@@ -3,7 +3,10 @@
  * Update Forge session phase and optional fields.
  *
  * Usage:
- *   forge phase <phase> [--plan-type openspec|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N]
+ *   forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N]
+ *
+ * `--openspec <change>` names the change for both engines (openspec/changes/<change>
+ * or specs/changes/<change>).
  */
 
 import { loadSession, readActive, saveSession } from './lib.mjs';
@@ -23,7 +26,7 @@ const VALID_PHASES = new Set([
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--session <id>]\n',
   );
   process.exit(1);
 }

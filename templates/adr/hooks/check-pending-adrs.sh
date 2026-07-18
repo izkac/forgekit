@@ -28,7 +28,8 @@ if [[ -f "$cfg" ]] && command -v node >/dev/null 2>&1; then
 fi
 
 shopt -s nullglob
-archive_glob=(openspec/changes/archive/*/proposal.md)
+# Both engines: OpenSpec and the built-in specs engine share the archive shape.
+archive_glob=(openspec/changes/archive/*/proposal.md specs/changes/archive/*/proposal.md)
 if [[ ${#archive_glob[@]} -eq 0 ]]; then
   exit 0
 fi
@@ -51,7 +52,7 @@ fi
 pending="$(printf '%s\n' "${pending_files[@]}" | head -10)"
 
 cat <<EOF
-Archived OpenSpec changes whose proposal.md does not reference an ADR yet:
+Archived changes whose proposal.md does not reference an ADR yet:
 
 ${pending}
 

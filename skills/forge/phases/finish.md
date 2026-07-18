@@ -14,6 +14,26 @@ forge phase done
 forge cleanup
 ```
 
+## Specs path (`planType: specs`)
+
+1. Confirm all tasks complete in `<specsDir>/changes/<name>/tasks.md`.
+2. **Archive** (with user approval): move the change dir to the dated archive —
+
+   ```bash
+   # e.g. specs/changes/add-auth → specs/changes/archive/2026-07-18-add-auth
+   git mv <specsDir>/changes/<name> <specsDir>/changes/archive/<YYYY-MM-DD>-<name>
+   ```
+
+   (plain `mv` if the dir is untracked).
+3. **ADR follow-up (optional):** same rule as OpenSpec — if `adr.enabled`,
+   follow **`archive-to-adr`** on the archived change; otherwise skip.
+4. End with **Suggested commit** block (display only — do not commit).
+
+```bash
+forge phase done
+forge cleanup
+```
+
 ## Throwaway path (`planType: throwaway`)
 
 1. Confirm all tasks in `plan.md` checked off.

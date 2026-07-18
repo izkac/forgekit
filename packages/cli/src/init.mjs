@@ -22,6 +22,14 @@ import {
   normalizeAdrDir,
   scaffoldAdr,
 } from './adr.mjs';
+import {
+  DEFAULT_SPECS_DIR,
+  hasOpenSpecConfig,
+  loadUserPlanEngine,
+  scaffoldSpecs,
+  setupOpenSpec,
+  writeProjectPlanConfig,
+} from './plan-engine.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +47,8 @@ export function parseArgs(argv) {
     /** @type {boolean | null} */
     adr: /** @type {boolean | null} */ (null),
     adrDir: /** @type {string | null} */ (null),
+    /** @type {boolean | null} true=openspec, false=specs, null=detect/prompt */
+    openspec: /** @type {boolean | null} */ (null),
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -54,6 +64,8 @@ export function parseArgs(argv) {
     else if (arg === '--adr') opts.adr = true;
     else if (arg === '--no-adr') opts.adr = false;
     else if (arg === '--adr-dir') opts.adrDir = argv[++i];
+    else if (arg === '--openspec') opts.openspec = true;
+    else if (arg === '--no-openspec') opts.openspec = false;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -70,6 +82,8 @@ Options:
   --claude          Claude Code (.claude/commands, rules, hooks)
   --codex           Codex CLI (.codex/rules)
   --all             All of the above
+  --openspec        Plan with OpenSpec (offer install + \`openspec init\` if missing)
+  --no-openspec     Plan with the built-in specs engine (${DEFAULT_SPECS_DIR}/changes/)
   --adr             Enable ADRs (scaffold decisions.md + ADR dir + hooks)
   --no-adr          Disable ADRs for this project
   --adr-dir <path>  ADR directory (default: ${DEFAULT_ADR_DIR} or ~/.forgekit preference)
@@ -81,8 +95,10 @@ Options:
 Requires the Forge skill already installed (\`forge install\`) for agents
 to load skill content. Init only adds project-local wiring.
 
-Interactive (TTY): when --adr/--no-adr omitted, asks whether to use ADRs
-and for the directory inside the repo.
+Interactive (TTY): when --openspec/--no-openspec omitted and OpenSpec is not
+already set up, offers to install + set it up (decline = built-in specs
+engine). When --adr/--no-adr omitted, asks whether to use ADRs and for the
+directory inside the repo.
 `);
 }
 
@@ -267,7 +283,7 @@ export function ensureCursorHookHints(cwd, opts) {
 
 /**
  * @param {string[]} selected
- * @param {{ cwd: string, force?: boolean, overlay?: boolean, templatesRoot?: string, adr?: boolean | null, adrDir?: string | null, home?: string }} opts
+ * @param {{ cwd: string, force?: boolean, overlay?: boolean, templatesRoot?: string, adr?: boolean | null, adrDir?: string | null, home?: string, planEngine?: string | null }} opts
  */
 export function initProject(selected, opts) {
   const templates = opts.templatesRoot ?? resolveTemplatesRoot();
@@ -334,6 +350,22 @@ export function initProject(selected, opts) {
     );
   }
 
+  if (opts.planEngine === 'specs') {
+    const scaffold = scaffoldSpecs(cwd, { force: opts.force });
+    const config = writeProjectPlanConfig(cwd, {
+      engine: 'specs',
+      dir: scaffold.dir,
+    });
+    report.plan = { engine: 'specs', dir: scaffold.dir, files: scaffold.files, config };
+  } else if (opts.planEngine === 'openspec') {
+    const config = writeProjectPlanConfig(cwd, { engine: 'openspec' });
+    report.plan = {
+      engine: 'openspec',
+      configured: hasOpenSpecConfig(cwd),
+      config,
+    };
+  }
+
   if (opts.adr === true) {
     const user = loadUserConfig(opts.home);
     const dir = normalizeAdrDir(
@@ -392,6 +424,77 @@ async function promptAgents() {
 }
 
 /**
+ * Offer to install + set up OpenSpec in this project.
+ * @returns {Promise<boolean>} true = user accepted OpenSpec setup
+ */
+async function promptOpenSpecSetup() {
+  const rl = readline.createInterface({ input, output });
+  try {
+    const yn = (
+      await rl.question(
+        'OpenSpec is not set up in this project. Install and set it up now? [Y/n] (n = built-in specs engine) ',
+      )
+    )
+      .trim()
+      .toLowerCase();
+    return !(yn === 'n' || yn === 'no');
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Resolve the planning engine for `forge init`, offering OpenSpec setup when needed.
+ * @param {{ cwd: string, openspec: boolean | null }} opts
+ * @returns {Promise<string>} 'openspec' | 'specs'
+ */
+async function resolveInitPlanEngine(opts) {
+  const configured = hasOpenSpecConfig(opts.cwd);
+
+  if (opts.openspec === false) return 'specs';
+
+  if (opts.openspec === true) {
+    if (!configured && process.stdin.isTTY) {
+      const setup = setupOpenSpec(opts.cwd);
+      for (const s of setup.steps) {
+        process.stdout.write(`  [${s.ok ? 'ok' : 'FAIL'}] ${s.step}${s.detail ? ` — ${s.detail}` : ''}\n`);
+      }
+      if (!setup.ok) {
+        process.stderr.write(
+          'OpenSpec setup failed — engine recorded as openspec; re-run `forge doctor --install` or `openspec init` manually.\n',
+        );
+      }
+    }
+    return 'openspec';
+  }
+
+  if (configured) return 'openspec';
+
+  const userDefault = loadUserPlanEngine();
+  if (userDefault === 'specs') return 'specs';
+
+  // Default (or user prefers openspec) but project has no OpenSpec yet
+  if (!process.stdin.isTTY) {
+    return userDefault === 'openspec' ? 'openspec' : 'specs';
+  }
+
+  const accepted = await promptOpenSpecSetup();
+  if (!accepted) return 'specs';
+
+  const setup = setupOpenSpec(opts.cwd);
+  for (const s of setup.steps) {
+    process.stdout.write(`  [${s.ok ? 'ok' : 'FAIL'}] ${s.step}${s.detail ? ` — ${s.detail}` : ''}\n`);
+  }
+  if (!setup.ok) {
+    process.stderr.write(
+      'OpenSpec setup failed — falling back to the built-in specs engine. You can switch later with `forge init --openspec --force`.\n',
+    );
+    return 'specs';
+  }
+  return 'openspec';
+}
+
+/**
  * @param {string} [defaultDir]
  * @returns {Promise<{ enabled: boolean, dir: string }>}
  */
@@ -435,6 +538,11 @@ async function main(argv = process.argv.slice(2)) {
     selected = await promptAgents();
   }
 
+  const planEngine = await resolveInitPlanEngine({
+    cwd: opts.cwd,
+    openspec: opts.openspec,
+  });
+
   let adr = opts.adr;
   let adrDir = opts.adrDir;
   if (adr === null) {
@@ -452,7 +560,7 @@ async function main(argv = process.argv.slice(2)) {
     }
   }
 
-  const report = initProject(selected, { ...opts, adr, adrDir });
+  const report = initProject(selected, { ...opts, adr, adrDir, planEngine });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   process.stdout.write(
     `\nMerge hook snippets into settings if needed, ensure \`forge\` is on PATH, then open the project in your agent.\n`,

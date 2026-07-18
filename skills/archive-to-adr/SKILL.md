@@ -39,8 +39,11 @@ Read **`.forge/config.json`** at the repo root (written by `forge init` / option
 | `adr.enabled` | `true` if file missing and `docs/adr/` exists; else follow install | When `false`, do **not** run this skill — no ADR, no "No ADR" stamp |
 | `adr.dir` | `docs/adr` | Directory for `NNNN-short-topic.md` + status `README.md` |
 | `adr.decisionsDoc` | sibling `decisions.md` of `adr.dir` | Process / template (when to write, format, hooks) |
+| `plan.engine` | `openspec` | `specs` = built-in engine; archives live under `<plan.dir>/changes/archive/` instead of `openspec/changes/archive/` |
 
-Below, **`{adrDir}`** and **`{decisionsDoc}`** mean those configured paths.
+Below, **`{adrDir}`** and **`{decisionsDoc}`** mean those configured paths, and
+**`{archiveRoot}`** means `openspec/changes/archive` (OpenSpec engine) or
+`<plan.dir>/changes/archive` (specs engine, default `specs/changes/archive`).
 
 If `adr.enabled` is `false`, stop and tell the user ADRs are disabled for this project.
 
@@ -59,9 +62,9 @@ That silences the session-start pending-ADR backstop.
 ## Input
 
 **Required:** the archive directory path, e.g.
-`openspec/changes/archive/2026-05-15-payment-add-service/`.
+`{archiveRoot}/2026-05-15-payment-add-service/`.
 
-If the user only gives the change name, resolve it: list `openspec/changes/archive/`
+If the user only gives the change name, resolve it: list `{archiveRoot}/`
 and pick the matching dated folder.
 
 ## Steps
@@ -102,7 +105,7 @@ and pick the matching dated folder.
    `{decisionsDoc}`.
 
 7. **Cross-reference from the archive**
-   - In `openspec/changes/archive/<dated-change>/proposal.md`, add (or extend):
+   - In `{archiveRoot}/<dated-change>/proposal.md`, add (or extend):
 
    ```markdown
    ## Decision record
@@ -137,8 +140,10 @@ and pick the matching dated folder.
 
 Project hooks (from `forge init --adr`) may:
 
-- Remind agents to run **archive-to-adr** after `openspec archive` / archive `mv`
-- At session start, list archives whose `proposal.md` lacks `ADR-*` **and** lacks
+- Remind agents to run **archive-to-adr** after `openspec archive` / an archive
+  move (either engine)
+- At session start, list archives (both `openspec/changes/archive/` and
+  `specs/changes/archive/`) whose `proposal.md` lacks `ADR-*` **and** lacks
   the `No ADR — non-architectural change` stamp
 
 Neither hook writes ADR files; **this skill** does.

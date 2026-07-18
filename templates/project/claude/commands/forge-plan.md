@@ -1,9 +1,12 @@
 ---
-description: Forge — plan phase (OpenSpec propose)
+description: Forge — plan phase (tracked change propose)
 ---
 
 Plan phase. Follow ~/.claude/skills/forge/references/plan-routing.md`.
 
-**Always OpenSpec** — run `/opsx:propose <prefix>-<slug>` or the `openspec-propose` skill per [plan-openspec.md](~/.claude/skills/forge/phases/plan-openspec.md). Do not ask for a plan mode.
+**Engine from `.forge/config.json` → `plan.engine`** — do not ask for a plan mode:
 
-Get user approval on the OpenSpec artefacts before `/forge:build` or `/forge:apply`.
+- `openspec` → run `/opsx:propose <prefix>-<slug>` or the `openspec-propose` skill per [plan-openspec.md](~/.claude/skills/forge/phases/plan-openspec.md)
+- `specs` → author `specs/changes/<name>/{proposal,tasks}.md` per [plan-specs.md](~/.claude/skills/forge/phases/plan-specs.md)
+
+Get user approval on the change artefacts before `/forge:build` or `/forge:apply`.

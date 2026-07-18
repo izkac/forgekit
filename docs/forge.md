@@ -123,16 +123,33 @@ User request
 | Check | Outcome |
 | ----- | ------- |
 | User sent `/forge:skip` | Direct execution |
-| Not substantial / not OpenSpec-worthy | Direct execution |
-| Otherwise | Enter Forge session (OpenSpec) |
+| Not substantial / not tracked-change-worthy | Direct execution |
+| Otherwise | Enter Forge session (tracked change) |
+
+### Planning engine (per project)
+
+Forge always produces a tracked change; the **engine** is project config
+(`.forge/config.json` → `plan.engine`, set by `forge init`):
+
+| Engine | Change location | Tooling |
+| ------ | --------------- | ------- |
+| `openspec` | `openspec/changes/<name>/` | OpenSpec CLI + `/opsx:*` vendor skills |
+| `specs` | `specs/changes/<name>/` (dir from `plan.dir`) | Built-in — plain markdown, same layout |
+
+Selection flow: `forgekit install` asks once for a user default
+(`~/.forgekit/config.json` → `plan.engine`); `forge init` auto-detects
+(`openspec/config.yaml` present → openspec, silent), otherwise offers to
+install + `openspec init`, and falls back to the specs engine on decline
+(`--openspec` / `--no-openspec` skip prompts). Migration later: `openspec
+init`, then move `specs/changes/*` into `openspec/changes/`.
 
 ### Planning (after brainstorm)
 
-Forge **always** uses OpenSpec. Proceed directly to `/opsx:propose` — do not ask for a plan mode.
+Proceed directly to the configured engine's propose flow — do not ask for a plan mode.
 
 | Step | What happens |
 | ---- | ------------ |
-| **OpenSpec propose** | `/opsx:propose` → `openspec/changes/<name>/` |
+| **Propose** | `/opsx:propose` → `openspec/changes/<name>/` (openspec) or author `specs/changes/<name>/{proposal,tasks}.md` per [plan-specs.md](../skills/forge/phases/plan-specs.md) (specs) |
 | **User approval** | Confirm proposal, design, tasks before implement |
 | **Implement** | `/forge:apply` or `/forge:build` against `tasks.md` |
 
@@ -146,7 +163,7 @@ See the Forge skill’s [references/plan-routing.md](../skills/forge/references/
 | ----- | ------------ | ----------------- |
 | **triage** | Substantial? Skip allowed? Bootstrap session | `forge` skill |
 | **brainstorm** | Explore intent, approaches, approval | `skills/brainstorming` |
-| **plan** | OpenSpec propose — `/opsx:propose` → `openspec/changes/<name>/` | [plan-routing.md](../skills/forge/references/plan-routing.md) |
+| **plan** | Tracked-change propose — engine from `.forge/config.json` | [plan-routing.md](../skills/forge/references/plan-routing.md) |
 | **implement** | Subagent per task, TDD, tier 2 evidence | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../skills/forge/references/test-strategy.md) |
 | **verify** | Audit tier 2 evidence; **one tier 3 full-workspace run** (per pace) | `skills/verification-before-completion` + `verify-evidence.md` |
 | **review** | Combined task reviewer (spec + quality) per task; final review | `skills/requesting-code-review` |
@@ -200,13 +217,13 @@ required for correctness.
 | ------- | ------- |
 | `/forge` | Start or resume from active session / current phase |
 | `/forge:brainstorm` | Brainstorm phase only |
-| `/forge:plan` | Plan phase — OpenSpec propose (`/opsx:propose`) |
-| `/forge:apply` | **OpenSpec implement** — subagent TDD + verify + review (preferred over `/opsx:apply`) |
-| `/forge:build` | Implement phase (OpenSpec tasks) |
+| `/forge:plan` | Plan phase — tracked-change propose (engine from `.forge/config.json`) |
+| `/forge:apply` | **Tracked-change implement** — subagent TDD + verify + review (preferred over `/opsx:apply`) |
+| `/forge:build` | Implement phase (`tasks.md` from either engine) |
 | `/forge:status` | Show active session progress |
 | `/forge:skip` | **Explicit** opt-out of Forge for this task |
 
-OpenSpec commands remain available standalone:
+OpenSpec commands remain available standalone (OpenSpec-engine projects):
 
 | Command | Purpose |
 | ------- | ------- |
@@ -234,7 +251,7 @@ forge prefs                       # print effective pace (does NOT write a file)
 forge prefs auto|thorough|standard|brisk|lite
                                   # WRITE .forge/preferences.local.json
 forge prefs --session-set lite    # pin active session only
-forge doctor                      # OpenSpec project + CLI readiness
+forge doctor                      # plan-engine readiness (OpenSpec or specs layout)
 forge doctor --install            # attempt npm install -g @fission-ai/openspec
 forge overlay                     # re-apply OpenSpec vendor overlays in this project
 forge init […]                    # wire project commands / hooks / rules
@@ -394,7 +411,7 @@ The bundled skills are a **maintained fork** of Superpowers (MIT — see `skills
 | Piece | Source | Policy |
 | ----- | ------ | ------ |
 | Brainstorm, TDD, subagents, verify, review | **skills/forge/skills/** (bundled) | Self-contained; Superpowers plugin not required |
-| Planning sink | OpenSpec only | `/opsx:propose` → `openspec/changes/`; no throwaway or direct modes for new work |
+| Planning sink | OpenSpec or built-in specs engine | Engine per project (`.forge/config.json`); no throwaway or direct modes for new work |
 | OpenSpec skills | Vendor (`openspec-*`, `opsx:*`) | **Do not hand-edit** — run `forge overlay` after upgrade |
 | OpenSpec implement | Forge **`/forge:apply`** | Full subagent TDD + verify + review; survives OpenSpec upgrades |
 | Archive follow-up | Optional ADRs (`forge init --adr`) | When `.forge/config.json` has `adr.enabled`, run **archive-to-adr** (path from `adr.dir`, default `docs/adr`) |
@@ -418,9 +435,9 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 | ------- | ------- |
 | `/forge` | Start or resume current phase |
 | `/forge:brainstorm` | Brainstorm only |
-| `/forge:plan` | OpenSpec propose — `/opsx:propose` |
-| `/forge:apply` | OpenSpec implement + verify + review (preferred) |
-| `/forge:build` | Implement phase (OpenSpec tasks) |
+| `/forge:plan` | Tracked-change propose (engine from `.forge/config.json`) |
+| `/forge:apply` | Tracked-change implement + verify + review (preferred) |
+| `/forge:build` | Implement phase (`tasks.md` from either engine) |
 | `/forge:status` | Session progress |
 | `/forge:skip` | Explicit skip for this task |
 
@@ -428,7 +445,7 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 
 No slash commands. On substantial work: read the **`forge`** skill, check
 `forge status`, bootstrap with `forge new <slug>` when needed.
-After brainstorm, proceed directly to **OpenSpec** (`/opsx:propose`) — see
+After brainstorm, proceed directly to the configured engine's propose flow — see
 [plan-routing.md](../skills/forge/references/plan-routing.md).
 User can say “skip forge” or `/forge:skip` to opt out.
 
@@ -436,6 +453,6 @@ User can say “skip forge” or `/forge:skip` to opt out.
 
 ## What we deliberately dropped from Superpowers
 
-- `docs/superpowers/plans/` and `docs/superpowers/specs/` — use OpenSpec + `.forge`
+- `docs/superpowers/plans/` and `docs/superpowers/specs/` — use OpenSpec / `specs/changes/` + `.forge` (the built-in specs engine covers the no-OpenSpec case with an OpenSpec-compatible layout)
 - Mandatory git worktree per brainstorm — optional
 - Autonomous commits in subagent prompts — forbidden unless the user asks

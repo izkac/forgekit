@@ -28,6 +28,7 @@ import {
   scaffoldAdr,
   disableProjectAdr,
 } from './adr.mjs';
+import { saveUserPlanEngine } from './plan-engine.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -103,6 +104,8 @@ export function parseArgs(argv) {
     /** @type {boolean | null} null = unset (prompt / infer) */
     adr: /** @type {boolean | null} */ (null),
     adrDir: /** @type {string | null} */ (null),
+    /** @type {boolean | null} null = unset (prompt on TTY) */
+    openspec: /** @type {boolean | null} */ (null),
     /** When true, also scaffold ADR files into cwd if it looks like a project */
     adrProject: false,
     noAdrProject: false,
@@ -127,6 +130,8 @@ export function parseArgs(argv) {
     else if (arg === '--adr') opts.adr = true;
     else if (arg === '--no-adr') opts.adr = false;
     else if (arg === '--adr-dir') opts.adrDir = argv[++i];
+    else if (arg === '--openspec') opts.openspec = true;
+    else if (arg === '--no-openspec') opts.openspec = false;
     else if (arg === '--adr-project') opts.adrProject = true;
     else if (arg === '--no-adr-project') opts.noAdrProject = true;
     else if (arg === '--cwd') opts.cwd = argv[++i];
@@ -157,6 +162,8 @@ Options:
   --all-agents      Install for every agent environment
   --cursor/--claude/--codex
                     Shorthand agent flags (same as --agents)
+  --openspec        Prefer OpenSpec as the planning engine (save user default)
+  --no-openspec     Prefer the built-in specs engine (save user default)
   --adr             Enable ADRs (install ADR skills; save user default)
   --no-adr          Disable ADRs (skip ADR skills; save user default)
   --adr-dir <path>  Default ADR directory inside repos (default: ${DEFAULT_ADR_DIR})
@@ -168,7 +175,8 @@ Options:
   --help
 
 Interactive (TTY) when skills and/or agents are omitted. You are also asked
-whether to use ADRs and for the ADR path inside the repo (default ${DEFAULT_ADR_DIR}).
+whether to plan with OpenSpec (vs the built-in specs engine), whether to use
+ADRs, and for the ADR path inside the repo (default ${DEFAULT_ADR_DIR}).
 
 Aliases:
   forge install […]   → forgekit install --skills forge […]
@@ -376,6 +384,25 @@ export async function promptAdrOptions() {
 }
 
 /**
+ * @returns {Promise<boolean>} true = OpenSpec, false = built-in specs engine
+ */
+export async function promptOpenSpec() {
+  const rl = readline.createInterface({ input, output });
+  try {
+    const yn = (
+      await rl.question(
+        'Plan with OpenSpec (vendor CLI)? [Y/n] (n = built-in specs engine) ',
+      )
+    )
+      .trim()
+      .toLowerCase();
+    return !(yn === 'n' || yn === 'no');
+  } finally {
+    rl.close();
+  }
+}
+
+/**
  * Merge ADR skills into the skill list when ADRs are enabled.
  * @param {string[]} skills
  * @param {boolean} adrEnabled
@@ -462,6 +489,15 @@ export async function runInstall(argv = process.argv.slice(2)) {
     }
   }
 
+  /** @type {boolean | null} */
+  let useOpenSpec = opts.openspec;
+  if (useOpenSpec === null && skills.includes('forge') && process.stdin.isTTY) {
+    useOpenSpec = await promptOpenSpec();
+  }
+  if (useOpenSpec !== null) {
+    saveUserPlanEngine(useOpenSpec ? 'openspec' : 'specs');
+  }
+
   const adrDecision = inferAdrFromSkills(skills, opts.adr);
   /** @type {{ enabled: boolean, dir: string }} */
   let adrOpts = { enabled: false, dir: DEFAULT_ADR_DIR };
@@ -509,8 +545,15 @@ export async function runInstall(argv = process.argv.slice(2)) {
     );
   }
 
+  if (useOpenSpec !== null) {
+    process.stdout.write(
+      `\nPlanning engine saved (~/.forgekit/config.json): ${
+        useOpenSpec ? 'openspec' : 'specs (built-in)'
+      } — per-project setup happens at \`forge init\`.\n`,
+    );
+  }
   process.stdout.write(
-    `\nADR preference saved (~/.forgekit/config.json): ${
+    `${useOpenSpec !== null ? '' : '\n'}ADR preference saved (~/.forgekit/config.json): ${
       adrOpts.enabled ? `enabled, dir=${adrOpts.dir}` : 'disabled'
     }\n`,
   );

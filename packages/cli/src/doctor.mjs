@@ -13,9 +13,13 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  OPENSPEC_PACKAGE,
+  OPENSPEC_INSTALL_CMD,
+  resolveProjectPlanEngine,
+} from './plan-engine.mjs';
 
-export const OPENSPEC_PACKAGE = '@fission-ai/openspec';
-export const OPENSPEC_INSTALL_CMD = `npm install -g ${OPENSPEC_PACKAGE}`;
+export { OPENSPEC_PACKAGE, OPENSPEC_INSTALL_CMD };
 
 /**
  * @param {string[]} argv
@@ -46,7 +50,8 @@ export function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(`Usage: forge doctor [options]
 
-Check OpenSpec project config and CLI availability.
+Check planning-engine readiness. OpenSpec projects: config + CLI availability.
+Specs-engine projects (.forge/config.json → plan.engine: specs): specs/changes/ layout.
 
 Options:
   --json        Machine-readable report
@@ -132,6 +137,23 @@ export function checkOpenSpecCli(opts = {}) {
 }
 
 /**
+ * @param {{ cwd: string, dir: string, existsSync?: typeof fs.existsSync }} opts
+ */
+export function checkSpecsProject(opts) {
+  const existsSync = opts.existsSync ?? fs.existsSync;
+  const changesPath = path.join(opts.cwd, opts.dir, 'changes');
+  const ok = existsSync(changesPath);
+  return {
+    id: 'specs-project',
+    ok,
+    changesPath,
+    message: ok
+      ? `${opts.dir}/changes/ found (built-in specs engine)`
+      : `${opts.dir}/changes/ missing — run \`forge init --no-openspec\` to scaffold the specs engine`,
+  };
+}
+
+/**
  * @param {{
  *   cwd?: string,
  *   install?: boolean,
@@ -141,6 +163,31 @@ export function checkOpenSpecCli(opts = {}) {
  */
 export function runDoctorChecks(opts = {}) {
   const cwd = opts.cwd ?? process.cwd();
+  const engine = resolveProjectPlanEngine(cwd, { useUserDefault: false });
+
+  if (engine.engine === 'specs') {
+    const project = checkSpecsProject({
+      cwd,
+      dir: engine.dir,
+      existsSync: opts.existsSync,
+    });
+    const cli = {
+      id: 'openspec-cli',
+      ok: true,
+      skipped: true,
+      version: null,
+      message: 'built-in specs engine — OpenSpec CLI not required',
+      installCommand: OPENSPEC_INSTALL_CMD,
+    };
+    return {
+      ok: project.ok,
+      engine: engine.engine,
+      checks: { project, cli },
+      installCommand: OPENSPEC_INSTALL_CMD,
+      actions: [],
+    };
+  }
+
   const project = checkOpenSpecProject({ cwd, existsSync: opts.existsSync });
   let cli = checkOpenSpecCli({ cwd, runCommand: opts.runCommand });
 
@@ -183,6 +230,7 @@ export function runDoctorChecks(opts = {}) {
   const ok = project.ok && cli.ok;
   return {
     ok,
+    engine: engine.engine,
     checks: { project, cli },
     installCommand: OPENSPEC_INSTALL_CMD,
     actions,
@@ -229,7 +277,7 @@ export function runDoctor(argv, io = {}) {
     stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
     const { project, cli } = report.checks;
-    stdout.write(`Forge doctor\n`);
+    stdout.write(`Forge doctor (plan engine: ${report.engine ?? 'openspec'})\n`);
     stdout.write(`  [${project.ok ? 'ok' : 'FAIL'}] ${project.message}\n`);
     stdout.write(`  [${cli.ok ? 'ok' : 'FAIL'}] ${cli.message}\n`);
     if (!cli.ok) {
@@ -264,15 +312,17 @@ export function warnIfDoctorFails(opts = {}) {
       runCommand: opts.runCommand,
     });
     if (!report.ok) {
-      stderr.write('[forge:doctor] OpenSpec readiness check failed:\n');
+      stderr.write('[forge:doctor] plan-engine readiness check failed:\n');
       if (!report.checks.project.ok) {
         stderr.write(`  - ${report.checks.project.message}\n`);
       }
       if (!report.checks.cli.ok) {
         stderr.write(`  - ${report.checks.cli.message}\n`);
       }
-      stderr.write(`  Install: ${report.installCommand}\n`);
-      stderr.write('  Or: forge doctor --install\n');
+      if (!report.checks.cli.ok) {
+        stderr.write(`  Install: ${report.installCommand}\n`);
+        stderr.write('  Or: forge doctor --install\n');
+      }
     }
     return report;
   } catch (err) {

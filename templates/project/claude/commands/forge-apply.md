@@ -1,11 +1,11 @@
 ---
 name: /forge:apply
-description: Forge — OpenSpec apply with subagent TDD, verify, and review
+description: Forge — apply a tracked change with subagent TDD, verify, and review
 category: Workflow
 tags: [workflow, forge, openspec]
 ---
 
-**Forge-owned command.** Use this instead of bare `/opsx:apply` for disciplined OpenSpec implementation.
+**Forge-owned command.** Use this instead of bare `/opsx:apply` for disciplined implementation of a tracked change (OpenSpec or built-in specs engine — `.forge/config.json` → `plan.engine`).
 
 Read the Forge skill (`~/.claude/skills/forge/SKILL.md`) and forgekit `docs/forge.md`.
 
@@ -13,16 +13,16 @@ Read the Forge skill (`~/.claude/skills/forge/SKILL.md`) and forgekit `docs/forg
 
 ## 0. Forge session
 
-1. Announce: "Using Forge for OpenSpec apply."
+1. Announce: "Using Forge apply."
 2. Resume `.forge/active.json` or bootstrap: `forge new <slug>`
-3. Set phase:
+3. Set phase (use the project's engine as plan-type):
    ```bash
-   forge phase implement --plan-type openspec --openspec "<change>"
+   forge phase implement --plan-type openspec|specs --openspec "<change>"
    ```
 
-## 1–5. OpenSpec CLI (vendor — follow `openspec-apply-change`)
+## 1–5. Load the change
 
-Same as `/opsx:apply` steps 1–5:
+**OpenSpec engine** — vendor CLI, follow `openspec-apply-change` (same as `/opsx:apply` steps 1–5):
 
 1. **Select the change** — announce "Using change: \<name\>"
 2. `openspec status --change "<name>" --json`
@@ -31,6 +31,12 @@ Same as `/opsx:apply` steps 1–5:
 5. Show progress (N/M tasks, schema, remaining tasks)
 
 Handle blocked / all_done states per vendor skill before implementing.
+
+**Specs engine** — no CLI:
+
+1. **Select the change** under `specs/changes/<name>/` — announce "Using change: \<name\>"
+2. Read `proposal.md`, `design.md` (if present), `tasks.md`
+3. Show progress (N/M checkboxes, remaining tasks)
 
 ## 6. Implement (Forge — REQUIRED)
 
@@ -64,6 +70,6 @@ Final reviewer; save to `.forge/sessions/<id>/reviews/final-review.md`.
 
 ## 9. Finish
 
-When verify + review pass: suggest `/opsx:archive` and [finish phase](~/.claude/skills/forge/phases/finish.md).
+When verify + review pass: suggest archive — `/opsx:archive` (OpenSpec) or the dated move into `specs/changes/archive/` (specs) — per [finish phase](~/.claude/skills/forge/phases/finish.md).
 
 **Skip Forge for this task only:** `/forge:skip` (runs work without brainstorm/plan/verify chain).
