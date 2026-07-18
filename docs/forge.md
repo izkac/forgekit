@@ -397,7 +397,7 @@ The bundled skills are a **maintained fork** of Superpowers (MIT — see `skills
 | Planning sink | OpenSpec only | `/opsx:propose` → `openspec/changes/`; no throwaway or direct modes for new work |
 | OpenSpec skills | Vendor (`openspec-*`, `opsx:*`) | **Do not hand-edit** — run `forge overlay` after upgrade |
 | OpenSpec implement | Forge **`/forge:apply`** | Full subagent TDD + verify + review; survives OpenSpec upgrades |
-| Archive follow-up | Project-specific (e.g. ADR) | After OpenSpec finish, follow the host repo’s archive policy |
+| Archive follow-up | Optional ADRs (`forge init --adr`) | When `.forge/config.json` has `adr.enabled`, run **archive-to-adr** (path from `adr.dir`, default `docs/adr`) |
 
 ---
 

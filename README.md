@@ -16,17 +16,20 @@ npm link --workspace=@forgekit/cli    # forgekit + forge + review on PATH
 
 # Pick skills and agents (interactive on TTY)
 forgekit install
+# Asks: which skills, which agents, whether to use ADRs, and ADR path (default docs/adr)
+
 # or non-interactive:
 forgekit install --skills forge,thorough-code-review --agents cursor,claude --force
+forgekit install --skills forge --agents cursor --adr --adr-dir docs/adr --adr-project
 forgekit list
 
 # Day-to-day
 forge new my-feature
 review new my-branch --type branch
 
-# Forge project wiring
+# Forge project wiring (+ optional ADR scaffold)
 cd /path/to/your-project
-forge init --cursor --claude
+forge init --cursor --claude --adr
 ```
 
 Aliases (single-skill shortcuts):
@@ -44,8 +47,11 @@ Requires Node 20+. OpenSpec CLI is optional but recommended for Forge (`forge do
 forgekit/
   skills/forge/
   skills/thorough-code-review/
+  skills/archive-to-adr/
+  skills/git-resolve-adr-conflict/
   packages/cli/                 # @forgekit/cli → forgekit + forge + review
   templates/project/            # forge init
+  templates/adr/                # decisions.md, ADR index, hooks
   docs/forge.md
   docs/thorough-code-review.md
 ```
@@ -54,10 +60,27 @@ forgekit/
 
 | Command | Purpose |
 |---------|---------|
-| `forgekit install` | Interactive: which skills + which agents |
+| `forgekit install` | Interactive: skills + agents + optional ADRs |
 | `forgekit install --skills a,b --agents cursor,claude` | Non-interactive |
+| `forgekit install --adr --adr-dir docs/adr` | Enable ADRs; install ADR skills; save `~/.forgekit/config.json` |
+| `forgekit install --no-adr` | Disable ADRs preference |
+| `forgekit install --adr --adr-project` | Also scaffold ADR docs into `--cwd` |
 | `forgekit install --all-skills --all-agents --force` | Everything |
 | `forgekit list` | Installed vs missing for every skill × agent |
+
+### ADRs (optional)
+
+When enabled:
+
+1. Installs **`archive-to-adr`** and **`git-resolve-adr-conflict`** skills.
+2. Saves preference to `~/.forgekit/config.json` (`adr.enabled`, `adr.dir`).
+3. On `forge init --adr` (or install with `--adr-project` in a repo): writes
+   - `.forge/config.json` — project ADR settings (committed)
+   - `{adr.dir}/README.md` — status index (default `docs/adr/`)
+   - sibling `decisions.md` — process / template
+   - `scripts/hooks/*` — archive reminder + pending-ADR backstop
+
+Forge finish only runs archive→ADR when `adr.enabled` is true.
 
 ## Forge CLI
 
@@ -65,7 +88,7 @@ forgekit/
 |---------|---------|
 | `forge new` / `status` / `phase` / `prefs` / `models` | Sessions |
 | `forge resolve-model` / `doctor` / `evidence` / `overlay` | Supporting |
-| `forge init` | Project commands, rules, hooks |
+| `forge init` | Project commands, rules, hooks; optional `--adr` |
 | `forge install` | Alias → `forgekit install --skills forge` |
 
 ## Review CLI

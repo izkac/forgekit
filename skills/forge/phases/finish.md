@@ -4,7 +4,9 @@
 
 1. Confirm all tasks complete in `tasks.md`.
 2. User runs or approves `/opsx:archive` / `openspec archive`.
-3. Follow **`archive-to-adr`** skill ([docs/decisions.md](../../../docs/decisions.md)).
+3. **ADR follow-up (optional):** if `.forge/config.json` has `adr.enabled: true`
+   (or the project uses ADRs), follow the **`archive-to-adr`** skill using
+   `adr.dir` / `adr.decisionsDoc`. If ADRs are disabled, skip.
 4. End with **Suggested commit** block (display only — do not commit).
 
 ```bash

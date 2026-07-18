@@ -19,6 +19,15 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stdin as input, stdout as output } from 'node:process';
+import {
+  ADR_SKILLS,
+  DEFAULT_ADR_DIR,
+  isGitRepo,
+  normalizeAdrDir,
+  saveUserConfig,
+  scaffoldAdr,
+  disableProjectAdr,
+} from './adr.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +42,16 @@ export const SKILLS = {
     label: 'Thorough Code Review',
     nextHint:
       'Thorough Code Review: invoke the skill explicitly (no auto-load). CLI: `review new|render|export|…`.',
+  },
+  'archive-to-adr': {
+    label: 'Archive → ADR',
+    nextHint:
+      'ADRs: after OpenSpec archive, run archive-to-adr (or stamp “No ADR”). Project path from `.forge/config.json`.',
+  },
+  'git-resolve-adr-conflict': {
+    label: 'Git: resolve ADR number conflict',
+    nextHint:
+      'ADR conflicts: invoke git-resolve-adr-conflict when two authors collide on the same NNNN.',
   },
 };
 
@@ -81,6 +100,13 @@ export function parseArgs(argv) {
     list: false,
     help: false,
     force: false,
+    /** @type {boolean | null} null = unset (prompt / infer) */
+    adr: /** @type {boolean | null} */ (null),
+    adrDir: /** @type {string | null} */ (null),
+    /** When true, also scaffold ADR files into cwd if it looks like a project */
+    adrProject: false,
+    noAdrProject: false,
+    cwd: process.cwd(),
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -98,8 +124,20 @@ export function parseArgs(argv) {
     else if (arg === '--cursor') opts.agents.push('cursor');
     else if (arg === '--claude' || arg === '--claude-code') opts.agents.push('claude');
     else if (arg === '--codex') opts.agents.push('codex');
-    else if (arg === 'forge' || arg === 'thorough-code-review') opts.skills.push(arg);
-    else throw new Error(`Unknown argument: ${arg}`);
+    else if (arg === '--adr') opts.adr = true;
+    else if (arg === '--no-adr') opts.adr = false;
+    else if (arg === '--adr-dir') opts.adrDir = argv[++i];
+    else if (arg === '--adr-project') opts.adrProject = true;
+    else if (arg === '--no-adr-project') opts.noAdrProject = true;
+    else if (arg === '--cwd') opts.cwd = argv[++i];
+    else if (
+      arg === 'forge' ||
+      arg === 'thorough-code-review' ||
+      arg === 'archive-to-adr' ||
+      arg === 'git-resolve-adr-conflict'
+    ) {
+      opts.skills.push(arg);
+    } else throw new Error(`Unknown argument: ${arg}`);
   }
 
   opts.skills = [...new Set(opts.skills)];
@@ -119,11 +157,18 @@ Options:
   --all-agents      Install for every agent environment
   --cursor/--claude/--codex
                     Shorthand agent flags (same as --agents)
+  --adr             Enable ADRs (install ADR skills; save user default)
+  --no-adr          Disable ADRs (skip ADR skills; save user default)
+  --adr-dir <path>  Default ADR directory inside repos (default: ${DEFAULT_ADR_DIR})
+  --adr-project     Also scaffold ADR docs into --cwd when it is a git repo
+  --no-adr-project  Never scaffold into cwd
+  --cwd <path>      Project root for optional ADR scaffold (default: cwd)
   --list            Show installed vs missing for all skill×agent pairs
   --force, -f       Overwrite existing skill directories
   --help
 
-Interactive (TTY) when skills and/or agents are omitted.
+Interactive (TTY) when skills and/or agents are omitted. You are also asked
+whether to use ADRs and for the ADR path inside the repo (default ${DEFAULT_ADR_DIR}).
 
 Aliases:
   forge install […]   → forgekit install --skills forge […]
@@ -131,7 +176,7 @@ Aliases:
 
 Examples:
   forgekit install
-  forgekit install --skills forge,thorough-code-review --agents cursor
+  forgekit install --skills forge,thorough-code-review --agents cursor --adr
   forgekit install --all-skills --all-agents --force
   forgekit list
 `);
@@ -292,6 +337,74 @@ async function promptAgents() {
 }
 
 /**
+ * @param {string} [defaultDir]
+ * @returns {Promise<string>}
+ */
+export async function promptAdrDir(defaultDir = DEFAULT_ADR_DIR) {
+  const rl = readline.createInterface({ input, output });
+  try {
+    const dirAnswer = (
+      await rl.question(`ADR directory inside each repo [${defaultDir}]: `)
+    ).trim();
+    return normalizeAdrDir(dirAnswer || defaultDir);
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * @returns {Promise<{ enabled: boolean, dir: string }>}
+ */
+export async function promptAdrOptions() {
+  const rl = readline.createInterface({ input, output });
+  let enabled = false;
+  try {
+    const yn = (
+      await rl.question(
+        'Use Architecture Decision Records (ADRs) after OpenSpec archive? [y/N] ',
+      )
+    )
+      .trim()
+      .toLowerCase();
+    enabled = yn === 'y' || yn === 'yes';
+  } finally {
+    rl.close();
+  }
+  if (!enabled) return { enabled: false, dir: DEFAULT_ADR_DIR };
+  const dir = await promptAdrDir(DEFAULT_ADR_DIR);
+  return { enabled: true, dir };
+}
+
+/**
+ * Merge ADR skills into the skill list when ADRs are enabled.
+ * @param {string[]} skills
+ * @param {boolean} adrEnabled
+ * @returns {string[]}
+ */
+export function applyAdrSkills(skills, adrEnabled) {
+  const next = [...skills];
+  if (adrEnabled) {
+    for (const id of ADR_SKILLS) {
+      if (!next.includes(id)) next.push(id);
+    }
+    return next;
+  }
+  return next.filter((id) => !ADR_SKILLS.includes(id));
+}
+
+/**
+ * Infer ADR enablement from explicit skill picks when --adr/--no-adr omitted.
+ * @param {string[]} skills
+ * @param {boolean | null} adrFlag
+ * @returns {boolean | null} null = still unknown
+ */
+export function inferAdrFromSkills(skills, adrFlag) {
+  if (adrFlag !== null) return adrFlag;
+  if (skills.some((id) => ADR_SKILLS.includes(id))) return true;
+  return null;
+}
+
+/**
  * @param {string[]} argv
  * @returns {Promise<number>}
  */
@@ -305,7 +418,7 @@ export async function runInstall(argv = process.argv.slice(2)) {
   if (opts.list) {
     for (const row of listInstallStatus()) {
       process.stdout.write(
-        `${row.skill.padEnd(24)} ${row.agent.padEnd(8)} ${row.status.padEnd(8)} ${row.dest}\n`,
+        `${row.skill.padEnd(28)} ${row.agent.padEnd(8)} ${row.status.padEnd(8)} ${row.dest}\n`,
       );
     }
     return 0;
@@ -349,6 +462,39 @@ export async function runInstall(argv = process.argv.slice(2)) {
     }
   }
 
+  const adrDecision = inferAdrFromSkills(skills, opts.adr);
+  /** @type {{ enabled: boolean, dir: string }} */
+  let adrOpts = { enabled: false, dir: DEFAULT_ADR_DIR };
+
+  if (adrDecision === null && process.stdin.isTTY) {
+    adrOpts = await promptAdrOptions();
+  } else if (adrDecision === true) {
+    adrOpts.enabled = true;
+    adrOpts.dir = opts.adrDir
+      ? normalizeAdrDir(opts.adrDir)
+      : process.stdin.isTTY
+        ? await promptAdrDir(DEFAULT_ADR_DIR)
+        : DEFAULT_ADR_DIR;
+  } else if (adrDecision === false) {
+    adrOpts = {
+      enabled: false,
+      dir: opts.adrDir ? normalizeAdrDir(opts.adrDir) : DEFAULT_ADR_DIR,
+    };
+  } else {
+    // Non-interactive, no --adr / --no-adr and no ADR skills in the list
+    adrOpts = { enabled: false, dir: DEFAULT_ADR_DIR };
+  }
+
+  if (opts.adrDir && adrOpts.enabled) {
+    adrOpts.dir = normalizeAdrDir(opts.adrDir);
+  }
+
+  skills = applyAdrSkills(skills, adrOpts.enabled);
+
+  saveUserConfig({
+    adr: { enabled: adrOpts.enabled, dir: adrOpts.dir },
+  });
+
   const results = installSkillsToAgents(skills, agents, { force: opts.force });
   const sources = new Map();
   for (const r of results) {
@@ -360,6 +506,41 @@ export async function runInstall(argv = process.argv.slice(2)) {
   for (const r of results) {
     process.stdout.write(
       `${r.skill} × ${r.agent}: ${r.status}${r.message ? ` — ${r.message}` : ''} → ${r.dest}\n`,
+    );
+  }
+
+  process.stdout.write(
+    `\nADR preference saved (~/.forgekit/config.json): ${
+      adrOpts.enabled ? `enabled, dir=${adrOpts.dir}` : 'disabled'
+    }\n`,
+  );
+
+  const inRepo = isGitRepo(opts.cwd);
+  const shouldScaffold =
+    !opts.noAdrProject &&
+    adrOpts.enabled &&
+    (opts.adrProject || (inRepo && process.stdin.isTTY));
+
+  if (shouldScaffold) {
+    const scaffold = scaffoldAdr(opts.cwd, {
+      dir: adrOpts.dir,
+      force: opts.force,
+      hooks: true,
+    });
+    process.stdout.write(
+      `ADR project scaffold in ${opts.cwd}: ${scaffold.decisionsDoc}, ${scaffold.dir}/README.md, .forge/config.json\n`,
+    );
+    for (const f of scaffold.files) {
+      process.stdout.write(`  ${f.status.padEnd(8)} ${f.file}\n`);
+    }
+  } else if (inRepo && !adrOpts.enabled && opts.adr === false) {
+    disableProjectAdr(opts.cwd);
+    process.stdout.write(
+      `ADRs disabled in project (.forge/config.json) under ${opts.cwd}\n`,
+    );
+  } else if (adrOpts.enabled) {
+    process.stdout.write(
+      `Tip: in each repo run \`forge init --adr\` (or \`forgekit install --adr --adr-project\`) to scaffold ${adrOpts.dir}/ and decisions.md.\n`,
     );
   }
 

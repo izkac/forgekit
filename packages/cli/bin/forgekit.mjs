@@ -30,10 +30,12 @@ Commands:
   install                 Install skills into ~/.cursor|claude|codex/skills/
   list                    Show installed vs missing (skill × agent)
 
-Install picks skills and agents (interactive on TTY, or via flags):
+Install picks skills and agents (interactive on TTY, or via flags).
+Also asks about ADRs (optional) and the ADR directory inside the repo:
 
   forgekit install
   forgekit install --skills forge,thorough-code-review --agents cursor,claude
+  forgekit install --adr --adr-dir docs/adr --adr-project
   forgekit install --all-skills --all-agents --force
   forgekit list
 

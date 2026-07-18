@@ -15,6 +15,13 @@ import readline from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { stdin as input, stdout as output } from 'node:process';
+import {
+  DEFAULT_ADR_DIR,
+  disableProjectAdr,
+  loadUserConfig,
+  normalizeAdrDir,
+  scaffoldAdr,
+} from './adr.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +36,9 @@ export function parseArgs(argv) {
     overlay: false,
     agents: /** @type {string[]} */ ([]),
     cwd: process.cwd(),
+    /** @type {boolean | null} */
+    adr: /** @type {boolean | null} */ (null),
+    adrDir: /** @type {string | null} */ (null),
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -41,6 +51,9 @@ export function parseArgs(argv) {
     else if (arg === '--cursor') opts.agents.push('cursor');
     else if (arg === '--claude' || arg === '--claude-code') opts.agents.push('claude');
     else if (arg === '--codex') opts.agents.push('codex');
+    else if (arg === '--adr') opts.adr = true;
+    else if (arg === '--no-adr') opts.adr = false;
+    else if (arg === '--adr-dir') opts.adrDir = argv[++i];
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -57,6 +70,9 @@ Options:
   --claude          Claude Code (.claude/commands, rules, hooks)
   --codex           Codex CLI (.codex/rules)
   --all             All of the above
+  --adr             Enable ADRs (scaffold decisions.md + ADR dir + hooks)
+  --no-adr          Disable ADRs for this project
+  --adr-dir <path>  ADR directory (default: ${DEFAULT_ADR_DIR} or ~/.forgekit preference)
   --overlay         Also run \`forge overlay\` (OpenSpec vendor patches)
   --force, -f       Overwrite existing template files
   --cwd <path>      Project root (default: cwd)
@@ -64,6 +80,9 @@ Options:
 
 Requires the Forge skill already installed (\`forge install\`) for agents
 to load skill content. Init only adds project-local wiring.
+
+Interactive (TTY): when --adr/--no-adr omitted, asks whether to use ADRs
+and for the directory inside the repo.
 `);
 }
 
@@ -121,14 +140,24 @@ export function ensureForgeGitignore(cwd) {
   const forgeDir = path.join(cwd, '.forge');
   fs.mkdirSync(forgeDir, { recursive: true });
   const gi = path.join(forgeDir, '.gitignore');
-  const body = `# Forge session scratch — keep layout docs if you add a README
+  const body = `# Forge session scratch — keep layout docs + committed project config
 *
 !.gitignore
 !README.md
+!config.json
 `;
   if (!fs.existsSync(gi)) {
     fs.writeFileSync(gi, body, 'utf8');
     return 'written';
+  }
+  // Upgrade older scaffolds that omit config.json
+  const existing = fs.readFileSync(gi, 'utf8');
+  if (!existing.includes('!config.json')) {
+    const next = existing.trimEnd().endsWith('!README.md')
+      ? `${existing.trimEnd()}\n!config.json\n`
+      : `${existing.trimEnd()}\n!config.json\n`;
+    fs.writeFileSync(gi, next, 'utf8');
+    return 'updated';
   }
   return 'exists';
 }
@@ -238,7 +267,7 @@ export function ensureCursorHookHints(cwd, opts) {
 
 /**
  * @param {string[]} selected
- * @param {{ cwd: string, force?: boolean, overlay?: boolean, templatesRoot?: string }} opts
+ * @param {{ cwd: string, force?: boolean, overlay?: boolean, templatesRoot?: string, adr?: boolean | null, adrDir?: string | null, home?: string }} opts
  */
 export function initProject(selected, opts) {
   const templates = opts.templatesRoot ?? resolveTemplatesRoot();
@@ -305,6 +334,20 @@ export function initProject(selected, opts) {
     );
   }
 
+  if (opts.adr === true) {
+    const user = loadUserConfig(opts.home);
+    const dir = normalizeAdrDir(
+      opts.adrDir ?? user.adr?.dir ?? DEFAULT_ADR_DIR,
+    );
+    report.adr = scaffoldAdr(cwd, {
+      dir,
+      force: opts.force,
+      hooks: true,
+    });
+  } else if (opts.adr === false) {
+    report.adr = { config: disableProjectAdr(cwd), enabled: false };
+  }
+
   if (opts.overlay) {
     const overlayScript = path.join(__dirname, 'vendor-openspec-overlays.mjs');
     const r = spawnSync(process.execPath, [overlayScript], {
@@ -348,6 +391,32 @@ async function promptAgents() {
   }
 }
 
+/**
+ * @param {string} [defaultDir]
+ * @returns {Promise<{ enabled: boolean, dir: string }>}
+ */
+async function promptAdrForInit(defaultDir = DEFAULT_ADR_DIR) {
+  const rl = readline.createInterface({ input, output });
+  let enabled = false;
+  try {
+    const yn = (
+      await rl.question(
+        'Use Architecture Decision Records (ADRs) in this project? [y/N] ',
+      )
+    )
+      .trim()
+      .toLowerCase();
+    enabled = yn === 'y' || yn === 'yes';
+    if (!enabled) return { enabled: false, dir: defaultDir };
+    const dirAnswer = (
+      await rl.question(`ADR directory inside the repo [${defaultDir}]: `)
+    ).trim();
+    return { enabled: true, dir: normalizeAdrDir(dirAnswer || defaultDir) };
+  } finally {
+    rl.close();
+  }
+}
+
 async function main(argv = process.argv.slice(2)) {
   const opts = parseArgs(argv);
   if (opts.help) {
@@ -366,7 +435,24 @@ async function main(argv = process.argv.slice(2)) {
     selected = await promptAgents();
   }
 
-  const report = initProject(selected, opts);
+  let adr = opts.adr;
+  let adrDir = opts.adrDir;
+  if (adr === null) {
+    const user = loadUserConfig();
+    const defaultDir = user.adr?.dir ?? DEFAULT_ADR_DIR;
+    if (process.stdin.isTTY) {
+      const picked = await promptAdrForInit(defaultDir);
+      adr = picked.enabled;
+      adrDir = picked.dir;
+    } else if (user.adr?.enabled === true) {
+      adr = true;
+      adrDir = user.adr.dir ?? DEFAULT_ADR_DIR;
+    } else {
+      adr = false;
+    }
+  }
+
+  const report = initProject(selected, { ...opts, adr, adrDir });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   process.stdout.write(
     `\nMerge hook snippets into settings if needed, ensure \`forge\` is on PATH, then open the project in your agent.\n`,
