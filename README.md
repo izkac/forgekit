@@ -8,11 +8,15 @@ Portable agent-skills monorepo. One package (`@forgekit/cli`), three bins:
 | **`forge`** | Forge workflow sessions |
 | **`review`** | Thorough code review pipeline |
 
+The **Forge** skill and several of its workflows are based on
+[Superpowers](https://github.com/obra/superpowers) (MIT) — see [Attribution](#attribution).
+
 ## Quick start
 
 ```bash
 npm install
 npm link --workspace=@forgekit/cli    # forgekit + forge + review on PATH
+# Once published: npm i -g @forgekit/cli
 
 # Pick skills and agents (interactive on TTY)
 forgekit install
@@ -70,7 +74,9 @@ forgekit/
 | `forgekit install --no-adr` | Disable ADRs preference |
 | `forgekit install --adr --adr-project` | Also scaffold ADR docs into `--cwd` |
 | `forgekit install --all-skills --all-agents --force` | Everything |
-| `forgekit list` | Installed vs missing for every skill × agent |
+| `forgekit list` | Installed / missing / outdated for every skill × agent |
+| `forgekit update` | Reinstall outdated skills |
+| `forgekit uninstall --skills … --agents …` | Remove installed skill dirs |
 
 ### Planning engine (OpenSpec optional)
 
@@ -109,6 +115,7 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 | `forge new` / `status` / `phase` / `prefs` / `models` | Sessions |
 | `forge resolve-model` / `doctor` / `evidence` / `overlay` | Supporting |
 | `forge init` | Project commands, rules, hooks; engine (`--openspec`/`--no-openspec`); optional `--adr` |
+| `forge change new\|archive` | Specs-engine change scaffold / dated archive |
 | `forge install` | Alias → `forgekit install --skills forge` |
 
 ## Review CLI
@@ -120,11 +127,25 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 
 Thorough review does **not** auto-load — ask the agent explicitly. See `docs/thorough-code-review.md`.
 
+## Attribution
+
+Forgekit’s **Forge** skill and several of its workflows are based on
+[Superpowers](https://github.com/obra/superpowers) (MIT). The bundled copies under
+`skills/forge/skills/` — brainstorming, TDD, subagent-driven development,
+verification-before-completion, requesting-code-review, and systematic-debugging —
+started as Superpowers skills and were adapted into a maintained fork (see
+`skills/forge/skills/NOTICE.md`). Upstream Superpowers is **not** required at runtime;
+edit the forks here and reinstall with `forgekit install --skills forge --force`.
+
+Other pieces in this repo (OpenSpec/specs planning engines, ADR skills, thorough
+code review, the CLI) are Forgekit-original or adapted from other project conventions.
+
 ## Developing Forgekit
 
 ```bash
 npm test --workspace=@forgekit/cli
+npm run lint
 node packages/cli/bin/forgekit.mjs --help
 ```
 
-After editing a skill, re-install with `forgekit install --force`.
+After editing a skill, re-install with `forgekit install --force` (or `forgekit update`).

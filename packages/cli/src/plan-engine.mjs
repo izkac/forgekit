@@ -19,15 +19,24 @@ import { spawnSync } from 'node:child_process';
 import {
   loadProjectConfig,
   loadUserConfig,
-  projectConfigPath,
-  userConfigPath,
-} from './adr.mjs';
+  saveProjectConfig,
+  saveUserConfig,
+} from './config.mjs';
 
 export const PLAN_ENGINES = Object.freeze(['openspec', 'specs']);
 export const DEFAULT_SPECS_DIR = 'specs';
 
 export const OPENSPEC_PACKAGE = '@fission-ai/openspec';
 export const OPENSPEC_INSTALL_CMD = `npm install -g ${OPENSPEC_PACKAGE}`;
+
+/**
+ * @param {unknown} value
+ * @returns {{ engine?: string, dir?: string } | null}
+ */
+function asPlan(value) {
+  if (!value || typeof value !== 'object') return null;
+  return /** @type {{ engine?: string, dir?: string }} */ (value);
+}
 
 /**
  * @param {string} engine
@@ -53,7 +62,7 @@ export function hasOpenSpecConfig(cwd) {
  */
 export function loadUserPlanEngine(home = os.homedir()) {
   const cfg = loadUserConfig(home);
-  const engine = cfg.plan?.engine;
+  const engine = asPlan(cfg.plan)?.engine;
   return PLAN_ENGINES.includes(engine) ? engine : null;
 }
 
@@ -64,15 +73,7 @@ export function loadUserPlanEngine(home = os.homedir()) {
  */
 export function saveUserPlanEngine(engine, home = os.homedir()) {
   assertPlanEngine(engine);
-  const p = userConfigPath(home);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  const current = loadUserConfig(home);
-  const next = {
-    ...current,
-    plan: { ...(current.plan ?? {}), engine },
-  };
-  fs.writeFileSync(p, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  return next;
+  return saveUserConfig({ plan: { engine } }, home);
 }
 
 /**
@@ -82,17 +83,14 @@ export function saveUserPlanEngine(engine, home = os.homedir()) {
  */
 export function writeProjectPlanConfig(cwd, plan) {
   assertPlanEngine(plan.engine);
-  const p = projectConfigPath(cwd);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
   const current = loadProjectConfig(cwd);
+  const curPlan = asPlan(current.plan);
   /** @type {{ engine: string, dir?: string }} */
   const nextPlan = { engine: plan.engine };
   if (plan.engine === 'specs') {
-    nextPlan.dir = plan.dir ?? current.plan?.dir ?? DEFAULT_SPECS_DIR;
+    nextPlan.dir = plan.dir ?? curPlan?.dir ?? DEFAULT_SPECS_DIR;
   }
-  const next = { ...current, plan: nextPlan };
-  fs.writeFileSync(p, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  return next;
+  return saveProjectConfig(cwd, { plan: nextPlan }, { replaceKeys: ['plan'] });
 }
 
 /**
@@ -103,15 +101,15 @@ export function writeProjectPlanConfig(cwd, plan) {
  *
  * @param {string} cwd
  * @param {{ home?: string, useUserDefault?: boolean }} [opts]
- *   useUserDefault=false (e.g. doctor) resolves from project state only.
  * @returns {{ engine: string, dir: string, source: string }}
  */
 export function resolveProjectPlanEngine(cwd, opts = {}) {
   const project = loadProjectConfig(cwd);
-  if (project.plan && PLAN_ENGINES.includes(project.plan.engine)) {
+  const projectPlan = asPlan(project.plan);
+  if (projectPlan && PLAN_ENGINES.includes(projectPlan.engine)) {
     return {
-      engine: project.plan.engine,
-      dir: project.plan.dir ?? DEFAULT_SPECS_DIR,
+      engine: /** @type {string} */ (projectPlan.engine),
+      dir: projectPlan.dir ?? DEFAULT_SPECS_DIR,
       source: 'project',
     };
   }

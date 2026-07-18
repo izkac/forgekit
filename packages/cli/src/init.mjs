@@ -30,6 +30,7 @@ import {
   setupOpenSpec,
   writeProjectPlanConfig,
 } from './plan-engine.mjs';
+import { resolveAsset } from './paths.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -106,14 +107,7 @@ directory inside the repo.
  * @returns {string}
  */
 export function resolveTemplatesRoot() {
-  const fromEnv = process.env.FORGEKIT_ROOT
-    ? path.join(process.env.FORGEKIT_ROOT, 'templates', 'project')
-    : null;
-  const fromRepo = path.resolve(__dirname, '..', '..', '..', 'templates', 'project');
-  for (const c of [fromEnv, fromRepo].filter(Boolean)) {
-    if (c && fs.existsSync(c)) return c;
-  }
-  throw new Error('templates/project not found under forgekit root');
+  return resolveAsset('templates/project');
 }
 
 /**
@@ -264,12 +258,12 @@ export function ensureCursorHookHints(cwd, opts) {
   const notePath = path.join(cwd, '.cursor', 'forge-hooks.snippet.json');
   const snippet = {
     _comment:
-      'Merge into .cursor/hooks.json. Requires a shell runner that can execute forge-session-start.sh (or call `forge reminder --format cursor`).',
+      'Merge into .cursor/hooks.json. Requires Node on PATH (forge-session-start.mjs).',
     version: 1,
     hooks: {
       sessionStart: [
         {
-          command: '.cursor/hooks/forge-session-start.sh',
+          command: 'node .cursor/hooks/forge-session-start.mjs',
         },
       ],
     },

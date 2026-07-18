@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { stdin as input, stdout as output } from 'node:process';
 import {
   ADR_SKILLS,
@@ -29,8 +29,9 @@ import {
   disableProjectAdr,
 } from './adr.mjs';
 import { saveUserPlanEngine } from './plan-engine.mjs';
+import { hashDirectory, packageVersion, resolveAsset } from './paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const FORGEKIT_STAMP = '.forgekit.json';
 
 /** @type {Record<string, { label: string, nextHint: string }>} */
 export const SKILLS = {
@@ -101,6 +102,8 @@ export function parseArgs(argv) {
     list: false,
     help: false,
     force: false,
+    update: false,
+    uninstall: false,
     /** @type {boolean | null} null = unset (prompt / infer) */
     adr: /** @type {boolean | null} */ (null),
     adrDir: /** @type {string | null} */ (null),
@@ -122,6 +125,8 @@ export function parseArgs(argv) {
     else if (arg === '--all-agents') opts.allAgents = true;
     else if (arg === '--all') opts.all = true;
     else if (arg === '--list') opts.list = true;
+    else if (arg === '--update') opts.update = true;
+    else if (arg === '--uninstall') opts.uninstall = true;
     else if (arg === '--force' || arg === '-f') opts.force = true;
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else if (arg === '--cursor') opts.agents.push('cursor');
@@ -170,7 +175,9 @@ Options:
   --adr-project     Also scaffold ADR docs into --cwd when it is a git repo
   --no-adr-project  Never scaffold into cwd
   --cwd <path>      Project root for optional ADR scaffold (default: cwd)
-  --list            Show installed vs missing for all skill×agent pairs
+  --list            Show installed vs missing (and outdated) for all skill×agent pairs
+  --update          Reinstall outdated installed skills (same agents as present)
+  --uninstall       Remove installed skill dirs for selected skills×agents
   --force, -f       Overwrite existing skill directories
   --help
 
@@ -187,6 +194,8 @@ Examples:
   forgekit install --skills forge,thorough-code-review --agents cursor --adr
   forgekit install --all-skills --all-agents --force
   forgekit list
+  forgekit update
+  forgekit uninstall --skills forge --agents cursor
 `);
 }
 
@@ -198,17 +207,63 @@ export function resolveSkillSource(skillId) {
   if (!SKILLS[skillId]) {
     throw new Error(`Unknown skill: ${skillId}. Known: ${SKILL_IDS.join(', ')}`);
   }
-  const fromEnv = process.env.FORGEKIT_ROOT
-    ? path.join(process.env.FORGEKIT_ROOT, 'skills', skillId)
-    : null;
-  const fromRepo = path.resolve(__dirname, '..', '..', '..', 'skills', skillId);
-  const candidates = [fromEnv, fromRepo].filter(Boolean);
-  for (const c of candidates) {
-    if (c && fs.existsSync(path.join(c, 'SKILL.md'))) return c;
-  }
-  throw new Error(
-    `Skill source not found for "${skillId}". Expected skills/${skillId}/SKILL.md under forgekit root.\nTried: ${candidates.join(', ')}`,
+  return resolveAsset(path.join('skills', skillId), { requireFile: 'SKILL.md' });
+}
+
+/**
+ * Write version + content hash stamp into an installed skill directory.
+ * @param {string} dest
+ * @param {string} skillId
+ * @param {string} skillSource
+ */
+export function writeInstallStamp(dest, skillId, skillSource) {
+  const stamp = {
+    skill: skillId,
+    version: packageVersion(),
+    contentHash: hashDirectory(skillSource),
+    installedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(
+    path.join(dest, FORGEKIT_STAMP),
+    `${JSON.stringify(stamp, null, 2)}\n`,
+    'utf8',
   );
+  return stamp;
+}
+
+/**
+ * @param {string} dest
+ * @returns {{ skill?: string, version?: string, contentHash?: string } | null}
+ */
+export function readInstallStamp(dest) {
+  const p = path.join(dest, FORGEKIT_STAMP);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} skillId
+ * @param {string} dest
+ * @returns {'missing' | 'present' | 'outdated' | 'unversioned'}
+ */
+export function skillInstallStatus(skillId, dest) {
+  if (!fs.existsSync(dest)) return 'missing';
+  const stamp = readInstallStamp(dest);
+  if (!stamp?.contentHash) return 'unversioned';
+  try {
+    const source = resolveSkillSource(skillId);
+    const current = hashDirectory(source);
+    if (stamp.contentHash !== current || stamp.version !== packageVersion()) {
+      return 'outdated';
+    }
+  } catch {
+    return 'present';
+  }
+  return 'present';
 }
 
 /**
@@ -262,6 +317,7 @@ export function installSkillsToAgents(skillIds, agentIds, opts = {}) {
       }
       if (exists) removeDirRecursive(dest);
       copyDirRecursive(skillSource, dest);
+      writeInstallStamp(dest, skillId, skillSource);
       results.push({
         skill: skillId,
         agent: agentId,
@@ -273,6 +329,67 @@ export function installSkillsToAgents(skillIds, agentIds, opts = {}) {
   }
 
   return results;
+}
+
+/**
+ * @param {string[]} skillIds
+ * @param {string[]} agentIds
+ * @param {{ home?: string }} [opts]
+ */
+export function uninstallSkillsFromAgents(skillIds, agentIds, opts = {}) {
+  const home = opts.home ?? os.homedir();
+  /** @type {{ skill: string, agent: string, dest: string, status: string }[]} */
+  const results = [];
+  for (const skillId of skillIds) {
+    for (const agentId of agentIds) {
+      const agent = AGENTS[agentId];
+      if (!agent) throw new Error(`Unknown agent: ${agentId}`);
+      const dest = agent.skillDir(home, skillId);
+      if (!fs.existsSync(dest)) {
+        results.push({ skill: skillId, agent: agentId, dest, status: 'missing' });
+        continue;
+      }
+      removeDirRecursive(dest);
+      results.push({ skill: skillId, agent: agentId, dest, status: 'removed' });
+    }
+  }
+  return results;
+}
+
+/**
+ * Reinstall skills that are outdated or unversioned for agents that already have them.
+ * @param {{ home?: string, skills?: string[], agents?: string[] }} [opts]
+ */
+export function updateOutdatedSkills(opts = {}) {
+  const home = opts.home ?? os.homedir();
+  const skillFilter = opts.skills?.length ? new Set(opts.skills) : null;
+  const agentFilter = opts.agents?.length ? new Set(opts.agents) : null;
+  /** @type {string[]} */
+  const skills = [];
+  /** @type {string[]} */
+  const agents = [];
+  /** @type {Set<string>} */
+  const skillSet = new Set();
+  /** @type {Set<string>} */
+  const agentSet = new Set();
+
+  for (const skillId of SKILL_IDS) {
+    if (skillFilter && !skillFilter.has(skillId)) continue;
+    for (const agentId of AGENT_IDS) {
+      if (agentFilter && !agentFilter.has(agentId)) continue;
+      const dest = AGENTS[agentId].skillDir(home, skillId);
+      const status = skillInstallStatus(skillId, dest);
+      if (status === 'outdated' || status === 'unversioned') {
+        skillSet.add(skillId);
+        agentSet.add(agentId);
+      }
+    }
+  }
+  skills.push(...skillSet);
+  agents.push(...agentSet);
+  if (skills.length === 0) return { results: [], skills, agents };
+  const results = installSkillsToAgents(skills, agents, { home, force: true });
+  return { results, skills, agents };
 }
 
 /**
@@ -289,7 +406,7 @@ export function listInstallStatus(opts = {}) {
         skill: skillId,
         agent: agentId,
         dest,
-        status: fs.existsSync(dest) ? 'present' : 'missing',
+        status: skillInstallStatus(skillId, dest),
       });
     }
   }
@@ -432,28 +549,45 @@ export function inferAdrFromSkills(skills, adrFlag) {
 }
 
 /**
- * @param {string[]} argv
- * @returns {Promise<number>}
+ * Resolve ADR enablement + directory from flags / prompts.
+ * @param {{ adr: boolean | null, adrDir: string | null, skills: string[] }} opts
+ * @returns {Promise<{ enabled: boolean, dir: string }>}
  */
-export async function runInstall(argv = process.argv.slice(2)) {
-  const opts = parseArgs(argv);
-  if (opts.help) {
-    printHelp();
-    return 0;
+export async function resolveAdrInstallOptions(opts) {
+  const adrDecision = inferAdrFromSkills(opts.skills, opts.adr);
+  /** @type {{ enabled: boolean, dir: string }} */
+  let adrOpts = { enabled: false, dir: DEFAULT_ADR_DIR };
+
+  if (adrDecision === null && process.stdin.isTTY) {
+    adrOpts = await promptAdrOptions();
+  } else if (adrDecision === true) {
+    adrOpts.enabled = true;
+    adrOpts.dir = opts.adrDir
+      ? normalizeAdrDir(opts.adrDir)
+      : process.stdin.isTTY
+        ? await promptAdrDir(DEFAULT_ADR_DIR)
+        : DEFAULT_ADR_DIR;
+  } else if (adrDecision === false) {
+    adrOpts = {
+      enabled: false,
+      dir: opts.adrDir ? normalizeAdrDir(opts.adrDir) : DEFAULT_ADR_DIR,
+    };
   }
 
-  if (opts.list) {
-    for (const row of listInstallStatus()) {
-      process.stdout.write(
-        `${row.skill.padEnd(28)} ${row.agent.padEnd(8)} ${row.status.padEnd(8)} ${row.dest}\n`,
-      );
-    }
-    return 0;
+  if (opts.adrDir && adrOpts.enabled) {
+    adrOpts.dir = normalizeAdrDir(opts.adrDir);
   }
+  return adrOpts;
+}
 
-  let skills = opts.allSkills ? [...SKILL_IDS] : [...opts.skills];
-  let agents =
-    opts.allAgents || opts.all ? [...AGENT_IDS] : [...opts.agents];
+/**
+ * @param {string[]} skills
+ * @param {string[]} agents
+ * @returns {Promise<{ skills: string[], agents: string[] } | number>}
+ */
+async function resolveSkillsAndAgents(skillsIn, agentsIn) {
+  let skills = [...skillsIn];
+  let agents = [...agentsIn];
 
   if (skills.length === 0) {
     if (!process.stdin.isTTY) {
@@ -489,6 +623,65 @@ export async function runInstall(argv = process.argv.slice(2)) {
     }
   }
 
+  return { skills, agents };
+}
+
+/**
+ * @param {string[]} argv
+ * @returns {Promise<number>}
+ */
+export async function runInstall(argv = process.argv.slice(2)) {
+  const opts = parseArgs(argv);
+  if (opts.help) {
+    printHelp();
+    return 0;
+  }
+
+  if (opts.list) {
+    for (const row of listInstallStatus()) {
+      process.stdout.write(
+        `${row.skill.padEnd(28)} ${row.agent.padEnd(8)} ${row.status.padEnd(12)} ${row.dest}\n`,
+      );
+    }
+    return 0;
+  }
+
+  if (opts.update) {
+    const updated = updateOutdatedSkills({
+      skills: opts.skills.length ? opts.skills : undefined,
+      agents: opts.agents.length || opts.allAgents || opts.all ? (
+        opts.allAgents || opts.all ? [...AGENT_IDS] : opts.agents
+      ) : undefined,
+    });
+    if (updated.results.length === 0) {
+      process.stdout.write('All installed skills are up to date.\n');
+      return 0;
+    }
+    for (const r of updated.results) {
+      process.stdout.write(
+        `${r.skill} × ${r.agent}: ${r.status} → ${r.dest}\n`,
+      );
+    }
+    return 0;
+  }
+
+  let skills = opts.allSkills ? [...SKILL_IDS] : [...opts.skills];
+  let agents =
+    opts.allAgents || opts.all ? [...AGENT_IDS] : [...opts.agents];
+
+  const resolved = await resolveSkillsAndAgents(skills, agents);
+  if (typeof resolved === 'number') return resolved;
+  skills = resolved.skills;
+  agents = resolved.agents;
+
+  if (opts.uninstall) {
+    const results = uninstallSkillsFromAgents(skills, agents);
+    for (const r of results) {
+      process.stdout.write(`${r.skill} × ${r.agent}: ${r.status} → ${r.dest}\n`);
+    }
+    return 0;
+  }
+
   /** @type {boolean | null} */
   let useOpenSpec = opts.openspec;
   if (useOpenSpec === null && skills.includes('forge') && process.stdin.isTTY) {
@@ -498,32 +691,11 @@ export async function runInstall(argv = process.argv.slice(2)) {
     saveUserPlanEngine(useOpenSpec ? 'openspec' : 'specs');
   }
 
-  const adrDecision = inferAdrFromSkills(skills, opts.adr);
-  /** @type {{ enabled: boolean, dir: string }} */
-  let adrOpts = { enabled: false, dir: DEFAULT_ADR_DIR };
-
-  if (adrDecision === null && process.stdin.isTTY) {
-    adrOpts = await promptAdrOptions();
-  } else if (adrDecision === true) {
-    adrOpts.enabled = true;
-    adrOpts.dir = opts.adrDir
-      ? normalizeAdrDir(opts.adrDir)
-      : process.stdin.isTTY
-        ? await promptAdrDir(DEFAULT_ADR_DIR)
-        : DEFAULT_ADR_DIR;
-  } else if (adrDecision === false) {
-    adrOpts = {
-      enabled: false,
-      dir: opts.adrDir ? normalizeAdrDir(opts.adrDir) : DEFAULT_ADR_DIR,
-    };
-  } else {
-    // Non-interactive, no --adr / --no-adr and no ADR skills in the list
-    adrOpts = { enabled: false, dir: DEFAULT_ADR_DIR };
-  }
-
-  if (opts.adrDir && adrOpts.enabled) {
-    adrOpts.dir = normalizeAdrDir(opts.adrDir);
-  }
+  const adrOpts = await resolveAdrInstallOptions({
+    adr: opts.adr,
+    adrDir: opts.adrDir,
+    skills,
+  });
 
   skills = applyAdrSkills(skills, adrOpts.enabled);
 

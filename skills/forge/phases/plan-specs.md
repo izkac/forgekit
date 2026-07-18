@@ -8,7 +8,13 @@ OpenSpec propose flow without the vendor CLI. Change lives under
 
 1. Derive a kebab-case change name from the brainstorm outcome (e.g.
    `add-stripe-refunds`). No date prefix while active.
-2. Create the change directory with these files:
+2. Create the change directory (preferred: CLI scaffold):
+
+   ```bash
+   forge change new <change-name>
+   ```
+
+   Or create manually under `<specsDir>/changes/<change-name>/` with:
 
    **`proposal.md`** (required)
 

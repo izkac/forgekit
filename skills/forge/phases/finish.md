@@ -17,10 +17,16 @@ forge cleanup
 ## Specs path (`planType: specs`)
 
 1. Confirm all tasks complete in `<specsDir>/changes/<name>/tasks.md`.
-2. **Archive** (with user approval): move the change dir to the dated archive —
+2. **Archive** (with user approval) — prefer the CLI:
 
    ```bash
-   # e.g. specs/changes/add-auth → specs/changes/archive/2026-07-18-add-auth
+   forge change archive <name>
+   # → <specsDir>/changes/archive/YYYY-MM-DD-<name>
+   ```
+
+   Or move manually:
+
+   ```bash
    git mv <specsDir>/changes/<name> <specsDir>/changes/archive/<YYYY-MM-DD>-<name>
    ```
 

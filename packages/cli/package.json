@@ -10,13 +10,34 @@
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "vendor",
+    "scripts"
   ],
   "scripts": {
-    "test": "node --test \"src/**/*.test.mjs\""
+    "prepack": "node scripts/prepack.mjs",
+    "test": "node --test \"src/**/*.test.mjs\"",
+    "lint": "eslint src bin scripts"
   },
   "engines": {
     "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/izkac/forgekit.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/izkac/forgekit#readme",
+  "bugs": {
+    "url": "https://github.com/izkac/forgekit/issues"
+  },
+  "keywords": [
+    "forge",
+    "openspec",
+    "agent-skills",
+    "cursor",
+    "claude",
+    "codex"
+  ],
   "license": "MIT"
 }

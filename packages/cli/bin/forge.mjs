@@ -29,10 +29,11 @@ const COMMANDS = {
   install: { script: 'install.mjs', prependArgs: ['--skills', 'forge'] },
   init: { script: 'init.mjs' },
   triage: { script: 'triage-prompt.mjs' },
+  change: { script: 'change.mjs' },
 };
 
 function printHelp() {
-  process.stdout.write(`Forge — disciplined OpenSpec development workflow
+  process.stdout.write(`Forge — disciplined development workflow
 
 Usage:
   forge <command> [args...]
@@ -45,13 +46,14 @@ Commands:
   prefs [pace]            Get/set pace preferences
   models [lane]           Get/set subagent billing (included|metered)
   resolve-model --tier …  Resolve subagent model JSON
-  doctor                  OpenSpec project + CLI readiness
+  doctor                  Plan-engine readiness (OpenSpec or specs)
   evidence                Stamp tier-2 test-evidence.md
   reminder                Session reminder (for hooks)
   overlay                 Re-apply OpenSpec vendor overlays in this project
   install                 Alias → forgekit install --skills forge
   init                    Wire Forge commands/hooks/rules into this project
   triage                  Classify whether a prompt needs Forge triage
+  change new|archive      Specs-engine change scaffold / archive
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.
 

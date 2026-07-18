@@ -1,4 +1,5 @@
 node_modules/
+packages/cli/vendor/
 .forge/sessions/
 .forge/active.json
 .forge/models.local.json

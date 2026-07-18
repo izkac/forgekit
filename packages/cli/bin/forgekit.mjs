@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Forgekit meta CLI — install / list skills across agent environments.
+ * Forgekit meta CLI — install / list / update / uninstall skills across agents.
  *
  * Skill day-to-day commands stay on `forge` and `review`.
  *
@@ -18,6 +18,8 @@ const SRC = path.join(__dirname, '..', 'src');
 const COMMANDS = {
   install: { script: 'install.mjs' },
   list: { script: 'install.mjs', prependArgs: ['--list'] },
+  update: { script: 'install.mjs', prependArgs: ['--update'] },
+  uninstall: { script: 'install.mjs', prependArgs: ['--uninstall'] },
 };
 
 function printHelp() {
@@ -28,16 +30,20 @@ Usage:
 
 Commands:
   install                 Install skills into ~/.cursor|claude|codex/skills/
-  list                    Show installed vs missing (skill × agent)
+  list                    Show installed / missing / outdated (skill × agent)
+  update                  Reinstall outdated skills
+  uninstall               Remove installed skill directories
 
 Install picks skills and agents (interactive on TTY, or via flags).
-Also asks about ADRs (optional) and the ADR directory inside the repo:
+Also asks about planning engine (OpenSpec vs specs) and ADRs:
 
   forgekit install
   forgekit install --skills forge,thorough-code-review --agents cursor,claude
   forgekit install --adr --adr-dir docs/adr --adr-project
   forgekit install --all-skills --all-agents --force
   forgekit list
+  forgekit update
+  forgekit uninstall --skills forge --agents cursor
 
 Day-to-day skill CLIs (same package):
 

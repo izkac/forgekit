@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm install
+      - run: npm test
+      - name: Smoke forge init + doctor (specs engine)
+        shell: bash
+        run: |
+          tmp=$(mktemp -d)
+          node packages/cli/bin/forge.mjs init --codex --no-openspec --no-adr --cwd "$tmp"
+          node packages/cli/bin/forge.mjs doctor --cwd "$tmp"
+          test -f "$tmp/specs/README.md"
+          test -f "$tmp/.forge/config.json"
+          node packages/cli/bin/forge.mjs change new smoke-feature --cwd "$tmp"
+          test -f "$tmp/specs/changes/smoke-feature/proposal.md"
+          node packages/cli/bin/forge.mjs change archive smoke-feature --cwd "$tmp" --date 2026-07-18
+          test -d "$tmp/specs/changes/archive/2026-07-18-smoke-feature"
+      - name: Smoke prepack vendors assets
+        shell: bash
+        run: |
+          npm run prepack --workspace=@forgekit/cli
+          test -f packages/cli/vendor/skills/forge/SKILL.md
+          test -d packages/cli/vendor/templates/project

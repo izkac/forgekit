@@ -7,11 +7,23 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {
+  loadProjectConfig,
+  loadUserConfig,
+  saveProjectConfig,
+  saveUserConfig as saveUserConfigBase,
+  userConfigPath,
+  projectConfigPath,
+} from './config.mjs';
+import { resolveAsset } from './paths.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export {
+  loadProjectConfig,
+  loadUserConfig,
+  userConfigPath,
+  projectConfigPath,
+};
 
 export const DEFAULT_ADR_DIR = 'docs/adr';
 export const ADR_SKILLS = Object.freeze(['archive-to-adr', 'git-resolve-adr-conflict']);
@@ -47,109 +59,40 @@ export function normalizeAdrDir(raw) {
 }
 
 /**
- * @param {string} [home]
- * @returns {string}
- */
-export function userConfigPath(home = os.homedir()) {
-  return path.join(home, '.forgekit', 'config.json');
-}
-
-/**
- * @param {string} [home]
- * @returns {{ adr?: { enabled?: boolean, dir?: string } }}
- */
-export function loadUserConfig(home = os.homedir()) {
-  const p = userConfigPath(home);
-  if (!fs.existsSync(p)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-/**
  * @param {{ adr?: { enabled?: boolean, dir?: string } }} patch
  * @param {string} [home]
  */
-export function saveUserConfig(patch, home = os.homedir()) {
-  const dir = path.dirname(userConfigPath(home));
-  fs.mkdirSync(dir, { recursive: true });
-  const current = loadUserConfig(home);
-  const next = {
-    ...current,
-    ...patch,
-    adr: {
-      ...(current.adr ?? {}),
-      ...(patch.adr ?? {}),
-    },
-  };
-  fs.writeFileSync(userConfigPath(home), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  return next;
-}
-
-/**
- * @param {string} cwd
- * @returns {string}
- */
-export function projectConfigPath(cwd) {
-  return path.join(cwd, '.forge', 'config.json');
-}
-
-/**
- * @param {string} cwd
- * @returns {{ adr?: { enabled?: boolean, dir?: string, decisionsDoc?: string } }}
- */
-export function loadProjectConfig(cwd) {
-  const p = projectConfigPath(cwd);
-  if (!fs.existsSync(p)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch {
-    return {};
-  }
+export function saveUserConfig(patch, home) {
+  return saveUserConfigBase(patch, home);
 }
 
 /**
  * @param {string} cwd
  * @param {{ adr: { enabled: boolean, dir?: string, decisionsDoc?: string } }} patch
- * @param {{ force?: boolean }} [opts]
  */
-export function writeProjectAdrConfig(cwd, patch, opts = {}) {
-  const p = projectConfigPath(cwd);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
+export function writeProjectAdrConfig(cwd, patch) {
   const current = loadProjectConfig(cwd);
   const enabled = Boolean(patch.adr.enabled);
   /** @type {{ enabled: boolean, dir?: string, decisionsDoc?: string }} */
   const adr = { enabled };
   if (enabled) {
-    const dir = normalizeAdrDir(patch.adr.dir ?? current.adr?.dir ?? DEFAULT_ADR_DIR);
+    const curAdr =
+      current.adr && typeof current.adr === 'object'
+        ? /** @type {{ dir?: string, decisionsDoc?: string }} */ (current.adr)
+        : {};
+    const dir = normalizeAdrDir(patch.adr.dir ?? curAdr.dir ?? DEFAULT_ADR_DIR);
     adr.dir = dir;
     adr.decisionsDoc =
-      patch.adr.decisionsDoc ??
-      current.adr?.decisionsDoc ??
-      decisionsDocFor(dir);
+      patch.adr.decisionsDoc ?? curAdr.decisionsDoc ?? decisionsDocFor(dir);
   }
-  const next = { ...current, adr };
-  if (fs.existsSync(p) && !opts.force) {
-    // merge write always allowed for config — callers pass force for scaffold files
-  }
-  fs.writeFileSync(p, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  return next;
+  return saveProjectConfig(cwd, { adr });
 }
 
 /**
  * @returns {string}
  */
 export function resolveAdrTemplatesRoot() {
-  const fromEnv = process.env.FORGEKIT_ROOT
-    ? path.join(process.env.FORGEKIT_ROOT, 'templates', 'adr')
-    : null;
-  const fromRepo = path.resolve(__dirname, '..', '..', '..', 'templates', 'adr');
-  for (const c of [fromEnv, fromRepo].filter(Boolean)) {
-    if (c && fs.existsSync(c)) return c;
-  }
-  throw new Error('templates/adr not found under forgekit root');
+  return resolveAsset('templates/adr');
 }
 
 /**
@@ -168,7 +111,6 @@ function renderTemplate(template, vars) {
 export function decisionsRelFromAdrReadme(adrDir, decisionsDoc) {
   const fromDir = adrDir.replace(/\/+$/, '');
   const target = decisionsDoc.replace(/\\/g, '/');
-  // both relative to repo root — compute posix relative
   const rel = path.posix.relative(fromDir, target);
   return rel.startsWith('.') ? rel : `./${rel}`;
 }
@@ -198,10 +140,7 @@ export function scaffoldAdr(cwd, opts = {}) {
   };
 
   const decisionsTpl = fs.readFileSync(path.join(templates, 'decisions.md'), 'utf8');
-  write(
-    decisionsDoc,
-    renderTemplate(decisionsTpl, { ADR_DIR: dir }),
-  );
+  write(decisionsDoc, renderTemplate(decisionsTpl, { ADR_DIR: dir }));
 
   const readmeTpl = fs.readFileSync(path.join(templates, 'README.md'), 'utf8');
   write(
@@ -219,24 +158,19 @@ export function scaffoldAdr(cwd, opts = {}) {
       for (const name of fs.readdirSync(hooksSrc)) {
         const from = path.join(hooksSrc, name);
         if (!fs.statSync(from).isFile()) continue;
-        const rel = path.posix.join(hooksDestRel, name);
-        const body = fs.readFileSync(from, 'utf8');
-        write(rel, body);
+        write(path.posix.join(hooksDestRel, name), fs.readFileSync(from, 'utf8'));
       }
     }
   }
 
-  const config = writeProjectAdrConfig(
-    cwd,
-    { adr: { enabled: true, dir, decisionsDoc } },
-    { force },
-  );
+  const config = writeProjectAdrConfig(cwd, {
+    adr: { enabled: true, dir, decisionsDoc },
+  });
 
   return { dir, decisionsDoc, files, config };
 }
 
 /**
- * Disable ADRs in the project (config only; does not delete existing docs).
  * @param {string} cwd
  */
 export function disableProjectAdr(cwd) {
@@ -252,33 +186,39 @@ export function isGitRepo(cwd) {
 }
 
 /**
- * Effective ADR settings for a project.
  * @param {string} cwd
  * @param {{ home?: string }} [opts]
  * @returns {{ enabled: boolean, dir: string, decisionsDoc: string, source: string }}
  */
 export function resolveProjectAdr(cwd, opts = {}) {
   const project = loadProjectConfig(cwd);
-  if (project.adr && typeof project.adr.enabled === 'boolean') {
-    const dir = normalizeAdrDir(project.adr.dir ?? DEFAULT_ADR_DIR);
+  const projectAdr =
+    project.adr && typeof project.adr === 'object'
+      ? /** @type {{ enabled?: boolean, dir?: string, decisionsDoc?: string }} */ (project.adr)
+      : null;
+  if (projectAdr && typeof projectAdr.enabled === 'boolean') {
+    const dir = normalizeAdrDir(projectAdr.dir ?? DEFAULT_ADR_DIR);
     return {
-      enabled: project.adr.enabled,
+      enabled: projectAdr.enabled,
       dir,
-      decisionsDoc: project.adr.decisionsDoc ?? decisionsDocFor(dir),
+      decisionsDoc: projectAdr.decisionsDoc ?? decisionsDocFor(dir),
       source: 'project',
     };
   }
   const user = loadUserConfig(opts.home);
-  if (user.adr && typeof user.adr.enabled === 'boolean') {
-    const dir = normalizeAdrDir(user.adr.dir ?? DEFAULT_ADR_DIR);
+  const userAdr =
+    user.adr && typeof user.adr === 'object'
+      ? /** @type {{ enabled?: boolean, dir?: string }} */ (user.adr)
+      : null;
+  if (userAdr && typeof userAdr.enabled === 'boolean') {
+    const dir = normalizeAdrDir(userAdr.dir ?? DEFAULT_ADR_DIR);
     return {
-      enabled: user.adr.enabled,
+      enabled: userAdr.enabled,
       dir,
       decisionsDoc: decisionsDocFor(dir),
       source: 'user',
     };
   }
-  // Heuristic: existing adr tree
   if (fs.existsSync(path.join(cwd, DEFAULT_ADR_DIR))) {
     return {
       enabled: true,

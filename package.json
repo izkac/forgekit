@@ -12,7 +12,14 @@
     "forge": "node packages/cli/bin/forge.mjs",
     "review": "node packages/cli/bin/review.mjs",
     "test": "npm run test --workspace=@forgekit/cli",
+    "lint": "npm run lint --workspace=@forgekit/cli",
+    "prepack": "npm run prepack --workspace=@forgekit/cli",
     "install:link": "npm install && npm link --workspace=@forgekit/cli"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "globals": "^15.14.0"
   },
   "engines": {
     "node": ">=20"
