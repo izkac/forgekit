@@ -1,0 +1,8 @@
+node_modules/
+.forge/sessions/
+.forge/active.json
+.forge/models.local.json
+.forge/preferences.local.json
+*.log
+.DS_Store
+Thumbs.db

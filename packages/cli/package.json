@@ -1,0 +1,22 @@
+{
+  "name": "@forgekit/cli",
+  "version": "0.1.0",
+  "description": "Forgekit CLIs — forgekit (install), forge (workflow), review (code review)",
+  "type": "module",
+  "bin": {
+    "forgekit": "./bin/forgekit.mjs",
+    "forge": "./bin/forge.mjs",
+    "review": "./bin/review.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test \"src/**/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

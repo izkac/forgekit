@@ -1,0 +1,21 @@
+{
+  "name": "forgekit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forgekit — portable agent skills monorepo (Forge workflow and more)",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "forgekit": "node packages/cli/bin/forgekit.mjs",
+    "forge": "node packages/cli/bin/forge.mjs",
+    "review": "node packages/cli/bin/review.mjs",
+    "test": "npm run test --workspace=@forgekit/cli",
+    "install:link": "npm install && npm link --workspace=@forgekit/cli"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

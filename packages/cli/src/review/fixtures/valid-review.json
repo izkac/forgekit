@@ -1,0 +1,42 @@
+{
+  "review_id": "20260605T160000Z-mercury-checkout-smoke",
+  "kind": "review",
+  "created_at": "2026-06-05T16:00:00.000Z",
+  "scope": {
+    "type": "paths",
+    "description": "services/mercury/src/services/checkout-sessions.ts",
+    "paths": ["services/mercury/src/services/checkout-sessions.ts"]
+  },
+  "lenses": ["security", "correctness"],
+  "summary": {
+    "tentative_count": 2,
+    "confirmed": 1,
+    "false_positive": 1,
+    "downgraded": 0,
+    "needs_decision": 0
+  },
+  "findings": [
+    {
+      "id": "F-001",
+      "lens": "correctness",
+      "location": "services/mercury/src/services/checkout-sessions.ts:42",
+      "claim": "Edge case not handled for empty cart",
+      "evidence": "snippet",
+      "severity": "important",
+      "phase1_confidence": "medium",
+      "verdict": "confirmed",
+      "verdict_reason": "No guard before total calculation; tests absent."
+    },
+    {
+      "id": "F-002",
+      "lens": "security",
+      "location": "services/mercury/src/services/checkout-sessions.ts:10",
+      "claim": "SQL injection via session id",
+      "evidence": "snippet",
+      "severity": "critical",
+      "phase1_confidence": "low",
+      "verdict": "false_positive",
+      "verdict_reason": "ORM parameterizes query; no raw SQL."
+    }
+  ]
+}

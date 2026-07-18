@@ -1,0 +1,73 @@
+{
+  "pace": "auto",
+  "presets": {
+    "thorough": {
+      "review": {
+        "perTask": "always",
+        "final": "always",
+        "depth": "full",
+        "maxRounds": 3
+      },
+      "verify": {
+        "tier3": "full-workspace"
+      },
+      "models": {
+        "bias": "default"
+      },
+      "brainstorm": {
+        "depth": "full"
+      }
+    },
+    "standard": {
+      "review": {
+        "perTask": "per-group",
+        "final": "always",
+        "depth": "full",
+        "maxRounds": 2
+      },
+      "verify": {
+        "tier3": "full-workspace"
+      },
+      "models": {
+        "bias": "default"
+      },
+      "brainstorm": {
+        "depth": "full"
+      }
+    },
+    "brisk": {
+      "review": {
+        "perTask": "high-risk-only",
+        "final": "high-risk-only",
+        "depth": "spec-only",
+        "maxRounds": 1
+      },
+      "verify": {
+        "tier3": "affected-only"
+      },
+      "models": {
+        "bias": "prefer-fast"
+      },
+      "brainstorm": {
+        "depth": "short"
+      }
+    },
+    "lite": {
+      "review": {
+        "perTask": "never",
+        "final": "never",
+        "depth": "spec-only",
+        "maxRounds": 0
+      },
+      "verify": {
+        "tier3": "audit-tier2-only"
+      },
+      "models": {
+        "bias": "prefer-fast"
+      },
+      "brainstorm": {
+        "depth": "minimal"
+      }
+    }
+  }
+}

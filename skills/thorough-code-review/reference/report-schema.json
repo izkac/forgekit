@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forgekit.local/schemas/code-review-report.json",
+  "title": "ThoroughCodeReviewReport",
+  "type": "object",
+  "required": ["review_id", "kind", "created_at", "scope", "lenses", "summary", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "review_id": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "enum": ["review", "reverify"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "scope": {
+      "type": "object",
+      "required": ["type", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["uncommitted", "branch", "paths", "commit_range", "file"]
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "base_sha": { "type": "string" },
+        "head_sha": { "type": "string" },
+        "paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "lenses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "security",
+          "correctness",
+          "smells",
+          "architecture",
+          "performance",
+          "tests",
+          "contracts",
+          "errors",
+          "maintainability"
+        ]
+      }
+    },
+    "parent_report": { "type": "string" },
+    "summary": {
+      "type": "object",
+      "required": ["tentative_count"],
+      "additionalProperties": true,
+      "properties": {
+        "tentative_count": { "type": "integer", "minimum": 0 },
+        "headline": { "type": "string" },
+        "top_actions": { "type": "array", "items": { "type": "string" } },
+        "confirmed": { "type": "integer", "minimum": 0 },
+        "downgraded": { "type": "integer", "minimum": 0 },
+        "false_positive": { "type": "integer", "minimum": 0 },
+        "needs_decision": { "type": "integer", "minimum": 0 },
+        "resolved": { "type": "integer", "minimum": 0 },
+        "still_open": { "type": "integer", "minimum": 0 },
+        "partially_fixed": { "type": "integer", "minimum": 0 },
+        "regressed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "dedupe_preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "location", "claim"],
+            "properties": {
+              "id": { "type": "string" },
+              "location": { "type": "string" },
+              "claim": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "Recall / completeness pass ledger.",
+      "additionalProperties": true,
+      "properties": {
+        "files_reviewed": { "type": "array", "items": { "type": "string" } },
+        "files_skipped": { "type": "array", "items": { "type": "string" } },
+        "lenses_without_findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["lens", "reason"],
+            "properties": {
+              "lens": {
+                "type": "string",
+                "enum": [
+                  "security",
+                  "correctness",
+                  "smells",
+                  "architecture",
+                  "performance",
+                  "tests",
+                  "contracts",
+                  "errors",
+                  "maintainability"
+                ]
+              },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "description": "Signals pre-flight: deterministic tools run before the scout.",
+      "additionalProperties": true,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "type": "string", "enum": ["pass", "fail", "skipped"] },
+              "summary": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "description": "Pipeline stats: subagent counts and shortcut tallies for the run.",
+      "additionalProperties": false,
+      "properties": {
+        "scouts": { "type": "integer", "minimum": 0 },
+        "skeptics_dedicated": { "type": "integer", "minimum": 0 },
+        "skeptics_batched": { "type": "integer", "minimum": 0 },
+        "inline_verdicts": { "type": "integer", "minimum": 0 },
+        "grounded_skips": { "type": "integer", "minimum": 0 },
+        "carried_forward": { "type": "integer", "minimum": 0 },
+        "second_opinions": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["id", "lens", "location", "claim", "severity", "verdict", "verdict_reason"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^(F|dup)-[0-9]{3}$" },
+        "title": { "type": "string", "minLength": 1 },
+        "lens": {
+          "type": "string",
+          "enum": [
+            "security",
+            "correctness",
+            "smells",
+            "architecture",
+            "performance",
+            "tests",
+            "contracts",
+            "errors",
+            "maintainability"
+          ]
+        },
+        "location": { "type": "string", "minLength": 1 },
+        "claim": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string" },
+        "severity": { "type": "string", "enum": ["critical", "important", "minor"] },
+        "phase1_confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+        "original_severity": { "type": "string", "enum": ["critical", "important", "minor"] },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "confirmed",
+            "false_positive",
+            "downgraded",
+            "needs_decision",
+            "resolved",
+            "still_open",
+            "partially_fixed",
+            "regressed"
+          ]
+        },
+        "verdict_reason": { "type": "string", "minLength": 1 },
+        "second_opinion": {
+          "type": "object",
+          "description": "Independent second skeptic for dangerous-quadrant findings.",
+          "required": ["verdict", "verdict_reason"],
+          "additionalProperties": false,
+          "properties": {
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "confirmed",
+                "false_positive",
+                "downgraded",
+                "needs_decision",
+                "resolved",
+                "still_open",
+                "partially_fixed",
+                "regressed"
+              ]
+            },
+            "verdict_reason": { "type": "string", "minLength": 1 },
+            "agrees": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}
