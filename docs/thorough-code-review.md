@@ -4,7 +4,7 @@ Two-phase agent skill for **deep code review with false-positive filtering**. Us
 
 **Skill:** [`skills/thorough-code-review/SKILL.md`](../skills/thorough-code-review/SKILL.md)  
 **Install:** `forgekit install --skills thorough-code-review` (or `review install`)  
-**CLI:** `review` (part of `@forgekit/cli`)  
+**CLI:** `review` (part of `@izkac/forgekit`)  
 **Reports:** `.reviews/` in the project under review (typically gitignored)
 
 **Not** the same as Forge’s per-task `requesting-code-review` — this skill is **standalone** and invoked explicitly (`disable-model-invocation: true`).
@@ -14,7 +14,7 @@ Two-phase agent skill for **deep code review with false-positive filtering**. Us
 ## Install
 
 ```bash
-# From forgekit (after npm link --workspace=@forgekit/cli)
+# From forgekit (after npm link --workspace=@izkac/forgekit)
 forgekit install --skills thorough-code-review --agents cursor,claude
 # or: review install --cursor --force
 ```
@@ -179,7 +179,7 @@ After you patch code:
 | `review render --file <json>` | (Re)generate the markdown from the JSON |
 | `review export` | Validate + summarize (CI gate) |
 | `review install` | Alias → `forgekit install --skills thorough-code-review` |
-| `npm test --workspace=@forgekit/cli` | Run the CLI test suite (includes review scripts) |
+| `npm test --workspace=@izkac/forgekit` | Run the CLI test suite (includes review scripts) |
 
 ## CI export
 

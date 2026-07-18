@@ -3,12 +3,17 @@
  * Update Forge session phase and optional fields.
  *
  * Usage:
- *   forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N]
+ *   forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"]
  *
  * `--openspec <change>` names the change for both engines (openspec/changes/<change>
  * or specs/changes/<change>).
+ *
+ * `finish` / `done` refuse unless verify-evidence.md exists and all tasks are
+ * complete, unless `--allow-incomplete "<reason>"` is provided.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { loadSession, readActive, saveSession } from './lib.mjs';
 
 const VALID_PHASES = new Set([
@@ -23,10 +28,13 @@ const VALID_PHASES = new Set([
   'skipped',
 ]);
 
+/** Escalate auto-resolved brisk/lite when the plan has at least this many tasks. */
+export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
+
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -43,6 +51,7 @@ let openspecChange = null;
 let tasksTotal = null;
 let tasksComplete = null;
 let subagentsDispatched = null;
+let allowIncomplete = null;
 
 for (let i = 1; i < args.length; i += 1) {
   const flag = args[i];
@@ -65,6 +74,9 @@ for (let i = 1; i < args.length; i += 1) {
   } else if (flag === '--subagents' && next) {
     subagentsDispatched = Number(next);
     i += 1;
+  } else if (flag === '--allow-incomplete' && next) {
+    allowIncomplete = next;
+    i += 1;
   }
 }
 
@@ -84,6 +96,60 @@ if (openspecChange !== null) session.openspecChange = openspecChange;
 if (tasksTotal !== null) session.tasksTotal = tasksTotal;
 if (tasksComplete !== null) session.tasksComplete = tasksComplete;
 if (subagentsDispatched !== null) session.subagentsDispatched = subagentsDispatched;
+
+/**
+ * Escalate under-scoped auto pace when the plan is large.
+ * Only when pace is not user-pinned and current resolved pace is brisk/lite.
+ */
+function maybeEscalatePaceForTaskCount() {
+  const total = Number(session.tasksTotal) || 0;
+  if (total < TASK_COUNT_ESCALATION_THRESHOLD) return;
+  if (session.pacePinned === true) return;
+  const resolved = session.resolvedPace;
+  if (resolved !== 'brisk' && resolved !== 'lite') return;
+  session.resolvedPace = 'standard';
+  session.paceReason = `escalated: ${total} tasks`;
+  session.paceEscalated = true;
+}
+
+maybeEscalatePaceForTaskCount();
+
+/**
+ * Refuse finish/done without verify evidence and full task completion,
+ * unless --allow-incomplete records an honest reason.
+ */
+function enforceDoneGate() {
+  if (phase !== 'done' && phase !== 'finish') return;
+
+  const total = Number(session.tasksTotal) || 0;
+  const complete = Number(session.tasksComplete) || 0;
+  const evidencePath = path.join(dir, 'verify-evidence.md');
+  const hasEvidence = fs.existsSync(evidencePath);
+  const tasksDone = total === 0 || complete === total;
+
+  if (hasEvidence && tasksDone) {
+    delete session.incompleteReason;
+    return;
+  }
+
+  if (allowIncomplete) {
+    session.incompleteReason = allowIncomplete;
+    return;
+  }
+
+  const problems = [];
+  if (!hasEvidence) problems.push('missing verify-evidence.md');
+  if (!tasksDone) {
+    problems.push(`tasks incomplete (${complete}/${total})`);
+  }
+  process.stderr.write(
+    `Cannot enter phase "${phase}": ${problems.join('; ')}.\n` +
+      `Run verify (write verify-evidence.md) and complete all tasks, or pass --allow-incomplete "<reason>".\n`,
+  );
+  process.exit(1);
+}
+
+enforceDoneGate();
 
 saveSession(dir, session);
 process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));

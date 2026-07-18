@@ -55,7 +55,16 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    - Group with `##` sections — Forge reviews per group under `standard` pace.
 
 3. Confirm `tasks.md` exists and the change is apply-ready.
-4. Update session:
+4. **Orchestration seam check** (required before apply-ready) — see [../references/runtime-integrity.md](../references/runtime-integrity.md):
+
+   If the change involves workers, job queues, handlers, or cross-runtime calls, `tasks.md` MUST include:
+
+   - Explicit **wiring** tasks per job kind / entry point → domain pipeline
+   - One **E2E fixture** acceptance task
+
+   Missing seam = plan **not** ready. Add the tasks before proceeding to implement.
+
+5. Update session:
 
    ```bash
    forge phase plan --plan-type specs --openspec <change-name>
@@ -65,7 +74,7 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    Count tasks from `tasks.md` checkboxes. (`--openspec` carries the change
    name for both engines.)
 
-5. Get user approval on the artefacts before implementing (unless they already said "go").
+6. Get user approval on the artefacts before implementing (unless they already said "go").
 
 ## Compatibility
 

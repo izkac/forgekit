@@ -1,5 +1,5 @@
 {
-  "name": "@forgekit/cli",
+  "name": "@izkac/forgekit",
   "version": "0.1.0",
   "description": "Forgekit CLIs — forgekit (install), forge (workflow), review (code review)",
   "type": "module",
@@ -18,6 +18,9 @@
     "prepack": "node scripts/prepack.mjs",
     "test": "node --test \"src/**/*.test.mjs\"",
     "lint": "eslint src bin scripts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=20"

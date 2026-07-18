@@ -7,7 +7,7 @@ Forge skill’s `skills/` folder — **no Superpowers plugin required**.
 **Skill:** `forge` (Cursor, Claude Code, Codex CLI)  
 **Commands:** `/forge`, `/forge:*` (after `forge init`; Cursor and Claude Code)  
 **Scratch space:** `.forge/` (gitignored except README)  
-**CLI:** `@forgekit/cli` → `forgekit` (install) · `forge` (workflow) · `review` (standalone deep review)
+**CLI:** `@izkac/forgekit` → `forgekit` (install) · `forge` (workflow) · `review` (standalone deep review)
 
 ---
 
@@ -15,7 +15,7 @@ Forge skill’s `skills/` folder — **no Superpowers plugin required**.
 
 ```bash
 # Once per machine (from forgekit checkout or published package)
-npm link --workspace=@forgekit/cli   # or: npm i -g @forgekit/cli when published
+npm link --workspace=@izkac/forgekit   # or: npm i -g @izkac/forgekit when published
 forgekit install --skills forge --agents cursor,claude
 # or: forge install                  # alias → --skills forge
 ```
@@ -274,7 +274,7 @@ Forge has two **optional**, **gitignored** overlays under `.forge/`.
 They appear on disk **only after you set them**. Bare get commands only print the
 merged effective value from package defaults.
 
-| Concern | Defaults (in `@forgekit/cli`) | Local file (gitignored) | Get (print only) | Set (creates/updates file) |
+| Concern | Defaults (in `@izkac/forgekit`) | Local file (gitignored) | Get (print only) | Set (creates/updates file) |
 | ------- | ----------------------------- | ----------------------- | ---------------- | -------------------------- |
 | Subagent **billing** (`included` / `metered`) | `packages/cli/src/models.defaults.json` | `.forge/models.local.json` | `forge models` | `forge models included\|metered` |
 | Forge **pace** (review / verify ceremony) | `packages/cli/src/preferences.defaults.json` | `.forge/preferences.local.json` | `forge prefs` | `forge prefs auto\|thorough\|…` |
@@ -328,9 +328,14 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 **`auto`** is not a preset — it picks one of the four once at session start (sticky):
 
 1. money / payment / auth / secret / migration / contract / gdpr → **thorough**
-2. ecosystem / API / multi-file / shared package → **standard**
-3. docs / typo / rename / scaffold → **lite**
-4. else → **brisk**
+2. ecosystem / API / multi-file / shared package / worker / job queue / pipeline / etl / platform / orchestration / openspec → **standard**
+3. docs / typo / rename / scaffold / changelog → **lite**
+4. fix / tweak / toolbar / style / padding (explicitly small) → **brisk**
+5. else (including empty / unrecognized) → **standard** (fail closed)
+
+When `--tasks-total N` is set with **N ≥ 15** and resolved pace is still `brisk`/`lite` (not user-pinned), Forge escalates the session to **standard**.
+
+**Runtime integrity** (all paces): no stubs / false job success; every claimed capability needs a named production caller; tests must fail on a no-op; capability specs beat narrow task wording; E2E-or-BLOCKED before `done`. See [runtime-integrity.md](../skills/forge/references/runtime-integrity.md). Defaults `integrity.*` in `preferences.defaults.json` (surfaced by `forge status`). `forge phase finish|done` refuses without `verify-evidence.md` and full task completion unless `--allow-incomplete "<reason>"`.
 
 **Unchanged on all paces:** tier-1 TDD + tier-2 evidence, no autonomous commit, OpenSpec when in Forge.
 

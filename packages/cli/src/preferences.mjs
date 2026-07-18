@@ -29,13 +29,17 @@ export const BRAINSTORM_DEPTH = Object.freeze(['full', 'short', 'minimal']);
 const THOROUGH_RE =
   /\b(money|payment|payments|stripe|billing|invoice|refund|auth|oauth|oidc|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|contract|contracts|gdpr|pci|wallet|checkout)\b/i;
 
-/** Signals that suggest standard (multi-surface / API). */
+/** Signals that suggest standard (multi-surface / API / platform / orchestration). */
 const STANDARD_RE =
-  /\b(ecosystem|cross-workspace|multi-file|openapi|api\b|shared[- ]package|public api|wire contract)\b/i;
+  /\b(ecosystem|cross-workspace|multi-file|openapi|api\b|shared[- ]package|public api|wire contract|worker|workers|job queue|job queues|queue|pipeline|etl|service|services|platform|orchestration|openspec|forge:apply|harmonization)\b/i;
 
 /** Signals that suggest lite. */
 const LITE_RE =
   /\b(docs?|readme|rename|typo|scaffold|wording|comment|comments|cosmetic|changelog)\b/i;
+
+/** Explicitly small / localized work — only these resolve to brisk under auto. */
+const SMALL_WORK_RE =
+  /\b(fix|tweak|button|toolbar|style|styles|css|padding|alignment|copy|label|typo|cosmetic)\b/i;
 
 /**
  * @param {unknown} value
@@ -118,24 +122,28 @@ export function assertConcretePace(pace) {
 
 /**
  * Suggest a concrete pace from free-text signals (stricter wins).
+ * Unrecognized scope fails closed to **standard** (not brisk).
  * @param {string} [signalText]
  * @returns {{ pace: string, reason: string }}
  */
 export function suggestPaceFromSignals(signalText = '') {
   const text = String(signalText || '').trim();
   if (!text) {
-    return { pace: 'brisk', reason: 'no signals; default brisk for routine work' };
+    return { pace: 'standard', reason: 'no signals; fail closed to standard' };
   }
   if (THOROUGH_RE.test(text)) {
     return { pace: 'thorough', reason: 'high-risk signals (money/auth/contracts/migrations/secrets)' };
   }
   if (STANDARD_RE.test(text)) {
-    return { pace: 'standard', reason: 'multi-surface / API / ecosystem signals' };
+    return { pace: 'standard', reason: 'multi-surface / API / ecosystem / orchestration signals' };
   }
-  if (LITE_RE.test(text) && !STANDARD_RE.test(text)) {
+  if (LITE_RE.test(text) && !STANDARD_RE.test(text) && !SMALL_WORK_RE.test(text)) {
     return { pace: 'lite', reason: 'docs/mechanical signals without high-risk terms' };
   }
-  return { pace: 'brisk', reason: 'localized change without high-risk or ecosystem signals' };
+  if (SMALL_WORK_RE.test(text) && !STANDARD_RE.test(text) && !THOROUGH_RE.test(text)) {
+    return { pace: 'brisk', reason: 'explicitly small/localized work signals' };
+  }
+  return { pace: 'standard', reason: 'unrecognized scope — failing closed' };
 }
 
 /**
@@ -261,6 +269,18 @@ export function resolveEffectivePreferences(opts = {}) {
 
   const expanded = expandPace({ pace: resolvedPace, overrides, defaults });
 
+  /** @type {Record<string, unknown>} */
+  const integrityDefaults =
+    defaults.integrity && isPlainObject(defaults.integrity)
+      ? /** @type {Record<string, unknown>} */ (defaults.integrity)
+      : {};
+  /** @type {Record<string, unknown>} */
+  const integrityLocal =
+    localPrefs.integrity && isPlainObject(localPrefs.integrity)
+      ? /** @type {Record<string, unknown>} */ (localPrefs.integrity)
+      : {};
+  const integrity = deepMerge(integrityDefaults, integrityLocal);
+
   return {
     requestedPace,
     resolvedPace,
@@ -269,6 +289,7 @@ export function resolveEffectivePreferences(opts = {}) {
     localPath,
     localExists: Boolean(local),
     effective: expanded,
+    integrity,
     shouldRunPerTaskReview: (ctx = {}) =>
       shouldRunPerTaskReview(expanded, ctx),
     shouldRunFinalReview: (ctx = {}) => shouldRunFinalReview(expanded, ctx),

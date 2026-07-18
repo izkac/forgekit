@@ -1,6 +1,6 @@
 # Forgekit
 
-Portable agent-skills monorepo. One package (`@forgekit/cli`), three bins:
+Portable agent-skills monorepo. One package (`@izkac/forgekit`), three bins:
 
 | Bin | Role |
 |-----|------|
@@ -15,8 +15,8 @@ The **Forge** skill and several of its workflows are based on
 
 ```bash
 npm install
-npm link --workspace=@forgekit/cli    # forgekit + forge + review on PATH
-# Once published: npm i -g @forgekit/cli
+npm link --workspace=@izkac/forgekit    # forgekit + forge + review on PATH
+# Once published: npm i -g @izkac/forgekit
 
 # Pick skills and agents (interactive on TTY)
 forgekit install
@@ -56,7 +56,7 @@ forgekit/
   skills/thorough-code-review/
   skills/archive-to-adr/
   skills/git-resolve-adr-conflict/
-  packages/cli/                 # @forgekit/cli → forgekit + forge + review
+  packages/cli/                 # @izkac/forgekit → forgekit + forge + review
   templates/project/            # forge init
   templates/adr/                # decisions.md, ADR index, hooks
   docs/forge.md
@@ -143,7 +143,7 @@ code review, the CLI) are Forgekit-original or adapted from other project conven
 ## Developing Forgekit
 
 ```bash
-npm test --workspace=@forgekit/cli
+npm test --workspace=@izkac/forgekit
 npm run lint
 node packages/cli/bin/forgekit.mjs --help
 ```

@@ -1,5 +1,10 @@
 {
   "pace": "auto",
+  "integrity": {
+    "forbidStubs": true,
+    "specsBeatNarrowTasks": true,
+    "requireE2E": "when-jobs-or-workers"
+  },
   "presets": {
     "thorough": {
       "review": {

@@ -62,11 +62,32 @@ node scripts/agent-check.mjs     # strict typecheck + tests for the diff-affecte
 — but a clean tier-3 test audit is the bar to leave verify; the Publish/push + CI gate
 (`shared-build-gate` capability) catches any strict-mode breakage before it's shared.
 
-### 3. Plan completeness
+### 3. Runtime wiring audit
+
+Honor [../references/runtime-integrity.md](../references/runtime-integrity.md).
+
+For each requirement in the change's **capability specs** (not only `tasks.md`):
+
+- Name the **production caller** (job kind, endpoint, CLI, …) that invokes the implementing code.
+- Library-only / stub handler / false success / enqueueable-but-unhandled kind → **stop**. Add wiring or mark explicit gaps; do not advance.
+
+Record the trace in `verify-evidence.md` (a short REQ → caller table is enough).
+
+### 4. E2E-or-BLOCKED
+
+Before leaving verify / claiming the change complete:
+
+1. Run (or document exact commands for) **one real fixture path** through each critical live entry point this change owns, **or**
+2. Leave an explicit **`BLOCKED`** list in `verify-evidence.md` explaining why E2E cannot run here.
+
+Do **not** mark the change complete or advance to `done` while a critical path is stubbed, unwired, or unverified without `BLOCKED`. Green unit/tier-3 suites alone are not enough when jobs/workers/orchestration are in scope (`integrity.requireE2E`).
+
+### 5. Plan completeness
 
 - Confirm every plan task is marked complete.
 - Confirm no tier 2 evidence contradicts another.
 - For OpenSpec: `openspec instructions apply --change "<name>" --json` shows expected progress.
+- Requirements met = line-by-line vs **capability specs**, not vs a narrowed task reading.
 
 ```bash
 forge phase verify

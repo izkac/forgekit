@@ -45,9 +45,26 @@ even under `lite` / `brisk` / mid-group `standard`.
 ## Auto signals (stricter wins)
 
 1. money, payment, stripe, billing, auth, oauth, hmac, secret, migration, contract, gdpr → **thorough**
-2. ecosystem, cross-workspace, multi-file, openapi, public API, shared package → **standard**
-3. docs, readme, rename, typo, scaffold, wording, comment → **lite**
-4. else → **brisk**
+2. ecosystem, cross-workspace, multi-file, openapi, public API, shared package, **worker**, **job queue**, **pipeline**, **etl**, **service(s)**, **platform**, **orchestration**, **openspec**, **forge:apply**, **harmonization** → **standard**
+3. docs, readme, rename, typo, scaffold, wording, comment, changelog → **lite**
+4. fix, tweak, button, toolbar, style, padding, alignment, copy, label (explicitly small) → **brisk**
+5. else (including empty / unrecognized scope) → **standard** (fail closed — never default to brisk)
+
+### Task-count escalation
+
+When `forge phase … --tasks-total N` sets **N ≥ 15** and the session's
+`resolvedPace` is still `brisk` or `lite` (and pace is **not** user-pinned),
+Forge escalates the session to **`standard`** with
+`paceReason: "escalated: N tasks"`. Slug keywords are a poor proxy for scope;
+task count is known at plan time.
+
+## Runtime integrity
+
+Always-on rules (all paces): [runtime-integrity.md](./runtime-integrity.md) —
+no stubs / false success, runtime owner required, tests must fail on a no-op,
+specs beat narrow tasks, E2E-or-BLOCKED before done. Defaults:
+`integrity.forbidStubs`, `integrity.specsBeatNarrowTasks`,
+`integrity.requireE2E` in `preferences.defaults.json` (surfaced by `forge status`).
 
 ## Agent rules by knob
 

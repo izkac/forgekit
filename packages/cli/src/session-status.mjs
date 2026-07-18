@@ -61,6 +61,7 @@ process.stdout.write(
         source: pace.source,
         effective: pace.effective,
       },
+      integrity: pace.integrity,
     },
     null,
     2,

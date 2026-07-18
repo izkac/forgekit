@@ -105,3 +105,104 @@ test('omitting --subagents leaves subagentsDispatched untouched', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('--tasks-total >= 15 escalates brisk/lite to standard when not pinned', () => {
+  const dir = tmp('forge-set-phase-escalate-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-esc');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.pace = 'auto';
+    raw.resolvedPace = 'brisk';
+    raw.paceReason = 'localized change';
+    raw.pacePinned = false;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '57']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.tasksTotal, 57);
+    assert.equal(session.resolvedPace, 'standard');
+    assert.equal(session.paceReason, 'escalated: 57 tasks');
+    assert.equal(session.paceEscalated, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--tasks-total escalation skips when pace is user-pinned', () => {
+  const dir = tmp('forge-set-phase-pinned-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.pace = 'brisk';
+    raw.resolvedPace = 'brisk';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '20']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'brisk');
+    assert.notEqual(session.paceEscalated, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done refuses without verify-evidence and incomplete tasks', () => {
+  const dir = tmp('forge-set-phase-done-refuse-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-done');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.tasksTotal = 3;
+    raw.tasksComplete = 1;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    assert.throws(
+      () => runSetPhase(dir, ['done']),
+      (err) => {
+        assert.match(String(err.stderr || err.message), /Cannot enter phase "done"/);
+        return true;
+      },
+    );
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'plan');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done accepts with verify-evidence and complete tasks', () => {
+  const dir = tmp('forge-set-phase-done-ok-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-done-ok');
+    const sessionDir = path.dirname(sessionFile);
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.tasksTotal = 2;
+    raw.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+
+    runSetPhase(dir, ['done']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase finish allows incomplete with --allow-incomplete', () => {
+  const dir = tmp('forge-set-phase-allow-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-allow');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.tasksTotal = 5;
+    raw.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['finish', '--allow-incomplete', 'E2E blocked in CI sandbox']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'finish');
+    assert.equal(session.incompleteReason, 'E2E blocked in CI sandbox');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

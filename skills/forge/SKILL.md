@@ -117,6 +117,7 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 - Tests required for behavior changes
 - Trace ecosystem consumers when contracts change
 - Honor `openspec/config.yaml` prefixes when the project uses them (OpenSpec engine)
+- **Runtime integrity** — [references/runtime-integrity.md](./references/runtime-integrity.md): no stubs / false success; capability specs beat narrow task wording; every claimed capability needs a named production caller; E2E-or-BLOCKED before marking complete
 
 ## Agent surfaces
 

@@ -65,6 +65,9 @@ export function needsOpenSpecPlan(session) {
 /** @deprecated use needsOpenSpecPlan */
 export const needsPlanModePrompt = needsOpenSpecPlan;
 
+export const RUNTIME_INTEGRITY_REMINDER =
+  'Integrity: no stubs/false success; specs beat task wording; E2E-or-BLOCKED before done (forge references/runtime-integrity.md).';
+
 export function buildForgeMessage(info) {
   const { session } = info;
   const lines = [];
@@ -81,6 +84,7 @@ export function buildForgeMessage(info) {
   if (needsOpenSpecPlan(session)) {
     lines.push(OPENSPEC_PLAN_REMINDER);
   }
+  lines.push(RUNTIME_INTEGRITY_REMINDER);
   lines.push('Resume: invoke the forge skill for the current phase.');
   lines.push('Honor pace: see forge references/pace.md (`forge prefs`).');
   lines.push('Skip Forge for this task only: /forge:skip');

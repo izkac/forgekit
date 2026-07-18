@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Claude Code SessionStart: inject active Forge session when present.
- * Requires `forge` on PATH (npm link @forgekit/cli or global install).
+ * Requires `forge` on PATH (npm link @izkac/forgekit or global install).
  */
 
 import { spawnSync } from 'node:child_process';

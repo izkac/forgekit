@@ -30,13 +30,33 @@ test('suggestPaceFromSignals: standard for ecosystem/api', () => {
   assert.equal(suggestPaceFromSignals('openapi route + ecosystem clients').pace, 'standard');
 });
 
+test('suggestPaceFromSignals: standard for worker/orchestration/openspec', () => {
+  assert.equal(suggestPaceFromSignals('forge:apply etl-surveydb-harmonization-platform').pace, 'standard');
+  assert.equal(suggestPaceFromSignals('wire worker job queue pipeline').pace, 'standard');
+  assert.equal(suggestPaceFromSignals('openspec change for services platform').pace, 'standard');
+});
+
 test('suggestPaceFromSignals: lite for docs', () => {
   assert.equal(suggestPaceFromSignals('update README wording').pace, 'lite');
 });
 
-test('suggestPaceFromSignals: brisk default', () => {
+test('suggestPaceFromSignals: brisk only for explicit small work', () => {
   assert.equal(suggestPaceFromSignals('fix toolbar alignment').pace, 'brisk');
-  assert.equal(suggestPaceFromSignals('').pace, 'brisk');
+  assert.equal(suggestPaceFromSignals('tweak button padding').pace, 'brisk');
+});
+
+test('suggestPaceFromSignals: fail closed to standard for empty/unrecognized', () => {
+  assert.equal(suggestPaceFromSignals('').pace, 'standard');
+  assert.equal(suggestPaceFromSignals('etl-surveydb-harmonization-platform').pace, 'standard');
+  assert.equal(suggestPaceFromSignals('mysterious-platform-change').pace, 'standard');
+});
+
+test('resolveEffectivePreferences surfaces integrity defaults', () => {
+  const forgeDir = tmp('forge-prefs-integrity-');
+  const eff = resolveEffectivePreferences({ forgeDir, defaultsPath: DEFAULTS_PATH });
+  assert.equal(eff.integrity.forbidStubs, true);
+  assert.equal(eff.integrity.specsBeatNarrowTasks, true);
+  assert.equal(eff.integrity.requireE2E, 'when-jobs-or-workers');
 });
 
 test('expandPace brisk matrix', () => {

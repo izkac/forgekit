@@ -29,15 +29,23 @@ Legacy sessions with planType `throwaway` or `direct`: resume from the session's
 
 For OpenSpec: follow `openspec-apply-change` for CLI steps, but **wrap each task** in the subagent loop (do not implement all tasks inline in coordinator context). For specs: read `proposal.md` / `design.md` / `tasks.md` from the change dir as context, then run the same subagent loop.
 
+## Runtime integrity (hard)
+
+Honor [../references/runtime-integrity.md](../references/runtime-integrity.md) in every brief and review packet:
+
+- Briefs **must never** contain “stub OK”, “later task”, “minimal poll loop only”, or equivalent. Shrink scope only by stopping and asking the user.
+- Capability specs beat narrow task wording. Fill reviewer `{CAPABILITY_SPEC_EXCERPT}` from the change's capability specs — not only the task line.
+- Do not mark a section complete if libraries exist but nothing in the production path calls them.
+
 ## Per-task loop
 
-1. Extract full task text + file paths + relevant spec sections.
+1. Extract full task text + file paths + relevant **capability** spec sections (not only the task checkbox line).
 2. Write `.forge/sessions/<id>/tasks/<nn>-<slug>/brief.md` using [../subagents/implementer-prompt.md](../subagents/implementer-prompt.md).
 3. Dispatch **implementer** subagent — brief includes [../references/tdd-core.md](../references/tdd-core.md). **Model:** resolve via `forge resolve-model --tier <fast|standard|capable>` (billing defaults to **`included`** — subscription/first-party pool; never invent API model slugs). Use `fast` for mechanical tasks (1–2 files, complete spec) and batched small tasks; `standard` for multi-file integration; escalate one capability tier (still `included`) when re-dispatching after `BLOCKED`. If `omitModel` is true, omit the Task `model` parameter.
 4. **Reviewer** (unless pace skips it):
    - **`always` / high-risk hard floor:** dispatch [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md) for this task → `task-review.md`.
    - **`per-group` at group boundary:** dispatch one reviewer covering **all tasks in the just-finished `tasks.md` group** → `group-review.md` (include each task id + paths). Mid-group low-risk tasks: self-check `task-review.md` only.
-   - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{DIFF_RANGE}` — read actual code, not the implementer's summary. **Model:** `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Do **not** skip high-risk tasks.
+   - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{DIFF_RANGE}` and `{CAPABILITY_SPEC_EXCERPT}` — read actual code, not the implementer's summary. **Model:** `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Do **not** skip high-risk tasks.
 5. Fix loop until the reviewer approves (max `review.maxRounds` from pace; then escalate to the human). For group reviews, fix any rejected task in the group before continuing to the next group.
 6. Record **test evidence** from the implementer's report (every task, even when review is deferred to group end):
    ```bash
@@ -59,6 +67,7 @@ forge phase implement --tasks-complete <N> --subagents <total dispatched so far>
 - **Tier 2 tests only** before claiming task done — narrowest command for this task ([test-strategy.md](../references/test-strategy.md)); **not** the full workspace suite unless the task requires it
 - Trace ecosystem consumers when contracts change
 - Minimal diff — surgical changes only
+- Runtime integrity: no stubs / false success; name the runtime caller; tests must fail on a no-op ([runtime-integrity.md](../references/runtime-integrity.md))
 
 ## After all tasks
 

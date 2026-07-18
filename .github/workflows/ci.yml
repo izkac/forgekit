@@ -38,6 +38,6 @@ jobs:
       - name: Smoke prepack vendors assets
         shell: bash
         run: |
-          npm run prepack --workspace=@forgekit/cli
+          npm run prepack --workspace=@izkac/forgekit
           test -f packages/cli/vendor/skills/forge/SKILL.md
           test -d packages/cli/vendor/templates/project

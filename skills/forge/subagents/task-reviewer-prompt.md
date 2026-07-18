@@ -2,9 +2,16 @@
 
 You review one Forge task in a single pass. No chat history — only this packet.
 
-## What was requested
+## What was requested (task / plan excerpt)
 
 {PLAN_OR_SPEC_EXCERPT}
+
+## Capability spec excerpt (source of truth)
+
+{CAPABILITY_SPEC_EXCERPT}
+
+Capability specs beat narrow task wording when they conflict. See
+[references/runtime-integrity.md](../references/runtime-integrity.md).
 
 ## What was implemented (implementer's own summary)
 
@@ -22,9 +29,18 @@ Diff range: {DIFF_RANGE}   <!-- e.g. `git diff` (uncommitted) or BASE..HEAD -->
 
 **Spec compliance** (gate — check before quality):
 
-- Every requirement in the excerpt is implemented; nothing important missing
+- Every requirement in the **capability** excerpt is implemented; nothing important missing
 - No unrequested scope (extra flags, features, refactors not in the plan)
 - Be strict on contract/API behaviour; pragmatic on internal refactors that match the plan
+
+**Runtime integrity — REJECT if any of:**
+
+- Success path has no domain side effects required by the capability
+- Tests would still pass with a no-op handler (ceremony-only evidence)
+- API / UI can enqueue or trigger a job kind / path the runtime cannot truly execute
+- UI / consumers depend on data nothing in the production path writes
+- Spec requirement has a library but no named runtime owner (job kind, endpoint, CLI, …)
+- Brief authorized a stub / “wire later” for a path this change claims
 
 **Code quality:**
 
@@ -37,7 +53,7 @@ Diff range: {DIFF_RANGE}   <!-- e.g. `git diff` (uncommitted) or BASE..HEAD -->
 
 ## Verdict
 
-- **APPROVED** — spec met and quality acceptable
-- **REJECTED** — list spec gaps and unrequested scope first, then quality issues classified Critical / Important / Minor
+- **APPROVED** — capability met, runtime owner present, quality acceptable
+- **REJECTED** — list spec gaps and runtime-integrity failures first, then quality issues classified Critical / Important / Minor
 
-Spec gaps and Critical/Important quality issues must be fixed before the task is marked complete.
+Spec gaps, runtime-integrity failures, and Critical/Important quality issues must be fixed before the task is marked complete.

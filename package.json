@@ -11,10 +11,10 @@
     "forgekit": "node packages/cli/bin/forgekit.mjs",
     "forge": "node packages/cli/bin/forge.mjs",
     "review": "node packages/cli/bin/review.mjs",
-    "test": "npm run test --workspace=@forgekit/cli",
-    "lint": "npm run lint --workspace=@forgekit/cli",
-    "prepack": "npm run prepack --workspace=@forgekit/cli",
-    "install:link": "npm install && npm link --workspace=@forgekit/cli"
+    "test": "npm run test --workspace=@izkac/forgekit",
+    "lint": "npm run lint --workspace=@izkac/forgekit",
+    "prepack": "npm run prepack --workspace=@izkac/forgekit",
+    "install:link": "npm install && npm link --workspace=@izkac/forgekit"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
