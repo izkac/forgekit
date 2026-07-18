@@ -14,8 +14,8 @@ Forge skill’s `skills/` folder — **no Superpowers plugin required**.
 ## Install
 
 ```bash
-# Once per machine (from forgekit checkout or published package)
-npm link --workspace=@izkac/forgekit   # or: npm i -g @izkac/forgekit when published
+# Preferred — once per machine
+npm i -g @izkac/forgekit
 forgekit install --skills forge --agents cursor,claude
 # or: forge install                  # alias → --skills forge
 ```

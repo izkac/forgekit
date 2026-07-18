@@ -13,10 +13,10 @@ The **Forge** skill and several of its workflows are based on
 
 ## Quick start
 
+Preferred — install the published package (Node 20+):
+
 ```bash
-npm install
-npm link --workspace=@izkac/forgekit    # forgekit + forge + review on PATH
-# Once published: npm i -g @izkac/forgekit
+npm i -g @izkac/forgekit
 
 # Pick skills and agents (interactive on TTY)
 forgekit install
@@ -39,6 +39,8 @@ forge init --cursor --claude --adr
 # decline (or --no-openspec) to use the built-in specs engine (specs/changes/)
 ```
 
+One-shot without a global install: `npx @izkac/forgekit install …` (same bins via `npx forge` / `npx review` after the package is on PATH, or keep the global install).
+
 Aliases (single-skill shortcuts):
 
 ```bash
@@ -46,7 +48,7 @@ forge install --cursor      # → forgekit install --skills forge --cursor
 review install --all        # → forgekit install --skills thorough-code-review --all-agents
 ```
 
-Requires Node 20+. OpenSpec CLI is optional — projects without it use the built-in specs engine (`forge doctor` reports readiness for whichever engine is configured).
+OpenSpec CLI is optional — projects without it use the built-in specs engine (`forge doctor` reports readiness for whichever engine is configured).
 
 ## Layout
 
@@ -142,7 +144,11 @@ code review, the CLI) are Forgekit-original or adapted from other project conven
 
 ## Developing Forgekit
 
+From a clone (contributors):
+
 ```bash
+npm install
+npm link --workspace=@izkac/forgekit   # local bins on PATH
 npm test --workspace=@izkac/forgekit
 npm run lint
 node packages/cli/bin/forgekit.mjs --help

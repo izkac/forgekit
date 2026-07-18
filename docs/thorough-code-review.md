@@ -14,7 +14,8 @@ Two-phase agent skill for **deep code review with false-positive filtering**. Us
 ## Install
 
 ```bash
-# From forgekit (after npm link --workspace=@izkac/forgekit)
+# Preferred
+npm i -g @izkac/forgekit
 forgekit install --skills thorough-code-review --agents cursor,claude
 # or: review install --cursor --force
 ```
