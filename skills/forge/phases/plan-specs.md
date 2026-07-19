@@ -60,9 +60,15 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    If the change involves workers, job queues, handlers, or cross-runtime calls, `tasks.md` MUST include:
 
    - Explicit **wiring** tasks per job kind / entry point → domain pipeline
-   - One **E2E fixture** acceptance task
+   - One **product-loop acceptance** task (last implement task, before verify)
 
-   Missing seam = plan **not** ready. Add the tasks before proceeding to implement.
+   And scaffold the spine matrix:
+
+   ```bash
+   forge spine init     # writes spine.json into the change dir; fill one row per capability
+   ```
+
+   Missing seam or empty spine = plan **not** ready. Add the tasks / rows before proceeding to implement. (`forge phase done` mechanically refuses if spine rows stay library-only.)
 
 5. Update session:
 

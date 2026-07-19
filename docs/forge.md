@@ -163,11 +163,11 @@ See the Forge skill’s [references/plan-routing.md](../skills/forge/references/
 | ----- | ------------ | ----------------- |
 | **triage** | Substantial? Skip allowed? Bootstrap session | `forge` skill |
 | **brainstorm** | Explore intent, approaches, approval | `skills/brainstorming` |
-| **plan** | Tracked-change propose — engine from `.forge/config.json` | [plan-routing.md](../skills/forge/references/plan-routing.md) |
-| **implement** | Subagent per task, TDD, tier 2 evidence | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../skills/forge/references/test-strategy.md) |
-| **verify** | Audit tier 2 evidence; **one tier 3 full-workspace run** (per pace) | `skills/verification-before-completion` + `verify-evidence.md` |
-| **review** | Combined task reviewer (spec + quality) per task; final review | `skills/requesting-code-review` |
-| **finish** | Archive (+ ADR if the project uses that), cleanup session | `/opsx:archive`, `forge cleanup` |
+| **plan** | Tracked-change propose; orchestration seam + `forge spine init` when jobs/workers | [plan-routing.md](../skills/forge/references/plan-routing.md) |
+| **implement** | Subagent per task, TDD, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../skills/forge/references/test-strategy.md) |
+| **verify** | Audit tier 2; tier 3; product-loop evidence; `forge integrity-check` | `skills/verification-before-completion` + `verify-evidence.md` |
+| **review** | Combined task reviewer (spec + quality) per task; final review (spine + product loop) | `skills/requesting-code-review` |
+| **finish** | Archive (+ ADR if the project uses that); `forge phase done` (integrity gate); cleanup | `/opsx:archive`, `forge cleanup` |
 
 **Standalone deep review (outside Forge):** for pre-merge audits with adversarial false-positive filtering, use the **thorough code review** skill — see [`docs/thorough-code-review.md`](thorough-code-review.md). Forge's `requesting-code-review` stays the per-task checkpoint during `/forge:build`.
 
@@ -191,7 +191,9 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
         notes.md
         decisions.md
       plan.md                         ← legacy throwaway plans only (deprecated)
-      verify-evidence.md              ← tier 3 full workspace (verify phase)
+      verify-evidence.md              ← tier 3 + ## Product loop (or BLOCKED)
+      deferrals.json                  ← forge defer registry (when used)
+      spine.json                      ← fallback if no tracked change dir
       tasks/
         01-first-task/
           brief.md
@@ -200,6 +202,9 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
       reviews/
         final-review.md
 ```
+
+For OpenSpec / specs-engine changes, the canonical **spine matrix** lives next to
+the plan: `openspec/changes/<name>/spine.json` (or `<specsDir>/changes/<name>/spine.json`).
 
 **Session ID:** `<UTC-compact>-<kebab-slug>-<6-hex>`
 
@@ -253,6 +258,9 @@ forge prefs auto|thorough|standard|brisk|lite
 forge prefs --session-set lite    # pin active session only
 forge doctor                      # plan-engine readiness (OpenSpec or specs layout)
 forge doctor --install            # attempt npm install -g @fission-ai/openspec
+forge spine init|check            # capability→runtime spine matrix (spine.json in change dir)
+forge defer add|resolve|list      # deferral registry — deferred wiring is tracked debt
+forge integrity-check             # mechanical gate: spine + deferrals + product-loop evidence
 forge overlay                     # re-apply OpenSpec vendor overlays in this project
 forge init […]                    # wire project commands / hooks / rules
 forge install […]                 # alias → forgekit install --skills forge
@@ -335,7 +343,22 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 
 When `--tasks-total N` is set with **N ≥ 15** and resolved pace is still `brisk`/`lite` (not user-pinned), Forge escalates the session to **standard**.
 
-**Runtime integrity** (all paces): no stubs / false job success; every claimed capability needs a named production caller; tests must fail on a no-op; capability specs beat narrow task wording; E2E-or-BLOCKED before `done`. See [runtime-integrity.md](../skills/forge/references/runtime-integrity.md). Defaults `integrity.*` in `preferences.defaults.json` (surfaced by `forge status`). `forge phase finish|done` refuses without `verify-evidence.md` and full task completion unless `--allow-incomplete "<reason>"`.
+**Runtime integrity** (all paces): no stubs / false job success; every claimed capability needs a named production caller; tests must fail on a no-op; capability specs beat narrow task wording; **product-loop** E2E (produce → consume → decision changes output — a single job slice is not platform E2E) or BLOCKED before `done`; job-kind closure (wired end-to-end or deleted); consumer–producer rule (UI/API reads must be production-written). See [runtime-integrity.md](../skills/forge/references/runtime-integrity.md).
+
+Mechanics: `forge spine init|check` maintains a per-change `spine.json` (capability → library → runtime owner → writes → reads → UI consumer → evidence; library-only rows fail). `forge defer add|resolve|list` registers deferred wiring as tracked debt. `forge integrity-check` combines spine validity, open deferrals, and product-loop/BLOCKED evidence — and `forge phase finish|done` runs the same checks and refuses on failure (plus missing `verify-evidence.md` / incomplete tasks) unless `--allow-incomplete "<reason>"` records an honest exception. Defaults `integrity.*` in `preferences.defaults.json` (surfaced by `forge status`).
+
+### What runs automatically every session
+
+You do **not** paste a long DoD prompt. After `forgekit install --skills forge`, every Forge session gets:
+
+| Automatic (CLI / hooks) | Agent-driven (skill phases — required, not optional) |
+| ----------------------- | ---------------------------------------------------- |
+| Integrity reminder on every session/prompt hook | Plan: `forge spine init` + fill rows when jobs/workers |
+| Pace `auto` fail-closed to **standard**; task-count escalation at ≥15 | Implement: update spine rows; `forge defer add` if wiring is deferred |
+| `forge phase done\|finish` runs `integrity-check` and refuses on failure | Verify: `## Product loop` in `verify-evidence.md` (or `BLOCKED`) |
+| `forge status` surfaces `integrity.*` defaults | Reviewers REJECT unregistered deferrals / library-only spine rows |
+
+So: **gates are automatic**; **filling the spine / product-loop evidence is part of the normal Forge phase flow** the coordinator must follow. Skipping those steps fails at `forge phase done`, not silently.
 
 **Unchanged on all paces:** tier-1 TDD + tier-2 evidence, no autonomous commit, OpenSpec when in Forge.
 

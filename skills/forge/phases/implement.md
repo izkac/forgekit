@@ -36,6 +36,8 @@ Honor [../references/runtime-integrity.md](../references/runtime-integrity.md) i
 - Briefs **must never** contain “stub OK”, “later task”, “minimal poll loop only”, or equivalent. Shrink scope only by stopping and asking the user.
 - Capability specs beat narrow task wording. Fill reviewer `{CAPABILITY_SPEC_EXCERPT}` from the change's capability specs — not only the task line.
 - Do not mark a section complete if libraries exist but nothing in the production path calls them.
+- **Deferrals:** if wiring genuinely lands in a later task, register it — `forge defer add --task <id> --reason "…"` — and resolve it when that task lands. Unregistered "later" is a REJECT; unresolved deferrals block `forge phase done`.
+- **Spine:** when a task wires a capability into production, update its `spine.json` row (runtimeOwner / writes / evidence). `forge spine check` must pass before verify ends.
 
 ## Per-task loop
 

@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadSession, readActive, saveSession } from './lib.mjs';
+import { runIntegrityChecks } from './integrity.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -115,7 +116,8 @@ function maybeEscalatePaceForTaskCount() {
 maybeEscalatePaceForTaskCount();
 
 /**
- * Refuse finish/done without verify evidence and full task completion,
+ * Refuse finish/done without verify evidence, full task completion, and a
+ * clean integrity check (spine matrix, deferrals, product-loop evidence) —
  * unless --allow-incomplete records an honest reason.
  */
 function enforceDoneGate() {
@@ -127,7 +129,14 @@ function enforceDoneGate() {
   const hasEvidence = fs.existsSync(evidencePath);
   const tasksDone = total === 0 || complete === total;
 
-  if (hasEvidence && tasksDone) {
+  const problems = [];
+  if (!hasEvidence) problems.push('missing verify-evidence.md');
+  if (!tasksDone) problems.push(`tasks incomplete (${complete}/${total})`);
+
+  const integrity = runIntegrityChecks({ sessionDir: dir, session });
+  problems.push(...integrity.problems);
+
+  if (problems.length === 0) {
     delete session.incompleteReason;
     return;
   }
@@ -137,14 +146,9 @@ function enforceDoneGate() {
     return;
   }
 
-  const problems = [];
-  if (!hasEvidence) problems.push('missing verify-evidence.md');
-  if (!tasksDone) {
-    problems.push(`tasks incomplete (${complete}/${total})`);
-  }
   process.stderr.write(
-    `Cannot enter phase "${phase}": ${problems.join('; ')}.\n` +
-      `Run verify (write verify-evidence.md) and complete all tasks, or pass --allow-incomplete "<reason>".\n`,
+    `Cannot enter phase "${phase}":\n${problems.map((p) => `  - ${p}`).join('\n')}\n` +
+      `Fix the above (forge integrity-check to re-run), or pass --allow-incomplete "<reason>".\n`,
   );
   process.exit(1);
 }

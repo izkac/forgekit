@@ -41,6 +41,8 @@ Diff range: {DIFF_RANGE}   <!-- e.g. `git diff` (uncommitted) or BASE..HEAD -->
 - UI / consumers depend on data nothing in the production path writes
 - Spec requirement has a library but no named runtime owner (job kind, endpoint, CLI, …)
 - Brief authorized a stub / “wire later” for a path this change claims
+- Wiring is deferred **without a registered open deferral** — the packet must show `forge defer list` output naming this task's deferral; "wiring in §9" with no registry entry is a REJECT
+- The task claims a capability whose `spine.json` row is missing or library-only (empty runtimeOwner / writes / evidence)
 
 **Code quality:**
 

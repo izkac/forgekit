@@ -189,6 +189,105 @@ test('phase done accepts with verify-evidence and complete tasks', () => {
   }
 });
 
+test('phase done refuses with an unresolved deferral', () => {
+  const dir = tmp('forge-set-phase-defer-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-defer');
+    const sessionDir = path.dirname(sessionFile);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'deferrals.json'),
+      `${JSON.stringify(
+        {
+          deferrals: [
+            { task: '9.2', reason: 'wiring later', createdAt: new Date().toISOString(), resolvedAt: null },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    assert.throws(
+      () => runSetPhase(dir, ['done']),
+      (err) => {
+        assert.match(String(err.stderr || err.message), /unresolved deferrals: 9\.2/);
+        return true;
+      },
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done refuses jobs-scoped session without spine.json', () => {
+  const dir = tmp('forge-set-phase-spine-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-spine');
+    const sessionDir = path.dirname(sessionFile);
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.slug = 'wire-worker-jobs';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+
+    assert.throws(
+      () => runSetPhase(dir, ['done']),
+      (err) => {
+        assert.match(String(err.stderr || err.message), /spine\.json required/);
+        return true;
+      },
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done accepts jobs-scoped session with wired spine + product-loop evidence', () => {
+  const dir = tmp('forge-set-phase-spine-ok-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-spine-ok');
+    const sessionDir = path.dirname(sessionFile);
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.slug = 'wire-worker-jobs';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify(
+        {
+          change: null,
+          notApplicable: null,
+          rows: [
+            {
+              capability: 'REQ-GOV-01 matching',
+              library: 'etl_core/matcher.py',
+              runtimeOwner: 'worker job analyze_study',
+              writes: 'study_proposals',
+              reads: 'N/A',
+              uiConsumer: 'Proposals page',
+              evidence: 'tasks/12-analyze/test-evidence.md',
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\n## Product loop\n\ningest -> analyze -> ratify -> run: output differs\n',
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('phase finish allows incomplete with --allow-incomplete', () => {
   const dir = tmp('forge-set-phase-allow-');
   try {

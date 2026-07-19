@@ -73,16 +73,28 @@ For each requirement in the change's **capability specs** (not only `tasks.md`):
 
 Record the trace in `verify-evidence.md` (a short REQ → caller table is enough).
 
-### 4. E2E-or-BLOCKED
+### 4. Product-loop E2E or BLOCKED
 
 Before leaving verify / claiming the change complete:
 
-1. Run (or document exact commands for) **one real fixture path** through each critical live entry point this change owns, **or**
-2. Leave an explicit **`BLOCKED`** list in `verify-evidence.md` explaining why E2E cannot run here.
+1. Run (or document exact commands for) the **closed product loop** — not a single job slice. When the design has a producer/consumer split (analyze vs execute, proposals vs ratify), the loop is: produce artifact → consumer reads it → decision/state change → **next run's output differs from baseline**. Record it under a `## Product loop` heading in `verify-evidence.md` (the done gate greps for it). **Or**
+2. Leave an explicit **`BLOCKED`** list in `verify-evidence.md` explaining why E2E cannot run here — the done gate then refuses `done` until unblocked or the user signs `--allow-incomplete`.
+
+Also enforce **job-kind closure**: every product-surface job kind is wired end-to-end or deleted from enums/API/UI before complete. And the **consumer–producer rule**: anything the UI/API reads must be proven written by the production path.
 
 Do **not** mark the change complete or advance to `done` while a critical path is stubbed, unwired, or unverified without `BLOCKED`. Green unit/tier-3 suites alone are not enough when jobs/workers/orchestration are in scope (`integrity.requireE2E`).
 
-### 5. Plan completeness
+### 5. Mechanical gate
+
+```bash
+forge spine check        # every capability row wired (library → runtime owner → writes → evidence)
+forge defer list         # no unresolved deferrals
+forge integrity-check    # combined; forge phase done runs the same checks
+```
+
+Fix any failure before proceeding — `forge phase done|finish` refuses on the same problems.
+
+### 6. Plan completeness
 
 - Confirm every plan task is marked complete.
 - Confirm no tier 2 evidence contradicts another.

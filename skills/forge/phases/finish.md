@@ -1,5 +1,14 @@
 # Finish phase
 
+Before marking done, integrity must pass (or the user must approve an incomplete finish):
+
+```bash
+forge integrity-check    # spine + deferrals + product-loop / BLOCKED
+forge phase done         # runs the same checks; refuses on failure
+# escape hatch only with an honest reason:
+# forge phase done --allow-incomplete "E2E blocked: no Compose in this environment"
+```
+
 ## OpenSpec path (`planType: openspec`)
 
 1. Confirm all tasks complete in `tasks.md`.

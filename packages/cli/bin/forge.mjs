@@ -30,6 +30,9 @@ const COMMANDS = {
   init: { script: 'init.mjs' },
   triage: { script: 'triage-prompt.mjs' },
   change: { script: 'change.mjs' },
+  spine: { script: 'spine.mjs' },
+  defer: { script: 'defer.mjs' },
+  'integrity-check': { script: 'integrity-check.mjs', aliases: ['integrity'] },
 };
 
 function printHelp() {
@@ -54,6 +57,9 @@ Commands:
   init                    Wire Forge commands/hooks/rules into this project
   triage                  Classify whether a prompt needs Forge triage
   change new|archive      Specs-engine change scaffold / archive
+  spine init|check        Capability→runtime spine matrix (spine.json)
+  defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
+  integrity-check         Mechanical integrity gate (runs at phase done)
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.
 

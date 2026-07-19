@@ -25,15 +25,29 @@ All files changed in this session (use git diff or explicit list):
 
 For **each** requirement in the change's capability specs, name the
 **production caller** (worker job kind, HTTP endpoint, CLI command, scheduled
-job, …) that invokes the implementing code.
+job, …) that invokes the implementing code. Cross-check against `spine.json`
+(`forge spine check`) — every capability row must be wired, not library-only.
 
 - Library-only / no production caller → **`NOT READY`**
 - Stub handler / false success / enqueueable-but-unhandled kind → **`NOT READY`**
+- Job kind on the product surface that is neither wired end-to-end nor deleted → **`NOT READY`**
+- UI/API reads a collection or artifact nothing in the production path writes → **`NOT READY`**
 - Missing E2E fixture path with no explicit `BLOCKED` in `verify-evidence.md` → **`NOT READY`**
+
+## Product-loop evidence (required)
+
+`verify-evidence.md` must contain a `## Product loop` section proving the
+**closed loop** (produce → consume → decision changes output), or an explicit
+`BLOCKED` list. A single job slice (e.g. ingest→file) or a library-level E2E
+does **not** count as platform E2E.
+
+- No product-loop section and no `BLOCKED` → **`NOT READY`**
+- `BLOCKED` present → **`NOT READY`** (honest, but not READY)
+- Unresolved deferrals in `forge defer list` → **`NOT READY`**
 
 ## Verdict
 
-- **READY** — every capability has a runtime owner, tests evidence real outcomes, no critical gaps
+- **READY** — every capability has a runtime owner, product loop evidenced, tests evidence real outcomes, no critical gaps
 - **NOT READY** — list blockers (prefer runtime-integrity and missing wiring first)
 
-Do not approve if tests were not run, **`test-evidence.md` is missing**, tasks remain unchecked, or any claimed capability is library-only / stubbed / false-succeeding.
+Do not approve if tests were not run, **`test-evidence.md` is missing**, tasks remain unchecked, or any claimed capability is library-only / stubbed / false-succeeding. Task checkboxes at 100% do **not** override a broken spine.
