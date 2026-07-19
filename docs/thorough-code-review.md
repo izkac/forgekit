@@ -247,5 +247,5 @@ Worked examples (invocation phrases, reverify JSON, CI): [`skills/thorough-code-
 
 | Topic | Path |
 | ----- | ---- |
-| Forge review (per-task, during `/forge:build`) | [`docs/forge.md`](forge.md) |
+| Forge review (per-task, during `/forge:build`) | [`skills/forge/docs/forge.md`](../skills/forge/docs/forge.md) |
 | Forgekit install | [`README.md`](../README.md) |

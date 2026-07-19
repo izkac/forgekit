@@ -7,7 +7,7 @@ tags: [workflow, forge, openspec]
 
 Run the **Forge** workflow for substantial work.
 
-Read and follow the Forge skill (`~/.claude/skills/forge/SKILL.md`) and forgekit `docs/forge.md`.
+Read and follow the Forge skill (`~/.claude/skills/forge/SKILL.md`) and `~/.claude/skills/forge/docs/forge.md`.
 
 1. Triage — substantial work? (skip only if user said `/forge:skip`)
 2. Resume from `.forge/active.json` or `forge new <slug>`

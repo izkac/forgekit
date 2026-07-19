@@ -11,4 +11,4 @@ forge models
 forge cleanup
 ```
 
-See [docs/forge.md](../docs/forge.md).
+See [skills/forge/docs/forge.md](../skills/forge/docs/forge.md) (pointer: [docs/forge.md](../docs/forge.md)).

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.2 — 2026-07-19
+
+- Interactive skill/agent picker: pick **one or more** (e.g. `1,3`) or all; clearer prompt and re-ask on bad input.
+- Package README included so npm shows docs on the package page.
+- **Forge reference ships with the skill:** `skills/forge/docs/forge.md` → installed as `~/.{cursor,claude,codex}/skills/forge/docs/forge.md`. Commands/rules point there (no missing monorepo `docs/forge.md`).
+
+## 0.1.1 — 2026-07-19
+
+- First installable npm release (`@izkac/forgekit@0.1.1`). `0.1.0` metadata was incomplete on the registry; republish fixed `npm i -g @izkac/forgekit`.
+- CI: discover tests without Node 20 glob expansion; bump `actions/checkout` / `setup-node` to v5.
+
 ### Session scorecard (L2 measurement)
 
 - **`forge score`**: grades session artifacts (spine, deferrals, product-loop quality, evidence, pace) → JSON/markdown; `--write` saves `scorecard.json` + `scorecard.md`.

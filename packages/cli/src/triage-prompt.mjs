@@ -91,7 +91,7 @@ export function buildForgeTriageMessage(options = {}) {
     for (const line of sessionLines) lines.push(`   ${line}`);
   }
   lines.push('3. Skip Forge for this task only: `/forge:skip`');
-  lines.push('Guide: Forge skill + forgekit docs/forge.md');
+  lines.push('Guide: Forge skill + docs/forge.md (under the installed forge skill)');
   return lines.join('\n');
 }
 

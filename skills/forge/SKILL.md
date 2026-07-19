@@ -17,7 +17,7 @@ Spec-tracked development pipeline. Planning engine is per-project
 all workflow skills live under `./skills/` (vendored from Superpowers MIT; see
 [skills/NOTICE.md](./skills/NOTICE.md)).
 
-Full reference: forgekit `docs/forge.md` (shipped with this skill’s source repo).
+Full reference: [docs/forge.md](./docs/forge.md) (ships with this skill).
 
 **Announce at start:** "Using Forge for this work." Include effective pace from
 `forge status` (e.g. `Pace: auto → brisk (…)`) — see [references/pace.md](./references/pace.md).
@@ -43,7 +43,7 @@ forge doctor                        # plan-engine readiness (OpenSpec CLI or spe
 
 Honor [references/pace.md](./references/pace.md) in implement / verify / review.
 Hard floor: money/auth/contracts/migrations always get per-task review (even under `standard` mid-group / `brisk` / `lite`).
-Local overlays: forgekit `docs/forge.md` § Checkout-local overrides.
+Local overlays: [docs/forge.md](./docs/forge.md) § Checkout-local overrides.
 
 ## Bundled skills
 
@@ -133,4 +133,4 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 
 ## Do not edit vendor OpenSpec skills
 
-OpenSpec vendor skills upgrade in place. Forge behaviour lives in this tree and forgekit `docs/forge.md`. Re-apply vendor patches with `forge overlay` after OpenSpec upgrades.
+OpenSpec vendor skills upgrade in place. Forge behaviour lives in this tree and [docs/forge.md](./docs/forge.md). Re-apply vendor patches with `forge overlay` after OpenSpec upgrades.

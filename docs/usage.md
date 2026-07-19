@@ -1,7 +1,7 @@
 # How to use Forgekit
 
 Step-by-step guide for humans. Reference details live in
-[`docs/forge.md`](forge.md) (workflow internals) and
+[`skills/forge/docs/forge.md`](../skills/forge/docs/forge.md) (workflow internals; also at `docs/forge.md`) and
 [`docs/thorough-code-review.md`](thorough-code-review.md) (standalone review).
 
 **What you get**

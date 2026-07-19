@@ -7,7 +7,7 @@ tags: [workflow, forge, openspec]
 
 **Forge-owned command.** Use this instead of bare `/opsx:apply` for disciplined implementation of a tracked change (OpenSpec or built-in specs engine — `.forge/config.json` → `plan.engine`).
 
-Read the Forge skill (`~/.claude/skills/forge/SKILL.md`) and forgekit `docs/forge.md`.
+Read the Forge skill (`~/.claude/skills/forge/SKILL.md`) and `~/.claude/skills/forge/docs/forge.md`.
 
 **Input**: Optionally specify a change name (e.g., `/forge:apply add-auth`). If omitted, infer from context or active Forge session.
 

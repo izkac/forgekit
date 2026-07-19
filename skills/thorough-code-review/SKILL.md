@@ -231,7 +231,7 @@ When reviewing a project that documents accepted risks:
 
 ## Model selection for subagents
 
-**Choose the model tier per dispatch — never default to the most capable (priciest) model.** Match the tier to the judgment the role actually needs. Map roles to Forge capability tiers (`fast` / `standard` / `capable`) and resolve via `forge resolve-model --tier <…>` so billing stays on the **`included`** (subscription) lane unless the user explicitly asks for metered/API models — see forgekit `docs/forge.md` § Subagent model.
+**Choose the model tier per dispatch — never default to the most capable (priciest) model.** Match the tier to the judgment the role actually needs. Map roles to Forge capability tiers (`fast` / `standard` / `capable`) and resolve via `forge resolve-model --tier <…>` so billing stays on the **`included`** (subscription) lane unless the user explicitly asks for metered/API models — see forge skill [docs/forge.md](../forge/docs/forge.md) § Subagent model.
 
 | Role | Tier | Why |
 | ---- | ---- | --- |

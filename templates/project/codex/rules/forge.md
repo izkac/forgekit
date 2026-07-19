@@ -1,6 +1,6 @@
 # Forge (thin rule)
 
-Full workflow: forgekit `docs/forge.md` · Skill: user-installed **Forge** (`~/.codex/skills/forge/SKILL.md` after `forge install`).
+Full workflow: `~/.codex/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.codex/skills/forge/SKILL.md` after `forge install`).
 
 **Default:** triage before implementation. Substantial work → **Forge**
 (brainstorm → OpenSpec → subagent TDD implement → review).

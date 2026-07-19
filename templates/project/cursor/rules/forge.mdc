@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Forge (thin rule)
 
-Full workflow: forgekit `docs/forge.md` · Skill: user-installed **Forge** (`~/.cursor/skills/forge/SKILL.md` after `forge install`).
+Full workflow: `~/.cursor/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.cursor/skills/forge/SKILL.md` after `forge install`).
 
 **Default:** triage before implementation. Substantial work → **Forge**
 (brainstorm → OpenSpec → subagent TDD implement → review).

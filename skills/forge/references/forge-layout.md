@@ -43,7 +43,7 @@ Optional `cursorChatId` on `session.json` when available — not required.
 
 Bare `forge models` / `forge:prefs` **print** effective values from committed
 defaults and do **not** create the `*.local.json` files. See [pace.md](./pace.md) and
-[docs/forge.md](../../../docs/forge.md) § Checkout-local overrides.
+[docs/forge.md](../docs/forge.md) § Checkout-local overrides.
 
 ## session.json fields
 

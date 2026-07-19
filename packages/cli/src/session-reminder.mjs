@@ -88,7 +88,7 @@ export function buildForgeMessage(info) {
   lines.push('Resume: invoke the forge skill for the current phase.');
   lines.push('Honor pace: see forge references/pace.md (`forge prefs`).');
   lines.push('Skip Forge for this task only: /forge:skip');
-  lines.push('Guide: Forge skill + forgekit docs/forge.md');
+  lines.push('Guide: Forge skill + docs/forge.md (under the installed forge skill)');
   return lines.join('\n');
 }
 

@@ -22,6 +22,7 @@ import {
   normalizeAdrDir,
   scaffoldAdr,
 } from './adr.mjs';
+import { parseMenuSelection } from './menu-select.mjs';
 import {
   DEFAULT_SPECS_DIR,
   hasOpenSpecConfig,
@@ -392,26 +393,22 @@ export function initProject(selected, opts) {
 
 async function promptAgents() {
   const rl = readline.createInterface({ input, output });
+  const map = { 1: 'cursor', 2: 'claude', 3: 'codex' };
+  const allIds = ['cursor', 'claude', 'codex'];
+  const allNum = '4';
   try {
     process.stdout.write(`Init Forge project wiring for which environments?\n`);
+    process.stdout.write(`(pick one or more — e.g. 1 or 1,3 — or ${allNum} for all)\n`);
     process.stdout.write(`  1) Cursor\n`);
     process.stdout.write(`  2) Claude Code\n`);
     process.stdout.write(`  3) Codex CLI\n`);
-    process.stdout.write(`  4) All\n`);
-    process.stdout.write(`Enter numbers separated by commas (e.g. 1,2) or 4 for all: `);
-    const answer = (await rl.question('')).trim();
-    if (!answer || answer === '4') return ['cursor', 'claude', 'codex'];
-    const map = { 1: 'cursor', 2: 'claude', 3: 'codex' };
-    const picked = [
-      ...new Set(
-        answer
-          .split(/[,\s]+/)
-          .map((s) => map[s.trim()])
-          .filter(Boolean),
-      ),
-    ];
-    if (picked.length === 0) throw new Error('No agents selected');
-    return picked;
+    process.stdout.write(`  ${allNum}) All\n`);
+    for (;;) {
+      const answer = await rl.question(`Choice(s) [1-${allNum}]: `);
+      const parsed = parseMenuSelection(answer, map, allIds, allNum);
+      if (parsed.ok) return parsed.ids;
+      process.stdout.write(`${parsed.error}\n`);
+    }
   } finally {
     rl.close();
   }

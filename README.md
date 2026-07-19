@@ -66,7 +66,8 @@ forgekit/
   templates/project/            # forge init
   templates/adr/                # decisions.md, ADR index, hooks
   docs/usage.md                 # how-to tutorial (start here)
-  docs/forge.md                 # full Forge reference
+  docs/forge.md                 # pointer → skill copy
+  skills/forge/docs/forge.md    # full Forge reference (ships with skill)
   docs/thorough-code-review.md
 ```
 
@@ -126,7 +127,7 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 | `forge change new\|archive` | Specs-engine change scaffold / dated archive |
 | `forge install` | Alias → `forgekit install --skills forge` |
 
-Full workflow (phases, pace, integrity): [`docs/forge.md`](docs/forge.md).  
+Full workflow (phases, pace, integrity): [`skills/forge/docs/forge.md`](skills/forge/docs/forge.md).  
 Step-by-step with examples: [`docs/usage.md`](docs/usage.md).
 
 ## Review CLI

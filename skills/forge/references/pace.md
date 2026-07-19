@@ -15,7 +15,7 @@ forge doctor                        # OpenSpec project + CLI
 
 Billing lane (orthogonal): `forge models` prints only;
 `forge models included|metered` writes `.forge/models.local.json`.
-See [docs/forge.md](../../../docs/forge.md) § Checkout-local overrides.
+See [docs/forge.md](../docs/forge.md) § Checkout-local overrides.
 
 ## Announce
 

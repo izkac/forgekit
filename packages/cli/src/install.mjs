@@ -28,6 +28,7 @@ import {
   scaffoldAdr,
   disableProjectAdr,
 } from './adr.mjs';
+import { parseMenuSelection } from './menu-select.mjs';
 import { saveUserPlanEngine } from './plan-engine.mjs';
 import { hashDirectory, packageVersion, resolveAsset } from './paths.mjs';
 
@@ -422,30 +423,21 @@ export function listInstallStatus(opts = {}) {
 async function promptMulti(question, map, allIds) {
   const rl = readline.createInterface({ input, output });
   try {
-    process.stdout.write(`${question}\n`);
     const entries = Object.entries(map);
+    const allNum = String(entries.length + 1);
+    process.stdout.write(`${question}\n`);
+    process.stdout.write(`(pick one or more — e.g. 1 or 1,3 — or ${allNum} for all)\n`);
     for (const [num, id] of entries) {
-      const label =
-        SKILLS[id]?.label ?? AGENTS[id]?.label ?? id;
+      const label = SKILLS[id]?.label ?? AGENTS[id]?.label ?? id;
       process.stdout.write(`  ${num}) ${label}\n`);
     }
-    const allNum = String(entries.length + 1);
     process.stdout.write(`  ${allNum}) All\n`);
-    process.stdout.write(
-      `Enter numbers separated by commas (e.g. 1,2) or ${allNum} for all: `,
-    );
-    const answer = (await rl.question('')).trim();
-    if (!answer || answer === allNum) return [...allIds];
-    const picked = [
-      ...new Set(
-        answer
-          .split(/[,\s]+/)
-          .map((s) => map[s.trim()])
-          .filter(Boolean),
-      ),
-    ];
-    if (picked.length === 0) throw new Error('Nothing selected');
-    return picked;
+    for (;;) {
+      const answer = await rl.question(`Choice(s) [1-${allNum}]: `);
+      const parsed = parseMenuSelection(answer, map, allIds, allNum);
+      if (parsed.ok) return parsed.ids;
+      process.stdout.write(`${parsed.error}\n`);
+    }
   } finally {
     rl.close();
   }
