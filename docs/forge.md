@@ -9,6 +9,9 @@ requires a named production path for every claimed capability, and (for
 jobs/workers) a closed product loop before `forge phase done`. See
 [Runtime integrity](#runtime-integrity).
 
+**Using Forgekit for the first time?** Start with the tutorial:
+[**How to use Forgekit**](usage.md) (install → init → `/forge:apply` → examples).
+
 **Skill:** `forge` (Cursor, Claude Code, Codex CLI)  
 **Commands:** `/forge`, `/forge:*` (after `forge init`; Cursor and Claude Code)  
 **Scratch space:** `.forge/` (gitignored except README)  

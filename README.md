@@ -8,6 +8,10 @@ Portable agent-skills monorepo. One package (`@izkac/forgekit`), three bins:
 | **`forge`** | Forge workflow sessions |
 | **`review`** | Thorough code review pipeline |
 
+**New here?** Read **[How to use Forgekit](docs/usage.md)** — install, project wiring,
+slash commands, simple vs jobs/workers examples, integrity (spine / defer /
+product loop), and a cheat sheet.
+
 The **Forge** skill and several of its workflows are based on
 [Superpowers](https://github.com/obra/superpowers) (MIT) — see [Attribution](#attribution).
 
@@ -61,7 +65,8 @@ forgekit/
   packages/cli/                 # @izkac/forgekit → forgekit + forge + review
   templates/project/            # forge init
   templates/adr/                # decisions.md, ADR index, hooks
-  docs/forge.md
+  docs/usage.md                 # how-to tutorial (start here)
+  docs/forge.md                 # full Forge reference
   docs/thorough-code-review.md
 ```
 
@@ -121,7 +126,8 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 | `forge change new\|archive` | Specs-engine change scaffold / dated archive |
 | `forge install` | Alias → `forgekit install --skills forge` |
 
-Full workflow (phases, pace, integrity): [`docs/forge.md`](docs/forge.md).
+Full workflow (phases, pace, integrity): [`docs/forge.md`](docs/forge.md).  
+Step-by-step with examples: [`docs/usage.md`](docs/usage.md).
 
 ## Review CLI
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Docs
+
+- New tutorial: [`docs/usage.md`](docs/usage.md) — install, project wiring, slash commands, simple vs jobs/workers examples, integrity (spine / defer / product loop), cheat sheet.
+
 ### Forge runtime integrity — round 2 (product-loop acceptance)
 
 - **Spine matrix**: `forge spine init|check` — per-change `spine.json` mapping capability → library → runtime owner → writes → reads → UI consumer → evidence. Library-only rows fail validation.
