@@ -4,10 +4,16 @@ Before marking done, integrity must pass (or the user must approve an incomplete
 
 ```bash
 forge integrity-check    # spine + deferrals + product-loop / BLOCKED
-forge phase done         # runs the same checks; refuses on failure
+forge score              # preview L2 scorecard (optional)
+forge phase done         # runs integrity checks + writes scorecard.md/json
 # escape hatch only with an honest reason:
 # forge phase done --allow-incomplete "E2E blocked: no Compose in this environment"
 ```
+
+`forge phase done|finish` always writes `.forge/sessions/<id>/scorecard.md` (and
+`.json`) — an L2 grade of session artifacts. Answer the **human ship-check**
+questions in that file for platform/async work (L3). See [usage.md](../../../docs/usage.md)
+§ Session success.
 
 ## OpenSpec path (`planType: openspec`)
 

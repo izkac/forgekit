@@ -33,6 +33,7 @@ const COMMANDS = {
   spine: { script: 'spine.mjs' },
   defer: { script: 'defer.mjs' },
   'integrity-check': { script: 'integrity-check.mjs', aliases: ['integrity'] },
+  score: { script: 'score-cli.mjs', aliases: ['scorecard'] },
 };
 
 function printHelp() {
@@ -60,6 +61,7 @@ Commands:
   spine init|check        Capability→runtime spine matrix (spine.json)
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)
+  score [--write]         L2 session scorecard (auto-written at phase done)
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.
 

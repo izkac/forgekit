@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadSession, readActive, saveSession } from './lib.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
+import { writeSessionScorecard } from './score.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -154,6 +155,22 @@ function enforceDoneGate() {
 }
 
 enforceDoneGate();
+
+// L2 scorecard on finish/done — always write so sessions leave a measurable trail
+if (phase === 'done' || phase === 'finish') {
+  try {
+    const { card, mdPath } = writeSessionScorecard({ sessionDir: dir, session });
+    session.score = card.score;
+    session.scoreGrade = card.grade;
+    process.stderr.write(
+      `[forge] Session score: ${card.score}/${card.maxScore} grade ${card.grade} → ${mdPath}\n`,
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not write scorecard: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
 
 saveSession(dir, session);
 process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));

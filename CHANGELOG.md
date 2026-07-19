@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Session scorecard (L2 measurement)
+
+- **`forge score`**: grades session artifacts (spine, deferrals, product-loop quality, evidence, pace) → JSON/markdown; `--write` saves `scorecard.json` + `scorecard.md`.
+- **`forge phase done|finish`**: always writes the scorecard and stamps `session.score` / `session.scoreGrade`. Incomplete finishes are capped at grade ≤ D (59).
+- Docs: [usage.md](docs/usage.md) § Session success (L1 process / L2 score / L3 ship-check).
+
 ### Docs
 
 - New tutorial: [`docs/usage.md`](docs/usage.md) — install, project wiring, slash commands, simple vs jobs/workers examples, integrity (spine / defer / product loop), cheat sheet.

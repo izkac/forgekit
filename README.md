@@ -121,7 +121,7 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 |---------|---------|
 | `forge new` / `status` / `phase` / `prefs` / `models` | Sessions |
 | `forge resolve-model` / `doctor` / `evidence` / `overlay` | Supporting |
-| `forge spine` / `defer` / `integrity-check` | Runtime integrity (spine matrix, deferrals, done gate) |
+| `forge spine` / `defer` / `integrity-check` / `score` | Runtime integrity + L2 session scorecard |
 | `forge init` | Project commands, rules, hooks; engine (`--openspec`/`--no-openspec`); optional `--adr` |
 | `forge change new\|archive` | Specs-engine change scaffold / dated archive |
 | `forge install` | Alias → `forgekit install --skills forge` |

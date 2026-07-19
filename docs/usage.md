@@ -312,7 +312,8 @@ forge phase done --allow-incomplete "E2E blocked until CI Compose fixtures land"
 
 ```bash
 forge integrity-check   # preview problems
-forge phase done        # same checks; exit 1 if spine/deferrals/loop fail
+forge score             # preview L2 grade (optional)
+forge phase done        # integrity gate + writes scorecard.md/json
 forge cleanup           # prune finished sessions (optional)
 ```
 
@@ -427,7 +428,39 @@ archiving the change. Pending ADR reminders come from project hooks.
 
 ---
 
-## 11. Cheat sheet
+## 11. Session success — did Forge actually work?
+
+Do not treat “tasks complete” or even `integrity-check` 0 as product success.
+
+| Layer | Measures | Command / artifact |
+|-------|----------|--------------------|
+| **L1** Process | Spine, deferrals, product-loop *presence* | `forge integrity-check` / done gate |
+| **L2** Artifacts | Quality of those artifacts + pace/evidence | `forge score` → `scorecard.md` (auto at done) |
+| **L3** Outcome | Real product path / ship decision | Human questions in scorecard + golden scenarios |
+
+```bash
+forge score           # JSON
+forge score --md      # markdown
+forge score --write   # save into session dir
+```
+
+Grades A–F from ~100 points. `--allow-incomplete` **caps** score at 59.
+`forge phase done` always writes `scorecard.md` / `scorecard.json` and sets
+`session.score` / `session.scoreGrade`.
+
+**After done — answer the L3 ship-check** (printed in the scorecard):
+
+1. Name the production path for the main REQ  
+2. Exercise it — real data in UI, not empty queues?  
+3. Governance in scope → does ratify change the next run’s output?  
+4. Ship to a customer tomorrow? (`yes` / `no` / `follow-on`)
+
+If L1 is green and (4) is `no`, **Forge failed** — open a Forgekit issue, don’t
+only file a product bug.
+
+Trend over time: rate of sessions with L1 green + ship=`no` should fall.
+
+## 12. Cheat sheet
 
 ```bash
 # Machine
@@ -445,6 +478,7 @@ forge spine init && forge spine check
 forge defer add --task 3.2 --reason "wire handler in 3.2"
 forge defer resolve --task 3.2
 forge integrity-check
+forge score --write
 forge phase done
 forge cleanup
 ```
@@ -464,6 +498,7 @@ In the agent:
 
 | Doc | Contents |
 |-----|----------|
+| [usage.md](usage.md) | Tutorial + session success (L1/L2/L3) |
 | [forge.md](forge.md) | Full reference: phases, pace matrix, integrity rules, agent surfaces |
 | [runtime-integrity.md](../skills/forge/references/runtime-integrity.md) | Hard rules agents must follow |
 | [thorough-code-review.md](thorough-code-review.md) | Standalone `review` pipeline |

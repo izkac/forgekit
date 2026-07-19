@@ -209,6 +209,7 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
       verify-evidence.md              ← tier 3 + ## Product loop (or BLOCKED)
       deferrals.json                  ← forge defer registry (when used)
       spine.json                      ← fallback if no tracked change dir
+      scorecard.md / scorecard.json   ← L2 session score (written at done/finish)
       tasks/
         01-first-task/
           brief.md
@@ -276,6 +277,7 @@ forge doctor --install            # attempt npm install -g @fission-ai/openspec
 forge spine init|check            # capability→runtime spine matrix (spine.json in change dir)
 forge defer add|resolve|list      # deferral registry — deferred wiring is tracked debt
 forge integrity-check             # mechanical gate: spine + deferrals + product-loop evidence
+forge score [--write] [--md]      # L2 session scorecard (also auto-written at phase done)
 forge overlay                     # re-apply OpenSpec vendor overlays in this project
 forge init […]                    # wire project commands / hooks / rules
 forge install […]                 # alias → forgekit install --skills forge
@@ -425,8 +427,8 @@ You do **not** paste a long definition-of-done prompt. After
 | ----------------------- | -------------------------------------- |
 | Integrity reminder on every session/prompt hook | Plan: **`forge spine init` every change** — fill rows or `notApplicable` |
 | Pace `auto` fail-closed to **standard**; task-count escalation at ≥15 | Implement: update spine rows; `forge defer add` if wiring is deferred |
-| `forge phase done\|finish` requires valid spine + runs `integrity-check` | Verify: `## Product loop` when spine has rows (sync-only → prefer `notApplicable`) |
-| `forge status` surfaces `integrity.*` defaults | Reviewers REJECT unregistered deferrals / library-only spine rows |
+| `forge phase done\|finish` requires valid spine + writes L2 scorecard | Verify: `## Product loop` when spine has rows (sync-only → prefer `notApplicable`) |
+| `forge status` surfaces `integrity.*` defaults | After done: answer L3 ship-check in `scorecard.md` |
 
 **Gates are automatic. Filling evidence is part of the normal phase flow.**
 Skipping those steps fails at `forge phase done`, not silently.
