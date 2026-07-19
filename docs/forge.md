@@ -4,6 +4,11 @@ Forge is an **OpenSpec-native**, **self-contained** development pipeline.
 All workflow skills (brainstorm, TDD, subagents, verify, review) live under the
 Forge skill’s `skills/` folder — **no Superpowers plugin required**.
 
+It does not stop at green unit tests or checked-off tasks: **runtime integrity**
+requires a named production path for every claimed capability, and (for
+jobs/workers) a closed product loop before `forge phase done`. See
+[Runtime integrity](#runtime-integrity).
+
 **Skill:** `forge` (Cursor, Claude Code, Codex CLI)  
 **Commands:** `/forge`, `/forge:*` (after `forge init`; Cursor and Claude Code)  
 **Scratch space:** `.forge/` (gitignored except README)  
@@ -107,16 +112,23 @@ User request
             └─────────────┬─────────────┘
                           ▼
          Verify: audit tier 2 + tier 3 (scope from pace)
+                  + ## Product loop (or BLOCKED)
+                  + forge integrity-check
                           │
                           ▼
-         Final review (pace) + verification-before-completion
+         Final review (pace) — spine + product loop
                           │
                           ▼
                  /opsx:archive (+ project ADR follow-up if any)
                           │
                           ▼
+            forge phase done  ← integrity gate (refuses if incomplete)
             Done + cleanup .forge session
 ```
+
+**Jobs / workers / queues:** during Plan, also run `forge spine init` and keep
+`spine.json` wired through Implement. See [Runtime integrity](#runtime-integrity)
+below.
 
 ### Triage (top of tree)
 
@@ -343,24 +355,7 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 
 When `--tasks-total N` is set with **N ≥ 15** and resolved pace is still `brisk`/`lite` (not user-pinned), Forge escalates the session to **standard**.
 
-**Runtime integrity** (all paces): no stubs / false job success; every claimed capability needs a named production caller; tests must fail on a no-op; capability specs beat narrow task wording; **product-loop** E2E (produce → consume → decision changes output — a single job slice is not platform E2E) or BLOCKED before `done`; job-kind closure (wired end-to-end or deleted); consumer–producer rule (UI/API reads must be production-written). See [runtime-integrity.md](../skills/forge/references/runtime-integrity.md).
-
-Mechanics: `forge spine init|check` maintains a per-change `spine.json` (capability → library → runtime owner → writes → reads → UI consumer → evidence; library-only rows fail). `forge defer add|resolve|list` registers deferred wiring as tracked debt. `forge integrity-check` combines spine validity, open deferrals, and product-loop/BLOCKED evidence — and `forge phase finish|done` runs the same checks and refuses on failure (plus missing `verify-evidence.md` / incomplete tasks) unless `--allow-incomplete "<reason>"` records an honest exception. Defaults `integrity.*` in `preferences.defaults.json` (surfaced by `forge status`).
-
-### What runs automatically every session
-
-You do **not** paste a long DoD prompt. After `forgekit install --skills forge`, every Forge session gets:
-
-| Automatic (CLI / hooks) | Agent-driven (skill phases — required, not optional) |
-| ----------------------- | ---------------------------------------------------- |
-| Integrity reminder on every session/prompt hook | Plan: `forge spine init` + fill rows when jobs/workers |
-| Pace `auto` fail-closed to **standard**; task-count escalation at ≥15 | Implement: update spine rows; `forge defer add` if wiring is deferred |
-| `forge phase done\|finish` runs `integrity-check` and refuses on failure | Verify: `## Product loop` in `verify-evidence.md` (or `BLOCKED`) |
-| `forge status` surfaces `integrity.*` defaults | Reviewers REJECT unregistered deferrals / library-only spine rows |
-
-So: **gates are automatic**; **filling the spine / product-loop evidence is part of the normal Forge phase flow** the coordinator must follow. Skipping those steps fails at `forge phase done`, not silently.
-
-**Unchanged on all paces:** tier-1 TDD + tier-2 evidence, no autonomous commit, OpenSpec when in Forge.
+**Unchanged on all paces:** tier-1 TDD + tier-2 evidence, no autonomous commit, OpenSpec when in Forge. Runtime integrity (below) applies at every pace.
 
 Agent rules for each knob: [pace.md](../skills/forge/references/pace.md).
 
@@ -372,6 +367,141 @@ Prefs are gitignored (`.forge/preferences.local.json`), same pattern as `models.
 If the CLI is missing, it warns and offers `npm install -g @fission-ai/openspec`
 (`--install` to attempt). `forge new` runs doctor warn-only so a missing CLI does
 not block session creation.
+
+---
+
+## Runtime integrity
+
+Forge’s job is to ship **working product paths**, not green checkboxes over
+orphan libraries. Integrity rules live in
+[runtime-integrity.md](../skills/forge/references/runtime-integrity.md) and are
+enforced by both skill prompts and the CLI.
+
+### The problem it prevents
+
+Without integrity, a large change can look “done” while the product is hollow:
+
+- Libraries (matcher, BI exporter, …) are unit-tested and marked complete
+- A worker job logs and marks `succeeded` (or a thin concat job writes a `.sav`)
+- The UI can enqueue kinds nobody handles, or read collections nobody writes
+- OpenSpec shows 57/57 — but upload → analyze → ratify → run never works
+
+Integrity upgrades Forge from “no false job success” to **product-loop acceptance**.
+
+### Rules (plain language)
+
+1. **No stubs / false success** — a handler that only logs and succeeds is forbidden.
+2. **Runtime owner required** — a library alone does not satisfy a capability; name the production caller (job, endpoint, CLI).
+3. **Tests must fail on a no-op** — asserting “job status became succeeded” is not enough.
+4. **Specs beat narrow tasks** — capability specs win when they conflict with a thin task reading.
+5. **E2E = product loop** — produce → consume → decision changes output. A single job slice (ingest → Parquet) is **not** platform E2E.
+6. **Job-kind closure** — every product-surface job kind is wired end-to-end **or deleted** before complete. “Fail closed” is only a temporary `BLOCKED` state.
+7. **Consumer–producer** — if UI/API reads it, production must write it (proven in evidence).
+8. **Deferrals are tracked** — “wiring later” only via `forge defer`; unresolved deferrals block `done`.
+
+### Mechanics
+
+| Tool | Purpose |
+|------|---------|
+| `forge spine init\|check` | Per-change `spine.json`: capability → library → runtime owner → writes → reads → UI → evidence |
+| `forge defer add\|resolve\|list` | Deferred wiring as tracked debt in the session |
+| `forge integrity-check` | Combined gate — also run automatically by `forge phase done\|finish` |
+
+Defaults (`integrity.forbidStubs`, `specsBeatNarrowTasks`, `requireE2E`) live in
+`preferences.defaults.json` and appear in `forge status`.
+
+Escape hatch: `forge phase done --allow-incomplete "<reason>"` records an honest
+exception in the session — it does not silently checkbox past gaps.
+
+### What runs automatically every session
+
+You do **not** paste a long definition-of-done prompt. After
+`forgekit install --skills forge`, every Forge session gets:
+
+| Automatic (CLI / hooks) | Agent-driven (skill phases — required) |
+| ----------------------- | -------------------------------------- |
+| Integrity reminder on every session/prompt hook | Plan: `forge spine init` + fill rows when jobs/workers |
+| Pace `auto` fail-closed to **standard**; task-count escalation at ≥15 | Implement: update spine rows; `forge defer add` if wiring is deferred |
+| `forge phase done\|finish` runs `integrity-check` and refuses on failure | Verify: `## Product loop` in `verify-evidence.md` (or `BLOCKED`) |
+| `forge status` surfaces `integrity.*` defaults | Reviewers REJECT unregistered deferrals / library-only spine rows |
+
+**Gates are automatic. Filling evidence is part of the normal phase flow.**
+Skipping those steps fails at `forge phase done`, not silently.
+
+### Worked example (jobs / workers change)
+
+**Plan**
+
+```bash
+forge spine init
+# edit openspec/changes/<name>/spine.json — one row per capability
+```
+
+```json
+{
+  "change": "etl-surveydb-pipeline-closure",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "REQ-GOV-01 matching",
+      "library": "services/etl-core/src/etl_core/matcher.py",
+      "runtimeOwner": "worker job analyze_study",
+      "writes": "study_proposals",
+      "reads": "N/A",
+      "uiConsumer": "Proposals page",
+      "evidence": "tasks/12-analyze/test-evidence.md"
+    },
+    {
+      "capability": "REQ-OUT-BI star schema",
+      "library": "services/etl-core/src/etl_core/bi_star.py",
+      "runtimeOwner": "worker job harmonization_run",
+      "writes": "runs/<id>/bi/*.parquet",
+      "reads": "decisions tip + weight_map tips",
+      "uiConsumer": "Runs artifact download",
+      "evidence": "verify-evidence.md#product-loop"
+    }
+  ]
+}
+```
+
+Docs-only / no-runtime changes may set `"notApplicable": "docs-only change"` instead of rows.
+
+**If wiring must wait for a later task**
+
+```bash
+forge defer add --task 9.7 --reason "analyze_study handler lands in 9.7"
+# … when 9.7 is done:
+forge defer resolve --task 9.7
+```
+
+**Verify evidence** (required when spine has rows):
+
+```markdown
+# Verify evidence — tier 3
+
+- **Command:** `pytest …` / `npm test …`
+- **Exit code:** 0
+
+## Product loop
+
+Fixture: OP1086 three sources
+
+1. ingest_source ×3 → study_sources + Parquet
+2. analyze_study → study_proposals (match / loop)
+3. ratify subset via API → decisions tip at revision R
+4. harmonization_run @R → .sav + Master QML + BI
+5. Assert: output at R differs from unratified baseline
+```
+
+Or an explicit `BLOCKED: …` line — then `forge phase done` refuses until unblocked
+or the user passes `--allow-incomplete`.
+
+**Finish**
+
+```bash
+forge integrity-check   # optional preview
+forge phase done        # same checks; exit 1 if incomplete
+```
 
 ---
 
