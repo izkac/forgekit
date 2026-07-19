@@ -159,9 +159,9 @@ Example output shape:
 
 ---
 
-## 4. Example A — simple change (no jobs / workers)
+## 4. Example A — simple change (sync only)
 
-A small API or UI feature. No spine matrix required unless you opt in.
+A small API or UI feature with **no** async jobs.
 
 **You**
 
@@ -170,29 +170,30 @@ A small API or UI feature. No spine matrix required unless you opt in.
 Pace: standard
 ```
 
-**Agent flow (what you should see)**
+**Plan — spine is still mandatory** (honest opt-out):
 
-1. Brainstorm short options → you say “go”
-2. Plan creates e.g. `openspec/changes/add-health-endpoint/` (or `specs/changes/…`)
-   - `proposal.md`, `tasks.md` with checkboxes
-3. `/forge:apply` walks tasks:
-   - implementer writes failing test → code → green
-   - reviewer APPROVED
-   - `forge evidence --task 01-health --command "npm test -- health" --exit 0 --summary "2/2 pass"`
-4. Verify runs workspace tests; writes `.forge/sessions/<id>/verify-evidence.md`
-5. Final review READY
-6. Archive change; `forge phase done`; cleanup
-
-**You do not need** `forge spine` for a docs-only or single-endpoint change with
-no background jobs. If the agent runs `forge spine init` anyway, set:
+```bash
+forge spine init
+```
 
 ```json
 {
   "change": "add-health-endpoint",
-  "notApplicable": "no workers/jobs — sync HTTP handler only",
+  "notApplicable": "sync HTTP only — no async producer/consumer loop",
   "rows": []
 }
 ```
+
+Do **not** skip `spine.json`. Missing spine fails at `forge phase done` even for
+simple changes — that is intentional (keyword sniffing used to miss platforms).
+
+**Agent flow (what you should see)**
+
+1. Brainstorm → you say “go”
+2. Plan creates e.g. `openspec/changes/add-health-endpoint/` + spine above
+3. `/forge:apply` walks tasks (TDD + review + evidence)
+4. Verify + final review
+5. Archive; `forge phase done`; cleanup
 
 ---
 
@@ -209,16 +210,15 @@ Pace: standard
 
 Integrity rules load from Forge defaults — no long DoD paste required.
 
-### 5b. Plan: scaffold the spine
-
-After `tasks.md` exists (and includes wiring + product-loop acceptance tasks):
+### 5b. Plan: scaffold the spine (always — fill rows for this case)
 
 ```bash
 forge spine init
 # Creates openspec/changes/<name>/spine.json (or specs/changes/<name>/spine.json)
 ```
 
-Edit to one **row per capability** (not per library file):
+Edit to one **row per capability** (not per library file). Do not use
+`notApplicable` here — that would hide the async loop.
 
 ```json
 {
@@ -341,7 +341,7 @@ changes/<name>/
   proposal.md
   design.md      # optional
   tasks.md
-  spine.json     # when jobs/workers
+  spine.json     # mandatory — rows or notApplicable
 ```
 
 Specs-engine example:
@@ -420,7 +420,8 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge: command not found` | `npm i -g @izkac/forgekit` and ensure PATH; hooks need `forge` on PATH |
 | `forge doctor` fails (OpenSpec) | `npm i -g @fission-ai/openspec` or `forge init --no-openspec` |
 | Skills outdated after upgrade | `forgekit install --skills forge --force` |
-| `forge phase done` refuses | Run `forge integrity-check`; fix spine / deferrals / product-loop section |
+| `forge phase done` refuses — missing spine | `forge spine init`; fill rows **or** set `notApplicable` (required every change) |
+| `forge phase done` refuses — deferrals / product loop | `forge integrity-check`; resolve deferrals; add `## Product loop` (or use `notApplicable` for sync-only) |
 | Session reminder missing | Merge `forge-hooks.snippet.json` from init into agent settings |
 | Wrong pace (`brisk` on a big change) | `forge prefs --session-set standard` or ensure `--tasks-total` ≥ 15 |
 

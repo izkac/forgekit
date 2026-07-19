@@ -55,20 +55,23 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    - Group with `##` sections — Forge reviews per group under `standard` pace.
 
 3. Confirm `tasks.md` exists and the change is apply-ready.
-4. **Orchestration seam check** (required before apply-ready) — see [../references/runtime-integrity.md](../references/runtime-integrity.md):
+4. **Spine (always) + orchestration seam** — see [../references/runtime-integrity.md](../references/runtime-integrity.md):
 
-   If the change involves workers, job queues, handlers, or cross-runtime calls, `tasks.md` MUST include:
+   ```bash
+   forge spine init     # mandatory every change — fill rows or set notApplicable
+   ```
+
+   Sync-only / docs-only: `"notApplicable": "<reason>"`. Capability work: one row
+   per REQ cluster (library → runtime owner → writes → evidence).
+
+   If the change also involves workers, job queues, handlers, or cross-runtime
+   calls, `tasks.md` MUST include:
 
    - Explicit **wiring** tasks per job kind / entry point → domain pipeline
    - One **product-loop acceptance** task (last implement task, before verify)
 
-   And scaffold the spine matrix:
-
-   ```bash
-   forge spine init     # writes spine.json into the change dir; fill one row per capability
-   ```
-
-   Missing seam or empty spine = plan **not** ready. Add the tasks / rows before proceeding to implement. (`forge phase done` mechanically refuses if spine rows stay library-only.)
+   Missing spine = plan **not** ready. (`forge phase done` refuses without a
+   valid spine — keyword sniffing does not decide.)
 
 5. Update session:
 

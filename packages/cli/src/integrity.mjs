@@ -242,11 +242,13 @@ export function sessionJobsSignalText(session) {
  *
  * Checks:
  *  1. No unresolved deferrals.
- *  2. spine.json — required when jobs/workers are in scope (signal text) or a
- *     spine already exists; must validate.
- *  3. verify-evidence.md — when a spine with rows exists: must exist and
- *     contain a product-loop section; an explicit BLOCKED marker means the
- *     change cannot be done.
+ *  2. spine.json — **always required** (filled rows, or `notApplicable` with a
+ *     reason). Keyword sniffing is not enough to decide; missing spine is how
+ *     library-only platforms checkbox past gaps.
+ *  3. verify-evidence.md — when a spine has real rows (not notApplicable): must
+ *     exist and contain a product-loop section; an explicit BLOCKED marker means
+ *     the change cannot be done. Sync-only work should prefer `notApplicable`
+ *     over inventing a fake loop.
  *
  * @param {{ cwd?: string, sessionDir: string, session: Record<string, unknown> }} opts
  * @returns {{ ok: boolean, problems: string[], spineFile: string, spineExists: boolean }}
@@ -266,39 +268,46 @@ export function runIntegrityChecks(opts) {
 
   const spineFile = spinePath({ cwd, session, sessionDir });
   const spineExists = fs.existsSync(spineFile);
-  const jobsInScope = JOBS_SIGNAL_RE.test(sessionJobsSignalText(session));
 
   /** @type {ReturnType<typeof validateSpine> | null} */
   let spineResult = null;
   let spineHasRows = false;
-  if (spineExists) {
+  if (!spineExists) {
+    problems.push(
+      `spine.json required at ${spineFile} — run forge spine init, then fill rows (or set notApplicable with a reason). Spine is mandatory for every change so capability→runtime wiring cannot be skipped by accident.`,
+    );
+  } else {
     try {
       const doc = readJson(spineFile);
       spineResult = validateSpine(doc);
-      spineHasRows = Array.isArray(doc?.rows) && doc.rows.length > 0 && !isNonEmptyString(doc?.notApplicable);
+      spineHasRows =
+        Array.isArray(doc?.rows) &&
+        doc.rows.length > 0 &&
+        !isNonEmptyString(doc?.notApplicable);
     } catch (err) {
-      spineResult = { ok: false, problems: [`spine.json unreadable: ${err instanceof Error ? err.message : err}`] };
+      spineResult = {
+        ok: false,
+        problems: [`spine.json unreadable: ${err instanceof Error ? err.message : err}`],
+      };
     }
     if (!spineResult.ok) {
       problems.push(...spineResult.problems.map((p) => `spine: ${p}`));
     }
-  } else if (jobsInScope) {
-    problems.push(
-      `spine.json required (jobs/workers in scope) but missing at ${spineFile} — run forge spine init (or set notApplicable with a reason)`,
-    );
   }
 
   if (spineExists && spineHasRows) {
     const evidenceFile = path.join(sessionDir, 'verify-evidence.md');
     if (!fs.existsSync(evidenceFile)) {
-      problems.push('verify-evidence.md missing — jobs/workers changes need product-loop evidence');
+      problems.push(
+        'verify-evidence.md missing — spine rows require product-loop evidence (or use notApplicable for sync-only work)',
+      );
     } else {
       const body = fs.readFileSync(evidenceFile, 'utf8');
       if (/\bBLOCKED\b/.test(body)) {
         problems.push('verify-evidence.md contains BLOCKED — change cannot be marked done while E2E is blocked');
       } else if (!/product[- ]loop/i.test(body)) {
         problems.push(
-          'verify-evidence.md has no "Product loop" section — a single job slice is not platform E2E; record the closed producer→consumer loop (or BLOCKED)',
+          'verify-evidence.md has no "Product loop" section — record the closed producer→consumer loop (or BLOCKED). Sync-only changes should use spine notApplicable instead.',
         );
       }
     }

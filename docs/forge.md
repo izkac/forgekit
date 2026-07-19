@@ -129,9 +129,9 @@ User request
             Done + cleanup .forge session
 ```
 
-**Jobs / workers / queues:** during Plan, also run `forge spine init` and keep
-`spine.json` wired through Implement. See [Runtime integrity](#runtime-integrity)
-below.
+**Jobs / workers / queues:** spine is mandatory for *every* change (`forge spine
+init` — rows or `notApplicable`). Async work also needs wiring + product-loop
+tasks. See [Runtime integrity](#runtime-integrity).
 
 ### Triage (top of tree)
 
@@ -178,7 +178,7 @@ See the Forge skill’s [references/plan-routing.md](../skills/forge/references/
 | ----- | ------------ | ----------------- |
 | **triage** | Substantial? Skip allowed? Bootstrap session | `forge` skill |
 | **brainstorm** | Explore intent, approaches, approval | `skills/brainstorming` |
-| **plan** | Tracked-change propose; orchestration seam + `forge spine init` when jobs/workers | [plan-routing.md](../skills/forge/references/plan-routing.md) |
+| **plan** | Tracked-change propose; **`forge spine init` every change** (rows or `notApplicable`); wiring + product-loop tasks when async | [plan-routing.md](../skills/forge/references/plan-routing.md) |
 | **implement** | Subagent per task, TDD, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../skills/forge/references/test-strategy.md) |
 | **verify** | Audit tier 2; tier 3; product-loop evidence; `forge integrity-check` | `skills/verification-before-completion` + `verify-evidence.md` |
 | **review** | Combined task reviewer (spec + quality) per task; final review (spine + product loop) | `skills/requesting-code-review` |
@@ -406,7 +406,7 @@ Integrity upgrades Forge from “no false job success” to **product-loop accep
 
 | Tool | Purpose |
 |------|---------|
-| `forge spine init\|check` | Per-change `spine.json`: capability → library → runtime owner → writes → reads → UI → evidence |
+| `forge spine init\|check` | **Mandatory every change.** `spine.json`: rows **or** `notApplicable`. Not keyword-gated. |
 | `forge defer add\|resolve\|list` | Deferred wiring as tracked debt in the session |
 | `forge integrity-check` | Combined gate — also run automatically by `forge phase done\|finish` |
 
@@ -423,9 +423,9 @@ You do **not** paste a long definition-of-done prompt. After
 
 | Automatic (CLI / hooks) | Agent-driven (skill phases — required) |
 | ----------------------- | -------------------------------------- |
-| Integrity reminder on every session/prompt hook | Plan: `forge spine init` + fill rows when jobs/workers |
+| Integrity reminder on every session/prompt hook | Plan: **`forge spine init` every change** — fill rows or `notApplicable` |
 | Pace `auto` fail-closed to **standard**; task-count escalation at ≥15 | Implement: update spine rows; `forge defer add` if wiring is deferred |
-| `forge phase done\|finish` runs `integrity-check` and refuses on failure | Verify: `## Product loop` in `verify-evidence.md` (or `BLOCKED`) |
+| `forge phase done\|finish` requires valid spine + runs `integrity-check` | Verify: `## Product loop` when spine has rows (sync-only → prefer `notApplicable`) |
 | `forge status` surfaces `integrity.*` defaults | Reviewers REJECT unregistered deferrals / library-only spine rows |
 
 **Gates are automatic. Filling evidence is part of the normal phase flow.**

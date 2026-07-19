@@ -117,7 +117,7 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 - Tests required for behavior changes
 - Trace ecosystem consumers when contracts change
 - Honor `openspec/config.yaml` prefixes when the project uses them (OpenSpec engine)
-- **Runtime integrity** — [references/runtime-integrity.md](./references/runtime-integrity.md): no stubs / false success; capability specs beat narrow task wording; every claimed capability needs a named production caller; product-loop E2E (not a single job slice) or BLOCKED before marking complete; deferred wiring only via `forge defer`; spine matrix (`forge spine`) for jobs/worker changes — `forge phase done` mechanically refuses on `forge integrity-check` failures
+- **Runtime integrity** — [references/runtime-integrity.md](./references/runtime-integrity.md): **spine.json mandatory every change** (rows or `notApplicable` — not keyword-gated); no stubs / false success; capability specs beat narrow task wording; every claimed capability needs a named production caller; product-loop when spine has rows (or BLOCKED); deferred wiring only via `forge defer` — `forge phase done` mechanically refuses on `forge integrity-check` failures
 
 ## Agent surfaces
 

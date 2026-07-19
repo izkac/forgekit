@@ -5,6 +5,7 @@
 ### Docs
 
 - New tutorial: [`docs/usage.md`](docs/usage.md) — install, project wiring, slash commands, simple vs jobs/workers examples, integrity (spine / defer / product loop), cheat sheet.
+- **Spine is mandatory** for every Forge change (filled rows or `notApplicable`). No longer inferred from slug/keywords — that miss let hollow platforms skip the matrix.
 
 ### Forge runtime integrity — round 2 (product-loop acceptance)
 

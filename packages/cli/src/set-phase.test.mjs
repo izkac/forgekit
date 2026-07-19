@@ -170,7 +170,7 @@ test('phase done refuses without verify-evidence and incomplete tasks', () => {
   }
 });
 
-test('phase done accepts with verify-evidence and complete tasks', () => {
+test('phase done accepts with verify-evidence, complete tasks, and notApplicable spine', () => {
   const dir = tmp('forge-set-phase-done-ok-');
   try {
     const sessionFile = makeForgeFixture(dir, 'sess-done-ok');
@@ -180,6 +180,11 @@ test('phase done accepts with verify-evidence and complete tasks', () => {
     raw.tasksComplete = 2;
     fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
     fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
 
     runSetPhase(dir, ['done']);
     const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
@@ -195,6 +200,11 @@ test('phase done refuses with an unresolved deferral', () => {
     const sessionFile = makeForgeFixture(dir, 'sess-defer');
     const sessionDir = path.dirname(sessionFile);
     fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync only' }, null, 2)}\n`,
+      'utf8',
+    );
     fs.writeFileSync(
       path.join(sessionDir, 'deferrals.json'),
       `${JSON.stringify(
@@ -221,13 +231,13 @@ test('phase done refuses with an unresolved deferral', () => {
   }
 });
 
-test('phase done refuses jobs-scoped session without spine.json', () => {
+test('phase done refuses any session without spine.json', () => {
   const dir = tmp('forge-set-phase-spine-');
   try {
     const sessionFile = makeForgeFixture(dir, 'sess-spine');
     const sessionDir = path.dirname(sessionFile);
     const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-    raw.slug = 'wire-worker-jobs';
+    raw.slug = 'add-feature-x';
     fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
     fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
 

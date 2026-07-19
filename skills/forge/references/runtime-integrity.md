@@ -103,17 +103,32 @@ forge defer resolve --task <id>     # when the wiring task actually lands
 
 ## Spine matrix (mechanical — `forge spine`)
 
-For any change involving workers, jobs, queues, handlers, or cross-runtime
-calls, maintain `spine.json` in the change dir (`forge spine init`): one row
-per capability/REQ cluster —
+**Spine is mandatory for every Forge change** — not gated on pace, and not
+inferred from slug keywords (that miss is how hollow platforms shipped).
 
-| capability | library | runtimeOwner | writes | reads | uiConsumer | evidence |
+At plan time (every change):
 
-- Every cell filled (`reads` / `uiConsumer` may be `"N/A"`); `evidence` points
-  at the tier-2/E2E proof of the **wired** path.
-- Library-only rows (missing runtimeOwner / writes / evidence) fail
-  `forge spine check` — and `forge phase done` runs the same check.
-- Changes genuinely without a runtime seam set `"notApplicable": "<reason>"`.
+```bash
+forge spine init
+```
+
+Then either:
+
+1. **Fill rows** — one per capability/REQ cluster:
+
+   | capability | library | runtimeOwner | writes | reads | uiConsumer | evidence |
+
+   Every cell filled (`reads` / `uiConsumer` may be `"N/A"`); `evidence` points
+   at the tier-2/E2E proof of the **wired** path. Library-only rows fail
+   `forge spine check` — and `forge phase done` runs the same check.
+
+2. **Or** set `"notApplicable": "<reason>"` for sync-only / docs-only work
+   (e.g. `"sync HTTP only — no async producer/consumer"`). That is the honest
+   opt-out; missing `spine.json` is not.
+
+Product-loop evidence in `verify-evidence.md` is required when the spine has
+real rows. Prefer `notApplicable` for sync-only changes instead of inventing a
+fake loop.
 
 ## Reviewer REJECT checklist (mandatory)
 
@@ -127,15 +142,16 @@ REJECT the task (or final review → `NOT READY`) if any of:
 - Deferred wiring without a registered open deferral (`forge defer list`)
 - Spine row for this capability missing or library-only
 
-## Plan seam (workers / jobs / cross-runtime)
+## Plan seam (every change)
 
-If the change involves workers, job queues, handlers, or cross-runtime calls,
-before apply-ready:
+Before apply-ready:
 
-1. `tasks.md` includes explicit **wiring** tasks per job kind / entry point →
-   domain pipeline
-2. `tasks.md` includes one **product-loop acceptance** task (last implement
-   task, before verify)
-3. `forge spine init` — scaffold the spine matrix and fill known rows
+1. `forge spine init` — **always**. Fill rows for each capability, or set
+   `notApplicable` with a reason (sync-only / docs-only).
+2. If the change involves workers, job queues, handlers, or cross-runtime
+   calls, `tasks.md` MUST also include:
+   - Explicit **wiring** tasks per job kind / entry point → domain pipeline
+   - One **product-loop acceptance** task (last implement task, before verify)
 
-Missing seam = plan not ready.
+Missing spine = plan not ready. Keyword guesses about “jobs in scope” are not
+an excuse to skip the spine.

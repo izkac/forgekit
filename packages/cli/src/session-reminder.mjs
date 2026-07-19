@@ -66,7 +66,7 @@ export function needsOpenSpecPlan(session) {
 export const needsPlanModePrompt = needsOpenSpecPlan;
 
 export const RUNTIME_INTEGRITY_REMINDER =
-  'Integrity: no stubs/false success; specs beat task wording; product-loop E2E (not a job slice) or BLOCKED; defer wiring only via `forge defer`; keep spine.json wired (`forge spine check`) — `forge phase done` runs `forge integrity-check` (forge references/runtime-integrity.md).';
+  'Integrity: spine.json mandatory every change (rows or notApplicable); no stubs/false success; specs beat task wording; product-loop when spine has rows; defer wiring only via `forge defer` — `forge phase done` runs `forge integrity-check` (forge references/runtime-integrity.md).';
 
 export function buildForgeMessage(info) {
   const { session } = info;

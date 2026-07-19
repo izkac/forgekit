@@ -137,10 +137,35 @@ function makeSessionDir(root) {
   return dir;
 }
 
-test('runIntegrityChecks: clean non-jobs session passes', () => {
+test('runIntegrityChecks: missing spine always fails (not keyword-gated)', () => {
   const cwd = tmp('forge-int-clean-');
   try {
     const sessionDir = makeSessionDir(cwd);
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: { slug: 'fix-toolbar', openspecChange: null },
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.problems.join('\n'), /spine\.json required/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: notApplicable spine allows sync-only without product-loop', () => {
+  const cwd = tmp('forge-int-na-sync-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify(
+        { rows: [], notApplicable: 'sync HTTP only — no async producer/consumer' },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
     const result = runIntegrityChecks({
       cwd,
       sessionDir,
@@ -156,6 +181,11 @@ test('runIntegrityChecks: unresolved deferral fails', () => {
   const cwd = tmp('forge-int-defer-');
   try {
     const sessionDir = makeSessionDir(cwd);
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync only' }, null, 2)}\n`,
+      'utf8',
+    );
     addDeferral(sessionDir, { task: '9.2', reason: 'later' });
     const result = runIntegrityChecks({
       cwd,
@@ -169,14 +199,14 @@ test('runIntegrityChecks: unresolved deferral fails', () => {
   }
 });
 
-test('runIntegrityChecks: jobs signal without spine fails', () => {
+test('runIntegrityChecks: empty slug without spine still fails', () => {
   const cwd = tmp('forge-int-jobs-');
   try {
     const sessionDir = makeSessionDir(cwd);
     const result = runIntegrityChecks({
       cwd,
       sessionDir,
-      session: { slug: 'wire-worker-jobs', openspecChange: null },
+      session: { slug: 'add-harmonization-platform', openspecChange: null },
     });
     assert.equal(result.ok, false);
     assert.match(result.problems.join('\n'), /spine\.json required/);
