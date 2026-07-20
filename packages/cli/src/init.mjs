@@ -30,6 +30,11 @@ import {
   writeProjectPlanConfig,
 } from './plan-engine.mjs';
 import { resolveAsset } from './paths.mjs';
+import { AGENT_IDS, AGENTS, installedManagedPairs } from './install.mjs';
+
+// Environments with project-local command/rule/hook templates. Others are
+// driven by the globally-installed skill alone (no per-project wiring).
+const WIRED_AGENTS = Object.freeze(['cursor', 'claude', 'codex']);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,6 +66,10 @@ export function parseArgs(argv) {
     else if (arg === '--cursor') opts.agents.push('cursor');
     else if (arg === '--claude' || arg === '--claude-code') opts.agents.push('claude');
     else if (arg === '--codex') opts.agents.push('codex');
+    else if (arg === '--copilot') opts.agents.push('copilot');
+    else if (arg === '--gemini') opts.agents.push('gemini');
+    else if (arg === '--windsurf') opts.agents.push('windsurf');
+    else if (arg === '--opencode') opts.agents.push('opencode');
     else if (arg === '--adr') opts.adr = true;
     else if (arg === '--no-adr') opts.adr = false;
     else if (arg === '--adr-dir') opts.adrDir = argv[++i];
@@ -81,7 +90,10 @@ Options:
   --cursor          Cursor (.cursor/commands, rules, hooks)
   --claude          Claude Code (.claude/commands, rules, hooks)
   --codex           Codex CLI (.codex/rules)
-  --all             All of the above
+  --copilot/--gemini/--windsurf/--opencode
+                    Offered in the picker for parity with \`forgekit install\`;
+                    driven by the global skill (no per-project wiring yet)
+  --all             Every offered environment
   --openspec        Plan with OpenSpec (offer install + \`openspec init\` if missing)
   --no-openspec     Plan with the built-in specs engine (${DEFAULT_SPECS_DIR}/changes/)
   --adr             Enable ADRs (scaffold decisions.md + ADR dir + hooks)
@@ -95,10 +107,12 @@ Options:
 Requires the Forge skill already installed (\`forge install\`) for agents
 to load skill content. Init only adds project-local wiring.
 
-Interactive (TTY): when --openspec/--no-openspec omitted and OpenSpec is not
-already set up, offers to install + set it up (decline = built-in specs
-engine). When --adr/--no-adr omitted, asks whether to use ADRs and for the
-directory inside the repo.
+Interactive (TTY): the environment picker matches \`forgekit install\` and is
+pre-checked with what you installed there (saved in ~/.forgekit/config.json),
+so you don't pick twice. When --openspec/--no-openspec omitted and OpenSpec is
+not already set up, offers to install + set it up (decline = built-in specs
+engine). When --adr/--no-adr omitted, asks whether to use ADRs (default Yes)
+and for the directory inside the repo.
 `);
 }
 
@@ -343,6 +357,10 @@ export function initProject(selected, opts) {
     );
   }
 
+  // Selected environments without project-wiring templates: the globally
+  // installed skill is their interface — nothing to scaffold per project.
+  report.skillOnly = selected.filter((id) => !WIRED_AGENTS.includes(id));
+
   if (opts.planEngine === 'specs') {
     const scaffold = scaffoldSpecs(cwd, { force: opts.force });
     const config = writeProjectPlanConfig(cwd, {
@@ -407,16 +425,32 @@ function wiredAgents(cwd) {
   );
 }
 
+/**
+ * Environments to pre-check: those chosen during `forgekit install`
+ * (saved in ~/.forgekit/config.json), plus what is already installed or wired.
+ * @param {string} cwd
+ * @param {string} [home]
+ * @returns {Set<string>}
+ */
+export function rememberedAgents(cwd, home) {
+  const user = loadUserConfig(home);
+  return new Set([
+    ...(Array.isArray(user.agents) ? user.agents : []),
+    ...installedManagedPairs(home).map((p) => p.agent),
+    ...wiredAgents(cwd),
+  ]);
+}
+
 /** @param {string} cwd */
 async function promptAgents(cwd) {
-  const wired = wiredAgents(cwd);
+  const remembered = rememberedAgents(cwd);
   return checkbox({
     message: 'Init Forge project wiring for which environments?',
-    choices: [
-      { value: 'cursor', name: 'Cursor', checked: wired.has('cursor') },
-      { value: 'claude', name: 'Claude Code', checked: wired.has('claude') },
-      { value: 'codex', name: 'Codex CLI', checked: wired.has('codex') },
-    ],
+    choices: AGENT_IDS.map((id) => ({
+      value: id,
+      name: AGENTS[id].label,
+      checked: remembered.has(id),
+    })),
     required: true,
   });
 }
@@ -486,12 +520,13 @@ async function resolveInitPlanEngine(opts) {
 
 /**
  * @param {string} [defaultDir]
+ * @param {boolean} [defaultEnabled]
  * @returns {Promise<{ enabled: boolean, dir: string }>}
  */
-async function promptAdrForInit(defaultDir = DEFAULT_ADR_DIR) {
+async function promptAdrForInit(defaultDir = DEFAULT_ADR_DIR, defaultEnabled = true) {
   const enabled = await confirm({
     message: 'Use Architecture Decision Records (ADRs) in this project?',
-    default: false,
+    default: defaultEnabled,
   });
   if (!enabled) return { enabled: false, dir: defaultDir };
   const dir = await input({
@@ -508,15 +543,22 @@ async function main(argv = process.argv.slice(2)) {
     return 0;
   }
 
-  let selected = opts.all ? ['cursor', 'claude', 'codex'] : [...new Set(opts.agents)];
+  let selected = opts.all ? [...AGENT_IDS] : [...new Set(opts.agents)];
   if (selected.length === 0) {
     if (!process.stdin.isTTY) {
       process.stderr.write(
-        'No agents specified. Pass --cursor/--claude/--codex/--all, or run in a TTY.\n',
+        'No agents specified. Pass --cursor/--claude/--codex/--copilot/--gemini/--windsurf/--opencode/--all, or run in a TTY.\n',
       );
       return 1;
     }
     selected = await promptAgents(opts.cwd);
+  }
+
+  for (const id of selected) {
+    if (!AGENTS[id]) {
+      process.stderr.write(`Unknown environment: ${id}. Known: ${AGENT_IDS.join(', ')}\n`);
+      return 1;
+    }
   }
 
   const planEngine = await resolveInitPlanEngine({
@@ -530,7 +572,8 @@ async function main(argv = process.argv.slice(2)) {
     const user = loadUserConfig();
     const defaultDir = user.adr?.dir ?? DEFAULT_ADR_DIR;
     if (process.stdin.isTTY) {
-      const picked = await promptAdrForInit(defaultDir);
+      // Default Yes, unless the user globally opted out of ADRs.
+      const picked = await promptAdrForInit(defaultDir, user.adr?.enabled !== false);
       adr = picked.enabled;
       adrDir = picked.dir;
     } else if (user.adr?.enabled === true) {
@@ -543,6 +586,12 @@ async function main(argv = process.argv.slice(2)) {
 
   const report = initProject(selected, { ...opts, adr, adrDir, planEngine });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (Array.isArray(report.skillOnly) && report.skillOnly.length) {
+    const labels = report.skillOnly.map((id) => AGENTS[id].label).join(', ');
+    process.stdout.write(
+      `\nNo project wiring for: ${labels} — they use the globally installed Forge skill directly (run \`forgekit install\` if not yet installed).\n`,
+    );
+  }
   process.stdout.write(
     `\nMerge hook snippets into settings if needed, ensure \`forge\` is on PATH, then open the project in your agent.\n`,
   );

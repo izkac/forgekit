@@ -730,6 +730,9 @@ export async function runInstall(argv = process.argv.slice(2)) {
 
   saveUserConfig({
     adr: { enabled: adrOpts.enabled, dir: adrOpts.dir },
+    // Remember the environment set so `forge init` can pre-check it. Only when
+    // deliberately chosen (picker or --all-agents) — narrow flag runs don't clobber it.
+    ...(resolved.agentsPrompted || opts.allAgents || opts.all ? { agents } : {}),
   });
 
   const { results, removed } = prune

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.5 — 2026-07-20
+
+- **`forge init` offers the same environments as `forgekit install`** (all seven) and pre-checks the ones you picked during install — saved to `~/.forgekit/config.json` — so you don't select them twice. Environments without project-wiring templates (Copilot, Gemini, Windsurf, opencode) are driven by the globally installed skill and reported as such instead of silently doing nothing.
+- **ADRs default to Yes in `forge init`** (unless you've globally opted out).
+- Added `--copilot/--gemini/--windsurf/--opencode` shorthands to `forge init`; `--all` now covers every offered environment.
+
 ## 0.1.4 — 2026-07-20
 
 - **More environments:** install targets now cover Claude Code, Cursor, Codex CLI, GitHub Copilot, Gemini CLI, Windsurf, and opencode — each into its global Agent-Skills (`SKILL.md`) directory. Shorthand flags `--copilot/--gemini/--windsurf/--opencode` added.
