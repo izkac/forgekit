@@ -7,6 +7,8 @@
  *   forge e2e init [--force]          # scaffold e2e.json for the active change
  *   forge e2e run                     # execute steps, write e2e-results.json (session dir)
  *   forge e2e check                   # gate check: green + current results; exit 1 with problems
+ *   forge e2e harness                 # show recorded project harness (reuse it!)
+ *   forge e2e harness --set "<desc>" [--start "<cmd>"] [--dir <path>]
  *   [--session <id>]
  *
  * e2e.json lives next to spine.json (change dir, falling back to the session
@@ -17,6 +19,7 @@
 
 import fs from 'node:fs';
 import { loadSession, readActive, readJson } from './lib.mjs';
+import { loadProjectConfig, saveProjectConfig } from './config.mjs';
 import {
   checkE2eGate,
   e2ePath,
@@ -34,8 +37,54 @@ const sub = args[0] && !args[0].startsWith('--') ? args[0] : 'status';
 
 if (args[0] === '--help' || sub === 'help') {
   process.stdout.write(
-    'Usage: forge e2e [init [--force] | run | check | status] [--session <id>]\n',
+    'Usage: forge e2e [init [--force] | run | check | status | harness [--set <desc> --start <cmd> --dir <path>]] [--session <id>]\n',
   );
+  process.exit(0);
+}
+
+/** Recorded project harness (committed in .forge/config.json → e2e.harness). */
+function loadHarness() {
+  const cfg = loadProjectConfig(process.cwd());
+  const h = cfg?.e2e?.harness;
+  return h && typeof h === 'object' ? h : null;
+}
+
+function harnessLines(h) {
+  const lines = [`Existing e2e harness (REUSE it — do not build or ask for a new one):`];
+  lines.push(`  ${h.description}`);
+  if (h.start) lines.push(`  Start: ${h.start}`);
+  if (h.dir) lines.push(`  Location: ${h.dir}`);
+  return lines.join('\n');
+}
+
+// Project-level, no session needed.
+if (sub === 'harness') {
+  const si = args.indexOf('--set');
+  if (si >= 0) {
+    const description = args[si + 1];
+    if (!description || description.startsWith('--')) {
+      process.stderr.write('Usage: forge e2e harness --set "<description>" [--start "<cmd>"] [--dir <path>]\n');
+      process.exit(1);
+    }
+    const harness = { description, recordedAt: new Date().toISOString() };
+    const st = args.indexOf('--start');
+    if (st >= 0 && args[st + 1]) harness.start = args[st + 1];
+    const di = args.indexOf('--dir');
+    if (di >= 0 && args[di + 1]) harness.dir = args[di + 1];
+    saveProjectConfig(process.cwd(), { e2e: { harness } }, { mergeKeys: ['adr', 'plan', 'e2e'] });
+    process.stdout.write(
+      `Recorded harness in .forge/config.json (commit it). Future sessions will see it on forge e2e init.\n`,
+    );
+    process.exit(0);
+  }
+  const h = loadHarness();
+  if (!h) {
+    process.stdout.write(
+      'No harness recorded. After building one (with operator approval), record it:\n  forge e2e harness --set "<what/where>" --start "<command>" [--dir <path>]\n',
+    );
+    process.exit(0);
+  }
+  process.stdout.write(`${harnessLines(h)}\n`);
   process.exit(0);
 }
 
@@ -74,6 +123,8 @@ if (sub === 'init') {
   process.stdout.write(
     `Scaffolded ${file}\nAuthor the product-loop steps (produce → consume → assert domain side effects).\nSteps that would pass against a stubbed handler are invalid.\nRun with: forge e2e run\n`,
   );
+  const harness = loadHarness();
+  if (harness) process.stdout.write(`\n${harnessLines(harness)}\n`);
   process.exit(0);
 }
 
@@ -133,7 +184,7 @@ if (sub === 'check') {
 
 if (sub === 'status') {
   if (!fs.existsSync(file)) {
-    process.stdout.write(JSON.stringify({ file, exists: false }, null, 2));
+    process.stdout.write(JSON.stringify({ file, exists: false, harness: loadHarness() }, null, 2));
     process.stdout.write('\n');
     process.exit(0);
   }
@@ -153,6 +204,7 @@ if (sub === 'status') {
         exists: true,
         ok: valid.ok,
         problems: valid.problems,
+        harness: loadHarness(),
         results: results
           ? {
               file: e2eResultsPath(dir),

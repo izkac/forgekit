@@ -98,6 +98,18 @@ cost instead:
   fixture-level work is over-asking; skipping the loop because the rig is
   missing is under-testing — the ask is exactly the moment the operator can
   say "build it once" and make every future loop on the project cheap.
+- **A built harness is permanent project infrastructure — record it, reuse
+  it.** When the operator approves building one: build it as committed
+  project code (never session scratch), then record it:
+
+  ```bash
+  forge e2e harness --set "<what it is / where>" --start "<start command>" [--dir <path>]
+  ```
+
+  This lands in `.forge/config.json` (committed), and every later session
+  sees it — `forge e2e init` and `forge e2e status` print the recorded
+  harness. Check `forge e2e harness` before proposing to build or asking the
+  operator; proposing a new rig while one is recorded is a REJECT.
 - **One executed loop per capability, not per assertion.** Push edge cases
   into unit tests; e2e proves the wiring exists.
 - **Set `timeoutMs` from the step count up front.** A 10-step loop is never a
