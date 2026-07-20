@@ -87,11 +87,17 @@ a loop is complex exactly when the feature has many wiring seams, which is
 when wiring silently breaks. Never skip the loop for complexity; control its
 cost instead:
 
-- **Ask before building new harness infrastructure, not before testing.** If
-  a harness already exists (test server, isolated ports, scratch DB), the loop
-  is cheap — author it. If the loop would require building a harness from
-  scratch or driving a third-party service, stop and ask the user: that is a
-  project, not a test.
+- **Ask before building complex harness infrastructure — and only then.**
+  The ask-line is infrastructure: a rig built from scratch, new
+  servers/containers/services, third-party accounts or sandboxes (e.g. real
+  payment checkout), device farms. That is a project, not a test — stop and
+  ask the user. **Everything below that line never needs permission**: if a
+  harness already exists (test server, isolated ports, scratch DB), author
+  the loop; writing fixtures, seed data, helper scripts, or extra steps
+  inside the existing rig is normal test work — just do it. Asking for
+  fixture-level work is over-asking; skipping the loop because the rig is
+  missing is under-testing — the ask is exactly the moment the operator can
+  say "build it once" and make every future loop on the project cheap.
 - **One executed loop per capability, not per assertion.** Push edge cases
   into unit tests; e2e proves the wiring exists.
 - **Set `timeoutMs` from the step count up front.** A 10-step loop is never a
