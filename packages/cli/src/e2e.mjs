@@ -60,7 +60,9 @@ if (!sessionId) {
 }
 
 const { dir, session } = loadSession(sessionId);
-const file = e2ePath({ session, sessionDir: dir });
+// init writes: target the live change dir only (never fall back into the
+// archive). run/check/status read: allow the archive fallback.
+const file = e2ePath({ session, sessionDir: dir, forWrite: sub === 'init' });
 
 if (sub === 'init') {
   try {

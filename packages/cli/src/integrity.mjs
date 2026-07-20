@@ -98,12 +98,18 @@ function liveOrArchived(changesDir, change) {
 export function resolveChangeDir(opts = {}) {
   const cwd = opts.cwd ?? process.cwd();
   const session = opts.session ?? null;
+  // Write callers (spine/e2e init) must always target the LIVE change dir —
+  // scaffolding into an archived record would corrupt frozen history. Only
+  // read callers (checks, gates) fall back to the archive.
+  const forWrite = opts.forWrite === true;
   const change = session && isNonEmptyString(session.openspecChange) ? session.openspecChange : null;
   if (!change) return null;
 
   const openspecChanges = path.join(cwd, 'openspec', 'changes');
   const openspecDir = path.join(openspecChanges, change);
-  if (session.planType === 'openspec') return liveOrArchived(openspecChanges, change);
+  if (session.planType === 'openspec') {
+    return forWrite ? openspecDir : liveOrArchived(openspecChanges, change);
+  }
 
   let specsRoot = DEFAULT_SPECS_DIR;
   try {
@@ -113,11 +119,14 @@ export function resolveChangeDir(opts = {}) {
   }
   const specsChanges = path.join(cwd, specsRoot, 'changes');
   const specsDir = path.join(specsChanges, change);
-  if (session.planType === 'specs') return liveOrArchived(specsChanges, change);
+  if (session.planType === 'specs') {
+    return forWrite ? specsDir : liveOrArchived(specsChanges, change);
+  }
 
   // planType unknown — prefer whichever exists (live first, then archived)
   if (fs.existsSync(openspecDir)) return openspecDir;
   if (fs.existsSync(specsDir)) return specsDir;
+  if (forWrite) return openspecDir;
   return (
     findArchivedChangeDir(openspecChanges, change) ??
     findArchivedChangeDir(specsChanges, change) ??

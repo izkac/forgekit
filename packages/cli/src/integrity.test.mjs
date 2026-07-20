@@ -136,9 +136,33 @@ test('resolveChangeDir: falls back to the archived copy after archive', () => {
         recursive: true,
       });
       assert.equal(resolveChangeDir({ cwd, session }), archived);
+
+      // forWrite (spine/e2e init) never follows into the archive — writes must
+      // target the live change dir so scaffolding can't corrupt frozen history.
+      assert.equal(resolveChangeDir({ cwd, session, forWrite: true }), liveDir);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
+  }
+});
+
+test('spinePath/e2ePath forWrite target the live dir even after archive', () => {
+  const cwd = tmp('forge-write-guard-');
+  try {
+    const session = { planType: 'openspec', openspecChange: 'add-customer-registry' };
+    const changesDir = path.join(cwd, 'openspec', 'changes');
+    // Only the archived copy exists — mimics running init after archive.
+    const archived = path.join(changesDir, 'archive', '2026-07-20-add-customer-registry');
+    fs.mkdirSync(archived, { recursive: true });
+    const liveDir = path.join(changesDir, 'add-customer-registry');
+
+    // Read path resolves the archive; write path stays on the (absent) live dir.
+    assert.equal(spinePath({ cwd, session }), path.join(archived, 'spine.json'));
+    assert.equal(spinePath({ cwd, session, forWrite: true }), path.join(liveDir, 'spine.json'));
+    assert.equal(e2ePath({ cwd, session }), path.join(archived, 'e2e.json'));
+    assert.equal(e2ePath({ cwd, session, forWrite: true }), path.join(liveDir, 'e2e.json'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 

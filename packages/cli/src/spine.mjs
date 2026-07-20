@@ -48,7 +48,9 @@ if (!sessionId) {
 }
 
 const { dir, session } = loadSession(sessionId);
-const file = spinePath({ session, sessionDir: dir });
+// init writes: target the live change dir only (never fall back into the
+// archive). check/status read: allow the archive fallback.
+const file = spinePath({ session, sessionDir: dir, forWrite: sub === 'init' });
 
 if (sub === 'init') {
   try {
