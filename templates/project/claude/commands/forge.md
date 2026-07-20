@@ -2,7 +2,7 @@
 name: /forge
 description: Forge — start or resume disciplined development (brainstorm → plan → build → review)
 category: Workflow
-tags: [workflow, forge, openspec]
+tags: [workflow, forge, planning]
 ---
 
 Run the **Forge** workflow for substantial work.

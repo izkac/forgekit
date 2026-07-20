@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.7 — 2026-07-20
+
+- **Thin rules are engine-neutral.** The `forge.md` project rules no longer hardcode OpenSpec — they point at `.forge/config.json` (`plan.engine`) and give the command for both engines (`/opsx:propose` for OpenSpec, `forge change new <slug>` for the built-in specs engine).
+- **`forge init` refreshes its own managed files.** Command, rule, and hook files (all forge-owned pointers) now update in place on re-run instead of being skipped, so template fixes — like the corrected `~/.<agent>/skills/forge/docs/forge.md` reference — reach existing projects without `--force`. Reported as `updated`/`unchanged`/`written`.
+
 ## 0.1.6 — 2026-07-20
 
 - **`forge init` pre-selects your environments in OpenSpec setup too.** When init runs `openspec init`, it now passes your chosen environments via `openspec init --tools <ids>` (mapping `copilot` → OpenSpec's `github-copilot`), so OpenSpec configures exactly those tools non-interactively instead of showing its own 24-tool picker with nothing selected.

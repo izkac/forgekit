@@ -100,7 +100,8 @@ Options:
   --no-adr          Disable ADRs for this project
   --adr-dir <path>  ADR directory (default: ${DEFAULT_ADR_DIR} or ~/.forgekit preference)
   --overlay         Also run \`forge overlay\` (OpenSpec vendor patches)
-  --force, -f       Overwrite existing template files
+  --force, -f       Force re-scaffold of ADR/specs docs (managed command,
+                    rule, and hook files always refresh to the latest template)
   --cwd <path>      Project root (default: cwd)
   --help
 
@@ -124,16 +125,22 @@ export function resolveTemplatesRoot() {
 }
 
 /**
+ * Copy a forgekit-managed template file. These are regenerated pointers
+ * (forge-* commands/rules/hooks) with no user-owned content, so re-running
+ * `forge init` refreshes them in place — that's how template fixes propagate.
  * @param {string} src
  * @param {string} dest
- * @param {{ force?: boolean }} opts
+ * @param {{ force?: boolean }} _opts
  */
-function copyFile(src, dest, opts) {
+function copyFile(src, dest, _opts) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (fs.existsSync(dest) && !opts.force) {
-    return 'skipped';
+  const next = fs.readFileSync(src);
+  if (fs.existsSync(dest)) {
+    if (fs.readFileSync(dest).equals(next)) return 'unchanged';
+    fs.writeFileSync(dest, next);
+    return 'updated';
   }
-  fs.copyFileSync(src, dest);
+  fs.writeFileSync(dest, next);
   return 'written';
 }
 
