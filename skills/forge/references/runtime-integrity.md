@@ -45,12 +45,13 @@ task.
 - To shrink scope: stop and ask the user. Do not silently checkbox around gaps.
 - Prefer `DONE_WITH_CONCERNS` / incomplete tasks over green checkboxes.
 
-## 5. E2E means product loop, not job slice
+## 5. E2E means an executed product loop, not prose
 
 Before claiming the change complete:
 
-1. Run (or document exact commands for) the **closed product loop** through the
-   live entry points, **or**
+1. Author the **closed product loop** as executable steps in `e2e.json`
+   (`forge e2e init`), run it against the live entry points
+   (`forge e2e run`), and get a **green run** — **or**
 2. Leave an explicit **`BLOCKED`** list in `verify-evidence.md` — and do **not**
    mark the change complete / advance to `done`.
 
@@ -65,8 +66,19 @@ next run's OUTPUT DIFFERS from the baseline
 
 Example: ingest→Parquet plus a thin run→`.sav` does **not** verify a
 governance loop; analyze→proposals→ratify→run-applies-decisions does.
-Record it under a `## Product loop` heading in `verify-evidence.md` —
-the mechanical gate looks for it.
+
+The mechanical gate requires a green, **current** `e2e-results.json` (its
+steps hash must match `e2e.json`) whenever the spine has real rows.
+Describing the loop in `verify-evidence.md` no longer satisfies the gate —
+prose cannot prove wiring. Each step is `{ name, cmd, expect?, timeoutMs? }`:
+exit code 0 required, `expect` (regex) matched against the output. Steps must
+assert **domain side effects** — a step list that would pass against a
+stubbed handler is invalid (rule 3 applies to e2e steps too).
+
+`e2e.json` may set `"notApplicable": "<reason>"` only when the loop cannot be
+driven by any command (e.g. requires a physical device). Reviewers police the
+reason; "no time" or "covered by unit tests" is a REJECT. Keep a short loop
+narrative under `## Product loop` in `verify-evidence.md` as reviewer context.
 
 ## 6. Job-kind closure
 
@@ -126,9 +138,9 @@ Then either:
    (e.g. `"sync HTTP only — no async producer/consumer"`). That is the honest
    opt-out; missing `spine.json` is not.
 
-Product-loop evidence in `verify-evidence.md` is required when the spine has
-real rows. Prefer `notApplicable` for sync-only changes instead of inventing a
-fake loop.
+An executed product loop (`forge e2e run`, green + current results) is
+required when the spine has real rows. Prefer `notApplicable` for sync-only
+changes instead of inventing a fake loop.
 
 ## Reviewer REJECT checklist (mandatory)
 
@@ -141,6 +153,8 @@ REJECT the task (or final review → `NOT READY`) if any of:
 - Spec requirement has a library but no named runtime owner
 - Deferred wiring without a registered open deferral (`forge defer list`)
 - Spine row for this capability missing or library-only
+- E2E steps would pass against a stubbed handler (no domain side-effect
+  assertions), or `e2e.json` opts out via `notApplicable` without a real reason
 
 ## Plan seam (every change)
 
@@ -148,10 +162,14 @@ Before apply-ready:
 
 1. `forge spine init` — **always**. Fill rows for each capability, or set
    `notApplicable` with a reason (sync-only / docs-only).
-2. If the change involves workers, job queues, handlers, or cross-runtime
+2. When the spine has real rows, `forge e2e init` — the acceptance **steps are
+   a plan deliverable**: author (or task out) the `e2e.json` step list that
+   drives the loop and asserts its side effects.
+3. If the change involves workers, job queues, handlers, or cross-runtime
    calls, `tasks.md` MUST also include:
    - Explicit **wiring** tasks per job kind / entry point → domain pipeline
-   - One **product-loop acceptance** task (last implement task, before verify)
+   - One **product-loop acceptance** task (last implement task, before
+     verify) — its output is a green `forge e2e run`
 
 Missing spine = plan not ready. Keyword guesses about “jobs in scope” are not
 an excuse to skip the spine.

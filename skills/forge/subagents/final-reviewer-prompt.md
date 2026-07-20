@@ -34,14 +34,17 @@ job, …) that invokes the implementing code. Cross-check against `spine.json`
 - UI/API reads a collection or artifact nothing in the production path writes → **`NOT READY`**
 - Missing E2E fixture path with no explicit `BLOCKED` in `verify-evidence.md` → **`NOT READY`**
 
-## Product-loop evidence (required)
+## Product-loop acceptance (required — executed, not described)
 
-`verify-evidence.md` must contain a `## Product loop` section proving the
-**closed loop** (produce → consume → decision changes output), or an explicit
-`BLOCKED` list. A single job slice (e.g. ingest→file) or a library-level E2E
-does **not** count as platform E2E.
+`forge e2e check` must be green: `e2e.json` steps drive the **closed loop**
+(produce → consume → decision changes output) and `e2e-results.json` records a
+green, current run (steps hash matches). A single job slice (e.g. ingest→file)
+or a library-level E2E does **not** count as platform E2E. Read the steps —
+would they pass against a stubbed handler? If yes, they prove nothing.
 
-- No product-loop section and no `BLOCKED` → **`NOT READY`**
+- No green, current e2e run and no `BLOCKED` in `verify-evidence.md` → **`NOT READY`**
+- E2E steps assert no domain side effects (would pass on a stub) → **`NOT READY`**
+- `e2e.json` `notApplicable` without a reason no command could overcome → **`NOT READY`**
 - `BLOCKED` present → **`NOT READY`** (honest, but not READY)
 - Unresolved deferrals in `forge defer list` → **`NOT READY`**
 

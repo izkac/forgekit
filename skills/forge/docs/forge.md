@@ -115,7 +115,7 @@ User request
             └─────────────┬─────────────┘
                           ▼
          Verify: audit tier 2 + tier 3 (scope from pace)
-                  + ## Product loop (or BLOCKED)
+                  + forge e2e run (green, or BLOCKED)
                   + forge integrity-check
                           │
                           ▼
@@ -130,8 +130,9 @@ User request
 ```
 
 **Jobs / workers / queues:** spine is mandatory for *every* change (`forge spine
-init` — rows or `notApplicable`). Async work also needs wiring + product-loop
-tasks. See [Runtime integrity](#runtime-integrity).
+init` — rows or `notApplicable`). Spine rows also require executable acceptance
+steps (`forge e2e init` at plan, green `forge e2e run` before done). Async work
+also needs wiring + product-loop tasks. See [Runtime integrity](#runtime-integrity).
 
 ### Triage (top of tree)
 
@@ -178,10 +179,10 @@ See the Forge skill’s [references/plan-routing.md](../references/plan-routing.
 | ----- | ------------ | ----------------- |
 | **triage** | Substantial? Skip allowed? Bootstrap session | `forge` skill |
 | **brainstorm** | Explore intent, approaches, approval | `skills/brainstorming` |
-| **plan** | Tracked-change propose; **`forge spine init` every change** (rows or `notApplicable`); wiring + product-loop tasks when async | [plan-routing.md](../references/plan-routing.md) |
+| **plan** | Tracked-change propose; **`forge spine init` every change** (rows or `notApplicable`); rows → `forge e2e init` (steps are a plan deliverable); wiring + product-loop tasks when async | [plan-routing.md](../references/plan-routing.md) |
 | **implement** | Subagent per task, TDD, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../references/test-strategy.md) |
-| **verify** | Audit tier 2; tier 3; product-loop evidence; `forge integrity-check` | `skills/verification-before-completion` + `verify-evidence.md` |
-| **review** | Combined task reviewer (spec + quality) per task; final review (spine + product loop) | `skills/requesting-code-review` |
+| **verify** | Audit tier 2; tier 3; green `forge e2e run`; `forge integrity-check` | `skills/verification-before-completion` + `verify-evidence.md` |
+| **review** | Combined task reviewer (spec + quality) per task; final review (spine + executed e2e) | `skills/requesting-code-review` |
 | **finish** | Archive (+ ADR if the project uses that); `forge phase done` (integrity gate); cleanup | `/opsx:archive`, `forge cleanup` |
 
 **Standalone deep review (outside Forge):** for pre-merge audits with adversarial false-positive filtering, use the **thorough code review** skill — see [thorough-code-review.md](https://github.com/izkac/forgekit/blob/main/docs/thorough-code-review.md). Forge's `requesting-code-review` stays the per-task checkpoint during `/forge:build`.
@@ -206,9 +207,11 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
         notes.md
         decisions.md
       plan.md                         ← legacy throwaway plans only (deprecated)
-      verify-evidence.md              ← tier 3 + ## Product loop (or BLOCKED)
+      verify-evidence.md              ← tier 3 + loop narrative (or BLOCKED)
+      e2e-results.json                ← forge e2e run results (steps hash + per-step outcomes)
       deferrals.json                  ← forge defer registry (when used)
       spine.json                      ← fallback if no tracked change dir
+      e2e.json                        ← fallback if no tracked change dir
       scorecard.md / scorecard.json   ← L2 session score (written at done/finish)
       tasks/
         01-first-task/
@@ -219,8 +222,9 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
         final-review.md
 ```
 
-For OpenSpec / specs-engine changes, the canonical **spine matrix** lives next to
-the plan: `openspec/changes/<name>/spine.json` (or `<specsDir>/changes/<name>/spine.json`).
+For OpenSpec / specs-engine changes, the canonical **spine matrix** and **e2e
+steps** live next to the plan: `openspec/changes/<name>/spine.json` + `e2e.json`
+(or `<specsDir>/changes/<name>/…`).
 
 **Session ID:** `<UTC-compact>-<kebab-slug>-<6-hex>`
 
@@ -275,8 +279,9 @@ forge prefs --session-set lite    # pin active session only
 forge doctor                      # plan-engine readiness (OpenSpec or specs layout)
 forge doctor --install            # attempt npm install -g @fission-ai/openspec
 forge spine init|check            # capability→runtime spine matrix (spine.json in change dir)
+forge e2e init|run|check          # executable product-loop acceptance (e2e.json + e2e-results.json)
 forge defer add|resolve|list      # deferral registry — deferred wiring is tracked debt
-forge integrity-check             # mechanical gate: spine + deferrals + product-loop evidence
+forge integrity-check             # mechanical gate: spine + deferrals + executed e2e
 forge score [--write] [--md]      # L2 session scorecard (also auto-written at phase done)
 forge overlay                     # re-apply OpenSpec vendor overlays in this project
 forge init […]                    # wire project commands / hooks / rules
@@ -399,7 +404,7 @@ Integrity upgrades Forge from “no false job success” to **product-loop accep
 2. **Runtime owner required** — a library alone does not satisfy a capability; name the production caller (job, endpoint, CLI).
 3. **Tests must fail on a no-op** — asserting “job status became succeeded” is not enough.
 4. **Specs beat narrow tasks** — capability specs win when they conflict with a thin task reading.
-5. **E2E = product loop** — produce → consume → decision changes output. A single job slice (ingest → Parquet) is **not** platform E2E.
+5. **E2E = executed product loop** — produce → consume → decision changes output, run as `e2e.json` steps via `forge e2e run` (prose does not count). A single job slice (ingest → Parquet) is **not** platform E2E.
 6. **Job-kind closure** — every product-surface job kind is wired end-to-end **or deleted** before complete. “Fail closed” is only a temporary `BLOCKED` state.
 7. **Consumer–producer** — if UI/API reads it, production must write it (proven in evidence).
 8. **Deferrals are tracked** — “wiring later” only via `forge defer`; unresolved deferrals block `done`.
@@ -409,6 +414,7 @@ Integrity upgrades Forge from “no false job success” to **product-loop accep
 | Tool | Purpose |
 |------|---------|
 | `forge spine init\|check` | **Mandatory every change.** `spine.json`: rows **or** `notApplicable`. Not keyword-gated. |
+| `forge e2e init\|run\|check` | **Mandatory when the spine has rows.** `e2e.json` step list executed by `forge e2e run`; results (`e2e-results.json`) carry a steps hash, so edits after a green run go stale |
 | `forge defer add\|resolve\|list` | Deferred wiring as tracked debt in the session |
 | `forge integrity-check` | Combined gate — also run automatically by `forge phase done\|finish` |
 
@@ -425,9 +431,9 @@ You do **not** paste a long definition-of-done prompt. After
 
 | Automatic (CLI / hooks) | Agent-driven (skill phases — required) |
 | ----------------------- | -------------------------------------- |
-| Integrity reminder on every session/prompt hook | Plan: **`forge spine init` every change** — fill rows or `notApplicable` |
+| Integrity reminder on every session/prompt hook | Plan: **`forge spine init` every change** — fill rows or `notApplicable`; rows → also `forge e2e init` |
 | Pace `auto` fail-closed to **standard**; task-count escalation at ≥15 | Implement: update spine rows; `forge defer add` if wiring is deferred |
-| `forge phase done\|finish` requires valid spine + writes L2 scorecard | Verify: `## Product loop` when spine has rows (sync-only → prefer `notApplicable`) |
+| `forge phase done\|finish` requires valid spine + green current e2e run + writes L2 scorecard | Verify: green `forge e2e run` when spine has rows (sync-only → prefer `notApplicable`) |
 | `forge status` surfaces `integrity.*` defaults | After done: answer L3 ship-check in `scorecard.md` |
 
 **Gates are automatic. Filling evidence is part of the normal phase flow.**
@@ -471,6 +477,30 @@ forge spine init
 
 Docs-only / no-runtime changes may set `"notApplicable": "docs-only change"` instead of rows.
 
+Spine rows → also author the executable acceptance steps:
+
+```bash
+forge e2e init
+# edit openspec/changes/<name>/e2e.json — the closed loop as commands
+```
+
+```json
+{
+  "change": "etl-surveydb-pipeline-closure",
+  "notApplicable": null,
+  "steps": [
+    { "name": "ingest", "cmd": "node scripts/e2e/ingest-fixture.mjs OP1086" },
+    { "name": "analyze", "cmd": "node scripts/e2e/run-analyze.mjs", "expect": "proposals: [1-9]" },
+    { "name": "ratify", "cmd": "node scripts/e2e/ratify-subset.mjs" },
+    { "name": "run-assert", "cmd": "node scripts/e2e/assert-output-differs.mjs", "timeoutMs": 600000 }
+  ]
+}
+```
+
+Steps must assert domain side effects — a list that would pass against a
+stubbed handler is invalid. `"notApplicable": "<reason>"` only when no command
+can drive the loop.
+
 **If wiring must wait for a later task**
 
 ```bash
@@ -479,27 +509,19 @@ forge defer add --task 9.7 --reason "analyze_study handler lands in 9.7"
 forge defer resolve --task 9.7
 ```
 
-**Verify evidence** (required when spine has rows):
+**Verify** (required when spine has rows):
 
-```markdown
-# Verify evidence — tier 3
-
-- **Command:** `pytest …` / `npm test …`
-- **Exit code:** 0
-
-## Product loop
-
-Fixture: OP1086 three sources
-
-1. ingest_source ×3 → study_sources + Parquet
-2. analyze_study → study_proposals (match / loop)
-3. ratify subset via API → decisions tip at revision R
-4. harmonization_run @R → .sav + Master QML + BI
-5. Assert: output at R differs from unratified baseline
+```bash
+forge e2e run    # executes the steps, writes e2e-results.json (session dir)
 ```
 
-Or an explicit `BLOCKED: …` line — then `forge phase done` refuses until unblocked
-or the user passes `--allow-incomplete`.
+Green run required; results go stale if `e2e.json` changes afterwards (steps
+hash). Keep a short loop narrative under `## Product loop` in
+`verify-evidence.md` as reviewer context — the gate checks the executed
+results, not the heading.
+
+Or an explicit `BLOCKED: …` line in `verify-evidence.md` — then `forge phase
+done` refuses until unblocked or the user passes `--allow-incomplete`.
 
 **Finish**
 

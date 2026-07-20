@@ -3,7 +3,7 @@
 Before marking done, integrity must pass (or the user must approve an incomplete finish):
 
 ```bash
-forge integrity-check    # spine + deferrals + product-loop / BLOCKED
+forge integrity-check    # spine + deferrals + executed e2e (green, current) / BLOCKED
 forge score              # preview L2 scorecard (optional)
 forge phase done         # runs integrity checks + writes scorecard.md/json
 # escape hatch only with an honest reason:

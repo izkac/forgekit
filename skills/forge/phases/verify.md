@@ -73,12 +73,15 @@ For each requirement in the change's **capability specs** (not only `tasks.md`):
 
 Record the trace in `verify-evidence.md` (a short REQ → caller table is enough).
 
-### 4. Product-loop E2E or BLOCKED
+### 4. Product-loop E2E — executed, or BLOCKED
 
 Before leaving verify / claiming the change complete:
 
-1. Run (or document exact commands for) the **closed product loop** — not a single job slice. When the design has a producer/consumer split (analyze vs execute, proposals vs ratify), the loop is: produce artifact → consumer reads it → decision/state change → **next run's output differs from baseline**. Record it under a `## Product loop` heading in `verify-evidence.md` (the done gate greps for it). **Or**
-2. Leave an explicit **`BLOCKED`** list in `verify-evidence.md` explaining why E2E cannot run here — the done gate then refuses `done` until unblocked or the user signs `--allow-incomplete`.
+1. Confirm `e2e.json` (scaffolded at plan time via `forge e2e init`) drives the **closed product loop** — not a single job slice. When the design has a producer/consumer split (analyze vs execute, proposals vs ratify), the loop is: produce artifact → consumer reads it → decision/state change → **next run's output differs from baseline**. Steps must assert domain side effects; a step list that would pass against a stubbed handler is invalid.
+2. `forge e2e run` — executes the steps sequentially and writes `e2e-results.json` (per-step exit codes, output tails, steps hash) into the session dir. A **green run** is required; results go stale if `e2e.json` changes afterwards (re-run). Prose in `verify-evidence.md` no longer satisfies the done gate. **Or**
+3. Leave an explicit **`BLOCKED`** list in `verify-evidence.md` explaining why E2E cannot run here — the done gate then refuses `done` until unblocked or the user signs `--allow-incomplete`. (`e2e.json` `notApplicable` is only for loops no command can drive — reviewers police the reason.)
+
+Keep a short loop narrative under `## Product loop` in `verify-evidence.md` as reviewer context — the gate checks the executed results, not the heading.
 
 Also enforce **job-kind closure**: every product-surface job kind is wired end-to-end or deleted from enums/API/UI before complete. And the **consumer–producer rule**: anything the UI/API reads must be proven written by the production path.
 
@@ -88,6 +91,7 @@ Do **not** mark the change complete or advance to `done` while a critical path i
 
 ```bash
 forge spine check        # every capability row wired (library → runtime owner → writes → evidence)
+forge e2e check          # green, current e2e-results.json (steps hash matches e2e.json)
 forge defer list         # no unresolved deferrals
 forge integrity-check    # combined; forge phase done runs the same checks
 ```

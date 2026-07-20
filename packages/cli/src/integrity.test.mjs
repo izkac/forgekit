@@ -6,16 +6,24 @@ import { tmpdir } from 'node:os';
 import {
   JOBS_SIGNAL_RE,
   addDeferral,
+  checkE2eGate,
+  e2ePath,
+  e2eStepsHash,
+  e2eTemplate,
+  initE2e,
   initSpine,
   loadDeferrals,
   openDeferrals,
   resolveChangeDir,
   resolveDeferral,
+  runE2eSteps,
   runIntegrityChecks,
   sessionJobsSignalText,
   spinePath,
   spineTemplate,
+  validateE2e,
   validateSpine,
+  writeE2eResults,
 } from './integrity.mjs';
 
 function tmp(prefix) {
@@ -215,40 +223,184 @@ test('runIntegrityChecks: empty slug without spine still fails', () => {
   }
 });
 
-test('runIntegrityChecks: spine rows demand product-loop evidence', () => {
+function greenStep(overrides = {}) {
+  return {
+    name: 'produce',
+    cmd: 'node -e "console.log(\'proposals: 3\')"',
+    ...overrides,
+  };
+}
+
+function writeSpineWithRows(sessionDir) {
+  fs.writeFileSync(
+    path.join(sessionDir, 'spine.json'),
+    `${JSON.stringify({ change: null, notApplicable: null, rows: [validRow()] }, null, 2)}\n`,
+    'utf8',
+  );
+}
+
+function writeE2eDoc(sessionDir, doc) {
+  fs.writeFileSync(path.join(sessionDir, 'e2e.json'), `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
+}
+
+test('validateE2e: filled steps pass; template placeholders rejected', () => {
+  assert.equal(validateE2e({ notApplicable: null, steps: [greenStep()] }).ok, true);
+  const scaffold = validateE2e(e2eTemplate({ change: 'x' }));
+  assert.equal(scaffold.ok, false);
+  assert.match(scaffold.problems.join('\n'), /scaffold placeholder/);
+});
+
+test('validateE2e: missing cmd, bad regex, bad timeout, empty steps', () => {
+  assert.match(
+    validateE2e({ steps: [{ name: 'x', cmd: '' }] }).problems.join('\n'),
+    /missing cmd/,
+  );
+  assert.match(
+    validateE2e({ steps: [greenStep({ expect: '(' })] }).problems.join('\n'),
+    /not a valid regex/,
+  );
+  assert.match(
+    validateE2e({ steps: [greenStep({ timeoutMs: -5 })] }).problems.join('\n'),
+    /timeoutMs/,
+  );
+  assert.match(validateE2e({ steps: [] }).problems.join('\n'), /steps is empty/);
+  assert.equal(validateE2e({ steps: [], notApplicable: 'no headless env — manual device loop' }).ok, true);
+});
+
+test('e2e init writes template and refuses overwrite without force', () => {
+  const dir = tmp('forge-e2e-init-');
+  try {
+    const file = path.join(dir, 'e2e.json');
+    initE2e({ file, change: 'my-change' });
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).change, 'my-change');
+    assert.throws(() => initE2e({ file, change: 'my-change' }), /already exists/);
+    initE2e({ file, change: 'other', force: true });
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).change, 'other');
+    assert.equal(
+      e2ePath({ cwd: dir, session: { openspecChange: null }, sessionDir: dir }),
+      file,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runE2eSteps: green run with expect match', () => {
+  const results = runE2eSteps({ steps: [greenStep({ expect: 'proposals: \\d+' })] });
+  assert.equal(results.ok, true);
+  assert.equal(results.steps[0].exitCode, 0);
+  assert.equal(results.steps[0].expectMatched, true);
+  assert.equal(results.stepsHash, e2eStepsHash([greenStep({ expect: 'proposals: \\d+' })]));
+});
+
+test('runE2eSteps: non-zero exit fails and skips later steps', () => {
+  const results = runE2eSteps({
+    steps: [
+      { name: 'boom', cmd: 'node -e "process.exit(3)"' },
+      greenStep({ name: 'never' }),
+    ],
+  });
+  assert.equal(results.ok, false);
+  assert.equal(results.steps[0].exitCode, 3);
+  assert.equal(results.steps[1].skipped, true);
+});
+
+test('runE2eSteps: exit 0 but expect mismatch fails', () => {
+  const results = runE2eSteps({ steps: [greenStep({ expect: 'ratified: \\d+' })] });
+  assert.equal(results.ok, false);
+  assert.equal(results.steps[0].expectMatched, false);
+});
+
+test('checkE2eGate: missing file, missing results, stale hash, failed run, green, notApplicable', () => {
+  const dir = tmp('forge-e2e-gate-');
+  try {
+    const e2eFile = path.join(dir, 'e2e.json');
+
+    let gate = checkE2eGate({ e2eFile, sessionDir: dir });
+    assert.match(gate.problems.join('\n'), /e2e\.json required/);
+
+    writeE2eDoc(dir, { notApplicable: null, steps: [greenStep()] });
+    gate = checkE2eGate({ e2eFile, sessionDir: dir });
+    assert.match(gate.problems.join('\n'), /e2e-results\.json missing/);
+
+    const results = runE2eSteps({ steps: [greenStep()] });
+    writeE2eResults(dir, results);
+    gate = checkE2eGate({ e2eFile, sessionDir: dir });
+    assert.deepEqual(gate.problems, []);
+
+    writeE2eDoc(dir, { notApplicable: null, steps: [greenStep({ name: 'edited' })] });
+    gate = checkE2eGate({ e2eFile, sessionDir: dir });
+    assert.match(gate.problems.join('\n'), /stale/);
+
+    writeE2eDoc(dir, { notApplicable: null, steps: [{ name: 'boom', cmd: 'node -e "process.exit(1)"' }] });
+    writeE2eResults(dir, runE2eSteps({ steps: [{ name: 'boom', cmd: 'node -e "process.exit(1)"' }] }));
+    gate = checkE2eGate({ e2eFile, sessionDir: dir });
+    assert.match(gate.problems.join('\n'), /failed at step "boom"/);
+
+    writeE2eDoc(dir, { notApplicable: 'loop needs a physical device', steps: [] });
+    gate = checkE2eGate({ e2eFile, sessionDir: dir });
+    assert.deepEqual(gate.problems, []);
+    assert.equal(gate.notApplicable, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: spine rows demand an executed green e2e run', () => {
   const cwd = tmp('forge-int-loop-');
   try {
     const sessionDir = makeSessionDir(cwd);
-    const spineFile = path.join(sessionDir, 'spine.json');
-    fs.writeFileSync(
-      spineFile,
-      `${JSON.stringify({ change: null, notApplicable: null, rows: [validRow()] }, null, 2)}\n`,
-      'utf8',
-    );
+    writeSpineWithRows(sessionDir);
     const session = { slug: 'wire-worker-jobs', openspecChange: null };
 
     let result = runIntegrityChecks({ cwd, sessionDir, session });
     assert.equal(result.ok, false);
-    assert.match(result.problems.join('\n'), /verify-evidence\.md missing/);
+    assert.match(result.problems.join('\n'), /e2e\.json required/);
 
-    const evidenceFile = path.join(sessionDir, 'verify-evidence.md');
-    fs.writeFileSync(evidenceFile, '# Verify\n\ntier 3 green\n', 'utf8');
+    writeE2eDoc(sessionDir, { notApplicable: null, steps: [greenStep()] });
     result = runIntegrityChecks({ cwd, sessionDir, session });
     assert.equal(result.ok, false);
-    assert.match(result.problems.join('\n'), /no "Product loop" section/);
+    assert.match(result.problems.join('\n'), /e2e-results\.json missing/);
 
-    fs.writeFileSync(evidenceFile, '# Verify\n\n## Product loop\n\nBLOCKED: no compose here\n', 'utf8');
+    writeE2eResults(sessionDir, runE2eSteps({ steps: [greenStep()] }));
     result = runIntegrityChecks({ cwd, sessionDir, session });
-    assert.equal(result.ok, false);
-    assert.match(result.problems.join('\n'), /BLOCKED/);
+    assert.equal(result.ok, true);
+    assert.equal(result.e2eFile, path.join(sessionDir, 'e2e.json'));
 
+    // prose "## Product loop" alone no longer satisfies the gate
+    fs.rmSync(path.join(sessionDir, 'e2e-results.json'));
     fs.writeFileSync(
-      evidenceFile,
-      '# Verify\n\n## Product loop\n\ningest x3 -> analyze -> ratify -> run@R: output differs from baseline\n',
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\n## Product loop\n\ningest -> analyze -> ratify: output differs\n',
       'utf8',
     );
     result = runIntegrityChecks({ cwd, sessionDir, session });
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, false);
+    assert.match(result.problems.join('\n'), /e2e-results\.json missing/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: BLOCKED in verify-evidence blocks even with green e2e', () => {
+  const cwd = tmp('forge-int-blocked-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    writeSpineWithRows(sessionDir);
+    writeE2eDoc(sessionDir, { notApplicable: null, steps: [greenStep()] });
+    writeE2eResults(sessionDir, runE2eSteps({ steps: [greenStep()] }));
+    fs.writeFileSync(
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\nBLOCKED: ratify UI unreachable in CI\n',
+      'utf8',
+    );
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: { slug: 'wire-worker-jobs', openspecChange: null },
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.problems.join('\n'), /BLOCKED/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

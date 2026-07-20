@@ -10,7 +10,7 @@ Portable agent-skills monorepo. One package (`@izkac/forgekit`), three bins:
 
 **New here?** Read **[How to use Forgekit](docs/usage.md)** — install, project wiring,
 slash commands, simple vs jobs/workers examples, integrity (spine / defer /
-product loop), and a cheat sheet.
+executed e2e product loop), and a cheat sheet.
 
 The **Forge** skill and several of its workflows are based on
 [Superpowers](https://github.com/obra/superpowers) (MIT) — see [Attribution](#attribution).
@@ -124,7 +124,7 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 |---------|---------|
 | `forge new` / `status` / `phase` / `prefs` / `models` | Sessions |
 | `forge resolve-model` / `doctor` / `evidence` / `overlay` | Supporting |
-| `forge spine` / `defer` / `integrity-check` / `score` | Runtime integrity + L2 session scorecard |
+| `forge spine` / `e2e` / `defer` / `integrity-check` / `score` | Runtime integrity (incl. executable E2E acceptance) + L2 session scorecard |
 | `forge init` | Project commands, rules, hooks; engine (`--openspec`/`--no-openspec`); optional `--adr` |
 | `forge change new\|archive` | Specs-engine change scaffold / dated archive |
 | `forge install` | Alias → `forgekit install --skills forge` |

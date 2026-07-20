@@ -38,6 +38,7 @@ Honor [../references/runtime-integrity.md](../references/runtime-integrity.md) i
 - Do not mark a section complete if libraries exist but nothing in the production path calls them.
 - **Deferrals:** if wiring genuinely lands in a later task, register it — `forge defer add --task <id> --reason "…"` — and resolve it when that task lands. Unregistered "later" is a REJECT; unresolved deferrals block `forge phase done`.
 - **Spine:** when a task wires a capability into production, update its `spine.json` row (runtimeOwner / writes / evidence). `forge spine check` must pass before verify ends.
+- **E2E:** the product-loop acceptance task (last implement task) delivers working `e2e.json` steps and a green `forge e2e run` — steps that would pass against a stubbed handler are invalid.
 
 ## Per-task loop
 

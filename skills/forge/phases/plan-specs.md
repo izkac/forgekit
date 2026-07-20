@@ -64,14 +64,20 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    Sync-only / docs-only: `"notApplicable": "<reason>"`. Capability work: one row
    per REQ cluster (library → runtime owner → writes → evidence).
 
+   When the spine has real rows, also `forge e2e init` — the executable
+   product-loop steps (`e2e.json`) are a **plan deliverable**: author them (or
+   task out their authoring) so verify can `forge e2e run` them.
+
    If the change also involves workers, job queues, handlers, or cross-runtime
    calls, `tasks.md` MUST include:
 
    - Explicit **wiring** tasks per job kind / entry point → domain pipeline
-   - One **product-loop acceptance** task (last implement task, before verify)
+   - One **product-loop acceptance** task (last implement task, before
+     verify) — its output is a green `forge e2e run`
 
    Missing spine = plan **not** ready. (`forge phase done` refuses without a
-   valid spine — keyword sniffing does not decide.)
+   valid spine and, when the spine has rows, a green current e2e run —
+   keyword sniffing does not decide.)
 
 5. Update session:
 

@@ -43,6 +43,7 @@ Diff range: {DIFF_RANGE}   <!-- e.g. `git diff` (uncommitted) or BASE..HEAD -->
 - Brief authorized a stub / “wire later” for a path this change claims
 - Wiring is deferred **without a registered open deferral** — the packet must show `forge defer list` output naming this task's deferral; "wiring in §9" with no registry entry is a REJECT
 - The task claims a capability whose `spine.json` row is missing or library-only (empty runtimeOwner / writes / evidence)
+- The task authored or touched `e2e.json` steps that would pass against a stubbed handler (no domain side-effect assertions), or set `notApplicable` without a real reason
 
 **Code quality:**
 

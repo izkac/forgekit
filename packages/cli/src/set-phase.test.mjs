@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runE2eSteps, writeE2eResults } from './integrity.mjs';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 
@@ -253,7 +254,7 @@ test('phase done refuses any session without spine.json', () => {
   }
 });
 
-test('phase done accepts jobs-scoped session with wired spine + product-loop evidence', () => {
+test('phase done accepts jobs-scoped session with wired spine + green e2e run', () => {
   const dir = tmp('forge-set-phase-spine-ok-');
   try {
     const sessionFile = makeForgeFixture(dir, 'sess-spine-ok');
@@ -289,6 +290,13 @@ test('phase done accepts jobs-scoped session with wired spine + product-loop evi
       '# Verify\n\n## Product loop\n\ningest -> analyze -> ratify -> run: output differs\n',
       'utf8',
     );
+    const e2eSteps = [{ name: 'loop', cmd: 'node -e "console.log(\'ratified: 1\')"' }];
+    fs.writeFileSync(
+      path.join(sessionDir, 'e2e.json'),
+      `${JSON.stringify({ change: null, notApplicable: null, steps: e2eSteps }, null, 2)}\n`,
+      'utf8',
+    );
+    writeE2eResults(sessionDir, runE2eSteps({ steps: e2eSteps }));
 
     runSetPhase(dir, ['done']);
     const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));

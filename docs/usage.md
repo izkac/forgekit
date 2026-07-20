@@ -254,6 +254,14 @@ forge spine check
 # exit 0 only when every cell is filled (no <placeholders>)
 ```
 
+Spine rows → also scaffold the executable acceptance steps now (they are a
+plan deliverable; see 5d):
+
+```bash
+forge e2e init
+# Creates e2e.json next to spine.json — author the loop as commands
+```
+
 ### 5c. Implement: defer only when registered
 
 Wrong (will be rejected by reviewers / fail at done):
@@ -269,30 +277,37 @@ forge defer resolve --task 9.7
 forge defer list
 ```
 
-### 5d. Verify: product loop, not a thin job smoke
+### 5d. Verify: run the product loop — prose no longer counts
 
-In `.forge/sessions/<id>/verify-evidence.md` include a **`## Product loop`**
-section. Example:
+When the spine has rows, the closed loop is **executed**, not described.
+Author the steps at plan time (`forge e2e init` → `e2e.json` next to
+`spine.json`), then in verify:
 
-```markdown
-# Verify evidence — tier 3
-
-- **Workspaces:** etl-core, api, web
-- **Command:** `pytest services/etl-core && npm test --workspace=api`
-- **Exit code:** 0
-
-## Product loop
-
-Fixture: OP1086 three sources
-
-1. ingest_source ×3 → study_sources + Parquet
-2. analyze_study → study_proposals non-empty (match / loop)
-3. ratify subset via API → decisions tip at revision R
-4. harmonization_run @R → .sav + Master QML + BI parquet
-5. Assert: artifact hash / columns at R differ from unratified baseline
+```bash
+forge e2e run    # executes steps, writes .forge/sessions/<id>/e2e-results.json
 ```
 
-If you cannot run E2E here:
+```json
+{
+  "change": "etl-pipeline-closure",
+  "notApplicable": null,
+  "steps": [
+    { "name": "ingest", "cmd": "node scripts/e2e/ingest-fixture.mjs OP1086" },
+    { "name": "analyze", "cmd": "node scripts/e2e/run-analyze.mjs", "expect": "proposals: [1-9]" },
+    { "name": "ratify", "cmd": "node scripts/e2e/ratify-subset.mjs" },
+    { "name": "run-assert", "cmd": "node scripts/e2e/assert-output-differs.mjs" }
+  ]
+}
+```
+
+Every step must exit 0 (and match `expect` when set). Results carry a hash of
+the steps — editing `e2e.json` after a green run makes the results stale, and
+the done gate demands a re-run. Steps must assert **domain side effects**: a
+step list that would pass against a stubbed handler is invalid, and reviewers
+reject it. Keep a short `## Product loop` narrative in `verify-evidence.md`
+as reviewer context (the gate checks the executed results, not the heading).
+
+If you cannot run E2E here, say so in `verify-evidence.md`:
 
 ```markdown
 ## Product loop
@@ -323,7 +338,7 @@ Typical failure messages:
 Cannot enter phase "done":
   - unresolved deferrals: 9.7 (…) — resolve via forge defer resolve --task <id>
   - spine: row 1 (REQ-GOV-01): runtimeOwner still has scaffold placeholder
-  - verify-evidence.md has no "Product loop" section — …
+  - e2e-results.json missing — run forge e2e run (a green run is required before done)
 ```
 
 ---
@@ -343,6 +358,7 @@ changes/<name>/
   design.md      # optional
   tasks.md
   spine.json     # mandatory — rows or notApplicable
+  e2e.json       # when spine has rows — executable product-loop steps
 ```
 
 Specs-engine example:
@@ -422,7 +438,8 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge doctor` fails (OpenSpec) | `npm i -g @fission-ai/openspec` or `forge init --no-openspec` |
 | Skills outdated after upgrade | `forgekit install --skills forge --force` |
 | `forge phase done` refuses — missing spine | `forge spine init`; fill rows **or** set `notApplicable` (required every change) |
-| `forge phase done` refuses — deferrals / product loop | `forge integrity-check`; resolve deferrals; add `## Product loop` (or use `notApplicable` for sync-only) |
+| `forge phase done` refuses — deferrals / e2e | `forge integrity-check`; resolve deferrals; `forge e2e init` + author steps + green `forge e2e run` (or spine `notApplicable` for sync-only) |
+| `forge phase done` refuses — stale e2e results | `e2e.json` changed after the last run — re-run `forge e2e run` |
 | Session reminder missing | Merge `forge-hooks.snippet.json` from init into agent settings |
 | Wrong pace (`brisk` on a big change) | `forge prefs --session-set standard` or ensure `--tasks-total` ≥ 15 |
 
@@ -434,7 +451,7 @@ Do not treat “tasks complete” or even `integrity-check` 0 as product success
 
 | Layer | Measures | Command / artifact |
 |-------|----------|--------------------|
-| **L1** Process | Spine, deferrals, product-loop *presence* | `forge integrity-check` / done gate |
+| **L1** Process | Spine, deferrals, executed product loop | `forge integrity-check` / done gate |
 | **L2** Artifacts | Quality of those artifacts + pace/evidence | `forge score` → `scorecard.md` (auto at done) |
 | **L3** Outcome | Real product path / ship decision | Human questions in scorecard + golden scenarios |
 
@@ -475,6 +492,7 @@ forge doctor
 forge new my-feature --signal "add worker job queue"
 forge status
 forge spine init && forge spine check
+forge e2e init && forge e2e run && forge e2e check
 forge defer add --task 3.2 --reason "wire handler in 3.2"
 forge defer resolve --task 3.2
 forge integrity-check

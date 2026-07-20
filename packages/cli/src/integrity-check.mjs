@@ -7,9 +7,10 @@
  *
  * Fails (exit 1) when:
  *   - deferrals are unresolved
- *   - spine.json is required (jobs/workers in scope) but missing or invalid
- *   - a spine with rows exists but verify-evidence.md lacks a product-loop
- *     section, or contains an explicit BLOCKED marker
+ *   - spine.json is missing or invalid
+ *   - a spine with rows exists but the executable E2E acceptance is missing,
+ *     failed, or stale (e2e.json + green, current e2e-results.json), or
+ *     verify-evidence.md contains an explicit BLOCKED marker
  */
 
 import { loadSession, readActive } from './lib.mjs';
@@ -49,6 +50,7 @@ process.stdout.write(
       problems: result.problems,
       spineFile: result.spineFile,
       spineExists: result.spineExists,
+      e2eFile: result.e2eFile,
     },
     null,
     2,

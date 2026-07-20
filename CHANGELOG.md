@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-07-20
+
+- **Executable E2E acceptance (`forge e2e`).** The product loop is now *run*, not described. `forge e2e init` scaffolds `e2e.json` next to `spine.json` — the closed loop as `{ name, cmd, expect?, timeoutMs? }` steps; `forge e2e run` executes them sequentially (exit 0 + regex match required) and writes `e2e-results.json` with per-step outcomes and a hash of the steps, so editing steps after a green run invalidates the results; `forge e2e check` verifies green + current.
+- **Done gate now demands the executed loop.** When the spine has real rows, `forge integrity-check` / `forge phase done|finish` require a green, current e2e run — a `## Product loop` prose section in `verify-evidence.md` no longer satisfies the gate (the `BLOCKED` escape and `--allow-incomplete` are unchanged). `e2e.json` may set `notApplicable: "<reason>"` only for loops no command can drive; reviewers police the reason. Sessions upgraded mid-flight: run `forge e2e init`, author steps, `forge e2e run`.
+- Plan phases now scaffold `e2e.json` when the spine has rows (steps are a plan deliverable); reviewer prompts REJECT step lists that would pass against a stubbed handler.
+
 ## 0.1.7 — 2026-07-20
 
 - **Thin rules are engine-neutral.** The `forge.md` project rules no longer hardcode OpenSpec — they point at `.forge/config.json` (`plan.engine`) and give the command for both engines (`/opsx:propose` for OpenSpec, `forge change new <slug>` for the built-in specs engine).
