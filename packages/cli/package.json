@@ -4,9 +4,9 @@
   "description": "Forgekit CLIs — forgekit (install), forge (workflow), review (code review)",
   "type": "module",
   "bin": {
-    "forgekit": "./bin/forgekit.mjs",
-    "forge": "./bin/forge.mjs",
-    "review": "./bin/review.mjs"
+    "forgekit": "bin/forgekit.mjs",
+    "forge": "bin/forge.mjs",
+    "review": "bin/review.mjs"
   },
   "files": [
     "bin",
