@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadSession, readActive, saveSession } from './lib.mjs';
+import { briefProblem, checkBrief } from './brief.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
 
@@ -115,6 +116,33 @@ function maybeEscalatePaceForTaskCount() {
 }
 
 maybeEscalatePaceForTaskCount();
+
+/**
+ * Hard gate: implementation may not start until the operator brief exists and
+ * matches the current specs — the plan-approval checkpoint is only as strong
+ * as the human's comprehension of it. `--allow-incomplete "<reason>"` records
+ * an honest skip.
+ */
+function enforceBriefGate() {
+  if (phase !== 'implement') return;
+  const result = checkBrief({ session });
+  if (result.ok) {
+    delete session.briefSkipped;
+    return;
+  }
+  if (allowIncomplete) {
+    session.briefSkipped = allowIncomplete;
+    return;
+  }
+  process.stderr.write(
+    `Cannot enter phase "implement":\n  - ${briefProblem(result)}\n` +
+      'Write the brief (see forge references/operator-brief.md), forge brief stamp, ' +
+      'or pass --allow-incomplete "<reason>".\n',
+  );
+  process.exit(1);
+}
+
+enforceBriefGate();
 
 /**
  * Refuse finish/done without verify evidence, full task completion, and a

@@ -79,7 +79,19 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    valid spine and, when the spine has rows, a green current e2e run —
    keyword sniffing does not decide.)
 
-5. Update session:
+5. **Operator brief (mandatory)** — see [../references/operator-brief.md](../references/operator-brief.md):
+   write `<specsDir>/changes/<change-name>/brief.html` — a plain-language,
+   self-contained HTML explanation of what will be built (mermaid diagrams
+   where helpful), then:
+
+   ```bash
+   forge brief stamp    # records specs hash + opens it in the operator's browser
+   ```
+
+   `forge phase implement` hard-refuses while the brief is missing or stale
+   (specs edited after stamping → rewrite affected sections and re-stamp).
+
+6. Update session:
 
    ```bash
    forge phase plan --plan-type specs --openspec <change-name>
@@ -89,7 +101,8 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    Count tasks from `tasks.md` checkboxes. (`--openspec` carries the change
    name for both engines.)
 
-6. Get user approval on the artefacts before implementing (unless they already said "go").
+7. Get user approval on the artefacts before implementing (unless they already said "go").
+   The brief (opened by `forge brief stamp`) is what the operator reviews.
 
 ## Compatibility
 

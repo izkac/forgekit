@@ -31,14 +31,27 @@ Thin wrapper around the project **`openspec-propose`** skill (or `/opsx:propose`
    valid spine and, when the spine has rows, a green current e2e run —
    keyword sniffing does not decide.)
 
-5. Update session:
+5. **Operator brief (mandatory)** — see [../references/operator-brief.md](../references/operator-brief.md):
+   write `openspec/changes/<change-name>/brief.html` — a plain-language,
+   self-contained HTML explanation of what will be built (mermaid diagrams
+   where helpful), then:
+
+   ```bash
+   forge brief stamp    # records specs hash + opens it in the operator's browser
+   ```
+
+   `forge phase implement` hard-refuses while the brief is missing or stale
+   (specs edited after stamping → rewrite affected sections and re-stamp).
+
+6. Update session:
    ```bash
    forge phase plan --plan-type openspec --openspec <change-name>
    forge phase implement --tasks-total <N>
    ```
    Count tasks from `tasks.md` checkboxes.
 
-6. Get user approval to proceed to implement (unless they already said "go").
+7. Get user approval to proceed to implement (unless they already said "go").
+   The brief (opened by `forge brief stamp`) is what the operator reviews.
 
 ## Session tracking
 

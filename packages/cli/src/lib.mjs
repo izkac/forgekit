@@ -6,6 +6,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { registerSession } from './lib/fleet.mjs';
 
 export const REPO_ROOT = process.cwd();
 export const FORGE_DIR = path.join(REPO_ROOT, '.forge');
@@ -130,6 +131,10 @@ export function saveSession(dir, session) {
   session.updatedAt = new Date().toISOString();
   writeJson(path.join(dir, 'session.json'), session);
   writeJson(path.join(dir, 'status.json'), defaultStatus(session));
+  // Mirror into ~/.forgekit/fleet so `forge fleet` sees every project's
+  // sessions. Project root derived from dir (<root>/.forge/sessions/<id>),
+  // not REPO_ROOT, so callers with explicit dirs mirror correctly too.
+  registerSession(path.resolve(dir, '..', '..', '..'), session);
 }
 
 export function sessionAgeDays(session) {

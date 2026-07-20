@@ -35,6 +35,8 @@ const COMMANDS = {
   defer: { script: 'defer.mjs' },
   'integrity-check': { script: 'integrity-check.mjs', aliases: ['integrity'] },
   score: { script: 'score-cli.mjs', aliases: ['scorecard'] },
+  fleet: { script: 'fleet.mjs' },
+  brief: { script: 'brief-cli.mjs' },
 };
 
 function printHelp() {
@@ -64,6 +66,8 @@ Commands:
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)
   score [--write]         L2 session scorecard (auto-written at phase done)
+  fleet list|watch|view|send  Cross-project session control terminal
+  brief stamp|check|open  Operator brief (plain-language HTML, gates implement)
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.
 

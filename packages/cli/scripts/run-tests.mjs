@@ -7,6 +7,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -39,5 +40,11 @@ if (files.length === 0) {
 const result = spawnSync(process.execPath, ['--test', ...files], {
   cwd: cliRoot,
   stdio: 'inherit',
+  env: {
+    ...process.env,
+    // Keep saveSession's fleet-registry mirroring away from ~/.forgekit
+    // when tests exercise session saves with scratch projects.
+    FORGEKIT_FLEET_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-test-fleet-')),
+  },
 });
 process.exit(result.status ?? 1);

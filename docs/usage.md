@@ -117,9 +117,11 @@ What happens:
 2. `forge new <slug>` creates `.forge/sessions/…` and sets active session
 3. **Brainstorm** → you approve the approach
 4. **Plan** → OpenSpec `/opsx:propose` or `forge change new` (specs engine)
-5. You approve `proposal.md` / `tasks.md`
-6. **`/forge:apply`** (or `/forge:build`) — subagent per task, TDD, reviews
-7. **Verify** → **review** → archive → `forge phase done`
+5. **Operator brief** — the agent writes `brief.html` and it **opens in your
+   browser**: plain-language explanation of what will be built (see §4)
+6. You approve — the brief is your review surface; specs are the contract
+7. **`/forge:apply`** (or `/forge:build`) — subagent per task, TDD, reviews
+8. **Verify** → **review** → archive → `forge phase done`
 
 Skip Forge for this turn only:
 
@@ -159,7 +161,34 @@ Example output shape:
 
 ---
 
-## 4. Example A — simple change (sync only)
+## 4. Operator brief — understand the plan at a glance
+
+Specs (`proposal.md` / `tasks.md`) are written for agents. The **operator
+brief** is the translation for you: one self-contained
+`changes/<name>/brief.html` in plain language — TL;DR, what you'll get, how it
+works (mermaid diagrams), what changes for you, risks, out of scope, work
+overview. The agent writes it at the end of every plan phase (both engines);
+`forge brief stamp` then records a hash of the specs into it and **opens it in
+your default browser** — that's the document you approve.
+
+```bash
+forge brief check    # fresh | missing | unstamped | stale (exit 1 unless fresh)
+forge brief open     # reopen anytime
+forge brief stamp    # after (re)writing — stamp freshness + auto-open
+```
+
+**Hard gate:** `forge phase implement` refuses while the brief is missing or
+**stale** (specs edited after stamping → the agent must update the brief and
+re-stamp). Sessions without a tracked change (direct/throwaway) are exempt.
+Deliberate waive: `forge phase implement --allow-incomplete "<reason>"`
+(recorded as `briefSkipped`).
+
+The brief archives with the change, so `changes/archive/…` keeps the
+human-readable record of what was approved — useful input for archive→ADR.
+
+---
+
+## 5. Example A — simple change (sync only)
 
 A small API or UI feature with **no** async jobs.
 
@@ -197,11 +226,11 @@ simple changes — that is intentional (keyword sniffing used to miss platforms)
 
 ---
 
-## 5. Example B — platform change (jobs / workers)
+## 6. Example B — platform change (jobs / workers)
 
 Any change with workers, job queues, pipelines, ETL, or “UI waits on async job.”
 
-### 5a. Start with an explicit apply message
+### 6a. Start with an explicit apply message
 
 ```text
 /forge:apply etl-surveydb-pipeline-closure
@@ -210,7 +239,7 @@ Pace: standard
 
 Integrity rules load from Forge defaults — no long DoD paste required.
 
-### 5b. Plan: scaffold the spine (always — fill rows for this case)
+### 6b. Plan: scaffold the spine (always — fill rows for this case)
 
 ```bash
 forge spine init
@@ -255,14 +284,14 @@ forge spine check
 ```
 
 Spine rows → also scaffold the executable acceptance steps now (they are a
-plan deliverable; see 5d):
+plan deliverable; see 6d):
 
 ```bash
 forge e2e init
 # Creates e2e.json next to spine.json — author the loop as commands
 ```
 
-### 5c. Implement: defer only when registered
+### 6c. Implement: defer only when registered
 
 Wrong (will be rejected by reviewers / fail at done):
 
@@ -277,7 +306,7 @@ forge defer resolve --task 9.7
 forge defer list
 ```
 
-### 5d. Verify: run the product loop — prose no longer counts
+### 6d. Verify: run the product loop — prose no longer counts
 
 When the spine has rows, the closed loop is **executed**, not described.
 Author the steps at plan time (`forge e2e init` → `e2e.json` next to
@@ -323,7 +352,7 @@ until unblocked or you explicitly:
 forge phase done --allow-incomplete "E2E blocked until CI Compose fixtures land"
 ```
 
-### 5e. Finish
+### 6e. Finish
 
 ```bash
 forge integrity-check   # preview problems
@@ -343,7 +372,45 @@ Cannot enter phase "done":
 
 ---
 
-## 6. Planning engines (pick one per project)
+## 7. Fleet control terminal — all sessions, one place
+
+Every forge session on the machine — any project, any engine (terminal,
+Claude Desktop, Cursor, …) — auto-registers into `~/.forgekit/fleet/` the
+moment it touches a `forge` command. One terminal sees and commands them all:
+
+```bash
+forge fleet list      # every session: phase bar, task bar, engine, age, ✉ pending
+forge fleet watch     # same table, live-refreshing (Ctrl+C exits)
+forge fleet view <session>              # detail; --transcript N tails the
+                                        # Claude Code conversation live
+forge fleet send <session> "message"    # delivered on the session's next turn
+forge fleet send --all "status report"  # broadcast
+```
+
+`<session>` matches by slug, session id, or project name (must be unique).
+
+Example `list` output:
+
+```text
+PROJECT     SESSION            ENGINE  PHASE                TASKS          PACE      AGE  MSGS
+mobile-app  push-notifications claude  █░░░░░░ brainstorm   —              standard  2m
+shop-api    checkout-flow      claude  ███░░░░ implement    █████░░░ 7/12  thorough  now  ✉ 1
+```
+
+How messaging works: `send` drops a file into the session's
+`.forge/sessions/<id>/inbox/`; the session-reminder hook injects pending
+messages into the agent's next turn (exactly once) under *"Fleet messages from
+the control terminal"*. Honest limit: a session only sees a message when it
+takes a turn — an idle session with no prompt pending stays silent until you
+poke it in its own window.
+
+Viewing fidelity: Claude Code sessions get a live transcript tail (their
+`~/.claude/projects/…` jsonl); other engines show forge status, tasks, and
+evidence instead.
+
+---
+
+## 8. Planning engines (pick one per project)
 
 | Engine | When to use | Day-to-day |
 |--------|-------------|------------|
@@ -357,6 +424,7 @@ changes/<name>/
   proposal.md
   design.md      # optional
   tasks.md
+  brief.html     # operator brief — mandatory, gates implement (see §4)
   spine.json     # mandatory — rows or notApplicable
   e2e.json       # when spine has rows — executable product-loop steps
 ```
@@ -373,7 +441,7 @@ forge change archive add-export-csv
 
 ---
 
-## 7. Pace and models (optional)
+## 9. Pace and models (optional)
 
 Ceremony amount (reviews / verify depth):
 
@@ -400,7 +468,7 @@ forge models metered        # WRITE .forge/models.local.json — only if you ask
 
 ---
 
-## 8. Standalone thorough review
+## 10. Standalone thorough review
 
 Not part of `/forge:apply`. Ask explicitly:
 
@@ -415,7 +483,7 @@ review new my-branch --type branch
 
 ---
 
-## 9. ADRs (optional)
+## 11. ADRs (optional)
 
 If you enabled ADRs at install/init:
 
@@ -429,7 +497,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 
 ---
 
-## 10. Common problems
+## 12. Common problems
 
 | Symptom | Fix |
 |---------|-----|
@@ -440,12 +508,15 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase done` refuses — missing spine | `forge spine init`; fill rows **or** set `notApplicable` (required every change) |
 | `forge phase done` refuses — deferrals / e2e | `forge integrity-check`; resolve deferrals; `forge e2e init` + author steps + green `forge e2e run` (or spine `notApplicable` for sync-only) |
 | `forge phase done` refuses — stale e2e results | `e2e.json` changed after the last run — re-run `forge e2e run` |
+| `forge phase implement` refuses — brief missing/stale | Agent writes/updates `brief.html`, then `forge brief stamp` (or `--allow-incomplete "<reason>"`) |
+| Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
+| `forge fleet send` seems ignored | Delivery is next-turn via the reminder hook — idle sessions read it when they wake |
 | Session reminder missing | Merge `forge-hooks.snippet.json` from init into agent settings |
 | Wrong pace (`brisk` on a big change) | `forge prefs --session-set standard` or ensure `--tasks-total` ≥ 15 |
 
 ---
 
-## 11. Session success — did Forge actually work?
+## 13. Session success — did Forge actually work?
 
 Do not treat “tasks complete” or even `integrity-check` 0 as product success.
 
@@ -477,7 +548,7 @@ only file a product bug.
 
 Trend over time: rate of sessions with L1 green + ship=`no` should fall.
 
-## 12. Cheat sheet
+## 14. Cheat sheet
 
 ```bash
 # Machine
@@ -491,6 +562,7 @@ forge doctor
 # Session
 forge new my-feature --signal "add worker job queue"
 forge status
+forge brief stamp && forge brief check
 forge spine init && forge spine check
 forge e2e init && forge e2e run && forge e2e check
 forge defer add --task 3.2 --reason "wire handler in 3.2"
@@ -499,6 +571,12 @@ forge integrity-check
 forge score --write
 forge phase done
 forge cleanup
+
+# Fleet (any terminal, all projects)
+forge fleet list
+forge fleet watch
+forge fleet view my-feature --transcript 20
+forge fleet send my-feature "pause and report"
 ```
 
 In the agent:

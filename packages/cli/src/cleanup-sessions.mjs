@@ -18,6 +18,7 @@ import {
   SESSIONS_DIR,
   sessionAgeDays,
 } from './lib.mjs';
+import { unregisterSession } from './lib/fleet.mjs';
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
@@ -59,6 +60,7 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
     if (!dryRun) {
       fs.rmSync(dir, { recursive: true, force: true });
       if (isActive) clearActive();
+      unregisterSession(process.cwd(), sessionId);
     }
     removed.push({ sessionId, reason: tooOld ? 'retention' : 'finished' });
   } else {

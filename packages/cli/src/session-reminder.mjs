@@ -9,6 +9,7 @@
  */
 
 import { FORGE_DIR, loadSession, readActive } from './lib.mjs';
+import { drainInbox } from './lib/fleet.mjs';
 import { resolveEffectivePreferences } from './preferences.mjs';
 
 function getActiveSessionInfo() {
@@ -148,9 +149,19 @@ if (!info) {
   process.exit(0);
 }
 
-const message = prompt
+let message = prompt
   ? buildForgePromptMessage(info, prompt)
   : buildForgeMessage(info);
+
+// Deliver queued `forge fleet send` messages exactly once (drain moves them
+// to inbox/delivered/). This is the fleet command bus: control terminal →
+// inbox file → injected into the agent's next turn via this hook.
+const fleetMessages = drainInbox(info.dir);
+if (fleetMessages.length > 0) {
+  message += `\n\nFleet messages from the control terminal — acknowledge and act on these first:\n${fleetMessages
+    .map((m) => `- ${m.text}`)
+    .join('\n')}`;
+}
 
 switch (format) {
   case 'cursor':
