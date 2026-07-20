@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.4 — 2026-07-20
+
+- **More environments:** install targets now cover Claude Code, Cursor, Codex CLI, GitHub Copilot, Gemini CLI, Windsurf, and opencode — each into its global Agent-Skills (`SKILL.md`) directory. Shorthand flags `--copilot/--gemini/--windsurf/--opencode` added.
+- **Select all:** the skills picker defaults to everything on a fresh machine; `a` toggles all in any checkbox.
+- **Remembers installs & reconciles:** pickers pre-check what you already have; choosing the full set installs new skill×env pairs and removes deselected ones (`--prune` to force this non-interactively). Flag-scoped runs (e.g. `forge install`) stay additive.
+- **ADR path only when relevant:** ADRs enable by picking an ADR skill; the ADR-directory question is skipped entirely when no ADR skill is selected (the standalone "use ADRs?" prompt is gone).
+
+Note: `forge init` project wiring still targets Cursor / Claude Code / Codex — the three with command/rule/hook templates.
+
 ## 0.1.3 — 2026-07-20
 
 - **Arrow-key selectors** (same UI as OpenSpec, via `@inquirer/prompts`): skill/environment pickers are checkbox multi-selects (space to toggle, `a` for all), yes/no questions are confirm prompts, the planning-engine choice is a two-option select, and the ADR directory input pre-fills its default. Numbered `1,3`-style menus removed. Ctrl+C exits cleanly (code 130). Non-interactive flags (`--skills`, `--agents`, `--all`) unchanged.

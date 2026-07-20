@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkbox, confirm, input, select } from '@inquirer/prompts';
+import { checkbox, input, select } from '@inquirer/prompts';
 import {
   ADR_SKILLS,
   DEFAULT_ADR_DIR,
@@ -58,19 +58,41 @@ export const SKILLS = {
 
 export const SKILL_IDS = Object.freeze(Object.keys(SKILLS));
 
-/** @type {Record<string, { label: string, skillDir: (home: string, skillId: string) => string }>} */
+/**
+ * Supported environments and their user-level skills directory.
+ * Paths follow each tool's global Agent-Skills (SKILL.md) convention.
+ * @type {Record<string, { label: string, skillDir: (home: string, skillId: string) => string }>}
+ */
 export const AGENTS = {
-  cursor: {
-    label: 'Cursor',
-    skillDir: (home, skillId) => path.join(home, '.cursor', 'skills', skillId),
-  },
   claude: {
     label: 'Claude Code',
     skillDir: (home, skillId) => path.join(home, '.claude', 'skills', skillId),
   },
+  cursor: {
+    label: 'Cursor',
+    skillDir: (home, skillId) => path.join(home, '.cursor', 'skills', skillId),
+  },
   codex: {
     label: 'Codex CLI',
     skillDir: (home, skillId) => path.join(home, '.codex', 'skills', skillId),
+  },
+  copilot: {
+    label: 'GitHub Copilot',
+    skillDir: (home, skillId) => path.join(home, '.copilot', 'skills', skillId),
+  },
+  gemini: {
+    label: 'Gemini CLI',
+    skillDir: (home, skillId) => path.join(home, '.gemini', 'skills', skillId),
+  },
+  windsurf: {
+    label: 'Windsurf',
+    skillDir: (home, skillId) =>
+      path.join(home, '.codeium', 'windsurf', 'skills', skillId),
+  },
+  opencode: {
+    label: 'opencode',
+    skillDir: (home, skillId) =>
+      path.join(home, '.config', 'opencode', 'skills', skillId),
   },
 };
 
@@ -101,6 +123,7 @@ export function parseArgs(argv) {
     list: false,
     help: false,
     force: false,
+    prune: false,
     update: false,
     uninstall: false,
     /** @type {boolean | null} null = unset (prompt / infer) */
@@ -127,10 +150,15 @@ export function parseArgs(argv) {
     else if (arg === '--update') opts.update = true;
     else if (arg === '--uninstall') opts.uninstall = true;
     else if (arg === '--force' || arg === '-f') opts.force = true;
+    else if (arg === '--prune') opts.prune = true;
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else if (arg === '--cursor') opts.agents.push('cursor');
     else if (arg === '--claude' || arg === '--claude-code') opts.agents.push('claude');
     else if (arg === '--codex') opts.agents.push('codex');
+    else if (arg === '--copilot') opts.agents.push('copilot');
+    else if (arg === '--gemini') opts.agents.push('gemini');
+    else if (arg === '--windsurf') opts.agents.push('windsurf');
+    else if (arg === '--opencode') opts.agents.push('opencode');
     else if (arg === '--adr') opts.adr = true;
     else if (arg === '--no-adr') opts.adr = false;
     else if (arg === '--adr-dir') opts.adrDir = argv[++i];
@@ -164,8 +192,10 @@ Options:
   --agents <ids>    Comma list: ${AGENT_IDS.join(', ')}
   --all-skills      Install every known skill
   --all-agents      Install for every agent environment
-  --cursor/--claude/--codex
+  --cursor/--claude/--codex/--copilot/--gemini/--windsurf/--opencode
                     Shorthand agent flags (same as --agents)
+  --prune           Reconcile: also remove installed skill×env pairs
+                    outside the selection (implied by the full picker)
   --openspec        Prefer OpenSpec as the planning engine (save user default)
   --no-openspec     Prefer the built-in specs engine (save user default)
   --adr             Enable ADRs (install ADR skills; save user default)
@@ -180,9 +210,12 @@ Options:
   --force, -f       Overwrite existing skill directories
   --help
 
-Interactive (TTY) when skills and/or agents are omitted. You are also asked
-whether to plan with OpenSpec (vs the built-in specs engine), whether to use
-ADRs, and for the ADR path inside the repo (default ${DEFAULT_ADR_DIR}).
+Interactive (TTY) when skills and/or agents are omitted: arrow-key pickers
+(space to toggle, <a> for all) pre-checked with what you already have
+installed. Choosing the full set reconciles — newly picked pairs install,
+deselected ones are removed. You are also asked whether to plan with OpenSpec
+(vs the built-in specs engine). ADRs are enabled by picking an ADR skill; the
+ADR path (default ${DEFAULT_ADR_DIR}) is only asked then.
 
 Aliases:
   forge install […]   → forgekit install --skills forge […]
@@ -356,6 +389,54 @@ export function uninstallSkillsFromAgents(skillIds, agentIds, opts = {}) {
 }
 
 /**
+ * Every forgekit-managed skill×agent install currently on disk (has our stamp).
+ * This is the "memory" of what was installed — no separate state file needed.
+ * @param {string} [home]
+ * @returns {{ skill: string, agent: string, dest: string }[]}
+ */
+export function installedManagedPairs(home = os.homedir()) {
+  /** @type {{ skill: string, agent: string, dest: string }[]} */
+  const pairs = [];
+  for (const skill of SKILL_IDS) {
+    for (const agent of AGENT_IDS) {
+      const dest = AGENTS[agent].skillDir(home, skill);
+      if (fs.existsSync(dest) && readInstallStamp(dest)) {
+        pairs.push({ skill, agent, dest });
+      }
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Install the selected skills×agents and, when pruning, remove any managed
+ * install that falls outside the new selection.
+ * @param {string[]} skillIds
+ * @param {string[]} agentIds
+ * @param {{ home?: string, force?: boolean, prune?: boolean }} [opts]
+ */
+export function reconcileInstall(skillIds, agentIds, opts = {}) {
+  const home = opts.home ?? os.homedir();
+  const desired = new Set();
+  for (const s of skillIds) for (const a of agentIds) desired.add(`${s}::${a}`);
+  /** @type {{ skill: string, agent: string, dest: string, status: string }[]} */
+  const removed = [];
+  if (opts.prune) {
+    for (const p of installedManagedPairs(home)) {
+      if (!desired.has(`${p.skill}::${p.agent}`)) {
+        removeDirRecursive(p.dest);
+        removed.push({ ...p, status: 'removed' });
+      }
+    }
+  }
+  const results = installSkillsToAgents(skillIds, agentIds, {
+    home,
+    force: opts.force ?? true,
+  });
+  return { results, removed };
+}
+
+/**
  * Reinstall skills that are outdated or unversioned for agents that already have them.
  * @param {{ home?: string, skills?: string[], agents?: string[] }} [opts]
  */
@@ -415,25 +496,32 @@ export function listInstallStatus(opts = {}) {
 /**
  * @param {string} message
  * @param {string[]} ids
+ * @param {string[]} [checkedIds] pre-selected (remembered from prior install)
  * @returns {Promise<string[]>}
  */
-async function promptMulti(message, ids) {
+async function promptMulti(message, ids, checkedIds = []) {
+  const checked = new Set(checkedIds);
   return checkbox({
     message,
     choices: ids.map((id) => ({
       value: id,
       name: SKILLS[id]?.label ?? AGENTS[id]?.label ?? id,
+      checked: checked.has(id),
     })),
     required: true,
   });
 }
 
-async function promptSkills() {
-  return promptMulti('Install which skills?', SKILL_IDS);
+/** @param {string[]} [checkedIds] */
+async function promptSkills(checkedIds) {
+  // First run (nothing installed): default to all skills, so <enter> = install everything.
+  const defaults = checkedIds?.length ? checkedIds : [...SKILL_IDS];
+  return promptMulti('Install which skills?', SKILL_IDS, defaults);
 }
 
-async function promptAgents() {
-  return promptMulti('Install for which environments?', AGENT_IDS);
+/** @param {string[]} [checkedIds] */
+async function promptAgents(checkedIds) {
+  return promptMulti('Install for which environments?', AGENT_IDS, checkedIds ?? []);
 }
 
 /**
@@ -446,19 +534,6 @@ export async function promptAdrDir(defaultDir = DEFAULT_ADR_DIR) {
     default: defaultDir,
   });
   return normalizeAdrDir(dir.trim() || defaultDir);
-}
-
-/**
- * @returns {Promise<{ enabled: boolean, dir: string }>}
- */
-export async function promptAdrOptions() {
-  const enabled = await confirm({
-    message: 'Use Architecture Decision Records (ADRs) after OpenSpec archive?',
-    default: false,
-  });
-  if (!enabled) return { enabled: false, dir: DEFAULT_ADR_DIR };
-  const dir = await promptAdrDir(DEFAULT_ADR_DIR);
-  return { enabled: true, dir };
 }
 
 /**
@@ -504,45 +579,38 @@ export function inferAdrFromSkills(skills, adrFlag) {
 }
 
 /**
- * Resolve ADR enablement + directory from flags / prompts.
+ * Resolve ADR enablement + directory. ADRs turn on when an ADR skill is picked
+ * (or --adr); the path is only asked when enabled — never a standalone prompt.
  * @param {{ adr: boolean | null, adrDir: string | null, skills: string[] }} opts
  * @returns {Promise<{ enabled: boolean, dir: string }>}
  */
 export async function resolveAdrInstallOptions(opts) {
-  const adrDecision = inferAdrFromSkills(opts.skills, opts.adr);
-  /** @type {{ enabled: boolean, dir: string }} */
-  let adrOpts = { enabled: false, dir: DEFAULT_ADR_DIR };
-
-  if (adrDecision === null && process.stdin.isTTY) {
-    adrOpts = await promptAdrOptions();
-  } else if (adrDecision === true) {
-    adrOpts.enabled = true;
-    adrOpts.dir = opts.adrDir
-      ? normalizeAdrDir(opts.adrDir)
-      : process.stdin.isTTY
-        ? await promptAdrDir(DEFAULT_ADR_DIR)
-        : DEFAULT_ADR_DIR;
-  } else if (adrDecision === false) {
-    adrOpts = {
+  const enabled = inferAdrFromSkills(opts.skills, opts.adr) === true;
+  if (!enabled) {
+    return {
       enabled: false,
       dir: opts.adrDir ? normalizeAdrDir(opts.adrDir) : DEFAULT_ADR_DIR,
     };
   }
-
-  if (opts.adrDir && adrOpts.enabled) {
-    adrOpts.dir = normalizeAdrDir(opts.adrDir);
-  }
-  return adrOpts;
+  const dir = opts.adrDir
+    ? normalizeAdrDir(opts.adrDir)
+    : process.stdin.isTTY
+      ? await promptAdrDir(DEFAULT_ADR_DIR)
+      : DEFAULT_ADR_DIR;
+  return { enabled: true, dir };
 }
 
 /**
- * @param {string[]} skills
- * @param {string[]} agents
- * @returns {Promise<{ skills: string[], agents: string[] } | number>}
+ * @param {string[]} skillsIn
+ * @param {string[]} agentsIn
+ * @returns {Promise<{ skills: string[], agents: string[], skillsPrompted: boolean, agentsPrompted: boolean } | number>}
  */
 async function resolveSkillsAndAgents(skillsIn, agentsIn) {
   let skills = [...skillsIn];
   let agents = [...agentsIn];
+  let skillsPrompted = false;
+  let agentsPrompted = false;
+  const installed = installedManagedPairs();
 
   if (skills.length === 0) {
     if (!process.stdin.isTTY) {
@@ -551,7 +619,8 @@ async function resolveSkillsAndAgents(skillsIn, agentsIn) {
       );
       return 1;
     }
-    skills = await promptSkills();
+    skills = await promptSkills([...new Set(installed.map((p) => p.skill))]);
+    skillsPrompted = true;
   }
 
   for (const id of skills) {
@@ -568,7 +637,8 @@ async function resolveSkillsAndAgents(skillsIn, agentsIn) {
       );
       return 1;
     }
-    agents = await promptAgents();
+    agents = await promptAgents([...new Set(installed.map((p) => p.agent))]);
+    agentsPrompted = true;
   }
 
   for (const id of agents) {
@@ -578,7 +648,7 @@ async function resolveSkillsAndAgents(skillsIn, agentsIn) {
     }
   }
 
-  return { skills, agents };
+  return { skills, agents, skillsPrompted, agentsPrompted };
 }
 
 /**
@@ -628,6 +698,10 @@ export async function runInstall(argv = process.argv.slice(2)) {
   if (typeof resolved === 'number') return resolved;
   skills = resolved.skills;
   agents = resolved.agents;
+  // Reconcile (add new, drop deselected) only when the user chose the full set
+  // via the pickers — flag-scoped runs (e.g. `forge install`) stay additive.
+  const prune =
+    opts.prune || (resolved.skillsPrompted && resolved.agentsPrompted);
 
   if (opts.uninstall) {
     const results = uninstallSkillsFromAgents(skills, agents);
@@ -658,13 +732,18 @@ export async function runInstall(argv = process.argv.slice(2)) {
     adr: { enabled: adrOpts.enabled, dir: adrOpts.dir },
   });
 
-  const results = installSkillsToAgents(skills, agents, { force: opts.force });
+  const { results, removed } = prune
+    ? reconcileInstall(skills, agents, { force: true, prune: true })
+    : { results: installSkillsToAgents(skills, agents, { force: opts.force }), removed: [] };
   const sources = new Map();
   for (const r of results) {
     if (r.skillSource) sources.set(r.skill, r.skillSource);
   }
   for (const [skill, src] of sources) {
     process.stdout.write(`Skill ${skill}: ${src}\n`);
+  }
+  for (const r of removed) {
+    process.stdout.write(`${r.skill} × ${r.agent}: removed (deselected) → ${r.dest}\n`);
   }
   for (const r of results) {
     process.stdout.write(

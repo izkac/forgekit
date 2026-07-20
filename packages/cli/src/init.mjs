@@ -389,13 +389,33 @@ export function initProject(selected, opts) {
   return report;
 }
 
-async function promptAgents() {
+/**
+ * Environments this project already has Forge wiring for (marker dir present).
+ * @param {string} cwd
+ * @returns {Set<string>}
+ */
+function wiredAgents(cwd) {
+  const markers = {
+    cursor: path.join(cwd, '.cursor', 'commands'),
+    claude: path.join(cwd, '.claude', 'commands'),
+    codex: path.join(cwd, '.codex', 'rules'),
+  };
+  return new Set(
+    Object.entries(markers)
+      .filter(([, dir]) => fs.existsSync(dir))
+      .map(([id]) => id),
+  );
+}
+
+/** @param {string} cwd */
+async function promptAgents(cwd) {
+  const wired = wiredAgents(cwd);
   return checkbox({
     message: 'Init Forge project wiring for which environments?',
     choices: [
-      { value: 'cursor', name: 'Cursor' },
-      { value: 'claude', name: 'Claude Code' },
-      { value: 'codex', name: 'Codex CLI' },
+      { value: 'cursor', name: 'Cursor', checked: wired.has('cursor') },
+      { value: 'claude', name: 'Claude Code', checked: wired.has('claude') },
+      { value: 'codex', name: 'Codex CLI', checked: wired.has('codex') },
     ],
     required: true,
   });
@@ -496,7 +516,7 @@ async function main(argv = process.argv.slice(2)) {
       );
       return 1;
     }
-    selected = await promptAgents();
+    selected = await promptAgents(opts.cwd);
   }
 
   const planEngine = await resolveInitPlanEngine({

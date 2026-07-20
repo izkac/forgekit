@@ -6,13 +6,17 @@ import path from 'node:path';
 import {
   parseArgs,
   installSkillsToAgents,
+  reconcileInstall,
+  installedManagedPairs,
   listInstallStatus,
   uninstallSkillsFromAgents,
   updateOutdatedSkills,
   readInstallStamp,
+  resolveAdrInstallOptions,
   FORGEKIT_STAMP,
   SKILL_IDS,
   AGENT_IDS,
+  AGENTS,
 } from './install.mjs';
 
 test('parseArgs supports multi skills and agents', () => {
@@ -87,6 +91,78 @@ test('uninstallSkillsFromAgents removes installed dirs', () => {
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test('expanded environments resolve to their global skills dirs', () => {
+  const home = '/home/u';
+  assert.ok(AGENT_IDS.includes('copilot'));
+  assert.ok(AGENT_IDS.includes('windsurf'));
+  assert.equal(
+    AGENTS.copilot.skillDir(home, 'forge'),
+    path.join(home, '.copilot', 'skills', 'forge'),
+  );
+  assert.equal(
+    AGENTS.windsurf.skillDir(home, 'forge'),
+    path.join(home, '.codeium', 'windsurf', 'skills', 'forge'),
+  );
+  assert.equal(
+    AGENTS.opencode.skillDir(home, 'forge'),
+    path.join(home, '.config', 'opencode', 'skills', 'forge'),
+  );
+});
+
+test('reconcileInstall prunes deselected pairs and remembers installs', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recon-'));
+  try {
+    // Start: forge on cursor + claude.
+    reconcileInstall(['forge'], ['cursor', 'claude'], { home, prune: true });
+    let managed = installedManagedPairs(home);
+    assert.equal(managed.length, 2);
+
+    // Re-select: forge on cursor only → claude pair pruned.
+    const { removed } = reconcileInstall(['forge'], ['cursor'], {
+      home,
+      prune: true,
+    });
+    assert.equal(removed.length, 1);
+    assert.equal(removed[0].agent, 'claude');
+    managed = installedManagedPairs(home);
+    assert.deepEqual(
+      managed.map((p) => `${p.skill}:${p.agent}`),
+      ['forge:cursor'],
+    );
+    assert.ok(!fs.existsSync(path.join(home, '.claude', 'skills', 'forge')));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('reconcileInstall without prune is additive (no removals)', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recon2-'));
+  try {
+    reconcileInstall(['forge'], ['cursor', 'claude'], { home, prune: true });
+    const { removed } = reconcileInstall(['forge'], ['cursor'], { home });
+    assert.equal(removed.length, 0);
+    assert.equal(installedManagedPairs(home).length, 2);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('resolveAdrInstallOptions: no ADR skill selected → disabled, no path prompt', async () => {
+  const off = await resolveAdrInstallOptions({
+    adr: null,
+    adrDir: null,
+    skills: ['forge'],
+  });
+  assert.equal(off.enabled, false);
+  const on = await resolveAdrInstallOptions({
+    adr: null,
+    adrDir: 'docs/decisions',
+    skills: ['forge', 'archive-to-adr'],
+  });
+  assert.equal(on.enabled, true);
+  assert.equal(on.dir, 'docs/decisions');
 });
 
 test('updateOutdatedSkills refreshes unversioned installs', () => {

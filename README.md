@@ -22,10 +22,12 @@ Preferred — install the published package (Node 20+):
 ```bash
 npm i -g @izkac/forgekit
 
-# Pick skills and agents (interactive on TTY)
+# Pick skills and environments (arrow-key checkboxes; `a` = all)
 forgekit install
-# Asks: which skills, which agents, planning engine (OpenSpec vs built-in specs),
-# whether to use ADRs, and ADR path (default docs/adr)
+# Environments: Claude Code, Cursor, Codex, GitHub Copilot, Gemini, Windsurf, opencode.
+# Pickers remember what you have installed; re-running reconciles the difference.
+# Also asks the planning engine (OpenSpec vs built-in specs). ADRs turn on by
+# picking an ADR skill (then it asks the ADR path, default docs/adr).
 
 # or non-interactive:
 forgekit install --skills forge,thorough-code-review --agents cursor,claude --force
