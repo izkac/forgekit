@@ -105,6 +105,70 @@ test('resolveChangeDir: openspec plan type and session-dir fallback', () => {
   }
 });
 
+test('resolveChangeDir: falls back to the archived copy after archive', () => {
+  for (const [planType, root] of [
+    ['openspec', ['openspec', 'changes']],
+    ['specs', ['specs', 'changes']],
+  ]) {
+    const cwd = tmp('forge-changedir-arch-');
+    try {
+      const changesDir = path.join(cwd, ...root);
+      const liveDir = path.join(changesDir, 'add-customer-registry');
+      fs.mkdirSync(liveDir, { recursive: true });
+      const session = { planType, openspecChange: 'add-customer-registry' };
+
+      // Live dir present → live path.
+      assert.equal(resolveChangeDir({ cwd, session }), liveDir);
+
+      // Archive moves it → resolve follows into changes/archive/<date>-<name>.
+      const archived = path.join(changesDir, 'archive', '2026-07-20-add-customer-registry');
+      fs.mkdirSync(path.dirname(archived), { recursive: true });
+      fs.renameSync(liveDir, archived);
+      assert.equal(resolveChangeDir({ cwd, session }), archived);
+
+      // Newest archive wins when a change name recurs.
+      const older = path.join(changesDir, 'archive', '2025-01-01-add-customer-registry');
+      fs.mkdirSync(older, { recursive: true });
+      assert.equal(resolveChangeDir({ cwd, session }), archived);
+
+      // No false match on a different change that ends with the same words.
+      fs.mkdirSync(path.join(changesDir, 'archive', '2026-07-20-extra-add-customer-registry'), {
+        recursive: true,
+      });
+      assert.equal(resolveChangeDir({ cwd, session }), archived);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('runIntegrityChecks: passes after archive (spine resolves in archive dir)', () => {
+  const cwd = tmp('forge-int-archived-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    const session = { planType: 'openspec', openspecChange: 'add-customer-registry', slug: 'add-customer-registry' };
+
+    // Green while live: spine in the change dir (sync-only notApplicable).
+    const liveDir = path.join(cwd, 'openspec', 'changes', 'add-customer-registry');
+    fs.mkdirSync(liveDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(liveDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    assert.equal(runIntegrityChecks({ cwd, sessionDir, session }).ok, true);
+
+    // Archive the change — the mechanical gate must STILL pass (the bug: it
+    // used to look only at the vanished live path and fail).
+    const archived = path.join(cwd, 'openspec', 'changes', 'archive', '2026-07-20-add-customer-registry');
+    fs.mkdirSync(path.dirname(archived), { recursive: true });
+    fs.renameSync(liveDir, archived);
+    assert.equal(runIntegrityChecks({ cwd, sessionDir, session }).ok, true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('deferrals: add, list, resolve lifecycle', () => {
   const dir = tmp('forge-defer-');
   try {

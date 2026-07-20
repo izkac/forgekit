@@ -58,14 +58,52 @@ function isNonEmptyString(value) {
  *
  * @param {{ cwd?: string, session?: Record<string, unknown> | null }} opts
  */
+/**
+ * The archived copy of a change, when the live dir is gone. Archiving moves
+ * `changes/<change>/` to `changes/archive/<YYYY-MM-DD>-<change>/`, so the
+ * done-gate integrity check (which runs *after* archive in the finish flow)
+ * would otherwise never find spine.json/e2e.json. Returns null if no match.
+ *
+ * @param {string} changesDir absolute path to `<root>/changes`
+ * @param {string} change change name
+ */
+function findArchivedChangeDir(changesDir, change) {
+  const archiveDir = path.join(changesDir, 'archive');
+  if (!fs.existsSync(archiveDir)) return null;
+  let entries;
+  try {
+    entries = fs.readdirSync(archiveDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const matches = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    // CLI + documented manual archive both name dirs `YYYY-MM-DD-<change>`;
+    // slice(11) drops the `YYYY-MM-DD-` prefix so the suffix must equal the
+    // change exactly (no false match on `…-other-<change>`).
+    .filter((name) => name === change || (/^\d{4}-\d{2}-\d{2}-/.test(name) && name.slice(11) === change))
+    .sort();
+  // Date-prefixed names sort lexically by date — newest archive wins.
+  return matches.length ? path.join(archiveDir, matches[matches.length - 1]) : null;
+}
+
+/** Live change dir if present, else its archived copy, else the live path. */
+function liveOrArchived(changesDir, change) {
+  const liveDir = path.join(changesDir, change);
+  if (fs.existsSync(liveDir)) return liveDir;
+  return findArchivedChangeDir(changesDir, change) ?? liveDir;
+}
+
 export function resolveChangeDir(opts = {}) {
   const cwd = opts.cwd ?? process.cwd();
   const session = opts.session ?? null;
   const change = session && isNonEmptyString(session.openspecChange) ? session.openspecChange : null;
   if (!change) return null;
 
-  const openspecDir = path.join(cwd, 'openspec', 'changes', change);
-  if (session.planType === 'openspec') return openspecDir;
+  const openspecChanges = path.join(cwd, 'openspec', 'changes');
+  const openspecDir = path.join(openspecChanges, change);
+  if (session.planType === 'openspec') return liveOrArchived(openspecChanges, change);
 
   let specsRoot = DEFAULT_SPECS_DIR;
   try {
@@ -73,13 +111,18 @@ export function resolveChangeDir(opts = {}) {
   } catch {
     // keep default
   }
-  const specsDir = path.join(cwd, specsRoot, 'changes', change);
-  if (session.planType === 'specs') return specsDir;
+  const specsChanges = path.join(cwd, specsRoot, 'changes');
+  const specsDir = path.join(specsChanges, change);
+  if (session.planType === 'specs') return liveOrArchived(specsChanges, change);
 
-  // planType unknown — prefer whichever exists
+  // planType unknown — prefer whichever exists (live first, then archived)
   if (fs.existsSync(openspecDir)) return openspecDir;
   if (fs.existsSync(specsDir)) return specsDir;
-  return openspecDir;
+  return (
+    findArchivedChangeDir(openspecChanges, change) ??
+    findArchivedChangeDir(specsChanges, change) ??
+    openspecDir
+  );
 }
 
 /**
