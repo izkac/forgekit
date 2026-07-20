@@ -25,8 +25,11 @@ forge brief stamp        # records specs hash + opens it in the operator's brows
 forge phase implement --tasks-total <N>   # hard-gated on a fresh stamped brief
 ```
 
-If any spec file changes later, the brief goes **stale** — update the affected
-sections and `forge brief stamp` again. `forge brief check` reports status.
+If any spec file changes later, the brief goes **stale** — the gate cannot
+tell meaning changes from typo fixes, so it flags both. Triage cheaply: if the
+edit doesn't change what the operator approved (typo, task renumber,
+formatting), just re-run `forge brief stamp` — no rewrite. If it does, update
+the affected sections first, then stamp. `forge brief check` reports status.
 Genuine edge case (operator explicitly waives it):
 `forge phase implement --allow-incomplete "<reason>"`.
 

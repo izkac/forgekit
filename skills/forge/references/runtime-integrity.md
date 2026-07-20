@@ -80,6 +80,29 @@ driven by any command (e.g. requires a physical device). Reviewers police the
 reason; "no time" or "covered by unit tests" is a REJECT. Keep a short loop
 narrative under `## Product loop` in `verify-evidence.md` as reviewer context.
 
+### Keeping the loop cheap (cost policy)
+
+"Too complex to test" is usually a signal to test it, not to wave it through —
+a loop is complex exactly when the feature has many wiring seams, which is
+when wiring silently breaks. Never skip the loop for complexity; control its
+cost instead:
+
+- **Ask before building new harness infrastructure, not before testing.** If
+  a harness already exists (test server, isolated ports, scratch DB), the loop
+  is cheap — author it. If the loop would require building a harness from
+  scratch or driving a third-party service, stop and ask the user: that is a
+  project, not a test.
+- **One executed loop per capability, not per assertion.** Push edge cases
+  into unit tests; e2e proves the wiring exists.
+- **Set `timeoutMs` from the step count up front.** A 10-step loop is never a
+  30s test — a too-small budget fails at whatever line the clock runs out on,
+  which reads as a phantom regression.
+- **Run it once, at the end, serially** — never alongside unit suites; load
+  makes real assertions look flaky.
+- **Prefer a production/preview build over the dev server** when the loop
+  drives a web app — compile-on-demand and dev-mode socket noise dominate the
+  per-run cost and bury the actual assertion.
+
 ## 6. Job-kind closure
 
 Every job kind / entry point on the product surface (enums, API, UI) is, before
