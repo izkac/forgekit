@@ -16,9 +16,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline/promises';
 import { pathToFileURL } from 'node:url';
-import { stdin as input, stdout as output } from 'node:process';
+import { checkbox, confirm, input, select } from '@inquirer/prompts';
 import {
   ADR_SKILLS,
   DEFAULT_ADR_DIR,
@@ -28,7 +27,6 @@ import {
   scaffoldAdr,
   disableProjectAdr,
 } from './adr.mjs';
-import { parseMenuSelection } from './menu-select.mjs';
 import { saveUserPlanEngine } from './plan-engine.mjs';
 import { hashDirectory, packageVersion, resolveAsset } from './paths.mjs';
 
@@ -415,42 +413,27 @@ export function listInstallStatus(opts = {}) {
 }
 
 /**
- * @param {string} question
- * @param {Record<string, string>} map  number → id
- * @param {string[]} allIds
+ * @param {string} message
+ * @param {string[]} ids
  * @returns {Promise<string[]>}
  */
-async function promptMulti(question, map, allIds) {
-  const rl = readline.createInterface({ input, output });
-  try {
-    const entries = Object.entries(map);
-    const allNum = String(entries.length + 1);
-    process.stdout.write(`${question}\n`);
-    process.stdout.write(`(pick one or more — e.g. 1 or 1,3 — or ${allNum} for all)\n`);
-    for (const [num, id] of entries) {
-      const label = SKILLS[id]?.label ?? AGENTS[id]?.label ?? id;
-      process.stdout.write(`  ${num}) ${label}\n`);
-    }
-    process.stdout.write(`  ${allNum}) All\n`);
-    for (;;) {
-      const answer = await rl.question(`Choice(s) [1-${allNum}]: `);
-      const parsed = parseMenuSelection(answer, map, allIds, allNum);
-      if (parsed.ok) return parsed.ids;
-      process.stdout.write(`${parsed.error}\n`);
-    }
-  } finally {
-    rl.close();
-  }
+async function promptMulti(message, ids) {
+  return checkbox({
+    message,
+    choices: ids.map((id) => ({
+      value: id,
+      name: SKILLS[id]?.label ?? AGENTS[id]?.label ?? id,
+    })),
+    required: true,
+  });
 }
 
 async function promptSkills() {
-  const map = Object.fromEntries(SKILL_IDS.map((id, i) => [String(i + 1), id]));
-  return promptMulti('Install which skills?', map, SKILL_IDS);
+  return promptMulti('Install which skills?', SKILL_IDS);
 }
 
 async function promptAgents() {
-  const map = Object.fromEntries(AGENT_IDS.map((id, i) => [String(i + 1), id]));
-  return promptMulti('Install for which environments?', map, AGENT_IDS);
+  return promptMulti('Install for which environments?', AGENT_IDS);
 }
 
 /**
@@ -458,35 +441,21 @@ async function promptAgents() {
  * @returns {Promise<string>}
  */
 export async function promptAdrDir(defaultDir = DEFAULT_ADR_DIR) {
-  const rl = readline.createInterface({ input, output });
-  try {
-    const dirAnswer = (
-      await rl.question(`ADR directory inside each repo [${defaultDir}]: `)
-    ).trim();
-    return normalizeAdrDir(dirAnswer || defaultDir);
-  } finally {
-    rl.close();
-  }
+  const dir = await input({
+    message: 'ADR directory inside each repo',
+    default: defaultDir,
+  });
+  return normalizeAdrDir(dir.trim() || defaultDir);
 }
 
 /**
  * @returns {Promise<{ enabled: boolean, dir: string }>}
  */
 export async function promptAdrOptions() {
-  const rl = readline.createInterface({ input, output });
-  let enabled = false;
-  try {
-    const yn = (
-      await rl.question(
-        'Use Architecture Decision Records (ADRs) after OpenSpec archive? [y/N] ',
-      )
-    )
-      .trim()
-      .toLowerCase();
-    enabled = yn === 'y' || yn === 'yes';
-  } finally {
-    rl.close();
-  }
+  const enabled = await confirm({
+    message: 'Use Architecture Decision Records (ADRs) after OpenSpec archive?',
+    default: false,
+  });
   if (!enabled) return { enabled: false, dir: DEFAULT_ADR_DIR };
   const dir = await promptAdrDir(DEFAULT_ADR_DIR);
   return { enabled: true, dir };
@@ -496,19 +465,13 @@ export async function promptAdrOptions() {
  * @returns {Promise<boolean>} true = OpenSpec, false = built-in specs engine
  */
 export async function promptOpenSpec() {
-  const rl = readline.createInterface({ input, output });
-  try {
-    const yn = (
-      await rl.question(
-        'Plan with OpenSpec (vendor CLI)? [Y/n] (n = built-in specs engine) ',
-      )
-    )
-      .trim()
-      .toLowerCase();
-    return !(yn === 'n' || yn === 'no');
-  } finally {
-    rl.close();
-  }
+  return select({
+    message: 'Planning engine?',
+    choices: [
+      { value: true, name: 'OpenSpec (vendor CLI)' },
+      { value: false, name: 'Built-in specs engine' },
+    ],
+  });
 }
 
 /**
@@ -763,6 +726,7 @@ if (isDirect) {
   runInstall()
     .then((code) => process.exit(code))
     .catch((err) => {
+      if (err?.name === 'ExitPromptError') process.exit(130);
       process.stderr.write(`${err.message || err}\n`);
       process.exit(1);
     });

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.3 — 2026-07-20
+
+- **Arrow-key selectors** (same UI as OpenSpec, via `@inquirer/prompts`): skill/environment pickers are checkbox multi-selects (space to toggle, `a` for all), yes/no questions are confirm prompts, the planning-engine choice is a two-option select, and the ADR directory input pre-fills its default. Numbered `1,3`-style menus removed. Ctrl+C exits cleanly (code 130). Non-interactive flags (`--skills`, `--agents`, `--all`) unchanged.
+
 ## 0.1.2 — 2026-07-19
 
 - Interactive skill/agent picker: pick **one or more** (e.g. `1,3`) or all; clearer prompt and re-ask on bad input.

@@ -11,10 +11,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { stdin as input, stdout as output } from 'node:process';
+import { checkbox, confirm, input } from '@inquirer/prompts';
 import {
   DEFAULT_ADR_DIR,
   disableProjectAdr,
@@ -22,7 +21,6 @@ import {
   normalizeAdrDir,
   scaffoldAdr,
 } from './adr.mjs';
-import { parseMenuSelection } from './menu-select.mjs';
 import {
   DEFAULT_SPECS_DIR,
   hasOpenSpecConfig,
@@ -392,26 +390,15 @@ export function initProject(selected, opts) {
 }
 
 async function promptAgents() {
-  const rl = readline.createInterface({ input, output });
-  const map = { 1: 'cursor', 2: 'claude', 3: 'codex' };
-  const allIds = ['cursor', 'claude', 'codex'];
-  const allNum = '4';
-  try {
-    process.stdout.write(`Init Forge project wiring for which environments?\n`);
-    process.stdout.write(`(pick one or more — e.g. 1 or 1,3 — or ${allNum} for all)\n`);
-    process.stdout.write(`  1) Cursor\n`);
-    process.stdout.write(`  2) Claude Code\n`);
-    process.stdout.write(`  3) Codex CLI\n`);
-    process.stdout.write(`  ${allNum}) All\n`);
-    for (;;) {
-      const answer = await rl.question(`Choice(s) [1-${allNum}]: `);
-      const parsed = parseMenuSelection(answer, map, allIds, allNum);
-      if (parsed.ok) return parsed.ids;
-      process.stdout.write(`${parsed.error}\n`);
-    }
-  } finally {
-    rl.close();
-  }
+  return checkbox({
+    message: 'Init Forge project wiring for which environments?',
+    choices: [
+      { value: 'cursor', name: 'Cursor' },
+      { value: 'claude', name: 'Claude Code' },
+      { value: 'codex', name: 'Codex CLI' },
+    ],
+    required: true,
+  });
 }
 
 /**
@@ -419,19 +406,11 @@ async function promptAgents() {
  * @returns {Promise<boolean>} true = user accepted OpenSpec setup
  */
 async function promptOpenSpecSetup() {
-  const rl = readline.createInterface({ input, output });
-  try {
-    const yn = (
-      await rl.question(
-        'OpenSpec is not set up in this project. Install and set it up now? [Y/n] (n = built-in specs engine) ',
-      )
-    )
-      .trim()
-      .toLowerCase();
-    return !(yn === 'n' || yn === 'no');
-  } finally {
-    rl.close();
-  }
+  return confirm({
+    message:
+      'OpenSpec is not set up in this project. Install and set it up now? (No = built-in specs engine)',
+    default: true,
+  });
 }
 
 /**
@@ -490,25 +469,16 @@ async function resolveInitPlanEngine(opts) {
  * @returns {Promise<{ enabled: boolean, dir: string }>}
  */
 async function promptAdrForInit(defaultDir = DEFAULT_ADR_DIR) {
-  const rl = readline.createInterface({ input, output });
-  let enabled = false;
-  try {
-    const yn = (
-      await rl.question(
-        'Use Architecture Decision Records (ADRs) in this project? [y/N] ',
-      )
-    )
-      .trim()
-      .toLowerCase();
-    enabled = yn === 'y' || yn === 'yes';
-    if (!enabled) return { enabled: false, dir: defaultDir };
-    const dirAnswer = (
-      await rl.question(`ADR directory inside the repo [${defaultDir}]: `)
-    ).trim();
-    return { enabled: true, dir: normalizeAdrDir(dirAnswer || defaultDir) };
-  } finally {
-    rl.close();
-  }
+  const enabled = await confirm({
+    message: 'Use Architecture Decision Records (ADRs) in this project?',
+    default: false,
+  });
+  if (!enabled) return { enabled: false, dir: defaultDir };
+  const dir = await input({
+    message: 'ADR directory inside the repo',
+    default: defaultDir,
+  });
+  return { enabled: true, dir: normalizeAdrDir(dir.trim() || defaultDir) };
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -566,6 +536,7 @@ if (isDirect) {
   main()
     .then((code) => process.exit(code))
     .catch((err) => {
+      if (err?.name === 'ExitPromptError') process.exit(130);
       process.stderr.write(`${err.message || err}\n`);
       process.exit(1);
     });

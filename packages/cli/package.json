@@ -1,6 +1,6 @@
 {
   "name": "@izkac/forgekit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Forgekit CLIs — forgekit (install), forge (workflow), review (code review)",
   "type": "module",
   "bin": {
@@ -42,5 +42,8 @@
     "claude",
     "codex"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@inquirer/prompts": "^8.5.2"
+  }
 }
