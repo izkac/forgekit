@@ -205,11 +205,27 @@ export function checkOpenSpecCliQuick(runCommand) {
 }
 
 /**
+ * Map forgekit environment ids → OpenSpec tool ids (mostly identity).
+ * @type {Record<string, string>}
+ */
+const OPENSPEC_TOOL_ID = { copilot: 'github-copilot' };
+
+/**
+ * @param {string[]} agentIds forgekit environment ids
+ * @returns {string[]} OpenSpec tool ids
+ */
+export function toOpenSpecToolIds(agentIds) {
+  return agentIds.map((id) => OPENSPEC_TOOL_ID[id] ?? id);
+}
+
+/**
  * Install the OpenSpec CLI (if missing) and run `openspec init` in the project.
- * Interactive: inherits stdio so `openspec init` can prompt.
+ * Interactive: inherits stdio so `openspec init` can prompt — unless `tools`
+ * is given, in which case those tools are configured non-interactively
+ * (`openspec init --tools <ids>`), skipping OpenSpec's own tool picker.
  *
  * @param {string} cwd
- * @param {{ runCommand?: Function, interactive?: boolean }} [opts]
+ * @param {{ runCommand?: Function, interactive?: boolean, tools?: string[] }} [opts]
  * @returns {{ ok: boolean, steps: { step: string, ok: boolean, detail?: string }[] }}
  */
 export function setupOpenSpec(cwd, opts = {}) {
@@ -249,10 +265,12 @@ export function setupOpenSpec(cwd, opts = {}) {
     return { ok: true, steps };
   }
 
-  const init = runInherit('openspec', ['init']);
+  const tools = opts.tools?.length ? toOpenSpecToolIds(opts.tools) : null;
+  const initArgs = tools ? ['init', '--tools', tools.join(',')] : ['init'];
+  const init = runInherit('openspec', initArgs);
   const initOk = init.status === 0;
   steps.push({
-    step: 'openspec init',
+    step: `openspec ${initArgs.join(' ')}`,
     ok: initOk,
     detail: initOk ? undefined : String(init.error ?? `exit ${init.status}`),
   });

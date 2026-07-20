@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.6 — 2026-07-20
+
+- **`forge init` pre-selects your environments in OpenSpec setup too.** When init runs `openspec init`, it now passes your chosen environments via `openspec init --tools <ids>` (mapping `copilot` → OpenSpec's `github-copilot`), so OpenSpec configures exactly those tools non-interactively instead of showing its own 24-tool picker with nothing selected.
+
 ## 0.1.5 — 2026-07-20
 
 - **`forge init` offers the same environments as `forgekit install`** (all seven) and pre-checks the ones you picked during install — saved to `~/.forgekit/config.json` — so you don't select them twice. Environments without project-wiring templates (Copilot, Gemini, Windsurf, opencode) are driven by the globally installed skill and reported as such instead of silently doing nothing.

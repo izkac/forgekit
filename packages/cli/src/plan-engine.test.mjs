@@ -12,6 +12,7 @@ import {
   saveUserPlanEngine,
   scaffoldSpecs,
   setupOpenSpec,
+  toOpenSpecToolIds,
   writeProjectPlanConfig,
 } from './plan-engine.mjs';
 import { loadProjectConfig, loadUserConfig, saveUserConfig } from './adr.mjs';
@@ -143,6 +144,43 @@ test('setupOpenSpec runs install + init via injected runner', () => {
     assert.equal(result.ok, true);
     assert.ok(calls.some((c) => c.startsWith('npm install -g')));
     assert.ok(calls.includes('openspec init'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('toOpenSpecToolIds maps copilot → github-copilot, else identity', () => {
+  assert.deepEqual(
+    toOpenSpecToolIds(['claude', 'cursor', 'codex', 'opencode', 'copilot', 'gemini', 'windsurf']),
+    ['claude', 'cursor', 'codex', 'opencode', 'github-copilot', 'gemini', 'windsurf'],
+  );
+});
+
+test('setupOpenSpec passes selected tools to `openspec init --tools`', () => {
+  const cwd = tmpdir('forgekit-openspec-tools-');
+  try {
+    /** @type {string[]} */
+    const calls = [];
+    const runCommand = (cmd, args) => {
+      const line = [cmd, ...args].join(' ');
+      calls.push(line);
+      if (line === 'openspec --version') return { status: 0, stdout: '1.0.0' };
+      if (line.startsWith('openspec init')) {
+        fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
+        fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n', 'utf8');
+        return { status: 0, stdout: '' };
+      }
+      return { status: 1, stdout: '' };
+    };
+    const result = setupOpenSpec(cwd, {
+      runCommand,
+      tools: ['claude', 'cursor', 'codex', 'copilot'],
+    });
+    assert.equal(result.ok, true);
+    assert.ok(
+      calls.includes('openspec init --tools claude,cursor,codex,github-copilot'),
+      `expected --tools call, got: ${calls.join(' | ')}`,
+    );
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

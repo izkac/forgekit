@@ -469,17 +469,18 @@ async function promptOpenSpecSetup() {
 
 /**
  * Resolve the planning engine for `forge init`, offering OpenSpec setup when needed.
- * @param {{ cwd: string, openspec: boolean | null }} opts
+ * @param {{ cwd: string, openspec: boolean | null, agents?: string[] }} opts
  * @returns {Promise<string>} 'openspec' | 'specs'
  */
 async function resolveInitPlanEngine(opts) {
   const configured = hasOpenSpecConfig(opts.cwd);
+  const tools = opts.agents;
 
   if (opts.openspec === false) return 'specs';
 
   if (opts.openspec === true) {
     if (!configured && process.stdin.isTTY) {
-      const setup = setupOpenSpec(opts.cwd);
+      const setup = setupOpenSpec(opts.cwd, { tools });
       for (const s of setup.steps) {
         process.stdout.write(`  [${s.ok ? 'ok' : 'FAIL'}] ${s.step}${s.detail ? ` — ${s.detail}` : ''}\n`);
       }
@@ -505,7 +506,7 @@ async function resolveInitPlanEngine(opts) {
   const accepted = await promptOpenSpecSetup();
   if (!accepted) return 'specs';
 
-  const setup = setupOpenSpec(opts.cwd);
+  const setup = setupOpenSpec(opts.cwd, { tools });
   for (const s of setup.steps) {
     process.stdout.write(`  [${s.ok ? 'ok' : 'FAIL'}] ${s.step}${s.detail ? ` — ${s.detail}` : ''}\n`);
   }
@@ -564,6 +565,7 @@ async function main(argv = process.argv.slice(2)) {
   const planEngine = await resolveInitPlanEngine({
     cwd: opts.cwd,
     openspec: opts.openspec,
+    agents: selected,
   });
 
   let adr = opts.adr;
