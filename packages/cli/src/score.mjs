@@ -11,6 +11,8 @@ import path from 'node:path';
 import { readJson, writeJson } from './lib.mjs';
 import {
   JOBS_SIGNAL_RE,
+  checkE2eGate,
+  e2ePath,
   loadDeferrals,
   openDeferrals,
   resolveChangeDir,
@@ -111,9 +113,28 @@ function reviewSelfCheckCount(sessionDir) {
 }
 
 /**
- * @param {string} body
+ * True when a green e2e run was executed against the current e2e.json — the
+ * primary product-loop signal: score what ran, not what was written. A phrase
+ * match in verify-evidence is only the fallback (a session that titled its
+ * section differently but ran the loop green must not score 0).
+ *
+ * @param {{ cwd?: string, session?: Record<string, unknown> | null, sessionDir: string }} opts
  */
-function scoreProductLoopBody(body) {
+function e2eRunGreen(opts) {
+  try {
+    const e2eFile = e2ePath(opts);
+    const gate = checkE2eGate({ e2eFile, sessionDir: opts.sessionDir });
+    return gate.problems.length === 0 && !gate.notApplicable;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} body
+ * @param {boolean} executedGreen
+ */
+function scoreProductLoopBody(body, executedGreen = false) {
   /** @type {string[]} */
   const notes = [];
   let pts = 0;
@@ -122,12 +143,16 @@ function scoreProductLoopBody(body) {
     notes.push('verify-evidence contains BLOCKED — product-loop not proven');
     return { points: 0, max, notes };
   }
-  if (!/product[- ]loop/i.test(body)) {
-    notes.push('no ## Product loop section');
+  if (executedGreen) {
+    pts += 8;
+    notes.push('green e2e run executed against current e2e.json — loop proven by execution');
+  } else if (/product[- ]loop/i.test(body)) {
+    pts += 8;
+    notes.push('product-loop section present (phrase-based — no executed green e2e run)');
+  } else {
+    notes.push('no executed green e2e run and no product-loop section in verify-evidence');
     return { points: 0, max, notes };
   }
-  pts += 8;
-  notes.push('product-loop section present');
   if (/\b(fixture|OP\d+|testdata|sample)\b/i.test(body)) {
     pts += 4;
     notes.push('names a fixture / corpus');
@@ -237,14 +262,15 @@ export function scoreSession(opts) {
     loopNotes = ['verify-evidence.md missing'];
   } else {
     const body = fs.readFileSync(evidenceFile, 'utf8');
+    const executedGreen = e2eRunGreen({ cwd, session, sessionDir });
     if (spineHasRows || JOBS_SIGNAL_RE.test(sessionJobsSignalText(session))) {
-      const scored = scoreProductLoopBody(body);
+      const scored = scoreProductLoopBody(body, executedGreen);
       loopPts = scored.points;
       loopNotes = scored.notes;
     } else {
       // Rows expected but maybe empty invalid spine — still look for loop
-      if (/product[- ]loop/i.test(body)) {
-        const scored = scoreProductLoopBody(body);
+      if (executedGreen || /product[- ]loop/i.test(body)) {
+        const scored = scoreProductLoopBody(body, executedGreen);
         loopPts = scored.points;
         loopNotes = scored.notes;
       } else {

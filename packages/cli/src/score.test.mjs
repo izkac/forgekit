@@ -11,9 +11,11 @@ import {
   scoreSession,
   writeSessionScorecard,
 } from './score.mjs';
+import { e2eStepsHash } from './integrity.mjs';
 
 const PHASE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 const SCORE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'score-cli.mjs');
+const CLEANUP_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cleanup-sessions.mjs');
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -172,6 +174,80 @@ Fixture: OP1086
     assert.ok(strong.score > weak.score, `${strong.score} should beat ${weak.score}`);
     const loop = strong.checks.find((c) => c.id === 'product_loop');
     assert.ok(loop.points >= 15);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: green e2e run proves the loop even without the phrase', () => {
+  const root = tmp('forge-score-e2e-');
+  try {
+    const { sessionDir, session } = makeSession(root, { slug: 'jobs-loop' });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify(validSpine([validRow()]), null, 2)}\n`,
+      'utf8',
+    );
+    // Evidence deliberately avoids the words "product loop" — before the fix
+    // this session scored 0/20 despite an executed green run.
+    fs.writeFileSync(
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\n## What the evidence actually proves\n\nReverted the fix, reproduced the broken row, re-applied, ran the loop green.\n',
+      'utf8',
+    );
+    const steps = [{ name: 'probe', cmd: 'node -e "console.log(1)"' }];
+    fs.writeFileSync(
+      path.join(sessionDir, 'e2e.json'),
+      `${JSON.stringify({ change: null, notApplicable: null, steps }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(sessionDir, 'e2e-results.json'),
+      `${JSON.stringify({ ok: true, stepsHash: e2eStepsHash(steps), steps: [{ name: 'probe', ok: true, exitCode: 0 }] }, null, 2)}\n`,
+      'utf8',
+    );
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const loop = card.checks.find((c) => c.id === 'product_loop');
+    assert.ok(loop.points >= 8, `expected >= 8 loop points, got ${loop.points}`);
+    assert.match(loop.notes.join('\n'), /proven by execution/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('forge cleanup harvests scorecard.json into the ledger before pruning', () => {
+  const root = tmp('forge-cleanup-harvest-');
+  try {
+    const { sessionDir, session } = makeSession(root, { phase: 'done' });
+    // A scorecard as an older (pre-ledger) forgekit would have written it.
+    fs.writeFileSync(
+      path.join(sessionDir, 'scorecard.json'),
+      `${JSON.stringify({
+        scoredAt: '2026-06-01T00:00:00.000Z',
+        sessionId: session.id,
+        slug: session.slug,
+        openspecChange: null,
+        score: 83,
+        maxScore: 100,
+        grade: 'B',
+        integrityOk: true,
+        caps: [],
+        checks: [{ id: 'spine', label: 'Spine matrix quality', points: 20, max: 25, notes: ['one row thin'] }],
+      }, null, 2)}\n`,
+      'utf8',
+    );
+    execFileSync(process.execPath, [CLEANUP_SCRIPT, '--include-active'], {
+      cwd: root,
+      env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(root, 'fleet') },
+    });
+    assert.equal(fs.existsSync(sessionDir), false);
+    const ledger = path.join(root, '.forge', 'scorecards.jsonl');
+    const lines = fs.readFileSync(ledger, 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines.length, 1);
+    const entry = JSON.parse(lines[0]);
+    assert.equal(entry.sessionId, session.id);
+    assert.equal(entry.grade, 'B');
+    assert.equal(entry.deductions[0].id, 'spine');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

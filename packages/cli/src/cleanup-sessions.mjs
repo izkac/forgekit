@@ -19,6 +19,7 @@ import {
   sessionAgeDays,
 } from './lib.mjs';
 import { unregisterSession } from './lib/fleet.mjs';
+import { appendScorecardLedger } from './score.mjs';
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
@@ -58,6 +59,17 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
 
   if (shouldRemove) {
     if (!dryRun) {
+      // Harvest the scorecard into the durable ledger before the session dir
+      // (and its scoring history) is erased. Covers sessions scored before
+      // the ledger existed; a no-op when the ledger already has the line.
+      try {
+        const cardFile = path.join(dir, 'scorecard.json');
+        if (fs.existsSync(cardFile)) {
+          appendScorecardLedger(dir, JSON.parse(fs.readFileSync(cardFile, 'utf8')), session);
+        }
+      } catch {
+        /* ledger is advisory — never block cleanup */
+      }
       fs.rmSync(dir, { recursive: true, force: true });
       if (isActive) clearActive();
       unregisterSession(process.cwd(), sessionId);
