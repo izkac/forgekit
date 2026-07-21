@@ -179,6 +179,32 @@ Fixture: OP1086
   }
 });
 
+test('scoreSession: product-loop bonuses match inflected forms (asserts, fixtures, ratify)', () => {
+  const root = tmp('forge-score-inflect-');
+  try {
+    const { sessionDir, session } = makeSession(root, { slug: 'jobs-loop' });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify(validSpine([validRow()]), null, 2)}\n`,
+      'utf8',
+    );
+    // Every keyword deliberately inflected — a trailing \b used to reject all of these.
+    fs.writeFileSync(
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\n## Product loop\n\n1. seed fixtures\n2. run the loop\n3. asserts the ratify output differs from stored baselines\n',
+      'utf8',
+    );
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const loop = card.checks.find((c) => c.id === 'product_loop');
+    const notes = loop.notes.join('\n');
+    assert.match(notes, /names a fixture/);
+    assert.match(notes, /asserts decision\/output change/);
+    assert.equal(loop.points, 20);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('scoreSession: green e2e run proves the loop even without the phrase', () => {
   const root = tmp('forge-score-e2e-');
   try {

@@ -163,6 +163,13 @@ forge defer resolve --task <id>     # when the wiring task actually lands
 - `forge phase done|finish` **refuses** while any deferral is unresolved.
 - An unregistered "later" in a brief or review is a REJECT.
 
+**Prose caveats don't survive — checkboxes and deferrals do.** Never tick a
+`tasks.md` box while a note says the work is unproven ("gate was never taken",
+"not yet verified", "should work"). Scorers, gates, and future sessions see
+the `[x]`, not the sentence above it. If a task is incomplete in any way, the
+box **stays open** or the gap becomes a `forge defer` entry — a ticked box
+documenting its own incompleteness is worse than an open one.
+
 ## Spine matrix (mechanical — `forge spine`)
 
 **Spine is mandatory for every Forge change** — not gated on pace, and not

@@ -154,11 +154,13 @@ function scoreProductLoopBody(body, executedGreen = false) {
     notes.push('no executed green e2e run and no product-loop section in verify-evidence');
     return { points: 0, max, notes };
   }
-  if (/\b(fixture|OP\d+|testdata|sample)\b/i.test(body)) {
+  // \w* suffixes: a trailing \b silently rejected inflected forms ("asserts",
+  // "fixtures", "ratify") and cost honest sessions real points.
+  if (/\b(fixture\w*|OP\d+|testdata\w*|sample\w*)/i.test(body)) {
     pts += 4;
     notes.push('names a fixture / corpus');
   }
-  if (/\b(differ|baseline|ratif|assert|before.?after|output changed)\b/i.test(body)) {
+  if (/\b(differ\w*|baseline\w*|ratif\w*|assert\w*|before.?after|output changed)/i.test(body)) {
     pts += 5;
     notes.push('asserts decision/output change vs baseline');
   } else {
