@@ -13,4 +13,4 @@ Read and follow the Forge skill (`~/.cursor/skills/forge/SKILL.md`) and `~/.curs
 2. Resume from `.forge/active.json` or `forge new <slug>`
 3. Continue from current `phase` in `session.json`
 
-Subcommands: `/forge:brainstorm`, `/forge:plan`, `/forge:apply`, `/forge:build`, `/forge:status`, `/forge:skip`
+Subcommands: `/forge:brainstorm`, `/forge:plan`, `/forge:apply`, `/forge:build`, `/forge:status`, `/forge:harness`, `/forge:analyze`, `/forge:skip`

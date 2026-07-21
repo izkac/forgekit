@@ -246,6 +246,8 @@ required for correctness.
 | `/forge:apply` | **Tracked-change implement** — subagent TDD + verify + review (preferred over `/opsx:apply`) |
 | `/forge:build` | Implement phase (`tasks.md` from either engine) |
 | `/forge:status` | Show active session progress |
+| `/forge:harness` | Ensure a working, recorded project e2e harness (build proactively) |
+| `/forge:analyze` | Agent-written improvement report over recent sessions |
 | `/forge:skip` | **Explicit** opt-out of Forge for this task |
 
 OpenSpec commands remain available standalone (OpenSpec-engine projects):
@@ -624,6 +626,8 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 | `/forge:apply` | Tracked-change implement + verify + review (preferred) |
 | `/forge:build` | Implement phase (`tasks.md` from either engine) |
 | `/forge:status` | Session progress |
+| `/forge:harness` | Ensure a working, recorded project e2e harness |
+| `/forge:analyze` | Improvement report over recent sessions |
 | `/forge:skip` | Explicit skip for this task |
 
 ### Codex CLI

@@ -5,11 +5,13 @@
  *
  * Usage:
  *   forge fleet list [--json]
- *   forge fleet watch [--interval <sec>]
+ *   forge fleet watch [--interval <sec>] [--all]
  *   forge fleet view <session> [--transcript [N]]
  *   forge fleet send <session>|--all <message...>
  *
  * <session> matches by sessionId, slug, or project name; must be unique.
+ * watch shows only active sessions (not done, session dir present); --all
+ * includes done/missing ones. list always shows everything.
  */
 
 import fs from 'node:fs';
@@ -27,7 +29,7 @@ function usage() {
   process.stderr.write(
     `Usage:
   forge fleet list [--json]
-  forge fleet watch [--interval <sec>]
+  forge fleet watch [--interval <sec>] [--all]
   forge fleet view <session> [--transcript [N]]
   forge fleet send <session>|--all <message...>
 `,
@@ -78,7 +80,7 @@ function renderTable(entries) {
       `${pad(e.projectName, 18)} ${pad(e.slug, 26)} ${pad(e.engine ?? '—', 7)} ${pad(
         e.missing ? 'missing' : phaseBar(e.phase),
         18,
-      )} ${pad(tasksCell(e), 13)} ${pad(e.pace ?? '—', 9)} ${pad(relTime(e.updatedAt), 4)} ${
+      )} ${pad(tasksCell(e), 13)} ${pad(e.pace ?? '—', 9)} ${pad(relTime(e.lastSeen ?? e.updatedAt), 4)} ${
         pending > 0 ? `✉ ${pending}` : ''
       }`,
     );
@@ -121,10 +123,14 @@ function cmdList(args) {
 function cmdWatch(args) {
   const i = args.indexOf('--interval');
   const interval = Math.max(1, Number(i >= 0 ? args[i + 1] : 3) || 3) * 1000;
+  const all = args.includes('--all');
   const render = () => {
+    const entries = listFleet().filter((e) => all || (!e.missing && e.phase !== 'done'));
     process.stdout.write('\x1b[2J\x1b[H');
-    process.stdout.write(`forge fleet — ${new Date().toLocaleTimeString()} (Ctrl+C to exit)\n\n`);
-    process.stdout.write(renderTable(listFleet()));
+    process.stdout.write(
+      `forge fleet — ${new Date().toLocaleTimeString()} (Ctrl+C to exit${all ? '' : ', --all for done/missing'})\n\n`,
+    );
+    process.stdout.write(renderTable(entries));
   };
   render();
   setInterval(render, interval);

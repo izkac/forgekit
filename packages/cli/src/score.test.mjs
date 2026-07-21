@@ -191,6 +191,17 @@ test('writeSessionScorecard writes json and md', () => {
     assert.equal(fs.existsSync(jsonPath), true);
     assert.equal(fs.existsSync(mdPath), true);
     assert.equal(JSON.parse(fs.readFileSync(jsonPath, 'utf8')).grade, card.grade);
+
+    // Durable ledger: one line per session, re-scoring replaces (not appends).
+    const ledger = path.join(root, '.forge', 'scorecards.jsonl');
+    assert.equal(fs.existsSync(ledger), true);
+    writeSessionScorecard({ cwd: root, sessionDir, session });
+    const lines = fs.readFileSync(ledger, 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines.length, 1);
+    const entry = JSON.parse(lines[0]);
+    assert.equal(entry.sessionId, session.id);
+    assert.equal(entry.grade, card.grade);
+    assert.ok(Array.isArray(entry.deductions));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

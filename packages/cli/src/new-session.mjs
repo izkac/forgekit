@@ -20,6 +20,7 @@ import {
 } from './lib.mjs';
 import { resolveSessionPaceFields } from './preferences.mjs';
 import { warnIfDoctorFails } from './doctor.mjs';
+import { liveOverlaps, queueMessage, sessionDirFor } from './lib/fleet.mjs';
 
 function usage() {
   process.stderr.write(
@@ -64,19 +65,35 @@ Object.assign(session, paceFields);
 saveSession(dir, session);
 writeActive(sessionId);
 
-process.stdout.write(
-  `${JSON.stringify(
-    {
-      sessionId,
-      dir,
-      session: defaultStatus(session),
-      pace: {
-        requested: session.pace,
-        resolved: session.resolvedPace,
-        reason: session.paceReason,
-      },
-    },
-    null,
-    2,
-  )}\n`,
-);
+// Fleet coordination: another live session in this working tree risks
+// conflicting edits — surface it here and notify the other sessions' inboxes.
+const overlaps = liveOverlaps(process.cwd(), sessionId);
+for (const o of overlaps) {
+  queueMessage(
+    sessionDirFor(o),
+    `Fleet overlap: session "${session.slug}" (${sessionId}) just started in this project. Coordinate with the user to avoid conflicting edits.`,
+  );
+}
+
+const out = {
+  sessionId,
+  dir,
+  session: defaultStatus(session),
+  pace: {
+    requested: session.pace,
+    resolved: session.resolvedPace,
+    reason: session.paceReason,
+  },
+};
+if (overlaps.length > 0) {
+  out.overlaps = overlaps.map((o) => ({
+    sessionId: o.sessionId,
+    slug: o.slug,
+    phase: o.phase,
+    engine: o.engine,
+    lastSeen: o.lastSeen ?? o.updatedAt,
+  }));
+  out.overlapAdvice =
+    'Other live sessions are working in this project. Tell the user and ask: continue anyway, use a git worktree, or pause one session.';
+}
+process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);

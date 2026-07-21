@@ -82,12 +82,47 @@ export function registerSession(projectRoot, session) {
       engine: detectEngine() ?? prev.engine ?? null,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
+      lastSeen: new Date().toISOString(),
     };
     fs.mkdirSync(fleetDir(), { recursive: true });
     fs.writeFileSync(file, `${JSON.stringify(entry, null, 2)}\n`, 'utf8');
   } catch {
     /* registry is advisory */
   }
+}
+
+/**
+ * Heartbeat: refresh lastSeen on an existing registry entry. Called from the
+ * reminder hook, which fires on every agent turn — so lastSeen ≈ "agent is
+ * actually running", unlike updatedAt which only moves on saveSession.
+ */
+export function touchSession(projectRoot, sessionId) {
+  try {
+    const file = entryFile(projectRoot, sessionId);
+    const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+    entry.lastSeen = new Date().toISOString();
+    fs.writeFileSync(file, `${JSON.stringify(entry, null, 2)}\n`, 'utf8');
+  } catch {
+    /* advisory */
+  }
+}
+
+// ponytail: fixed 30-min liveness window; make configurable if hooks ever fire slower.
+export const LIVE_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * Other live sessions in the same project — the overlap signal for "two
+ * agents editing one working tree". Live = not done, session dir present,
+ * heartbeat (lastSeen, falling back to updatedAt) within LIVE_WINDOW_MS.
+ */
+export function liveOverlaps(projectRoot, sessionId, now = Date.now()) {
+  const root = path.resolve(projectRoot);
+  return listFleet().filter((e) => {
+    if (e.sessionId === sessionId || e.missing || e.phase === 'done') return false;
+    if (path.resolve(e.project) !== root) return false;
+    const seen = new Date(e.lastSeen ?? e.updatedAt).getTime();
+    return !Number.isNaN(seen) && now - seen < LIVE_WINDOW_MS;
+  });
 }
 
 export function unregisterSession(projectRoot, sessionId) {

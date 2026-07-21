@@ -32,7 +32,7 @@ Running agents across three IDEs and two terminals? `forge fleet` is a single co
 
 ```bash
 forge fleet list       # every session: phase, task progress, engine, activity
-forge fleet watch      # live-refreshing dashboard
+forge fleet watch      # live-refreshing dashboard (active sessions only; --all shows everything)
 forge fleet view <s>   # detail + live transcript tail (Claude Code)
 forge fleet send <s> "pause and report"   # message any session; --all broadcasts
 ```

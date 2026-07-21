@@ -139,6 +139,8 @@ Skip Forge for this turn only:
 | `/forge:apply` | Implement + verify + review (preferred) |
 | `/forge:build` | Implement from `tasks.md` |
 | `/forge:status` | Progress (or run `forge status`) |
+| `/forge:harness` | Build/verify + record the project e2e harness proactively |
+| `/forge:analyze` | Agent-written improvement report over recent sessions |
 | `/forge:skip` | Opt out of Forge for this task |
 
 ### 3c. Check progress yourself
@@ -380,7 +382,7 @@ moment it touches a `forge` command. One terminal sees and commands them all:
 
 ```bash
 forge fleet list      # every session: phase bar, task bar, engine, age, ✉ pending
-forge fleet watch     # same table, live-refreshing (Ctrl+C exits)
+forge fleet watch     # live-refreshing, active sessions only (--all for done/missing)
 forge fleet view <session>              # detail; --transcript N tails the
                                         # Claude Code conversation live
 forge fleet send <session> "message"    # delivered on the session's next turn
@@ -388,6 +390,12 @@ forge fleet send --all "status report"  # broadcast
 ```
 
 `<session>` matches by slug, session id, or project name (must be unique).
+
+Sessions heartbeat on every agent turn (the AGE column reflects real activity),
+and when a session starts or resumes in a project that already has another live
+session, both agents are warned — the new one in its session-start context, the
+existing one via its inbox — so you can decide: continue, use a git worktree,
+or pause one.
 
 Example `list` output:
 
@@ -586,6 +594,8 @@ In the agent:
 /forge:apply <change-name>
 /forge:status
 /forge:skip …
+/forge:harness    # build/verify + record the project e2e harness proactively
+/forge:analyze    # agent-written improvement report over recent sessions
 ```
 
 ---

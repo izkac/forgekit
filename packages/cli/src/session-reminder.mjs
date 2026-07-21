@@ -8,8 +8,14 @@
  *   forge reminder --format plain
  */
 
-import { FORGE_DIR, loadSession, readActive } from './lib.mjs';
-import { drainInbox } from './lib/fleet.mjs';
+import { FORGE_DIR, loadSession, readActive, REPO_ROOT } from './lib.mjs';
+import {
+  drainInbox,
+  liveOverlaps,
+  queueMessage,
+  sessionDirFor,
+  touchSession,
+} from './lib/fleet.mjs';
 import { resolveEffectivePreferences } from './preferences.mjs';
 
 function getActiveSessionInfo() {
@@ -149,9 +155,31 @@ if (!info) {
   process.exit(0);
 }
 
+// Fleet heartbeat: this hook fires on every agent turn, so lastSeen in the
+// registry tracks "agent actually running", not just the last saveSession.
+touchSession(REPO_ROOT, info.session.id);
+
 let message = prompt
   ? buildForgePromptMessage(info, prompt)
   : buildForgeMessage(info);
+
+// Overlap check on resume: another live session in this same working tree
+// means potentially conflicting edits. Warn this agent and drop a note in the
+// other sessions' inboxes. Session-start only — per-turn would spam.
+if (format === 'claude-session-start') {
+  const overlaps = liveOverlaps(REPO_ROOT, info.session.id);
+  if (overlaps.length > 0) {
+    message += `\n\nFleet overlap — other live session(s) in this project:\n${overlaps
+      .map((o) => `- ${o.slug} (${o.sessionId}) · ${o.engine ?? 'unknown'} · phase ${o.phase}`)
+      .join('\n')}\nTell the user and ask how to proceed: continue anyway, move this work to a git worktree, or pause one session.`;
+    for (const o of overlaps) {
+      queueMessage(
+        sessionDirFor(o),
+        `Fleet overlap: session "${info.session.slug}" (${info.session.id}) just resumed in this project. Coordinate with the user to avoid conflicting edits.`,
+      );
+    }
+  }
+}
 
 // Deliver queued `forge fleet send` messages exactly once (drain moves them
 // to inbox/delivered/). This is the fleet command bus: control terminal →

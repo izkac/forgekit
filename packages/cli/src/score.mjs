@@ -475,7 +475,52 @@ export function formatScorecardMarkdown(card) {
 }
 
 /**
- * Write scorecard.json + scorecard.md into the session dir.
+ * Durable one-line-per-session ledger at `.forge/scorecards.jsonl`. Sessions
+ * are pruned after RETENTION_DAYS and scorecards die with them; the ledger
+ * survives — it is the history `/forge:analyze` reads for trends. Re-scoring
+ * a session replaces its line (latest score wins). Never throws.
+ *
+ * @param {string} sessionDir
+ * @param {ReturnType<typeof scoreSession>} card
+ * @param {Record<string, unknown>} session
+ */
+export function appendScorecardLedger(sessionDir, card, session = {}) {
+  try {
+    const file = path.join(path.resolve(sessionDir, '..', '..'), 'scorecards.jsonl');
+    const line = {
+      scoredAt: card.scoredAt,
+      sessionId: card.sessionId,
+      slug: card.slug,
+      change: card.openspecChange,
+      score: card.score,
+      grade: card.grade,
+      integrityOk: card.integrityOk,
+      pace: session.resolvedPace ?? null,
+      incompleteReason: session.incompleteReason ?? null,
+      caps: card.caps,
+      deductions: card.checks
+        .filter((c) => c.points < c.max)
+        .map((c) => ({ id: c.id, points: c.points, max: c.max, notes: c.notes })),
+    };
+    const kept = (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n') : [])
+      .filter(Boolean)
+      .filter((l) => {
+        try {
+          return JSON.parse(l).sessionId !== card.sessionId;
+        } catch {
+          return false;
+        }
+      });
+    kept.push(JSON.stringify(line));
+    fs.writeFileSync(file, `${kept.join('\n')}\n`, 'utf8');
+  } catch {
+    /* ledger is advisory — never block a scorecard write */
+  }
+}
+
+/**
+ * Write scorecard.json + scorecard.md into the session dir, and mirror a
+ * summary line into the durable `.forge/scorecards.jsonl` ledger.
  *
  * @param {{ cwd?: string, sessionDir: string, session: Record<string, unknown> }} opts
  */
@@ -485,5 +530,6 @@ export function writeSessionScorecard(opts) {
   const mdPath = path.join(opts.sessionDir, 'scorecard.md');
   writeJson(jsonPath, card);
   fs.writeFileSync(mdPath, formatScorecardMarkdown(card), 'utf8');
+  appendScorecardLedger(opts.sessionDir, card, opts.session);
   return { card, jsonPath, mdPath };
 }

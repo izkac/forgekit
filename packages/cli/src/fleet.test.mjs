@@ -9,10 +9,13 @@ import {
   drainInbox,
   entryFile,
   listFleet,
+  LIVE_WINDOW_MS,
+  liveOverlaps,
   peekInbox,
   queueMessage,
   registerSession,
   sanitizePath,
+  touchSession,
   unregisterSession,
 } from './lib/fleet.mjs';
 import { saveSession } from './lib.mjs';
@@ -131,6 +134,47 @@ function registerSessionIn(fleetDir, project, session) {
     else process.env.FORGEKIT_FLEET_DIR = prev;
   }
 }
+
+test('registerSession stamps lastSeen; touchSession refreshes it', () => {
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-hb-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  makeProject(project, 's5');
+
+  registerSession(project, makeSession('s5'));
+  const before = listFleet()[0].lastSeen;
+  assert.ok(before);
+
+  const file = entryFile(project, 's5');
+  const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+  entry.lastSeen = '2000-01-01T00:00:00.000Z';
+  fs.writeFileSync(file, JSON.stringify(entry));
+
+  touchSession(project, 's5');
+  const after = listFleet()[0].lastSeen;
+  assert.ok(after > '2000-01-01T00:00:00.000Z');
+});
+
+test('liveOverlaps flags only live sessions in the same project', () => {
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-ovl-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  const other = tmp('fleet-proj2-');
+  for (const id of ['me', 'peer', 'finished']) makeProject(project, id);
+  makeProject(other, 'elsewhere');
+
+  registerSession(project, makeSession('me'));
+  registerSession(project, makeSession('peer'));
+  registerSession(project, makeSession('finished', { phase: 'done' }));
+  registerSession(other, makeSession('elsewhere'));
+
+  const overlaps = liveOverlaps(project, 'me');
+  assert.deepEqual(
+    overlaps.map((e) => e.sessionId),
+    ['peer'],
+  );
+
+  // Stale heartbeat falls outside the liveness window.
+  assert.equal(liveOverlaps(project, 'me', Date.now() + LIVE_WINDOW_MS + 1000).length, 0);
+});
 
 test('sanitizePath matches Claude Code project-dir naming', () => {
   assert.equal(sanitizePath('S:\\Projects\\forgekit'), 'S--Projects-forgekit');
