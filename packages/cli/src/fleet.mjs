@@ -72,7 +72,7 @@ function pad(str, len) {
 
 function renderTable(entries) {
   if (entries.length === 0) return 'No fleet sessions. Start one with `forge new <slug>`.\n';
-  const header = `${pad('PROJECT', 18)} ${pad('SESSION', 26)} ${pad('ENGINE', 7)} ${pad('PHASE', 18)} ${pad('TASKS', 13)} ${pad('PACE', 9)} ${pad('AGE', 4)} MSGS`;
+  const header = `${pad('PROJECT', 18)} ${pad('SESSION', 26)} ${pad('ENGINE', 7)} ${pad('PHASE', 18)} ${pad('TASKS', 16)} ${pad('PACE', 9)} ${pad('AGE', 4)} MSGS`;
   const lines = [header, '-'.repeat(header.length)];
   for (const e of entries) {
     const pending = e.missing ? 0 : peekInbox(sessionDirFor(e)).length;
@@ -80,7 +80,7 @@ function renderTable(entries) {
       `${pad(e.projectName, 18)} ${pad(e.slug, 26)} ${pad(e.engine ?? '—', 7)} ${pad(
         e.missing ? 'missing' : phaseBar(e.phase),
         18,
-      )} ${pad(tasksCell(e), 13)} ${pad(e.pace ?? '—', 9)} ${pad(relTime(e.lastSeen ?? e.updatedAt), 4)} ${
+      )} ${pad(tasksCell(e), 16)} ${pad(e.pace ?? '—', 9)} ${pad(relTime(e.lastSeen ?? e.updatedAt), 4)} ${
         pending > 0 ? `✉ ${pending}` : ''
       }`,
     );
