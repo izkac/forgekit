@@ -3,9 +3,9 @@
  * Operator-brief CLI (core in brief.mjs).
  *
  * Usage:
- *   forge brief stamp [--session <id>] [--no-open]   stamp freshness hash + open in browser
- *   forge brief check [--session <id>]               exit 1 when missing/stale/unstamped
- *   forge brief open  [--session <id>]               open in default browser
+ *   forge brief stamp [--session <id>]   stamp freshness hash (never auto-opens)
+ *   forge brief check [--session <id>]   exit 1 when missing/stale/unstamped
+ *   forge brief open  [--session <id>]   open in default browser (explicit only)
  */
 
 import fs from 'node:fs';
@@ -16,7 +16,7 @@ import { BRIEF_FILE, briefPath, checkBrief, openInBrowser, stampBrief } from './
 const [cmd, ...rest] = process.argv.slice(2);
 if (!cmd || !['stamp', 'check', 'open'].includes(cmd)) {
   process.stderr.write(
-    'Usage: forge brief stamp [--session <id>] [--no-open] | check [--session <id>] | open [--session <id>]\n',
+    'Usage: forge brief stamp [--session <id>] | check [--session <id>] | open [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -45,12 +45,13 @@ if (!changeDir) {
 }
 
 if (cmd === 'stamp') {
+  // Never auto-open: re-stamps happen several times a session and each open
+  // stole the operator's focus. `forge brief open` is the explicit opt-in.
   const hash = stampBrief(changeDir);
   process.stdout.write(`Stamped ${briefPath(changeDir)} (specs hash ${hash})\n`);
-  if (!rest.includes('--no-open')) {
-    openInBrowser(briefPath(changeDir));
-    process.stdout.write('Opened in default browser.\n');
-  }
+  process.stdout.write(
+    `Operator: review the brief at ${briefPath(changeDir)} — open it with \`forge brief open\`.\n`,
+  );
 } else {
   const file = briefPath(changeDir);
   if (!fs.existsSync(file)) {

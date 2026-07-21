@@ -117,8 +117,9 @@ What happens:
 2. `forge new <slug>` creates `.forge/sessions/…` and sets active session
 3. **Brainstorm** → you approve the approach
 4. **Plan** → OpenSpec `/opsx:propose` or `forge change new` (specs engine)
-5. **Operator brief** — the agent writes `brief.html` and it **opens in your
-   browser**: plain-language explanation of what will be built (see §4)
+5. **Operator brief** — the agent writes `brief.html` and tells you where it
+   is: plain-language explanation of what will be built (see §4); open it with
+   `forge brief open`
 6. You approve — the brief is your review surface; specs are the contract
 7. **`/forge:apply`** (or `/forge:build`) — subagent per task, TDD, reviews
 8. **Verify** → **review** → archive → `forge phase done`
@@ -170,13 +171,14 @@ brief** is the translation for you: one self-contained
 `changes/<name>/brief.html` in plain language — TL;DR, what you'll get, how it
 works (mermaid diagrams), what changes for you, risks, out of scope, work
 overview. The agent writes it at the end of every plan phase (both engines);
-`forge brief stamp` then records a hash of the specs into it and **opens it in
-your default browser** — that's the document you approve.
+`forge brief stamp` then records a hash of the specs into it and prints where
+it lives — that's the document you approve. Nothing opens automatically
+(re-stamps are frequent); `forge brief open` launches it when you want it.
 
 ```bash
 forge brief check    # fresh | missing | unstamped | stale (exit 1 unless fresh)
-forge brief open     # reopen anytime
-forge brief stamp    # after (re)writing — stamp freshness + auto-open
+forge brief open     # open in your browser, anytime
+forge brief stamp    # after (re)writing — stamp freshness (never auto-opens)
 ```
 
 **Hard gate:** `forge phase implement` refuses while the brief is missing or

@@ -21,7 +21,8 @@ freshness and opens the file.
 ```bash
 # 1. specs are final (proposal.md / design.md / tasks.md)
 # 2. write <changeDir>/brief.html   (structure below)
-forge brief stamp        # records specs hash + opens it in the operator's browser
+forge brief stamp        # records specs hash — tell the operator where the brief is
+                         # (it is NOT auto-opened; they can run `forge brief open`)
 forge phase implement --tasks-total <N>   # hard-gated on a fresh stamped brief
 ```
 

@@ -37,7 +37,7 @@ Thin wrapper around the project **`openspec-propose`** skill (or `/opsx:propose`
    where helpful), then:
 
    ```bash
-   forge brief stamp    # records specs hash + opens it in the operator's browser
+   forge brief stamp    # records specs hash (does NOT auto-open)
    ```
 
    `forge phase implement` hard-refuses while the brief is missing or stale
@@ -51,7 +51,8 @@ Thin wrapper around the project **`openspec-propose`** skill (or `/opsx:propose`
    Count tasks from `tasks.md` checkboxes.
 
 7. Get user approval to proceed to implement (unless they already said "go").
-   The brief (opened by `forge brief stamp`) is what the operator reviews.
+   The brief is what the operator reviews — tell them its path and that
+   `forge brief open` launches it; never open it for them.
 
 ## Session tracking
 
