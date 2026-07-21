@@ -320,6 +320,17 @@ Author the steps at plan time (`forge e2e init` → `e2e.json` next to
 forge e2e run    # executes steps, writes .forge/sessions/<id>/e2e-results.json
 ```
 
+E2E is the most time-consuming part of a session. If a project genuinely
+can't afford it, **you** (never the agent) can switch it off project-wide:
+
+```bash
+forge e2e disable "slow legacy stack — manual verification accepted"
+forge e2e enable    # restore the executed-run requirement
+```
+
+While disabled, integrity gates stop demanding green runs and the scorecard
+grades the product loop from evidence prose only (noted on every scorecard).
+
 ```json
 {
   "change": "etl-pipeline-closure",
@@ -518,6 +529,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase done` refuses — missing spine | `forge spine init`; fill rows **or** set `notApplicable` (required every change) |
 | `forge phase done` refuses — deferrals / e2e | `forge integrity-check`; resolve deferrals; `forge e2e init` + author steps + green `forge e2e run` (or spine `notApplicable` for sync-only) |
 | `forge phase done` refuses — stale e2e results | `e2e.json` changed after the last run — re-run `forge e2e run` |
+| E2E too slow for this project | Operator runs `forge e2e disable "<reason>"` (agents must never) — `forge e2e enable` restores |
 | `forge phase implement` refuses — brief missing/stale | Agent writes/updates `brief.html`, then `forge brief stamp` (or `--allow-incomplete "<reason>"`) |
 | Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
 | `forge fleet send` seems ignored | Delivery is next-turn via the reminder hook — idle sessions read it when they wake |

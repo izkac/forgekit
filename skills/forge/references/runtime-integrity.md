@@ -80,6 +80,15 @@ driven by any command (e.g. requires a physical device). Reviewers police the
 reason; "no time" or "covered by unit tests" is a REJECT. Keep a short loop
 narrative under `## Product loop` in `verify-evidence.md` as reviewer context.
 
+**Project-level off switch (operator only).** `forge e2e disable "<reason>"`
+records `e2e.disabled` in `.forge/config.json` and the gate stops demanding
+executed runs project-wide (`forge e2e enable` restores it). This is the
+**human's** trade-off to make — an agent must NEVER run `forge e2e disable`,
+suggest it to dodge a red gate, or edit the config key. If the gate blocks
+you, fix the loop or ask the operator. When it is disabled, keep the
+`## Product loop` narrative in `verify-evidence.md` — with no executed run,
+prose is the only loop evidence the scorecard can grade.
+
 ### Keeping the loop cheap (cost policy)
 
 "Too complex to test" is usually a signal to test it, not to wave it through —

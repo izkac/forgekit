@@ -9,6 +9,8 @@
  *   forge e2e check                   # gate check: green + current results; exit 1 with problems
  *   forge e2e harness                 # show recorded project harness (reuse it!)
  *   forge e2e harness --set "<desc>" [--start "<cmd>"] [--dir <path>]
+ *   forge e2e disable "<reason>"      # OPERATOR ONLY: project-level e2e off switch
+ *   forge e2e enable                  # re-enable the executed-run requirement
  *   [--session <id>]
  *
  * e2e.json lives next to spine.json (change dir, falling back to the session
@@ -22,6 +24,7 @@ import { loadSession, readActive, readJson } from './lib.mjs';
 import { loadProjectConfig, saveProjectConfig } from './config.mjs';
 import {
   checkE2eGate,
+  e2eDisabledReason,
   e2ePath,
   e2eResultsPath,
   e2eStepsHash,
@@ -37,7 +40,7 @@ const sub = args[0] && !args[0].startsWith('--') ? args[0] : 'status';
 
 if (args[0] === '--help' || sub === 'help') {
   process.stdout.write(
-    'Usage: forge e2e [init [--force] | run | check | status | harness [--set <desc> --start <cmd> --dir <path>]] [--session <id>]\n',
+    'Usage: forge e2e [init [--force] | run | check | status | harness [--set <desc> --start <cmd> --dir <path>] | disable "<reason>" | enable] [--session <id>]\n',
   );
   process.exit(0);
 }
@@ -85,6 +88,28 @@ if (sub === 'harness') {
     process.exit(0);
   }
   process.stdout.write(`${harnessLines(h)}\n`);
+  process.exit(0);
+}
+
+// Project-level, no session needed. Operator-only: agents must never run
+// `disable` themselves — it is the human's call to trade e2e time away.
+if (sub === 'disable') {
+  const reason = args.slice(1).filter((a) => !a.startsWith('--')).join(' ').trim();
+  if (!reason) {
+    process.stderr.write('Usage: forge e2e disable "<reason>" — a reason is required.\n');
+    process.exit(1);
+  }
+  saveProjectConfig(process.cwd(), { e2e: { disabled: reason } }, { mergeKeys: ['adr', 'plan', 'e2e'] });
+  process.stdout.write(
+    `E2E disabled for this project (.forge/config.json): ${reason}\n` +
+      `Integrity gates stop demanding executed e2e runs. Re-enable: forge e2e enable\n`,
+  );
+  process.exit(0);
+}
+
+if (sub === 'enable') {
+  saveProjectConfig(process.cwd(), { e2e: { disabled: null } }, { mergeKeys: ['adr', 'plan', 'e2e'] });
+  process.stdout.write('E2E re-enabled — executed green runs are required again where the spine has rows.\n');
   process.exit(0);
 }
 
@@ -170,6 +195,13 @@ if (sub === 'run') {
 }
 
 if (sub === 'check') {
+  const disabled = e2eDisabledReason(process.cwd());
+  if (disabled) {
+    process.stdout.write(
+      `${JSON.stringify({ file, ok: true, disabled, problems: [] }, null, 2)}\n`,
+    );
+    process.exit(0);
+  }
   const gate = checkE2eGate({ e2eFile: file, sessionDir: dir });
   process.stdout.write(
     JSON.stringify(
@@ -184,7 +216,13 @@ if (sub === 'check') {
 
 if (sub === 'status') {
   if (!fs.existsSync(file)) {
-    process.stdout.write(JSON.stringify({ file, exists: false, harness: loadHarness() }, null, 2));
+    process.stdout.write(
+      JSON.stringify(
+        { file, exists: false, disabled: e2eDisabledReason(process.cwd()), harness: loadHarness() },
+        null,
+        2,
+      ),
+    );
     process.stdout.write('\n');
     process.exit(0);
   }
@@ -204,6 +242,7 @@ if (sub === 'status') {
         exists: true,
         ok: valid.ok,
         problems: valid.problems,
+        disabled: e2eDisabledReason(process.cwd()),
         harness: loadHarness(),
         results: results
           ? {

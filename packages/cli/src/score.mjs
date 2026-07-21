@@ -12,6 +12,7 @@ import { readJson, writeJson } from './lib.mjs';
 import {
   JOBS_SIGNAL_RE,
   checkE2eGate,
+  e2eDisabledReason,
   e2ePath,
   loadDeferrals,
   openDeferrals,
@@ -262,7 +263,8 @@ export function scoreSession(opts) {
     loopNotes = ['verify-evidence.md missing'];
   } else {
     const body = fs.readFileSync(evidenceFile, 'utf8');
-    const executedGreen = e2eRunGreen({ cwd, session, sessionDir });
+    const e2eOff = e2eDisabledReason(cwd);
+    const executedGreen = !e2eOff && e2eRunGreen({ cwd, session, sessionDir });
     if (spineHasRows || JOBS_SIGNAL_RE.test(sessionJobsSignalText(session))) {
       const scored = scoreProductLoopBody(body, executedGreen);
       loopPts = scored.points;
@@ -277,6 +279,9 @@ export function scoreSession(opts) {
         loopPts = 10;
         loopNotes = ['no spine rows and no jobs signal — partial credit without product-loop'];
       }
+    }
+    if (e2eOff) {
+      loopNotes.push(`e2e disabled by project config ("${e2eOff}") — scored from evidence text only`);
     }
   }
   checks.push({

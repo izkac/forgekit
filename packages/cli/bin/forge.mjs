@@ -63,6 +63,7 @@ Commands:
   change new|archive      Specs-engine change scaffold / archive
   spine init|check        Capability→runtime spine matrix (spine.json)
   e2e init|run|check      Executable product-loop acceptance (e2e.json)
+  e2e disable|enable      Operator-only project e2e off switch
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)
   score [--write]         L2 session scorecard (auto-written at phase done)

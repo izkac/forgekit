@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readJson, writeJson } from './lib.mjs';
+import { loadProjectConfig } from './config.mjs';
 import { DEFAULT_SPECS_DIR, resolveProjectPlanEngine } from './plan-engine.mjs';
 
 /** Signals that a change involves jobs/workers and therefore needs a spine. */
@@ -602,6 +603,25 @@ export function sessionJobsSignalText(session) {
  * @param {{ cwd?: string, sessionDir: string, session: Record<string, unknown> }} opts
  * @returns {{ ok: boolean, problems: string[], spineFile: string, spineExists: boolean, e2eFile: string | null }}
  */
+/**
+ * Project-level e2e off switch: `.forge/config.json` → `e2e.disabled` set to a
+ * non-empty reason string. Operator-set via `forge e2e disable "<reason>"` —
+ * agents must never set it themselves. When set, the integrity gate stops
+ * demanding an executed green e2e run (the most time-consuming part of a
+ * session); spine, deferrals, evidence, and BLOCKED checks still apply.
+ *
+ * @param {string} [cwd]
+ * @returns {string | null} the reason, or null when e2e is enabled
+ */
+export function e2eDisabledReason(cwd = process.cwd()) {
+  try {
+    const reason = loadProjectConfig(cwd)?.e2e?.disabled;
+    return isNonEmptyString(reason) ? reason : null;
+  } catch {
+    return null;
+  }
+}
+
 export function runIntegrityChecks(opts) {
   /** @type {string[]} */
   const problems = [];
@@ -645,9 +665,12 @@ export function runIntegrityChecks(opts) {
   }
 
   let e2eFile = null;
+  const e2eDisabled = e2eDisabledReason(cwd);
   if (spineExists && spineHasRows) {
-    e2eFile = e2ePath({ cwd, session, sessionDir });
-    problems.push(...checkE2eGate({ e2eFile, sessionDir }).problems);
+    if (!e2eDisabled) {
+      e2eFile = e2ePath({ cwd, session, sessionDir });
+      problems.push(...checkE2eGate({ e2eFile, sessionDir }).problems);
+    }
 
     const evidenceFile = path.join(sessionDir, 'verify-evidence.md');
     if (fs.existsSync(evidenceFile) && /\bBLOCKED\b/.test(fs.readFileSync(evidenceFile, 'utf8'))) {
@@ -655,5 +678,5 @@ export function runIntegrityChecks(opts) {
     }
   }
 
-  return { ok: problems.length === 0, problems, spineFile, spineExists, e2eFile };
+  return { ok: problems.length === 0, problems, spineFile, spineExists, e2eFile, e2eDisabled };
 }

@@ -73,3 +73,25 @@ test('e2e harness --set requires a description', () => {
   makeFixture(root);
   assert.throws(() => run(root, ['harness', '--set']), /Usage: forge e2e harness --set/);
 });
+
+test('e2e disable/enable toggles the project off switch; check honors it', () => {
+  const root = tmp('e2e-disable-');
+  makeFixture(root);
+
+  assert.match(run(root, ['disable', 'slow legacy stack']), /E2E disabled/);
+  const cfg = JSON.parse(fs.readFileSync(path.join(root, '.forge', 'config.json'), 'utf8'));
+  assert.equal(cfg.e2e.disabled, 'slow legacy stack');
+
+  // check passes without any e2e.json while disabled
+  const check = JSON.parse(run(root, ['check']));
+  assert.equal(check.ok, true);
+  assert.equal(check.disabled, 'slow legacy stack');
+
+  assert.throws(() => run(root, ['disable']), /reason is required/);
+
+  run(root, ['enable']);
+  const cfg2 = JSON.parse(fs.readFileSync(path.join(root, '.forge', 'config.json'), 'utf8'));
+  assert.equal(cfg2.e2e.disabled, null);
+  // gate demands e2e.json again once re-enabled → non-zero exit
+  assert.throws(() => run(root, ['check']));
+});

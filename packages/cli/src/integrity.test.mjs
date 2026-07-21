@@ -470,6 +470,36 @@ test('runIntegrityChecks: spine rows demand an executed green e2e run', () => {
   }
 });
 
+test('runIntegrityChecks: project-level e2e disable skips the executed-run demand', () => {
+  const cwd = tmp('forge-int-e2eoff-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    writeSpineWithRows(sessionDir);
+    const session = { slug: 'wire-worker-jobs', openspecChange: null };
+
+    let result = runIntegrityChecks({ cwd, sessionDir, session });
+    assert.equal(result.ok, false);
+    assert.match(result.problems.join('\n'), /e2e\.json required/);
+
+    fs.writeFileSync(
+      path.join(cwd, '.forge', 'config.json'),
+      `${JSON.stringify({ e2e: { disabled: 'operator accepts manual verification' } }, null, 2)}\n`,
+      'utf8',
+    );
+    result = runIntegrityChecks({ cwd, sessionDir, session });
+    assert.equal(result.ok, true);
+    assert.equal(result.e2eDisabled, 'operator accepts manual verification');
+
+    // BLOCKED evidence still blocks — the off switch only drops the run demand.
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), 'BLOCKED: cannot verify\n', 'utf8');
+    result = runIntegrityChecks({ cwd, sessionDir, session });
+    assert.equal(result.ok, false);
+    assert.match(result.problems.join('\n'), /BLOCKED/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('runIntegrityChecks: BLOCKED in verify-evidence blocks even with green e2e', () => {
   const cwd = tmp('forge-int-blocked-');
   try {
