@@ -51,7 +51,8 @@ function printHelp() {
   process.stdout.write(`Usage: forge doctor [options]
 
 Check planning-engine readiness. OpenSpec projects: config + CLI availability.
-Specs-engine projects (.forge/config.json → plan.engine: specs): specs/changes/ layout.
+Specs-engine projects (.forge/config.json → plan.engine: specs):
+\`<plan.dir>/changes/\` + \`<plan.dir>/specs/\` layout.
 
 Options:
   --json        Machine-readable report
@@ -142,14 +143,22 @@ export function checkOpenSpecCli(opts = {}) {
 export function checkSpecsProject(opts) {
   const existsSync = opts.existsSync ?? fs.existsSync;
   const changesPath = path.join(opts.cwd, opts.dir, 'changes');
-  const ok = existsSync(changesPath);
+  const specsPath = path.join(opts.cwd, opts.dir, 'specs');
+  const changesOk = existsSync(changesPath);
+  const specsOk = existsSync(specsPath);
+  const ok = changesOk && specsOk;
+  const missing = [
+    !changesOk ? `${opts.dir}/changes/` : null,
+    !specsOk ? `${opts.dir}/specs/` : null,
+  ].filter(Boolean);
   return {
     id: 'specs-project',
     ok,
     changesPath,
+    specsPath,
     message: ok
-      ? `${opts.dir}/changes/ found (built-in specs engine)`
-      : `${opts.dir}/changes/ missing — run \`forge init --no-openspec\` to scaffold the specs engine`,
+      ? `${opts.dir}/changes/ + ${opts.dir}/specs/ found (built-in specs engine)`
+      : `${missing.join(' + ')} missing — run \`forge init --no-openspec\` (optionally \`--plan-dir ${opts.dir}\`) to scaffold`,
   };
 }
 

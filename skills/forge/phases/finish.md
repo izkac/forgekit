@@ -31,18 +31,21 @@ forge cleanup
 
 ## Specs path (`planType: specs`)
 
-1. Confirm all tasks complete in `<specsDir>/changes/<name>/tasks.md`.
-2. **Archive** (with user approval) — prefer the CLI:
+1. Confirm all tasks complete in `<plan.dir>/changes/<name>/tasks.md`.
+2. **Archive** (with user approval) — prefer the CLI (merges delta specs into
+   `<plan.dir>/specs/` first, matching OpenSpec archive behavior):
 
    ```bash
    forge change archive <name>
-   # → <specsDir>/changes/archive/YYYY-MM-DD-<name>
+   # → sync deltas → <plan.dir>/specs/<cap>/spec.md
+   # → <plan.dir>/changes/archive/YYYY-MM-DD-<name>
    ```
 
-   Or move manually:
+   Skip the merge with `--no-sync` only when deliberate. Or move manually
+   (you must sync deltas yourself):
 
    ```bash
-   git mv <specsDir>/changes/<name> <specsDir>/changes/archive/<YYYY-MM-DD>-<name>
+   git mv <plan.dir>/changes/<name> <plan.dir>/changes/archive/<YYYY-MM-DD>-<name>
    ```
 
    (plain `mv` if the dir is untracked).

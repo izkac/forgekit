@@ -34,7 +34,7 @@ Handle blocked / all_done states per vendor skill before implementing.
 
 **Specs engine** — no CLI:
 
-1. **Select the change** under `specs/changes/<name>/` — announce "Using change: \<name\>"
+1. **Select the change** under `<plan.dir>/changes/<name>/` (default `specs/changes/`) — announce "Using change: \<name\>"
 2. Read `proposal.md`, `design.md` (if present), `tasks.md`
 3. Show progress (N/M checkboxes, remaining tasks)
 
@@ -70,6 +70,6 @@ Final reviewer; save to `.forge/sessions/<id>/reviews/final-review.md`.
 
 ## 9. Finish
 
-When verify + review pass: suggest archive — `/opsx:archive` (OpenSpec) or the dated move into `specs/changes/archive/` (specs) — per [finish phase](~/.cursor/skills/forge/phases/finish.md).
+When verify + review pass: suggest archive — `/opsx:archive` (OpenSpec) or `forge change archive <name>` (specs; merges deltas into `<plan.dir>/specs/`) — per [finish phase](~/.cursor/skills/forge/phases/finish.md).
 
 **Skip Forge for this task only:** `/forge:skip` (runs work without brainstorm/plan/verify chain).

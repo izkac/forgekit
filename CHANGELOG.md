@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.3.13 — 2026-07-24
+
+- **Specs engine OpenSpec format parity.** Built-in engine now scaffolds the full
+  OpenSpec layout: main `<plan.dir>/specs/<cap>/spec.md`, per-change delta
+  `changes/<name>/specs/<cap>/spec.md` (ADDED/MODIFIED/REMOVED — not a
+  `deltas/` folder), `design.md`, and a Capabilities section on proposals.
+  `forge change new … --capability <id>` stubs deltas; `forge change archive`
+  merges them into the main catalog before moving the change (`--no-sync` to
+  skip).
+- **`forge init --plan-dir <path>`.** Sets `plan.dir` for the specs engine
+  (default `specs`). Use `--no-openspec --plan-dir openspec` to switch from
+  OpenSpec without moving files.
+- **`forge init` no longer falls back to specs on OpenSpec setup failure.**
+  Choosing OpenSpec (flag, user default, or interactive pick) always records
+  `plan.engine: openspec`; setup is best-effort.
+
 ## 0.2.0 — 2026-07-20
 
 - **Executable E2E acceptance (`forge e2e`).** The product loop is now *run*, not described. `forge e2e init` scaffolds `e2e.json` next to `spine.json` — the closed loop as `{ name, cmd, expect?, timeoutMs? }` steps; `forge e2e run` executes them sequentially (exit 0 + regex match required) and writes `e2e-results.json` with per-step outcomes and a hash of the steps, so editing steps after a green run invalidates the results; `forge e2e check` verifies green + current.

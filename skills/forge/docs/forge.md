@@ -150,14 +150,17 @@ Forge always produces a tracked change; the **engine** is project config
 | Engine | Change location | Tooling |
 | ------ | --------------- | ------- |
 | `openspec` | `openspec/changes/<name>/` | OpenSpec CLI + `/opsx:*` vendor skills |
-| `specs` | `specs/changes/<name>/` (dir from `plan.dir`) | Built-in — plain markdown, same layout |
+| `specs` | `<plan.dir>/changes/<name>/` (dir from `plan.dir`, default `specs`) | Built-in — OpenSpec-format markdown (proposal / design / tasks / deltas) |
 
 Selection flow: `forgekit install` asks once for a user default
-(`~/.forgekit/config.json` → `plan.engine`); `forge init` auto-detects
-(`openspec/config.yaml` present → openspec, silent), otherwise offers to
-install + `openspec init`, and falls back to the specs engine on decline
-(`--openspec` / `--no-openspec` skip prompts). Migration later: `openspec
-init`, then move `specs/changes/*` into `openspec/changes/`.
+(`~/.forgekit/config.json` → `plan.engine`); `forge init` uses that default
+(or asks Planning engine? when unset), auto-detects `openspec/config.yaml`,
+and offers `openspec init` when OpenSpec is chosen but missing. Choosing
+OpenSpec always writes `plan.engine: openspec` — setup failure or declining
+immediate init does **not** fall back to the built-in specs engine
+(`--openspec` / `--no-openspec` skip prompts; `--plan-dir` sets the specs
+engine root, e.g. `openspec` to reuse a vendor tree). Migration later: keep
+the same tree and flip `plan.engine`, or run `openspec init` if starting fresh.
 
 ### Planning (after brainstorm)
 

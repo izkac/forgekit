@@ -6,7 +6,8 @@ Forge always produces a tracked change; the **engine** comes from
 | `plan.engine` | Plan phase | Change location |
 | ------------- | ---------- | --------------- |
 | `openspec` (or config missing + `openspec/config.yaml` present) | [../phases/plan-openspec.md](../phases/plan-openspec.md) | `openspec/changes/<name>/` |
-| `specs` | [../phases/plan-specs.md](../phases/plan-specs.md) | `<plan.dir>/changes/<name>/` (default `specs/`) |
+| `specs` | [../phases/plan-specs.md](../phases/plan-specs.md) | `<plan.dir>/changes/<name>/` (default `specs/`; set `plan.dir: openspec` to reuse an OpenSpec tree) |
+
 
 <HARD-GATE>
 Do NOT ask the user to choose a plan mode or engine. The engine is project

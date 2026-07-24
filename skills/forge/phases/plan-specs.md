@@ -1,8 +1,10 @@
 # Plan phase — built-in specs engine
 
 For projects with `.forge/config.json` → `plan.engine: specs`. Mirrors the
-OpenSpec propose flow without the vendor CLI. Change lives under
-`<specsDir>/changes/<change-name>/` (default `specs/changes/…`).
+OpenSpec propose flow without the vendor CLI. Engine root is `plan.dir`
+(default `specs/`; set to `openspec` to reuse an OpenSpec tree).
+
+Change lives under `<plan.dir>/changes/<change-name>/`.
 
 ## Steps
 
@@ -11,10 +13,11 @@ OpenSpec propose flow without the vendor CLI. Change lives under
 2. Create the change directory (preferred: CLI scaffold):
 
    ```bash
-   forge change new <change-name>
+   forge change new <change-name> --capability <domain> [--capability <other>]
    ```
 
-   Or create manually under `<specsDir>/changes/<change-name>/` with:
+   Or create manually under `<plan.dir>/changes/<change-name>/` with the
+   **same layout as OpenSpec**:
 
    **`proposal.md`** (required)
 
@@ -27,13 +30,16 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    ## What Changes
    Bulleted scope — behavior, contracts, data.
 
+   ## Capabilities
+   - `<domain>`: brief — delta at `specs/<domain>/spec.md`
+
    ## Impact
    Affected code/areas, risks, migration notes.
    ```
 
-   **`design.md`** (only when there are real design decisions)
+   **`design.md`** (scaffold always; trim or delete when purely mechanical)
 
-   Context, decisions with alternatives, risks. Skip for mechanical changes.
+   Context, decisions with alternatives, risks.
 
    **`tasks.md`** (required)
 
@@ -48,13 +54,40 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    - [ ] 2.1 …
    ```
 
+   **`specs/<capability>/spec.md`** (delta specs — required for capability work)
+
+   Same format as OpenSpec. There is **no** `deltas/` directory — deltas live
+   under `changes/<name>/specs/`:
+
+   ```markdown
+   # Delta for <Capability>
+
+   ## ADDED Requirements
+
+   ### Requirement: …
+   The system SHALL …
+
+   #### Scenario: …
+   - GIVEN …
+   - WHEN …
+   - THEN …
+
+   ## MODIFIED Requirements
+   …
+
+   ## REMOVED Requirements
+   …
+   ```
+
    Task-writing rules (from writing-plans practice):
    - Bite-sized: one task = one reviewable step (a test + the code to pass it).
    - Name exact file paths where known.
    - Each task states its verification (test command or observable behavior).
    - Group with `##` sections — Forge reviews per group under `standard` pace.
 
-3. Confirm `tasks.md` exists and the change is apply-ready.
+3. Confirm `tasks.md` exists and at least one delta under `specs/` when the
+   change adds/changes behavior. Apply-ready = proposal + tasks + deltas
+   (design when non-mechanical).
 4. **Spine (always) + orchestration seam** — see [../references/runtime-integrity.md](../references/runtime-integrity.md):
 
    ```bash
@@ -80,7 +113,7 @@ OpenSpec propose flow without the vendor CLI. Change lives under
    keyword sniffing does not decide.)
 
 5. **Operator brief (mandatory)** — see [../references/operator-brief.md](../references/operator-brief.md):
-   write `<specsDir>/changes/<change-name>/brief.html` — a plain-language,
+   write `<plan.dir>/changes/<change-name>/brief.html` — a plain-language,
    self-contained HTML explanation of what will be built (mermaid diagrams
    where helpful), then:
 
@@ -107,11 +140,24 @@ OpenSpec propose flow without the vendor CLI. Change lives under
 
 ## Compatibility
 
-Layout and conventions are deliberately identical to OpenSpec
-(`proposal.md` / `design.md` / `tasks.md`, archive on finish). Migration:
-`openspec init`, then move `specs/changes/*` into `openspec/changes/`.
+Layout and conventions are identical to OpenSpec:
+
+| Path | Role |
+| ---- | ---- |
+| `<plan.dir>/specs/<cap>/spec.md` | Source of truth |
+| `<plan.dir>/changes/<name>/proposal.md` | Why / what / capabilities / impact |
+| `<plan.dir>/changes/<name>/design.md` | Technical approach |
+| `<plan.dir>/changes/<name>/tasks.md` | Checklist |
+| `<plan.dir>/changes/<name>/specs/<cap>/spec.md` | Delta specs |
+
+Switch engines without moving files:
+
+```bash
+forge init --no-openspec --plan-dir openspec
+# → .forge/config.json { "plan": { "engine": "specs", "dir": "openspec" } }
+```
 
 ## Session tracking
 
 Forge session holds orchestration artefacts; the canonical plan lives under
-`<specsDir>/changes/<change-name>/`.
+`<plan.dir>/changes/<change-name>/`.

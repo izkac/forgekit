@@ -41,8 +41,9 @@ review new my-branch --type branch
 # Forge project wiring (+ planning engine + optional ADR scaffold)
 cd /path/to/your-project
 forge init --cursor --claude --adr
-# If OpenSpec isn't set up, init offers to install + `openspec init`;
-# decline (or --no-openspec) to use the built-in specs engine (specs/changes/)
+# If OpenSpec isn't set up, init offers to install + `openspec init`.
+# Choosing OpenSpec always writes plan.engine=openspec (setup can wait).
+# Use --no-openspec for the built-in specs engine (specs/changes/)
 ```
 
 One-shot without a global install: `npx @izkac/forgekit install …` (same bins via `npx forge` / `npx review` after the package is on PATH, or keep the global install).
@@ -95,14 +96,18 @@ Forge always plans through a tracked change; the engine is per project:
 | Engine | Location | Tooling |
 |--------|----------|---------|
 | `openspec` | `openspec/changes/<name>/` | OpenSpec CLI (`/opsx:*`) |
-| `specs` (built-in) | `specs/changes/<name>/` | None — plain markdown, same layout |
+| `specs` (built-in) | `<plan.dir>/changes/<name>/` (default `specs/`) | Same OpenSpec layout — proposal / design / tasks / delta `specs/` |
 
 `forgekit install` asks once and saves the default. `forge init` auto-detects:
-existing `openspec/config.yaml` wins silently; otherwise it offers to install +
-run `openspec init`, and declining scaffolds the specs engine. The engine lands
-in `.forge/config.json` → `plan.engine`. Both engines share the change layout
-(`proposal.md` / `design.md` / `tasks.md`, dated `changes/archive/`), so
-archive→ADR and a later move to OpenSpec work unchanged.
+existing `openspec/config.yaml` wins silently; otherwise it uses the install
+default (or asks), and offers to install + run `openspec init` when OpenSpec
+is chosen. Declining or failing that setup still records `plan.engine:
+openspec` — use `--no-openspec` for the built-in specs engine (add
+`--plan-dir openspec` to reuse an OpenSpec tree without moving files). The
+engine lands in `.forge/config.json` → `plan.engine` (+ `plan.dir` for specs).
+Both engines share the change layout (`proposal.md` / `design.md` / `tasks.md`
+/ delta `specs/<cap>/spec.md`, dated `changes/archive/`), so archive→ADR and
+switching engines work unchanged.
 
 ### ADRs (optional)
 

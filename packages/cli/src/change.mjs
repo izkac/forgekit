@@ -3,8 +3,8 @@
  * Specs-engine change scaffolding.
  *
  * Usage:
- *   forge change new <name> [--cwd <path>] [--force]
- *   forge change archive <name> [--cwd <path>] [--date YYYY-MM-DD]
+ *   forge change new <name> [--capability <id>]… [--cwd <path>] [--force]
+ *   forge change archive <name> [--cwd <path>] [--date YYYY-MM-DD] [--no-sync]
  */
 
 import fs from 'node:fs';
@@ -14,6 +14,7 @@ import {
   DEFAULT_SPECS_DIR,
   resolveProjectPlanEngine,
 } from './plan-engine.mjs';
+import { deltaSpecTemplate, mergeChangeDeltas } from './specs-sync.mjs';
 
 /**
  * @param {string[]} argv
@@ -22,19 +23,26 @@ export function parseArgs(argv) {
   const opts = {
     help: false,
     force: false,
+    noSync: false,
     cwd: process.cwd(),
     date: /** @type {string | null} */ (null),
     action: /** @type {string | null} */ (null),
     name: /** @type {string | null} */ (null),
+    capabilities: /** @type {string[]} */ ([]),
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') opts.help = true;
     else if (arg === '--force' || arg === '-f') opts.force = true;
+    else if (arg === '--no-sync') opts.noSync = true;
     else if (arg === '--cwd') opts.cwd = argv[++i];
     else if (arg === '--date') opts.date = argv[++i];
-    else if (!opts.action && (arg === 'new' || arg === 'archive')) opts.action = arg;
+    else if (arg === '--capability' || arg === '--cap') {
+      const cap = argv[++i];
+      if (!cap) throw new Error(`${arg} requires a capability id`);
+      opts.capabilities.push(cap);
+    } else if (!opts.action && (arg === 'new' || arg === 'archive')) opts.action = arg;
     else if (!opts.name && !arg.startsWith('-')) opts.name = arg;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -45,18 +53,28 @@ function printHelp() {
   process.stdout.write(`Usage: forge change <new|archive> <name> [options]
 
 Scaffold or archive a change for the built-in specs planning engine.
+Layout matches OpenSpec: proposal / design / tasks / delta specs under
+\`changes/<name>/specs/<capability>/spec.md\`, main catalog at
+\`<plan.dir>/specs/\`.
 
 Commands:
-  new <name>       Create specs/changes/<name>/{proposal.md,tasks.md}
-  archive <name>   Move specs/changes/<name> → changes/archive/YYYY-MM-DD-<name>
+  new <name>       Create <plan.dir>/changes/<name>/{proposal,design,tasks}.md
+                   plus delta stubs for each --capability
+  archive <name>   Merge deltas → <plan.dir>/specs/, then move change to
+                   changes/archive/YYYY-MM-DD-<name>
 
 Options:
-  --cwd <path>     Project root (default: cwd)
+  --capability <id>  Delta capability to stub (repeatable). kebab-case id
+                     matching OpenSpec domains (e.g. auth, payments)
+  --cwd <path>       Project root (default: cwd)
   --date YYYY-MM-DD  Archive date prefix (default: today UTC)
-  --force, -f      Overwrite existing proposal/tasks on new
+  --no-sync          Archive without merging deltas into the main catalog
+  --force, -f        Overwrite existing scaffold files on new
   --help
 
 Requires \`.forge/config.json\` → plan.engine: specs (or run \`forge init --no-openspec\`).
+Engine root is \`plan.dir\` (default \`specs\`; use \`openspec\` to reuse an
+OpenSpec tree).
 `);
 }
 
@@ -72,7 +90,24 @@ export function assertChangeName(name) {
   return name;
 }
 
-const PROPOSAL_TMPL = (title) => `# ${title}
+/**
+ * @param {string} capability
+ */
+export function assertCapabilityName(capability) {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(capability)) {
+    throw new Error(
+      `Capability id must be kebab-case (got: ${capability}). Example: auth`,
+    );
+  }
+  return capability;
+}
+
+const PROPOSAL_TMPL = (title, capabilities) => {
+  const caps =
+    capabilities.length > 0
+      ? capabilities.map((c) => `- \`${c}\`: … (delta: \`specs/${c}/spec.md\`)`).join('\n')
+      : `- \`<capability>\`: … — add with \`forge change new … --capability <id>\` or create \`specs/<id>/spec.md\``;
+  return `# ${title}
 
 ## Why
 
@@ -82,9 +117,31 @@ One or two paragraphs: problem / pressure.
 
 - …
 
+## Capabilities
+
+${caps}
+
 ## Impact
 
 Affected code/areas, risks, migration notes.
+`;
+};
+
+const DESIGN_TMPL = `# Design
+
+## Context
+
+…
+
+## Decisions
+
+- Decision: …
+  - Alternatives considered: …
+  - Rationale: …
+
+## Risks / Trade-offs
+
+- …
 `;
 
 const TASKS_TMPL = `# Tasks
@@ -99,10 +156,11 @@ const TASKS_TMPL = `# Tasks
 /**
  * @param {string} cwd
  * @param {string} name
- * @param {{ force?: boolean }} [opts]
+ * @param {{ force?: boolean, capabilities?: string[] }} [opts]
  */
 export function createSpecsChange(cwd, name, opts = {}) {
   assertChangeName(name);
+  const capabilities = (opts.capabilities ?? []).map(assertCapabilityName);
   const engine = resolveProjectPlanEngine(cwd, { useUserDefault: false });
   if (engine.engine !== 'specs') {
     throw new Error(
@@ -114,6 +172,7 @@ export function createSpecsChange(cwd, name, opts = {}) {
   const dir = engine.dir || DEFAULT_SPECS_DIR;
   const changeDir = path.join(cwd, dir, 'changes', name);
   fs.mkdirSync(changeDir, { recursive: true });
+  fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
 
   /** @type {{ file: string, status: string }[]} */
   const files = [];
@@ -123,6 +182,7 @@ export function createSpecsChange(cwd, name, opts = {}) {
       files.push({ file: `${dir}/changes/${name}/${rel}`, status: 'skipped' });
       return;
     }
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, body, 'utf8');
     files.push({ file: `${dir}/changes/${name}/${rel}`, status: 'written' });
   };
@@ -131,16 +191,21 @@ export function createSpecsChange(cwd, name, opts = {}) {
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
-  write('proposal.md', PROPOSAL_TMPL(title));
+  write('proposal.md', PROPOSAL_TMPL(title, capabilities));
+  write('design.md', DESIGN_TMPL);
   write('tasks.md', TASKS_TMPL);
 
-  return { dir, changeDir, name, files };
+  for (const cap of capabilities) {
+    write(`specs/${cap}/spec.md`, deltaSpecTemplate(cap));
+  }
+
+  return { dir, changeDir, name, files, capabilities };
 }
 
 /**
  * @param {string} cwd
  * @param {string} name
- * @param {{ date?: string | null }} [opts]
+ * @param {{ date?: string | null, noSync?: boolean }} [opts]
  */
 export function archiveSpecsChange(cwd, name, opts = {}) {
   assertChangeName(name);
@@ -156,12 +221,18 @@ export function archiveSpecsChange(cwd, name, opts = {}) {
   if (!fs.existsSync(src)) {
     throw new Error(`Change not found: ${dir}/changes/${name}`);
   }
-  const date =
-    opts.date ||
-    new Date().toISOString().slice(0, 10);
+  const date = opts.date || new Date().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error(`Invalid --date (want YYYY-MM-DD): ${date}`);
   }
+
+  /** @type {{ capability: string, status: string, file: string }[]} */
+  let synced = [];
+  if (!opts.noSync) {
+    const mainSpecsDir = path.join(cwd, dir, 'specs');
+    synced = mergeChangeDeltas(src, mainSpecsDir);
+  }
+
   const archiveParent = path.join(cwd, dir, 'changes', 'archive');
   fs.mkdirSync(archiveParent, { recursive: true });
   const destName = `${date}-${name}`;
@@ -174,6 +245,7 @@ export function archiveSpecsChange(cwd, name, opts = {}) {
     dir,
     from: `${dir}/changes/${name}`,
     to: `${dir}/changes/archive/${destName}`,
+    synced,
   };
 }
 
@@ -193,22 +265,43 @@ export function runChange(argv) {
   }
 
   if (opts.action === 'new') {
-    const result = createSpecsChange(opts.cwd, opts.name, { force: opts.force });
+    const result = createSpecsChange(opts.cwd, opts.name, {
+      force: opts.force,
+      capabilities: opts.capabilities,
+    });
     process.stdout.write(
       `Created specs change "${result.name}" under ${result.dir}/changes/${result.name}/\n`,
     );
     for (const f of result.files) {
       process.stdout.write(`  ${f.status.padEnd(8)} ${f.file}\n`);
     }
+    if (result.capabilities.length === 0) {
+      process.stdout.write(
+        `\nNo delta stubs yet — add with:\n` +
+          `  forge change new ${result.name} --capability <domain> --force\n` +
+          `or create ${result.dir}/changes/${result.name}/specs/<domain>/spec.md\n`,
+      );
+    }
     process.stdout.write(
-      `\nNext: edit proposal.md / tasks.md, then:\n` +
+      `\nNext: edit proposal.md / design.md / tasks.md / specs/, then:\n` +
         `  forge phase plan --plan-type specs --openspec ${result.name}\n`,
     );
     return 0;
   }
 
   if (opts.action === 'archive') {
-    const result = archiveSpecsChange(opts.cwd, opts.name, { date: opts.date });
+    const result = archiveSpecsChange(opts.cwd, opts.name, {
+      date: opts.date,
+      noSync: opts.noSync,
+    });
+    for (const s of result.synced) {
+      process.stdout.write(
+        `  sync ${s.status.padEnd(8)} ${result.dir}/specs/${s.capability}/spec.md\n`,
+      );
+    }
+    if (!opts.noSync && result.synced.length === 0) {
+      process.stdout.write('  sync     (no delta specs to merge)\n');
+    }
     process.stdout.write(`Archived ${result.from} → ${result.to}\n`);
     process.stdout.write(
       `If ADRs are enabled, run archive-to-adr on the archived folder.\n`,

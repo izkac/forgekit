@@ -25,9 +25,33 @@ import {
 
 export const PLAN_ENGINES = Object.freeze(['openspec', 'specs']);
 export const DEFAULT_SPECS_DIR = 'specs';
+/** Default OpenSpec engine root (symmetric with DEFAULT_SPECS_DIR). */
+export const DEFAULT_OPENSPEC_DIR = 'openspec';
 
 export const OPENSPEC_PACKAGE = '@fission-ai/openspec';
 export const OPENSPEC_INSTALL_CMD = `npm install -g ${OPENSPEC_PACKAGE}`;
+
+/**
+ * Relative engine-root path inside the repo (no `..`, no absolute).
+ * @param {string} dir
+ * @returns {string}
+ */
+export function normalizePlanDir(dir) {
+  const cleaned = String(dir ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/\/+$/, '');
+  if (!cleaned) {
+    throw new Error('plan.dir must be a non-empty relative path (e.g. specs or openspec)');
+  }
+  if (path.isAbsolute(cleaned) || cleaned.startsWith('/') || cleaned.includes('..')) {
+    throw new Error(
+      `plan.dir must be a relative path within the repo (got: ${dir}). Example: openspec`,
+    );
+  }
+  return cleaned;
+}
 
 /**
  * @param {unknown} value
@@ -88,7 +112,10 @@ export function writeProjectPlanConfig(cwd, plan) {
   /** @type {{ engine: string, dir?: string }} */
   const nextPlan = { engine: plan.engine };
   if (plan.engine === 'specs') {
-    nextPlan.dir = plan.dir ?? curPlan?.dir ?? DEFAULT_SPECS_DIR;
+    nextPlan.dir = normalizePlanDir(plan.dir ?? curPlan?.dir ?? DEFAULT_SPECS_DIR);
+  } else if (plan.dir) {
+    // Optional override when recording openspec (rarely needed).
+    nextPlan.dir = normalizePlanDir(plan.dir);
   }
   return saveProjectConfig(cwd, { plan: nextPlan }, { replaceKeys: ['plan'] });
 }
@@ -107,48 +134,62 @@ export function resolveProjectPlanEngine(cwd, opts = {}) {
   const project = loadProjectConfig(cwd);
   const projectPlan = asPlan(project.plan);
   if (projectPlan && PLAN_ENGINES.includes(projectPlan.engine)) {
+    const fallbackDir =
+      projectPlan.engine === 'openspec' ? DEFAULT_OPENSPEC_DIR : DEFAULT_SPECS_DIR;
     return {
       engine: /** @type {string} */ (projectPlan.engine),
-      dir: projectPlan.dir ?? DEFAULT_SPECS_DIR,
+      dir: projectPlan.dir ?? fallbackDir,
       source: 'project',
     };
   }
   if (hasOpenSpecConfig(cwd)) {
-    return { engine: 'openspec', dir: DEFAULT_SPECS_DIR, source: 'detected' };
+    return { engine: 'openspec', dir: DEFAULT_OPENSPEC_DIR, source: 'detected' };
   }
   if (opts.useUserDefault !== false) {
     const userEngine = loadUserPlanEngine(opts.home);
     if (userEngine) {
-      return { engine: userEngine, dir: DEFAULT_SPECS_DIR, source: 'user' };
+      return {
+        engine: userEngine,
+        dir: userEngine === 'openspec' ? DEFAULT_OPENSPEC_DIR : DEFAULT_SPECS_DIR,
+        source: 'user',
+      };
     }
   }
-  return { engine: 'openspec', dir: DEFAULT_SPECS_DIR, source: 'default' };
+  return { engine: 'openspec', dir: DEFAULT_OPENSPEC_DIR, source: 'default' };
 }
 
 const SPECS_README = (dir) => `# \`${dir}/\` — Forge specs (built-in planning engine)
 
-OpenSpec-compatible change tracking without the OpenSpec CLI. Managed by the
-Forge workflow (see the \`forge\` skill, \`phases/plan-specs.md\`).
+OpenSpec-compatible change tracking without the OpenSpec CLI. Same **format**
+as OpenSpec (proposal / design / tasks / delta specs / main catalog). Managed
+by the Forge workflow (see the \`forge\` skill, \`phases/plan-specs.md\`).
 
 \`\`\`
 ${dir}/
+  specs/<capability>/spec.md          # source of truth (current behavior)
   changes/<change-name>/
-    proposal.md   # Why / What Changes / Impact
-    design.md     # optional — context, decisions, risks
-    tasks.md      # ## groups with - [ ] task checkboxes
-  changes/archive/YYYY-MM-DD-<change-name>/   # archived on finish
+    proposal.md                       # Why / What Changes / Capabilities / Impact
+    design.md                         # optional — context, decisions, risks
+    tasks.md                          # ## groups with - [ ] task checkboxes
+    specs/<capability>/spec.md        # DELTA specs (ADDED / MODIFIED / REMOVED)
+  changes/archive/YYYY-MM-DD-<change-name>/
 \`\`\`
 
 Conventions (kept identical to OpenSpec so migration stays trivial):
 
 - One change per unit of substantial work; kebab-case change names.
+- Delta specs live under \`changes/<name>/specs/\` — **not** a \`deltas/\` folder.
 - \`tasks.md\` uses \`##\` section groups and \`- [ ]\` checkboxes; Forge counts
   and reviews per group.
-- On finish, move the change dir into \`changes/archive/\` with a date prefix,
-  then follow the project ADR policy if enabled.
+- On archive (\`forge change archive\`), deltas merge into \`${dir}/specs/\`, then
+  the change folder moves under \`changes/archive/\`.
 
-Migrating to OpenSpec later: run \`openspec init\`, then move
-\`${dir}/changes/*\` into \`openspec/changes/\`.
+Switching from OpenSpec without moving files: set
+\`.forge/config.json\` → \`{ "plan": { "engine": "specs", "dir": "openspec" } }\`
+(or \`forge init --no-openspec --plan-dir openspec\`).
+
+Migrating the other way: run \`openspec init\`, keep using the same tree if
+\`dir\` already points at \`openspec/\`.
 `;
 
 /**
@@ -157,7 +198,7 @@ Migrating to OpenSpec later: run \`openspec init\`, then move
  * @param {{ dir?: string, force?: boolean }} [opts]
  */
 export function scaffoldSpecs(cwd, opts = {}) {
-  const dir = opts.dir ?? DEFAULT_SPECS_DIR;
+  const dir = normalizePlanDir(opts.dir ?? DEFAULT_SPECS_DIR);
   /** @type {{ file: string, status: string }[]} */
   const files = [];
 
@@ -175,8 +216,10 @@ export function scaffoldSpecs(cwd, opts = {}) {
   };
 
   ensureDir(`${dir}/changes/archive`);
+  ensureDir(`${dir}/specs`);
   writeFile(`${dir}/README.md`, SPECS_README(dir));
   writeFile(`${dir}/changes/archive/.gitkeep`, '');
+  writeFile(`${dir}/specs/.gitkeep`, '');
 
   return { dir, files };
 }

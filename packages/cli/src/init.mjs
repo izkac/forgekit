@@ -30,7 +30,12 @@ import {
   writeProjectPlanConfig,
 } from './plan-engine.mjs';
 import { resolveAsset } from './paths.mjs';
-import { AGENT_IDS, AGENTS, installedManagedPairs } from './install.mjs';
+import {
+  AGENT_IDS,
+  AGENTS,
+  installedManagedPairs,
+  promptOpenSpec,
+} from './install.mjs';
 
 // Environments with project-local command/rule/hook templates. Others are
 // driven by the globally-installed skill alone (no per-project wiring).
@@ -54,6 +59,8 @@ export function parseArgs(argv) {
     adrDir: /** @type {string | null} */ (null),
     /** @type {boolean | null} true=openspec, false=specs, null=detect/prompt */
     openspec: /** @type {boolean | null} */ (null),
+    /** @type {string | null} specs-engine root (plan.dir) */
+    planDir: /** @type {string | null} */ (null),
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -75,6 +82,7 @@ export function parseArgs(argv) {
     else if (arg === '--adr-dir') opts.adrDir = argv[++i];
     else if (arg === '--openspec') opts.openspec = true;
     else if (arg === '--no-openspec') opts.openspec = false;
+    else if (arg === '--plan-dir') opts.planDir = argv[++i];
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -96,6 +104,8 @@ Options:
   --all             Every offered environment
   --openspec        Plan with OpenSpec (offer install + \`openspec init\` if missing)
   --no-openspec     Plan with the built-in specs engine (${DEFAULT_SPECS_DIR}/changes/)
+  --plan-dir <path> Specs-engine root (plan.dir). Default: ${DEFAULT_SPECS_DIR}.
+                    Use \`openspec\` to reuse an existing OpenSpec tree without moving files.
   --adr             Enable ADRs (scaffold decisions.md + ADR dir + hooks)
   --no-adr          Disable ADRs for this project
   --adr-dir <path>  ADR directory (default: ${DEFAULT_ADR_DIR} or ~/.forgekit preference)
@@ -110,10 +120,12 @@ to load skill content. Init only adds project-local wiring.
 
 Interactive (TTY): the environment picker matches \`forgekit install\` and is
 pre-checked with what you installed there (saved in ~/.forgekit/config.json),
-so you don't pick twice. When --openspec/--no-openspec omitted and OpenSpec is
-not already set up, offers to install + set it up (decline = built-in specs
-engine). When --adr/--no-adr omitted, asks whether to use ADRs (default Yes)
-and for the directory inside the repo.
+so you don't pick twice. When --openspec/--no-openspec omitted: uses the user
+default from install when set; otherwise asks Planning engine?. Choosing
+OpenSpec always writes plan.engine=openspec (setup failure or declining
+immediate \`openspec init\` does not fall back to the built-in specs engine).
+When --adr/--no-adr omitted, asks whether to use ADRs (default Yes) and for
+the directory inside the repo.
 `);
 }
 
@@ -297,7 +309,7 @@ export function ensureCursorHookHints(cwd, opts) {
 
 /**
  * @param {string[]} selected
- * @param {{ cwd: string, force?: boolean, overlay?: boolean, templatesRoot?: string, adr?: boolean | null, adrDir?: string | null, home?: string, planEngine?: string | null }} opts
+ * @param {{ cwd: string, force?: boolean, overlay?: boolean, templatesRoot?: string, adr?: boolean | null, adrDir?: string | null, home?: string, planEngine?: string | null, planDir?: string | null }} opts
  */
 export function initProject(selected, opts) {
   const templates = opts.templatesRoot ?? resolveTemplatesRoot();
@@ -369,13 +381,21 @@ export function initProject(selected, opts) {
   report.skillOnly = selected.filter((id) => !WIRED_AGENTS.includes(id));
 
   if (opts.planEngine === 'specs') {
-    const scaffold = scaffoldSpecs(cwd, { force: opts.force });
+    const scaffold = scaffoldSpecs(cwd, {
+      force: opts.force,
+      dir: opts.planDir ?? undefined,
+    });
     const config = writeProjectPlanConfig(cwd, {
       engine: 'specs',
       dir: scaffold.dir,
     });
     report.plan = { engine: 'specs', dir: scaffold.dir, files: scaffold.files, config };
   } else if (opts.planEngine === 'openspec') {
+    if (opts.planDir) {
+      process.stderr.write(
+        'Note: --plan-dir applies to the built-in specs engine; ignoring for openspec.\n',
+      );
+    }
     const config = writeProjectPlanConfig(cwd, { engine: 'openspec' });
     report.plan = {
       engine: 'openspec',
@@ -463,66 +483,99 @@ async function promptAgents(cwd) {
 }
 
 /**
- * Offer to install + set up OpenSpec in this project.
- * @returns {Promise<boolean>} true = user accepted OpenSpec setup
+ * Offer to install + set up OpenSpec in this project (engine already chosen).
+ * @returns {Promise<boolean>} true = user accepted OpenSpec setup now
  */
 async function promptOpenSpecSetup() {
   return confirm({
-    message:
-      'OpenSpec is not set up in this project. Install and set it up now? (No = built-in specs engine)',
+    message: 'OpenSpec is not set up in this project. Install and set it up now?',
     default: true,
   });
 }
 
 /**
  * Resolve the planning engine for `forge init`, offering OpenSpec setup when needed.
- * @param {{ cwd: string, openspec: boolean | null, agents?: string[] }} opts
+ *
+ * Choosing OpenSpec (flag, user default, or interactive pick) always records
+ * `plan.engine: openspec`. Immediate `openspec init` is best-effort — failure
+ * or declining setup must not fall back to the built-in specs engine.
+ *
+ * @param {{
+ *   cwd: string,
+ *   openspec: boolean | null,
+ *   agents?: string[],
+ *   home?: string,
+ *   isTTY?: boolean,
+ *   confirmSetup?: () => Promise<boolean>,
+ *   promptEngine?: () => Promise<boolean>,
+ *   setup?: typeof setupOpenSpec,
+ *   loadUser?: (home?: string) => string | null,
+ * }} opts
  * @returns {Promise<string>} 'openspec' | 'specs'
  */
-async function resolveInitPlanEngine(opts) {
+export async function resolveInitPlanEngine(opts) {
   const configured = hasOpenSpecConfig(opts.cwd);
   const tools = opts.agents;
+  const isTTY = opts.isTTY ?? Boolean(process.stdin.isTTY);
+  const runSetup = opts.setup ?? setupOpenSpec;
+  const loadUser = opts.loadUser ?? ((home) => loadUserPlanEngine(home));
+  const confirmSetup = opts.confirmSetup ?? promptOpenSpecSetup;
+  const promptEngine = opts.promptEngine ?? promptOpenSpec;
+
+  const reportSetup = (setup) => {
+    for (const s of setup.steps) {
+      process.stdout.write(
+        `  [${s.ok ? 'ok' : 'FAIL'}] ${s.step}${s.detail ? ` — ${s.detail}` : ''}\n`,
+      );
+    }
+    if (!setup.ok) {
+      process.stderr.write(
+        'OpenSpec setup failed — engine recorded as openspec; re-run `forge doctor --install` or `openspec init` manually.\n',
+      );
+    }
+  };
+
+  /** Best-effort setup; never changes the chosen engine. */
+  const ensureOpenSpecSetup = async ({ ask }) => {
+    if (configured) return;
+    if (!isTTY) return;
+    if (ask) {
+      const accepted = await confirmSetup();
+      if (!accepted) {
+        process.stdout.write(
+          'OpenSpec engine recorded; run `openspec init` (or `forge doctor --install`) when ready.\n',
+        );
+        return;
+      }
+    }
+    reportSetup(runSetup(opts.cwd, { tools }));
+  };
 
   if (opts.openspec === false) return 'specs';
 
   if (opts.openspec === true) {
-    if (!configured && process.stdin.isTTY) {
-      const setup = setupOpenSpec(opts.cwd, { tools });
-      for (const s of setup.steps) {
-        process.stdout.write(`  [${s.ok ? 'ok' : 'FAIL'}] ${s.step}${s.detail ? ` — ${s.detail}` : ''}\n`);
-      }
-      if (!setup.ok) {
-        process.stderr.write(
-          'OpenSpec setup failed — engine recorded as openspec; re-run `forge doctor --install` or `openspec init` manually.\n',
-        );
-      }
-    }
+    // Flag means engine=openspec; attempt setup without a second prompt.
+    await ensureOpenSpecSetup({ ask: false });
     return 'openspec';
   }
 
   if (configured) return 'openspec';
 
-  const userDefault = loadUserPlanEngine();
+  const userDefault = loadUser(opts.home);
   if (userDefault === 'specs') return 'specs';
 
-  // Default (or user prefers openspec) but project has no OpenSpec yet
-  if (!process.stdin.isTTY) {
-    return userDefault === 'openspec' ? 'openspec' : 'specs';
+  if (userDefault === 'openspec') {
+    await ensureOpenSpecSetup({ ask: true });
+    return 'openspec';
   }
 
-  const accepted = await promptOpenSpecSetup();
-  if (!accepted) return 'specs';
+  // No user default — ask on TTY, otherwise leave project on built-in specs.
+  if (!isTTY) return 'specs';
 
-  const setup = setupOpenSpec(opts.cwd, { tools });
-  for (const s of setup.steps) {
-    process.stdout.write(`  [${s.ok ? 'ok' : 'FAIL'}] ${s.step}${s.detail ? ` — ${s.detail}` : ''}\n`);
-  }
-  if (!setup.ok) {
-    process.stderr.write(
-      'OpenSpec setup failed — falling back to the built-in specs engine. You can switch later with `forge init --openspec --force`.\n',
-    );
-    return 'specs';
-  }
+  const wantOpenSpec = await promptEngine();
+  if (!wantOpenSpec) return 'specs';
+
+  await ensureOpenSpecSetup({ ask: true });
   return 'openspec';
 }
 
@@ -593,7 +646,13 @@ async function main(argv = process.argv.slice(2)) {
     }
   }
 
-  const report = initProject(selected, { ...opts, adr, adrDir, planEngine });
+  const report = initProject(selected, {
+    ...opts,
+    adr,
+    adrDir,
+    planEngine,
+    planDir: opts.planDir,
+  });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (Array.isArray(report.skillOnly) && report.skillOnly.length) {
     const labels = report.skillOnly.map((id) => AGENTS[id].label).join(', ');

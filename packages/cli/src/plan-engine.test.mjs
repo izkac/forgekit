@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   DEFAULT_SPECS_DIR,
+  DEFAULT_OPENSPEC_DIR,
   PLAN_ENGINES,
   hasOpenSpecConfig,
   loadUserPlanEngine,
+  normalizePlanDir,
   resolveProjectPlanEngine,
   saveUserPlanEngine,
   scaffoldSpecs,
@@ -17,7 +19,11 @@ import {
 } from './plan-engine.mjs';
 import { loadProjectConfig, loadUserConfig, saveUserConfig } from './adr.mjs';
 import { parseArgs as parseInstallArgs } from './install.mjs';
-import { parseArgs as parseInitArgs, initProject } from './init.mjs';
+import {
+  parseArgs as parseInitArgs,
+  initProject,
+  resolveInitPlanEngine,
+} from './init.mjs';
 import { runDoctorChecks } from './doctor.mjs';
 
 function tmpdir(prefix) {
@@ -71,12 +77,14 @@ test('resolveProjectPlanEngine precedence: project > detection > user > default'
       resolveProjectPlanEngine(cwd, { home }).engine,
       'openspec',
     );
+    assert.equal(resolveProjectPlanEngine(cwd, { home }).dir, DEFAULT_OPENSPEC_DIR);
     assert.equal(resolveProjectPlanEngine(cwd, { home }).source, 'default');
 
     // user default
     saveUserPlanEngine('specs', home);
     const viaUser = resolveProjectPlanEngine(cwd, { home });
     assert.equal(viaUser.engine, 'specs');
+    assert.equal(viaUser.dir, DEFAULT_SPECS_DIR);
     assert.equal(viaUser.source, 'user');
 
     // useUserDefault=false ignores user config
@@ -91,6 +99,7 @@ test('resolveProjectPlanEngine precedence: project > detection > user > default'
     assert.equal(hasOpenSpecConfig(cwd), true);
     const detected = resolveProjectPlanEngine(cwd, { home });
     assert.equal(detected.engine, 'openspec');
+    assert.equal(detected.dir, DEFAULT_OPENSPEC_DIR);
     assert.equal(detected.source, 'detected');
 
     // project config beats detection
@@ -104,16 +113,26 @@ test('resolveProjectPlanEngine precedence: project > detection > user > default'
   }
 });
 
-test('scaffoldSpecs writes README + changes/archive', () => {
+test('normalizePlanDir rejects absolute and parent paths', () => {
+  assert.equal(normalizePlanDir('openspec'), 'openspec');
+  assert.equal(normalizePlanDir('./specs/'), 'specs');
+  assert.throws(() => normalizePlanDir('/tmp/x'), /relative/);
+  assert.throws(() => normalizePlanDir('../x'), /relative/);
+  assert.throws(() => normalizePlanDir(''), /non-empty/);
+});
+
+test('scaffoldSpecs writes README + changes/archive + main specs catalog', () => {
   const cwd = tmpdir('forgekit-specs-scaffold-');
   try {
     const result = scaffoldSpecs(cwd, { force: true });
     assert.equal(result.dir, DEFAULT_SPECS_DIR);
     assert.ok(fs.existsSync(path.join(cwd, 'specs', 'README.md')));
     assert.ok(fs.existsSync(path.join(cwd, 'specs', 'changes', 'archive')));
+    assert.ok(fs.existsSync(path.join(cwd, 'specs', 'specs', '.gitkeep')));
     const readme = fs.readFileSync(path.join(cwd, 'specs', 'README.md'), 'utf8');
     assert.match(readme, /changes\/<change-name>/);
     assert.match(readme, /tasks\.md/);
+    assert.match(readme, /ADDED \/ MODIFIED \/ REMOVED/);
 
     // second run without force skips
     const again = scaffoldSpecs(cwd);
@@ -121,6 +140,30 @@ test('scaffoldSpecs writes README + changes/archive', () => {
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test('scaffoldSpecs + init honor custom plan.dir (e.g. openspec)', () => {
+  const cwd = tmpdir('forgekit-plan-dir-');
+  try {
+    const report = initProject(['codex'], {
+      cwd,
+      force: true,
+      planEngine: 'specs',
+      planDir: 'openspec',
+    });
+    assert.equal(report.plan.engine, 'specs');
+    assert.equal(report.plan.dir, 'openspec');
+    assert.equal(loadProjectConfig(cwd).plan.dir, 'openspec');
+    assert.ok(fs.existsSync(path.join(cwd, 'openspec', 'changes')));
+    assert.ok(fs.existsSync(path.join(cwd, 'openspec', 'specs')));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('init parseArgs --plan-dir', () => {
+  assert.equal(parseInitArgs(['--plan-dir', 'openspec']).planDir, 'openspec');
+  assert.equal(parseInitArgs([]).planDir, null);
 });
 
 test('setupOpenSpec runs install + init via injected runner', () => {
@@ -238,6 +281,127 @@ test('initProject planEngine=openspec records engine without scaffolding specs',
     assert.equal(report.plan.configured, false);
     assert.ok(!fs.existsSync(path.join(cwd, 'specs')));
     assert.equal(loadProjectConfig(cwd).plan.engine, 'openspec');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: setup failure keeps openspec (no specs fallback)', async () => {
+  const cwd = tmpdir('forgekit-resolve-fail-');
+  try {
+    const engine = await resolveInitPlanEngine({
+      cwd,
+      openspec: null,
+      isTTY: true,
+      loadUser: () => 'openspec',
+      confirmSetup: async () => true,
+      setup: () => ({
+        ok: false,
+        steps: [{ step: 'openspec init', ok: false, detail: 'exit 1' }],
+      }),
+    });
+    assert.equal(engine, 'openspec');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: declining setup keeps openspec when user default is openspec', async () => {
+  const cwd = tmpdir('forgekit-resolve-decline-');
+  try {
+    const engine = await resolveInitPlanEngine({
+      cwd,
+      openspec: null,
+      isTTY: true,
+      loadUser: () => 'openspec',
+      confirmSetup: async () => false,
+      setup: () => {
+        throw new Error('setup should not run when declined');
+      },
+    });
+    assert.equal(engine, 'openspec');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: --openspec keeps openspec even when setup fails', async () => {
+  const cwd = tmpdir('forgekit-resolve-flag-');
+  try {
+    const engine = await resolveInitPlanEngine({
+      cwd,
+      openspec: true,
+      isTTY: true,
+      setup: () => ({
+        ok: false,
+        steps: [{ step: 'openspec init', ok: false }],
+      }),
+    });
+    assert.equal(engine, 'openspec');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: interactive engine pick openspec survives setup failure', async () => {
+  const cwd = tmpdir('forgekit-resolve-pick-');
+  try {
+    const engine = await resolveInitPlanEngine({
+      cwd,
+      openspec: null,
+      isTTY: true,
+      loadUser: () => null,
+      promptEngine: async () => true,
+      confirmSetup: async () => true,
+      setup: () => ({
+        ok: false,
+        steps: [{ step: 'openspec init', ok: false }],
+      }),
+    });
+    assert.equal(engine, 'openspec');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: interactive engine pick specs skips setup', async () => {
+  const cwd = tmpdir('forgekit-resolve-specs-pick-');
+  try {
+    const engine = await resolveInitPlanEngine({
+      cwd,
+      openspec: null,
+      isTTY: true,
+      loadUser: () => null,
+      promptEngine: async () => false,
+      setup: () => {
+        throw new Error('setup should not run for specs');
+      },
+    });
+    assert.equal(engine, 'specs');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: --no-openspec and user specs default', async () => {
+  const cwd = tmpdir('forgekit-resolve-no-');
+  try {
+    assert.equal(
+      await resolveInitPlanEngine({ cwd, openspec: false, isTTY: true }),
+      'specs',
+    );
+    assert.equal(
+      await resolveInitPlanEngine({
+        cwd,
+        openspec: null,
+        isTTY: true,
+        loadUser: () => 'specs',
+        promptEngine: async () => {
+          throw new Error('should not ask when user default is specs');
+        },
+      }),
+      'specs',
+    );
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

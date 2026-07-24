@@ -65,9 +65,12 @@ forge init --cursor --claude --adr
 
 # Planning engine:
 #   - If openspec/config.yaml exists → OpenSpec (silent)
-#   - Else init offers to install OpenSpec CLI + `openspec init`
-#   - Decline (or pass --no-openspec) → built-in specs/ engine
+#   - Else uses install default, or asks Planning engine? when unset
+#   - OpenSpec choice always writes plan.engine=openspec (setup is best-effort)
+#   - Pass --no-openspec → built-in specs/ engine
+#   - Pass --plan-dir openspec with --no-openspec to reuse an OpenSpec tree
 forge init --cursor --claude --no-openspec   # force specs engine
+forge init --cursor --claude --no-openspec --plan-dir openspec
 forge init --cursor --claude --openspec      # force OpenSpec path
 ```
 
