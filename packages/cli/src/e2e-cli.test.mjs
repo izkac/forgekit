@@ -112,9 +112,12 @@ test('e2e run --repeat measures flakiness instead of trusting one green run', ()
   const root = tmp('forge-e2e-repeat-');
   makeFixture(root);
   const changeDir = path.join(root, 'specs', 'changes', 'my-change');
-  const counter = path.join(root, 'runs.txt');
+  // Portable counter: steps run through `shell: true`, which is cmd.exe on
+  // Windows, so POSIX `$(cat …)`/`test` would fail every run and read as
+  // BROKEN rather than FLAKY. Single quotes only — the outer quoting is `"`.
+  const counter = path.join(root, 'runs.txt').replace(/\\/g, '/');
   // Fails on the 2nd invocation only: a textbook flake.
-  const cmd = `n=$(cat ${counter} 2>/dev/null || echo 0); n=$((n+1)); echo $n > ${counter}; test "$n" != "2"`;
+  const cmd = `node -e "const fs=require('fs');const f='${counter}';let n=0;try{n=Number(fs.readFileSync(f,'utf8'))||0}catch(e){};n++;fs.writeFileSync(f,String(n));process.exit(n===2?1:0)"`;
   fs.writeFileSync(
     path.join(changeDir, 'e2e.json'),
     `${JSON.stringify({ steps: [{ name: 'flaky-step', cmd }] })}\n`,
