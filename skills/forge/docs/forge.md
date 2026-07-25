@@ -277,6 +277,9 @@ forge checkpoint --range [--last] # diff range for a reviewer brief ({DIFF_RANGE
 forge finding add "<text>" [--change <slug>] [--severity blocker|major|minor|note]
                                   # findings ledger (.forge/findings.jsonl)
 forge finding list|resolve <id>   # open findings appear in forge status
+forge fleet report [--json]       # cross-project trend from the durable ledgers
+forge e2e run --repeat 5 [--record-baseline]
+                                  # measure harness flakiness; write e2e.baseline
 forge cleanup [--dry-run]         # prune sessions >14 days or finished
 forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<text>"
                                   # stamp tier-2 test-evidence.md
@@ -338,8 +341,18 @@ idea as a personal `.env`.
 ## Pace (thoroughness)
 
 Forge ceremony (per-task review, final review, tier-3 verify, model bias, brainstorm
-depth) is controlled by a **pace** preset. Default is **`auto`**: resolve once at
-session start from risk signals, sticky for the session.
+depth) is controlled by a **pace** preset. Default is **`auto`**.
+
+`auto` resolves **twice**. At `forge new` the only signal is a free-text slug, so
+that pass fails closed to `standard`. On the way into **implement** it re-resolves
+from the plan itself — task count, group count, capabilities, spine rows, and
+whether anything in the proposal/design/tasks/spine touches
+money/auth/contracts/migrations. That second pass is why `brisk` is reachable at
+all: classifying a slug returned `standard` on every real session, three of them
+via "unrecognized scope — failing closed". The session records
+`paceResolvedFrom: "plan"` and a reason naming the facts (`plan: 3 tasks, single
+capability, no wired spine rows`). Pinned pace (`forge prefs --session-set`) is
+never overridden.
 
 | Pace | Intent |
 |------|--------|

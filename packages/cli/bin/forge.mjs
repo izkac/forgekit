@@ -71,7 +71,7 @@ Commands:
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)
   score [--write]         L2 session scorecard (auto-written at phase done)
-  fleet list|watch|view|send  Cross-project session control terminal
+  fleet list|report|watch|view|send  Cross-project control terminal + trend
   brief stamp|check|open  Operator brief (plain-language HTML, gates implement)
   finding add|list|resolve    Findings ledger — give an observation a home
 

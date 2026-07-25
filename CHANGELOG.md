@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+## 0.3.17 — 2026-07-25
+
+### Pace is decided where the facts are
+
+`pace: auto` classified a free-text slug written at session creation. Across
+five real sessions it returned `standard` every time — three via "unrecognized
+scope — failing closed" — while `brisk` and `lite` were documented and never
+selected: a constant dressed as a decision.
+
+- On the way into **implement**, `auto` now re-resolves from the plan: task
+  count, group count, capabilities, spine rows, and whether anything in the
+  proposal / design / tasks / spine touches money/auth/contracts/migrations.
+  The session records `paceResolvedFrom: "plan"` and a reason naming the facts.
+  A pinned pace is never overridden; an unreadable plan still fails closed.
+- **Fixed a real gap in risk detection:** `\bauth\b` matched "auth token" but
+  missed "authorization gate", "authenticated user" and "authorized signer" —
+  the words specs and spine rows actually use for the highest-risk category.
+  (`auth\w*` is not the fix: it swallows "author"/"authoring".) This also
+  sharpens the 0.3.16 high-risk score cap.
+
+### The high-risk review floor is a gate, not a paragraph
+
+`forge phase done` now refuses when a change touches
+money/auth/contracts/migrations and its final review is missing or
+self-authored. The rule already existed in the skill and in three analysis
+reports, and was skipped anyway — the session that most needed it recorded
+"dispatch was declined twice" in review prose no gate could see. Escape:
+`--final-review-waived "<reason>"`, kept on the session and carried into
+`.forge/sessions.jsonl`, because a waiver that survives cleanup is worth more
+than a caveat that does not.
+
+### `forge fleet report`
+
+Cross-project trend from the durable ledgers: mean score, grade distribution,
+caps, review coverage and rejection rounds, where points are lost, and carried
+debt. On the two real projects here it reproduces in one command the headline
+finding three hand-written analyses took to reach — `product_loop −57 pts
+across 6 sessions`.
+
+### `forge e2e run --repeat N [--record-baseline]`
+
+Runs the product loop N times and reports which steps are **flaky** (failed
+some runs) versus **broken** (failed every run), optionally recording
+`e2e.baseline` in `.forge/config.json`. A project whose clean-tree baseline is
+"1–4 varying failures" makes every verify phase a coin flip and a real
+regression indistinguishable from noise. A flaky loop is never written as a
+green run: the worst run is what lands in `e2e-results.json`.
+
 ## 0.3.16 — 2026-07-25
 
 ### Scoring measures outcomes, not paperwork

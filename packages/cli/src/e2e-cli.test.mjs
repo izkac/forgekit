@@ -95,3 +95,44 @@ test('e2e disable/enable toggles the project off switch; check honors it', () =>
   // gate demands e2e.json again once re-enabled → non-zero exit
   assert.throws(() => run(root, ['check']));
 });
+
+/** Like run(), but tolerates a non-zero exit (a failing loop exits 1). */
+function runAllowFail(cwd, args) {
+  try {
+    return run(cwd, args);
+  } catch (err) {
+    return `${String(err.stdout ?? '')}${String(err.stderr ?? '')}`;
+  }
+}
+
+test('e2e run --repeat measures flakiness instead of trusting one green run', () => {
+  // volo's smoke suite pinned --workers=1 in 6/6 changes to route around a
+  // race nobody fixed, and the server suite's clean-tree baseline was "1-4
+  // varying failures" — invisible to every verify phase.
+  const root = tmp('forge-e2e-repeat-');
+  makeFixture(root);
+  const changeDir = path.join(root, 'specs', 'changes', 'my-change');
+  const counter = path.join(root, 'runs.txt');
+  // Fails on the 2nd invocation only: a textbook flake.
+  const cmd = `n=$(cat ${counter} 2>/dev/null || echo 0); n=$((n+1)); echo $n > ${counter}; test "$n" != "2"`;
+  fs.writeFileSync(
+    path.join(changeDir, 'e2e.json'),
+    `${JSON.stringify({ steps: [{ name: 'flaky-step', cmd }] })}\n`,
+    'utf8',
+  );
+
+  const out = runAllowFail(root, ['run', '--repeat', '3', '--record-baseline']);
+  assert.match(out, /2\/3 runs green/);
+  assert.match(out, /FLAKY\s+flaky-step — failed 1\/3 runs/);
+
+  const config = JSON.parse(fs.readFileSync(path.join(root, '.forge', 'config.json'), 'utf8'));
+  assert.equal(config.e2e.baseline.runs, 3);
+  assert.equal(config.e2e.baseline.green, 2);
+  assert.equal(config.e2e.baseline.flakySteps[0].step, 'flaky-step');
+
+  // A flaky loop must not be recorded as a green run.
+  const results = JSON.parse(
+    fs.readFileSync(path.join(root, '.forge', 'sessions', 's1', 'e2e-results.json'), 'utf8'),
+  );
+  assert.equal(results.ok, false);
+});

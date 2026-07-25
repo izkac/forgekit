@@ -130,6 +130,7 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 | `forge new` / `status` / `phase` / `prefs` / `models` | Sessions (`status` includes a health verdict) |
 | `forge checkpoint` | Opt-in commit at a task-group boundary (`git.checkpoint`); never pushes |
 | `forge finding add\|list\|resolve` | Findings ledger — an observation gets a home the day it is written |
+| `forge fleet report` | Cross-project trend from `scorecards.jsonl` + `sessions.jsonl` |
 | `forge resolve-model` / `doctor` / `evidence` / `overlay` | Supporting |
 | `forge spine` / `e2e` / `defer` / `integrity-check` / `score` | Runtime integrity (incl. executable E2E acceptance) + L2 session scorecard |
 | `forge init` | Project commands, rules, hooks; engine (`--openspec`/`--no-openspec`); optional `--adr` |

@@ -323,3 +323,97 @@ test('phase finish allows incomplete with --allow-incomplete', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** High-risk change (specs engine) with a done-ready session. */
+function makeHighRiskFixture(dir, sessionId) {
+  const sessionFile = makeForgeFixture(dir, sessionId);
+  const sessionDir = path.dirname(sessionFile);
+  const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  raw.tasksTotal = 2;
+  raw.tasksComplete = 2;
+  raw.planType = 'specs';
+  raw.openspecChange = 'add-refunds';
+  fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+
+  const changeDir = path.join(dir, 'specs', 'changes', 'add-refunds');
+  fs.mkdirSync(changeDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(changeDir, 'proposal.md'),
+    '# Why\n\nIssue partial refunds through the payment provider.\n',
+    'utf8',
+  );
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), '## Work\n- [x] 1.1 do it\n- [x] 1.2 do it\n', 'utf8');
+  fs.writeFileSync(
+    path.join(changeDir, 'spine.json'),
+    `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+    'utf8',
+  );
+  return { sessionFile, sessionDir };
+}
+
+test('phase done refuses a high-risk change whose final review is missing or self-authored', () => {
+  // The rule existed as a paragraph in the skill and a line in three analysis
+  // reports, and was skipped anyway: the session that most needed it recorded
+  // "dispatch was declined twice" in prose no gate could see.
+  const dir = tmp('forge-review-floor-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-floor');
+
+    assert.throws(() => runSetPhase(dir, ['done']), /final review is missing or self-authored/);
+
+    fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, 'reviews', 'final-review.md'),
+      '# Final review\n\nReviewer: the coordinator — a self-review, dispatch was declined.\n',
+      'utf8',
+    );
+    assert.throws(() => runSetPhase(dir, ['done']), /self-authored/);
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'reviews', 'final-review.md'),
+      '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n',
+      'utf8',
+    );
+    runSetPhase(dir, ['done']);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'done');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the review floor can be waived explicitly, and the waiver is recorded', () => {
+  const dir = tmp('forge-review-waive-');
+  try {
+    const { sessionFile } = makeHighRiskFixture(dir, 'sess-waive');
+    runSetPhase(dir, ['done', '--final-review-waived', 'operator declined dispatch — cost']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.match(session.finalReviewWaived, /declined dispatch/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a low-risk change is not asked for an independent final review', () => {
+  const dir = tmp('forge-review-lowrisk-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-lowrisk');
+    const sessionDir = path.dirname(sessionFile);
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.tasksTotal = 1;
+    raw.tasksComplete = 1;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'done');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

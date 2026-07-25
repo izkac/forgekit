@@ -174,7 +174,62 @@ if (sub === 'run') {
     process.stdout.write(`e2e notApplicable: ${doc.notApplicable}\nNothing to run.\n`);
     process.exit(0);
   }
-  const results = runE2eSteps(doc, { cwd: process.cwd() });
+  // --repeat N: run the loop N times to measure flakiness. A harness whose
+  // clean-tree baseline is "1-4 varying failures" makes every verify phase a
+  // coin flip, and a real regression indistinguishable from noise — but nobody
+  // measures it, because measuring it was manual.
+  const repeatIdx = args.indexOf('--repeat');
+  const repeat = repeatIdx >= 0 ? Math.max(1, Number(args[repeatIdx + 1]) || 1) : 1;
+  const recordBaseline = args.includes('--record-baseline');
+
+  let results = runE2eSteps(doc, { cwd: process.cwd() });
+  if (repeat > 1) {
+    const runs = [results];
+    for (let i = 1; i < repeat; i += 1) runs.push(runE2eSteps(doc, { cwd: process.cwd() }));
+    const green = runs.filter((r) => r.ok).length;
+    /** @type {Map<string, number>} */
+    const failuresByStep = new Map();
+    for (const run of runs) {
+      for (const step of run.steps ?? []) {
+        if (step.ok === false) failuresByStep.set(step.name, (failuresByStep.get(step.name) ?? 0) + 1);
+      }
+    }
+    const flaky = [...failuresByStep.entries()]
+      .filter(([, n]) => n > 0 && n < repeat)
+      .map(([name, n]) => ({ step: name, failed: n, of: repeat }));
+
+    process.stdout.write(`\nRepeat: ${green}/${repeat} runs green\n`);
+    for (const f of flaky) {
+      process.stdout.write(`  FLAKY  ${f.step} — failed ${f.failed}/${f.of} runs\n`);
+    }
+    for (const [name, n] of failuresByStep) {
+      if (n === repeat) process.stdout.write(`  BROKEN ${name} — failed every run\n`);
+    }
+    if (flaky.length === 0 && green === repeat) {
+      process.stdout.write('  baseline is zero — a failure here is a real regression\n');
+    }
+
+    if (recordBaseline) {
+      saveProjectConfig(
+        process.cwd(),
+        {
+          e2e: {
+            baseline: {
+              runs: repeat,
+              green,
+              flakySteps: flaky,
+              measuredAt: new Date().toISOString(),
+            },
+          },
+        },
+        { mergeKeys: ['adr', 'plan', 'e2e', 'git'] },
+      );
+      process.stdout.write('  recorded to .forge/config.json → e2e.baseline\n');
+    }
+    // The last run is what gets written as the session's results; report the
+    // worst outcome so a flaky loop cannot be recorded as green.
+    results = runs.find((r) => !r.ok) ?? results;
+  }
   const resultsFile = writeE2eResults(dir, results);
   for (const step of results.steps) {
     if (step.skipped) {

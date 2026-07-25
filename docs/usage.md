@@ -536,6 +536,8 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase implement` refuses — brief missing/stale | Agent writes/updates `brief.html`, then `forge brief stamp` (or `--allow-incomplete "<reason>"`) |
 | `forge checkpoint` says checkpoints are off | Opt in: `.forge/config.json` → `{ "git": { "checkpoint": "per-group" } }` |
 | `forge checkpoint` refuses — default branch | Forge work belongs on a branch; create one, or `--allow-default-branch` / `git.allowDefaultBranch: true` |
+| `forge phase done` refuses — final review | High-risk change needs an independent final review; dispatch one, or `--final-review-waived "<reason>"` (recorded on the session and in the ledger) |
+| Verify passes but the suite is flaky | `forge e2e run --repeat 5 --record-baseline` — a non-zero baseline makes every verify a coin flip |
 | A finding keeps reappearing in reports | `forge finding add "<text>" --change <slug>` — then open that change, or mark it `--severity note` |
 | Session shows `RED` / `STALE` | `forge status` → `health.reasons`: fix the failing e2e step, re-run `forge e2e run`, or resume the idle phase |
 | Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
@@ -625,6 +627,8 @@ forge checkpoint --group 02-api --tasks 2.1-2.4   # opt-in: .forge/config.json �
 forge checkpoint --range --last   # {DIFF_RANGE} for the group reviewer
 forge finding add "smoke suite race is never fixed" --change fix-e2e-race
 forge finding list                # open findings (also shown by forge status)
+forge fleet report                # cross-project trend (scores, reviews, carried debt)
+forge e2e run --repeat 5 --record-baseline   # is the harness baseline actually zero?
 forge spine init && forge spine check
 forge e2e init && forge e2e run && forge e2e check
 forge defer add --task 3.2 --reason "wire handler in 3.2"

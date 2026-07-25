@@ -25,9 +25,17 @@ export const TIER3 = Object.freeze(['full-workspace', 'affected-only', 'audit-ti
 export const MODEL_BIAS = Object.freeze(['default', 'prefer-fast']);
 export const BRAINSTORM_DEPTH = Object.freeze(['full', 'short', 'minimal']);
 
-/** Signals that force thorough (order does not matter; any match wins). */
+/**
+ * Signals that force thorough (order does not matter; any match wins).
+ *
+ * The auth alternatives are spelled out because a bare `\bauth\b` matched
+ * "auth token" but missed "authorization gate", "authenticated user" and
+ * "authorized signer" — the words real specs and spine rows actually use for
+ * the highest-risk category. `auth\w*` is not the fix: it would swallow
+ * "author"/"authoring", which appear in every docs change.
+ */
 const THOROUGH_RE =
-  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|oauth|oidc|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|contract|contracts|gdpr|pci|wallet|checkout)\b/i;
+  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|contract|contracts|gdpr|pci|wallet|checkout)\b/i;
 
 /** Signals that suggest standard (multi-surface / API / platform / orchestration). */
 const STANDARD_RE =

@@ -5,6 +5,7 @@
  *
  * Usage:
  *   forge fleet list [--json]
+ *   forge fleet report [--json]     cross-project trend from the durable ledgers
  *   forge fleet watch [--interval <sec>] [--all]
  *   forge fleet view <session> [--transcript [N]]
  *   forge fleet send <session>|--all <message...>
@@ -25,11 +26,13 @@ import {
   sessionDirFor,
 } from './lib/fleet.mjs';
 import { healthCell, sessionHealth } from './health.mjs';
+import { buildFleetReport, formatFleetReport } from './fleet-report.mjs';
 
 function usage() {
   process.stderr.write(
     `Usage:
   forge fleet list [--json]
+  forge fleet report [--json]
   forge fleet watch [--interval <sec>] [--all]
   forge fleet view <session> [--transcript [N]]
   forge fleet send <session>|--all <message...>
@@ -145,6 +148,15 @@ function cmdList(args) {
   }
 }
 
+function cmdReport(args) {
+  const report = buildFleetReport(listFleet());
+  if (args.includes('--json')) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(formatFleetReport(report));
+}
+
 function cmdWatch(args) {
   const i = args.indexOf('--interval');
   const interval = Math.max(1, Number(i >= 0 ? args[i + 1] : 3) || 3) * 1000;
@@ -249,6 +261,9 @@ const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
   case 'list':
     cmdList(rest);
+    break;
+  case 'report':
+    cmdReport(rest);
     break;
   case 'watch':
     cmdWatch(rest);

@@ -16,6 +16,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadSession, readActive, saveSession } from './lib.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
+import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
+import { reviewCensus } from './review-census.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
 
@@ -37,7 +39,7 @@ export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -55,6 +57,7 @@ let tasksTotal = null;
 let tasksComplete = null;
 let subagentsDispatched = null;
 let allowIncomplete = null;
+let finalReviewWaived = null;
 
 for (let i = 1; i < args.length; i += 1) {
   const flag = args[i];
@@ -76,6 +79,9 @@ for (let i = 1; i < args.length; i += 1) {
     i += 1;
   } else if (flag === '--subagents' && next) {
     subagentsDispatched = Number(next);
+    i += 1;
+  } else if (flag === '--final-review-waived' && next) {
+    finalReviewWaived = next;
     i += 1;
   } else if (flag === '--allow-incomplete' && next) {
     allowIncomplete = next;
@@ -115,6 +121,37 @@ function maybeEscalatePaceForTaskCount() {
   session.paceEscalated = true;
 }
 
+/**
+ * Re-resolve `auto` pace from the plan on the way into implement.
+ *
+ * At `forge new` the only signal is a free-text slug, and classifying that
+ * returned `standard` on every real session (three of them via "unrecognized
+ * scope — failing closed"). By this point the plan exists: task count, group
+ * count, capabilities, spine rows and whether anything touches money/auth are
+ * all facts, so decide from those instead.
+ */
+function maybeResolvePaceFromPlan() {
+  if (phase !== 'implement') return;
+  if (session.pace !== 'auto' || session.pacePinned === true) return;
+  try {
+    const facts = collectPlanFacts({ session });
+    if (!facts.readable) return;
+    const suggested = suggestPaceFromPlan(facts);
+    if (suggested.pace === session.resolvedPace) return;
+    session.paceResolvedFrom = 'plan';
+    session.resolvedPace = suggested.pace;
+    session.paceReason = `plan: ${suggested.reason}`;
+    process.stderr.write(`[forge] Pace auto → ${suggested.pace} (${suggested.reason})\n`);
+  } catch (err) {
+    // Never block a phase transition — but say so, because a silent catch
+    // here would hide a wiring bug as "pace just didn't change".
+    process.stderr.write(
+      `[forge] Warning: could not resolve pace from the plan: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
+
+maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
 
 /**
@@ -182,6 +219,48 @@ function enforceDoneGate() {
   process.exit(1);
 }
 
+/**
+ * Hard floor: a high-risk change gets an independent final review.
+ *
+ * This was a paragraph in the skill and a line in three analysis reports, and
+ * it was skipped anyway — the session that most needed it recorded "subagent
+ * dispatch was declined twice" in review prose that no gate could see, then
+ * scored 100/100. A rule that matters has to be a gate; the waiver is a field
+ * so it survives session cleanup and lands in the ledgers.
+ */
+function enforceFinalReviewFloor() {
+  if (phase !== 'done' && phase !== 'finish') return;
+  if (finalReviewWaived) {
+    session.finalReviewWaived = finalReviewWaived;
+    return;
+  }
+  if (allowIncomplete) return; // already an explicit, recorded escape
+
+  let facts;
+  try {
+    facts = collectPlanFacts({ session });
+  } catch {
+    return; // cannot judge risk — do not invent a refusal
+  }
+  if (!facts.highRisk) {
+    delete session.finalReviewWaived;
+    return;
+  }
+  if (reviewCensus(dir).finalReview === 'independent') {
+    delete session.finalReviewWaived;
+    return;
+  }
+
+  process.stderr.write(
+    `Cannot enter phase "${phase}": this change touches money/auth/contracts/migrations, ` +
+      'and its final review is missing or self-authored.\n' +
+      '  - Dispatch an independent final reviewer (forge resolve-model --tier capable), then save reviews/final-review.md\n' +
+      '  - Or record the refusal: --final-review-waived "<reason>" (kept on the session and in .forge/sessions.jsonl)\n',
+  );
+  process.exit(1);
+}
+
+enforceFinalReviewFloor();
 enforceDoneGate();
 
 // L2 scorecard on finish/done — always write so sessions leave a measurable trail
