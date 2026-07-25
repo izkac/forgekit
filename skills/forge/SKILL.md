@@ -115,6 +115,8 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 
 - No autonomous `git commit` / push unless the user explicitly asks. **Never push.** The one sanctioned commit is `forge checkpoint` at a task-group boundary, and only when the project set `.forge/config.json` → `git.checkpoint` (default `off`); it refuses on the default branch and excludes `.forge/` scratch
 - **Session health** — `forge status` returns a `health` verdict (`healthy` / `stale` / `red` / `done`). On resume, read it before continuing: a red e2e run or an idle session mid-implement is the first thing to tell the user about
+- **High-risk floor** — money/auth/contracts/migrations need an **independent final review** (a reviewer other than you reading the whole change). `forge score` caps the session at 69 without one. If the user declines dispatch, record it with `forge defer` — prose caveats do not survive session cleanup
+- **Findings** — anything you notice that deserves work but is out of scope goes to `forge finding add "<text>" [--change <slug>]`, not into a report the next session will not read
 - Tests required for behavior changes
 - Trace ecosystem consumers when contracts change
 - Honor `openspec/config.yaml` prefixes when the project uses them (OpenSpec engine)

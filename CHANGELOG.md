@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+## 0.3.16 — 2026-07-25
+
+### Scoring measures outcomes, not paperwork
+
+Seven scored sessions across two projects landed between 80 and 100 while the
+things that actually varied — 3 vs 31 subagents, one group review vs nine, a
+rejection with a blocker vs a self-approval — were invisible to the score.
+
+- **Review depth is scored by what was dispatched.** It used to start at 5/5 and
+  only ever subtract, so a session with *no reviewer of any kind* scored full
+  marks. Now: coverage of independent reviews across task groups (one review
+  across eight groups reads as "thin coverage"), whether the final review is
+  independent or self-authored, and **+1 when a round rejected work before
+  approving** — a review that sent work back demonstrably was not a rubber stamp.
+- **Two new caps at 69 (grade C).** A `red` session health (failing e2e run or
+  BLOCKED verify evidence) caps the score: outcomes outrank artifacts. So does a
+  high-risk change without an **independent final review** — risk is now read
+  from the spine as well as the pace signal, and fails closed (a negated mention
+  still counts; the cost of being wrong is one dispatched reviewer). Per-group
+  reviews do not lift it: each saw one slice.
+- Re-scored against real history: a 38-task session with one group review and a
+  self-authored final review goes **100 → 69 (A → C)**, with the reason named in
+  `caps`; a session with nine dispatched reviews, an independent final review and
+  four rejection rounds stays **97 (A)**.
+
+### Durable ledgers — `.forge/sessions.jsonl`, `.forge/deferrals.jsonl`
+
+Cleanup deletes the session dir at done, taking reviews, deferrals, fix-round
+briefs and evidence with it (5 of 6 scored sessions in one project were already
+gone). `phase done` now also writes, next to the existing `scorecards.jsonl`:
+
+- **`sessions.jsonl`** — one digest per session: tasks, subagents dispatched,
+  reviews by kind, rejection rounds, checkpoints, health verdict, duration.
+- **`deferrals.jsonl`** — unresolved deferrals with the session that owed them,
+  so carried debt outlives the session that raised it.
+
+### `forge finding` — an observation gets a home the day it is written
+
+Analysis reports kept re-listing the same unactioned items because nothing
+converted a report line into tracked work.
+
+```bash
+forge finding add "<text>" [--change <slug>] [--severity blocker|major|minor|note]
+forge finding list [--json] [--all]
+forge finding resolve <id> [--note "<text>"]
+```
+
+Durable `.forge/findings.jsonl`; open findings appear in `forge status`, so they
+cannot quietly disappear between sessions. Filing works without an active
+session (reports are usually written between them). Naming a `--change` records
+the intended home and prints the command to open it, rather than scaffolding
+one behind your back.
+
 ## 0.3.15 — 2026-07-25
 
 ### `forge checkpoint` — opt-in commits at group boundaries

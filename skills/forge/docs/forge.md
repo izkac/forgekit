@@ -274,6 +274,9 @@ forge checkpoint --group <name> [--tasks <ids>]
                                   # commit this group's work (opt-in; never pushes)
 forge checkpoint --dry-run        # what a checkpoint would commit
 forge checkpoint --range [--last] # diff range for a reviewer brief ({DIFF_RANGE})
+forge finding add "<text>" [--change <slug>] [--severity blocker|major|minor|note]
+                                  # findings ledger (.forge/findings.jsonl)
+forge finding list|resolve <id>   # open findings appear in forge status
 forge cleanup [--dry-run]         # prune sessions >14 days or finished
 forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<text>"
                                   # stamp tier-2 test-evidence.md

@@ -39,6 +39,7 @@ const COMMANDS = {
   score: { script: 'score-cli.mjs', aliases: ['scorecard'] },
   fleet: { script: 'fleet.mjs' },
   brief: { script: 'brief-cli.mjs' },
+  finding: { script: 'findings-cli.mjs', aliases: ['findings'] },
 };
 
 function printHelp() {
@@ -72,6 +73,7 @@ Commands:
   score [--write]         L2 session scorecard (auto-written at phase done)
   fleet list|watch|view|send  Cross-project session control terminal
   brief stamp|check|open  Operator brief (plain-language HTML, gates implement)
+  finding add|list|resolve    Findings ledger — give an observation a home
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.
 

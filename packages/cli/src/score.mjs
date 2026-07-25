@@ -22,9 +22,16 @@ import {
   spinePath,
   validateSpine,
 } from './integrity.mjs';
+import { sessionHealth } from './health.mjs';
+import { isHighRiskText } from './preferences.mjs';
+import { reviewCensus } from './review-census.mjs';
+import { appendDeferralLedger, appendSessionDigest } from './ledger.mjs';
 
 /** Keep in sync with set-phase.mjs TASK_COUNT_ESCALATION_THRESHOLD. */
 const TASK_COUNT_ESCALATION_THRESHOLD = 15;
+
+/** Ceiling (grade C) for sessions whose outcome is unproven or unreviewed. */
+const OUTCOME_CAP = 69;
 
 /**
  * @param {unknown} value
@@ -92,25 +99,6 @@ function evidenceHonestyIssues(sessionDir) {
     }
   }
   return issues;
-}
-
-/**
- * @param {string} sessionDir
- */
-function reviewSelfCheckCount(sessionDir) {
-  const tasksDir = path.join(sessionDir, 'tasks');
-  if (!fs.existsSync(tasksDir)) return 0;
-  let n = 0;
-  for (const e of fs.readdirSync(tasksDir, { withFileTypes: true })) {
-    if (!e.isDirectory()) continue;
-    for (const name of ['task-review.md', 'group-review.md']) {
-      const file = path.join(tasksDir, e.name, name);
-      if (!fs.existsSync(file)) continue;
-      const body = fs.readFileSync(file, 'utf8');
-      if (/pace self-check|APPROVED \(pace/i.test(body)) n += 1;
-    }
-  }
-  return n;
 }
 
 /**
@@ -207,11 +195,15 @@ export function scoreSession(opts) {
   /** @type {string[]} */
   const spineNotes = [];
   const spineFile = spinePath({ cwd, session, sessionDir });
+  // What the change actually touches, for risk detection below — a slug
+  // written at session start rarely says "auth" even when the change is one.
+  let spineText = '';
   if (!fs.existsSync(spineFile)) {
     spineNotes.push('spine.json missing');
   } else {
     try {
       const doc = readJson(spineFile);
+      spineText = JSON.stringify(doc);
       const v = validateSpine(doc);
       if (!v.ok) {
         spineNotes.push(...v.problems);
@@ -386,23 +378,56 @@ export function scoreSession(opts) {
   }
   checks.push({ id: 'pace', label: 'Pace sanity', points: pacePts, max: 5, notes: paceNotes });
 
-  // --- review depth soft signal (5) ---
-  const selfChecks = reviewSelfCheckCount(sessionDir);
-  let reviewPts = 5;
+  // --- review depth (5) — scored by what was dispatched ---
+  const census = reviewCensus(sessionDir);
+  let reviewPts = 0;
   /** @type {string[]} */
   const reviewNotes = [];
-  if (selfChecks > 0 && (resolved === 'thorough' || total >= TASK_COUNT_ESCALATION_THRESHOLD)) {
-    reviewPts = Math.max(0, 5 - Math.min(5, selfChecks));
-    reviewNotes.push(`${selfChecks} pace self-check review(s) on a large/thorough session`);
-  } else if (selfChecks > 0) {
-    reviewNotes.push(`${selfChecks} pace self-check(s) — ok under brisk/standard mid-group`);
+  if (census.total === 0 && !census.finalReview) {
+    reviewNotes.push('no review artifacts at all — nobody read this work but the author');
   } else {
-    reviewNotes.push('no pace self-check markers found');
+    // Coverage, not presence: one review across eight task groups is not the
+    // same signal as nine across nine.
+    const groups = Math.max(ev.taskDirs, census.total);
+    const coverage = groups > 0 ? census.independent / groups : 0;
+    if (census.independent > 0 && coverage >= 0.5) {
+      reviewPts += 2;
+      reviewNotes.push(`${census.independent} dispatched review(s) across ${groups} task group(s)`);
+    } else if (census.independent > 0) {
+      reviewPts += 1;
+      reviewNotes.push(
+        `${census.independent} dispatched review(s) across ${groups} task group(s) — thin coverage`,
+      );
+    } else {
+      reviewNotes.push(`${census.selfChecks} self-check(s), no dispatched reviewer`);
+    }
+    if (census.finalReview === 'independent') {
+      reviewPts += 2;
+      reviewNotes.push('independent final review');
+    } else if (census.finalReview === 'self') {
+      reviewPts += 1;
+      reviewNotes.push('final review is self-authored — weaker than an outside reader');
+    } else {
+      reviewNotes.push('no final review');
+    }
+    // A review that never rejected anything may still be a rubber stamp; one
+    // that sent work back demonstrably was not.
+    if (census.rejections > 0) {
+      reviewPts += 1;
+      reviewNotes.push(`${census.rejections} review round(s) rejected work before approving`);
+    }
+  }
+  if (
+    census.selfChecks > 0 &&
+    census.independent === 0 &&
+    (resolved === 'thorough' || total >= TASK_COUNT_ESCALATION_THRESHOLD)
+  ) {
+    reviewNotes.push('large/thorough session carried by self-checks only');
   }
   checks.push({
     id: 'reviews',
-    label: 'Review depth signal',
-    points: reviewPts,
+    label: 'Review depth (dispatched reviewers, not absence of markers)',
+    points: Math.min(5, reviewPts),
     max: 5,
     notes: reviewNotes,
   });
@@ -418,6 +443,45 @@ export function scoreSession(opts) {
     caps.push(
       `incompleteReason set ("${session.incompleteReason}") — score capped at 59 (was ${before})`,
     );
+  }
+
+  // A failing product loop is an outcome, and outcomes outrank artifacts: no
+  // amount of spine/evidence polish should let a session with a red e2e run
+  // read as an A.
+  const health = sessionHealth({ cwd, sessionDir, session });
+  if (health.state === 'red') {
+    const before = score;
+    if (score > OUTCOME_CAP) {
+      score = OUTCOME_CAP;
+      caps.push(`${health.reasons.join('; ')} — score capped at ${OUTCOME_CAP} (was ${before})`);
+    }
+  }
+
+  // Money/auth/contracts/migrations have a hard floor: an independent
+  // reviewer. Prose saying dispatch was declined does not survive session
+  // cleanup; a cap does.
+  // Fails closed, like pace resolution: a *negated* mention ("carries
+  // consumption, never money") still counts as a money-shaped change, because
+  // the cost of being wrong is one dispatched reviewer.
+  const riskText = [session.paceSignal, session.slug, session.openspecChange, spineText]
+    .filter(isNonEmptyString)
+    .join(' ');
+  // The floor for a high-risk change is an independent reader of the *whole*
+  // change. Per-group reviews do not substitute: they each saw one slice.
+  if (isHighRiskText(riskText) && census.finalReview !== 'independent') {
+    const before = score;
+    const what =
+      census.finalReview === 'self'
+        ? 'high-risk session whose final review is self-authored'
+        : 'high-risk session with no independent final review';
+    if (score > OUTCOME_CAP) {
+      score = OUTCOME_CAP;
+      caps.push(
+        `${what} — score capped at ${OUTCOME_CAP} (was ${before}); dispatch a final reviewer, or record the refusal with forge defer so it survives cleanup`,
+      );
+    } else {
+      caps.push(what);
+    }
   }
 
   const grade = gradeForScore(score);
@@ -564,5 +628,9 @@ export function writeSessionScorecard(opts) {
   writeJson(jsonPath, card);
   fs.writeFileSync(mdPath, formatScorecardMarkdown(card), 'utf8');
   appendScorecardLedger(opts.sessionDir, card, opts.session);
+  // Durable ledgers: the session dir is deleted at cleanup, so the digest and
+  // any unresolved deferrals have to leave the session while it still exists.
+  appendSessionDigest({ cwd: opts.cwd, sessionDir: opts.sessionDir, session: opts.session, card });
+  appendDeferralLedger({ cwd: opts.cwd, sessionDir: opts.sessionDir, session: opts.session });
   return { card, jsonPath, mdPath };
 }

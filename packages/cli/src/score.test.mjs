@@ -105,6 +105,231 @@ test('scoreSession: strong sync-only session scores high', () => {
   }
 });
 
+/** Session with everything except reviews, so review depth is the only variable. */
+function makeReviewFixture(root, sessionOverrides = {}) {
+  const { sessionDir, session } = makeSession(root, {
+    slug: 'add-billing',
+    tasksTotal: 20,
+    tasksComplete: 20,
+    ...sessionOverrides,
+  });
+  fs.writeFileSync(
+    path.join(sessionDir, 'spine.json'),
+    `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+    'utf8',
+  );
+  fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify\n\nExit 0\n', 'utf8');
+  const taskDir = path.join(sessionDir, 'tasks', '01-model');
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(taskDir, 'test-evidence.md'),
+    '# Test evidence\n\n- **Exit code:** 0\n- **Summary:** asserts the row is written\n',
+    'utf8',
+  );
+  return { sessionDir, session, taskDir };
+}
+
+function reviewCheck(card) {
+  return card.checks.find((c) => c.id === 'reviews');
+}
+
+test('review depth: no reviewer artifacts at all scores zero, not full marks', () => {
+  // Regression: reviewPts started at 5 and was only ever *reduced* by finding
+  // self-check markers, so a session with no reviews of any kind scored 5/5.
+  // That is how a 38-task, high-risk, self-reviewed session reached 100/100.
+  const root = tmp('forge-score-noreview-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root);
+    const check = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));
+    assert.equal(check.points, 0);
+    assert.match(check.notes.join(' '), /no review/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('review depth: a dispatched reviewer beats a self-check', () => {
+  const root = tmp('forge-score-dispatched-');
+  try {
+    const { sessionDir, session, taskDir } = makeReviewFixture(root);
+    fs.writeFileSync(
+      path.join(taskDir, 'task-review.md'),
+      '# Task review\n\nAPPROVED (pace self-check) — coordinator read the diff.\n',
+      'utf8',
+    );
+    const selfOnly = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));
+
+    fs.writeFileSync(
+      path.join(taskDir, 'group-review.md'),
+      '# Group review\n\n**Verdict: APPROVED** (opus reviewer a3cbc561b60655bb8)\n',
+      'utf8',
+    );
+    const dispatched = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));
+
+    assert.ok(
+      dispatched.points > selfOnly.points,
+      `dispatched (${dispatched.points}) should beat self-check-only (${selfOnly.points})`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('review depth: a recorded rejection round scores as evidence the review had teeth', () => {
+  // helm's group-6 REJECT→fix→APPROVE caught a flaky-green test about to
+  // become 3-OS CI evidence. It is the most valuable artifact in the corpus
+  // and used to score nothing.
+  const root = tmp('forge-score-reject-');
+  try {
+    const { sessionDir, session, taskDir } = makeReviewFixture(root);
+    fs.writeFileSync(
+      path.join(taskDir, 'group-review.md'),
+      '# Group 6 review\n\n**Verdict: APPROVED** (opus reviewer 9f2, after one fix round)\n\n## Round 1 — REJECTED\n\nOne blocker, four majors.\n',
+      'utf8',
+    );
+    const withReject = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));
+
+    fs.writeFileSync(
+      path.join(taskDir, 'group-review.md'),
+      '# Group 6 review\n\n**Verdict: APPROVED** (opus reviewer 9f2)\n',
+      'utf8',
+    );
+    const cleanApprove = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));
+
+    assert.ok(
+      withReject.points > cleanApprove.points,
+      `a rejection round (${withReject.points}) should outscore a first-pass approval (${cleanApprove.points})`,
+    );
+    assert.match(withReject.notes.join(' '), /reject/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('review depth scores coverage, not presence — 1 review across 8 groups is thin', () => {
+  const root = tmp('forge-score-coverage-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root);
+    const tasksDir = path.join(sessionDir, 'tasks');
+    for (const g of ['02-api', '03-mail', '04-client']) {
+      fs.mkdirSync(path.join(tasksDir, g), { recursive: true });
+      fs.writeFileSync(
+        path.join(tasksDir, g, 'test-evidence.md'),
+        '# Test evidence\n\n- **Exit code:** 0\n- **Summary:** asserts output\n',
+        'utf8',
+      );
+    }
+    fs.writeFileSync(
+      path.join(tasksDir, '01-model', 'group-review.md'),
+      '# Group review\n\n**Verdict: APPROVED** (opus reviewer 7c1)\n',
+      'utf8',
+    );
+    const thin = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));
+    assert.match(thin.notes.join(' '), /thin coverage/);
+
+    for (const g of ['02-api', '03-mail', '04-client']) {
+      fs.writeFileSync(
+        path.join(tasksDir, g, 'group-review.md'),
+        '# Group review\n\n**Verdict: APPROVED** (opus reviewer 7c1)\n',
+        'utf8',
+      );
+    }
+    const full = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));
+    assert.ok(full.points > thin.points, `full coverage (${full.points}) should beat thin (${thin.points})`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a high-risk session with no independent review is capped, however good its artifacts', () => {
+  const root = tmp('forge-score-riskcap-');
+  try {
+    // Money/auth signal: the hard floor says an independent reviewer is
+    // mandatory regardless of pace.
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'add-stripe-refund-auth',
+      paceSignal: 'payment refunds behind an authorization gate',
+    });
+    const card = scoreSession({ cwd: root, sessionDir, session });
+
+    assert.ok(card.score <= 69, `expected a cap at C, got ${card.score}`);
+    assert.match(card.caps.join(' '), /independent final review/i);
+
+    // Per-group reviews do NOT lift the cap: each saw one slice, and the floor
+    // is an independent reader of the whole change.
+    const taskDir = path.join(sessionDir, 'tasks', '01-model');
+    fs.writeFileSync(
+      path.join(taskDir, 'group-review.md'),
+      '# Group review\n\n**Verdict: APPROVED** (opus reviewer 7c1)\n',
+      'utf8',
+    );
+    assert.ok(scoreSession({ cwd: root, sessionDir, session }).score <= 69);
+
+    // A self-authored final review is named as such, and still capped.
+    fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, 'reviews', 'final-review.md'),
+      '# Final review\n\nReviewer: the coordinator — this is a self-review, dispatch was declined.\n',
+      'utf8',
+    );
+    const selfFinal = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(selfFinal.score <= 69);
+    assert.match(selfFinal.caps.join(' '), /self-authored/i);
+
+    // An independent final review lifts it.
+    fs.writeFileSync(
+      path.join(sessionDir, 'reviews', 'final-review.md'),
+      '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n',
+      'utf8',
+    );
+    const reviewed = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(
+      reviewed.caps.some((c) => /final review/i.test(c)),
+      false,
+    );
+    assert.ok(reviewed.score > 69, `expected no cap, got ${reviewed.score}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a red e2e run caps the score — artifacts cannot outvote a failing product loop', () => {
+  const root = tmp('forge-score-redcap-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'phase-1',
+      openspecChange: 'phase-1',
+      planType: 'specs',
+    });
+    const changeDir = path.join(root, 'specs', 'changes', 'phase-1');
+    fs.mkdirSync(changeDir, { recursive: true });
+    const steps = [{ name: 'bench-gate', cmd: 'true' }];
+    fs.writeFileSync(
+      path.join(changeDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(changeDir, 'e2e.json'), `${JSON.stringify({ steps })}\n`, 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'e2e-results.json'),
+      `${JSON.stringify({
+        ok: false,
+        ranAt: new Date().toISOString(),
+        stepsHash: e2eStepsHash(steps),
+        steps: [{ name: 'bench-gate', ok: false, exitCode: 1 }],
+      })}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify\n\n## Product loop\n\n1. run it\n', 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(card.score <= 69, `expected a cap at C, got ${card.score}`);
+    assert.match(card.caps.join(' '), /e2e|product loop/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('scoreSession: missing spine scores poorly', () => {
   const root = tmp('forge-score-weak-');
   try {

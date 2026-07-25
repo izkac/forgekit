@@ -536,6 +536,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase implement` refuses — brief missing/stale | Agent writes/updates `brief.html`, then `forge brief stamp` (or `--allow-incomplete "<reason>"`) |
 | `forge checkpoint` says checkpoints are off | Opt in: `.forge/config.json` → `{ "git": { "checkpoint": "per-group" } }` |
 | `forge checkpoint` refuses — default branch | Forge work belongs on a branch; create one, or `--allow-default-branch` / `git.allowDefaultBranch: true` |
+| A finding keeps reappearing in reports | `forge finding add "<text>" --change <slug>` — then open that change, or mark it `--severity note` |
 | Session shows `RED` / `STALE` | `forge status` → `health.reasons`: fix the failing e2e step, re-run `forge e2e run`, or resume the idle phase |
 | Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
 | `forge fleet send` seems ignored | Delivery is next-turn via the reminder hook — idle sessions read it when they wake |
@@ -560,9 +561,38 @@ forge score --md      # markdown
 forge score --write   # save into session dir
 ```
 
-Grades A–F from ~100 points. `--allow-incomplete` **caps** score at 59.
-`forge phase done` always writes `scorecard.md` / `scorecard.json` and sets
-`session.score` / `session.scoreGrade`.
+Grades A–F from ~100 points. `forge phase done` always writes `scorecard.md` /
+`scorecard.json` and sets `session.score` / `session.scoreGrade`.
+
+**Caps** — outcomes outrank artifacts, so three things put a ceiling on the score
+no matter how polished the paperwork is:
+
+| Cap | When |
+|-----|------|
+| 59 | `--allow-incomplete "<reason>"` |
+| 69 | Health is `red` — a failing e2e run or BLOCKED verify evidence |
+| 69 | High-risk change (money / auth / contracts / migrations, read from the pace signal **and the spine**) without an **independent final review** |
+
+The high-risk read fails closed: a negated mention ("carries consumption, never
+money") still counts, because the cost of being wrong is one dispatched
+reviewer. Per-group reviews do not lift that cap — each saw one slice; the floor
+is an independent reader of the whole change. If dispatch is genuinely refused,
+record it with `forge defer` so the refusal survives session cleanup.
+
+**Review depth is scored by what was dispatched**, not by the absence of a
+marker: coverage of independent reviews across task groups, whether the final
+review is independent or self-authored, and whether any round **rejected** work
+before approving (a review that sent work back demonstrably was not a rubber
+stamp).
+
+**Durable ledgers** — the session dir is deleted at cleanup, so `phase done`
+also appends:
+
+| File | Holds |
+|------|-------|
+| `.forge/scorecards.jsonl` | one score line per session |
+| `.forge/sessions.jsonl` | one digest per session: tasks, subagents, reviews by kind, rejections, checkpoints, health, duration |
+| `.forge/deferrals.jsonl` | unresolved deferrals, with the session that owed them |
 
 **After done — answer the L3 ship-check** (printed in the scorecard):
 
@@ -593,6 +623,8 @@ forge status                      # includes health: healthy | stale | red | don
 forge brief stamp && forge brief check
 forge checkpoint --group 02-api --tasks 2.1-2.4   # opt-in: .forge/config.json → git.checkpoint
 forge checkpoint --range --last   # {DIFF_RANGE} for the group reviewer
+forge finding add "smoke suite race is never fixed" --change fix-e2e-race
+forge finding list                # open findings (also shown by forge status)
 forge spine init && forge spine check
 forge e2e init && forge e2e run && forge e2e check
 forge defer add --task 3.2 --reason "wire handler in 3.2"

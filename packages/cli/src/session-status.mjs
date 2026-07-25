@@ -17,6 +17,7 @@ import {
 } from './lib.mjs';
 import { resolveEffectivePreferences } from './preferences.mjs';
 import { sessionHealth } from './health.mjs';
+import { openFindings } from './findings.mjs';
 
 const args = process.argv.slice(2);
 let sessionId = null;
@@ -49,6 +50,10 @@ const pace = resolveEffectivePreferences({
 
 const health = sessionHealth({ cwd: REPO_ROOT, sessionDir: dir, session });
 
+// Open findings are project-level, not session-level: they outlive the session
+// that raised them, which is the entire point of the ledger.
+const findings = openFindings(FORGE_DIR);
+
 process.stdout.write(
   JSON.stringify(
     {
@@ -58,6 +63,10 @@ process.stdout.write(
       // Verdict first: a status dump that never says "this session is red and
       // nobody has touched it since yesterday" makes the operator derive it.
       health,
+      openFindings: {
+        count: findings.length,
+        latest: findings.slice(-5).map((f) => ({ id: f.id, severity: f.severity, text: f.text, change: f.change })),
+      },
       session,
       progress: status,
       pace: {
