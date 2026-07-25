@@ -20,6 +20,7 @@ const COMMANDS = {
   status: { script: 'session-status.mjs' },
   cleanup: { script: 'cleanup-sessions.mjs' },
   phase: { script: 'set-phase.mjs', aliases: ['set-phase'] },
+  checkpoint: { script: 'checkpoint.mjs', aliases: ['ckpt'] },
   prefs: { script: 'set-prefs.mjs' },
   models: { script: 'set-models.mjs' },
   'resolve-model': { script: 'resolve-model.mjs' },
@@ -50,6 +51,7 @@ Commands:
   new <slug>              Create a Forge session under .forge/
   status                  Show active session
   phase <phase>           Update session phase
+  checkpoint              Commit the group's work (opt-in; never pushes)
   cleanup                 Prune old/finished sessions
   prefs [pace]            Get/set pace preferences
   models [lane]           Get/set subagent billing (included|metered)

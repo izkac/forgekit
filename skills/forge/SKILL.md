@@ -113,7 +113,8 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 
 ## Guardrails (every phase)
 
-- No autonomous `git commit` / push unless the user explicitly asks
+- No autonomous `git commit` / push unless the user explicitly asks. **Never push.** The one sanctioned commit is `forge checkpoint` at a task-group boundary, and only when the project set `.forge/config.json` → `git.checkpoint` (default `off`); it refuses on the default branch and excludes `.forge/` scratch
+- **Session health** — `forge status` returns a `health` verdict (`healthy` / `stale` / `red` / `done`). On resume, read it before continuing: a red e2e run or an idle session mid-implement is the first thing to tell the user about
 - Tests required for behavior changes
 - Trace ecosystem consumers when contracts change
 - Honor `openspec/config.yaml` prefixes when the project uses them (OpenSpec engine)

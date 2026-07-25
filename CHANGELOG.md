@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+## 0.3.15 — 2026-07-25
+
+### `forge checkpoint` — opt-in commits at group boundaries
+
+A long session used to accumulate the whole change as one uncommitted working
+tree (a 32-task session on helm: 6k lines across 37 files plus 18 untracked
+ones), so a stray `git checkout` could erase a day of agent work, and every
+reviewer after task 1 read a diff containing all previous tasks.
+
+- Off by default. Opt in per project: `.forge/config.json` →
+  `{ "git": { "checkpoint": "per-group" } }` (or `per-task`, `off`).
+- **Never pushes.** Refuses on `main`/`master` unless `--allow-default-branch`
+  (or `git.allowDefaultBranch: true`), refuses mid-merge/rebase/cherry-pick/
+  revert/bisect, and excludes `.forge/` so session scratch never lands in
+  project history.
+- A clean tree is success, not an error, and never produces an empty commit.
+- Records `{ sha, group, tasks, at }` on the session. `forge checkpoint --range
+  [--last]` prints what a reviewer should read as `reviewTarget`: a group
+  review runs *before* its checkpoint, so while the group is uncommitted that
+  is `git diff <last checkpoint>` plus the untracked files named explicitly
+  (a diff never shows them, and new files are most of an implementer's output);
+  once checkpointed it collapses to a plain commit range. The `range` field is
+  the commit range only and is empty mid-group by design. `forge new` now
+  records `baseCommit` + `branch`, so a base exists even with checkpoints off.
+- Implement phase and the task-reviewer prompt updated to use it.
+
+### Session health
+
+`forge status` printed every field a session had and never said whether the
+session was in trouble — helm's phase-1 sat at `implement 27/32` with a red
+e2e run for 14 hours and looked identical to one mid-stride.
+
+- `forge status` gains `health`: `red` (e2e run failing — names the step — or
+  `verify-evidence.md` records BLOCKED), `stale` (idle past
+  `health.idleHours`, default 4, or e2e results no longer matching `e2e.json`),
+  `healthy`, `done`. Red outranks stale; all reasons are reported.
+- `forge fleet list` gains a HEALTH column plus a reason line per unhealthy
+  session, so a red or abandoned session is visible without opening the project.
+- The reminder hook leads with the health line on resume when it is not healthy.
+
 ## 0.3.14 — 2026-07-25
 
 ### Fixes

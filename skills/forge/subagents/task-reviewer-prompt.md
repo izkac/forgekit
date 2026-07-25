@@ -21,7 +21,7 @@ Capability specs beat narrow task wording when they conflict. See
 
 {FILE_LIST}
 
-Diff range: {DIFF_RANGE}   <!-- e.g. `git diff` (uncommitted) or BASE..HEAD -->
+Diff range: {DIFF_RANGE}   <!-- `forge checkpoint --range --last` → paste its `reviewTarget` (scopes to this group; names untracked files a diff hides). No checkpoints: `git diff` + the untracked files in `git status`. -->
 
 **Read the actual code.** The summary above was written by the party under review — it is a map, not evidence. Read the changed files (or the diff range) before any verdict; verify each spec requirement against what the code does, not what the summary says it does.
 

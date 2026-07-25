@@ -17,6 +17,7 @@ import {
   touchSession,
 } from './lib/fleet.mjs';
 import { resolveEffectivePreferences } from './preferences.mjs';
+import { sessionHealth } from './health.mjs';
 
 function getActiveSessionInfo() {
   const active = readActive();
@@ -87,6 +88,15 @@ export function buildForgeMessage(info) {
   lines.push(formatPaceLine(session));
   if (session.tasksTotal > 0) {
     lines.push(`Tasks: ${session.tasksComplete}/${session.tasksTotal}`);
+  }
+  // Only when something is wrong: a resumed session that is red or was
+  // abandoned mid-implement should say so before the agent picks up where it
+  // thinks it left off.
+  if (info.dir) {
+    const health = sessionHealth({ cwd: REPO_ROOT, sessionDir: info.dir, session });
+    if (health.state === 'red' || health.state === 'stale') {
+      lines.push(`Health: ${health.line}`);
+    }
   }
   if (needsOpenSpecPlan(session)) {
     lines.push(OPENSPEC_PLAN_REMINDER);

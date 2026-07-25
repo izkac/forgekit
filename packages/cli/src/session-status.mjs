@@ -16,6 +16,7 @@ import {
   REPO_ROOT,
 } from './lib.mjs';
 import { resolveEffectivePreferences } from './preferences.mjs';
+import { sessionHealth } from './health.mjs';
 
 const args = process.argv.slice(2);
 let sessionId = null;
@@ -46,12 +47,17 @@ const pace = resolveEffectivePreferences({
   signalText: session.paceSignal || session.slug || '',
 });
 
+const health = sessionHealth({ cwd: REPO_ROOT, sessionDir: dir, session });
+
 process.stdout.write(
   JSON.stringify(
     {
       status: 'ok',
       sessionId,
       sessionPath: path.relative(REPO_ROOT, dir).replace(/\\/g, '/'),
+      // Verdict first: a status dump that never says "this session is red and
+      // nobody has touched it since yesterday" makes the operator derive it.
+      health,
       session,
       progress: status,
       pace: {

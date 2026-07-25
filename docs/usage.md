@@ -534,6 +534,9 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase done` refuses — stale e2e results | `e2e.json` changed after the last run — re-run `forge e2e run` |
 | E2E too slow for this project | Operator runs `forge e2e disable "<reason>"` (agents must never) — `forge e2e enable` restores |
 | `forge phase implement` refuses — brief missing/stale | Agent writes/updates `brief.html`, then `forge brief stamp` (or `--allow-incomplete "<reason>"`) |
+| `forge checkpoint` says checkpoints are off | Opt in: `.forge/config.json` → `{ "git": { "checkpoint": "per-group" } }` |
+| `forge checkpoint` refuses — default branch | Forge work belongs on a branch; create one, or `--allow-default-branch` / `git.allowDefaultBranch: true` |
+| Session shows `RED` / `STALE` | `forge status` → `health.reasons`: fix the failing e2e step, re-run `forge e2e run`, or resume the idle phase |
 | Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
 | `forge fleet send` seems ignored | Delivery is next-turn via the reminder hook — idle sessions read it when they wake |
 | Session reminder missing | Merge `forge-hooks.snippet.json` from init into agent settings |
@@ -586,8 +589,10 @@ forge doctor
 
 # Session
 forge new my-feature --signal "add worker job queue"
-forge status
+forge status                      # includes health: healthy | stale | red | done
 forge brief stamp && forge brief check
+forge checkpoint --group 02-api --tasks 2.1-2.4   # opt-in: .forge/config.json → git.checkpoint
+forge checkpoint --range --last   # {DIFF_RANGE} for the group reviewer
 forge spine init && forge spine check
 forge e2e init && forge e2e run && forge e2e check
 forge defer add --task 3.2 --reason "wire handler in 3.2"

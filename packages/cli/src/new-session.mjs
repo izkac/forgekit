@@ -7,12 +7,14 @@
  *   forge new <slug> [--chat-id <id>] [--signal <text>]
  */
 
+import { spawnSync } from 'node:child_process';
 import {
   defaultSession,
   defaultStatus,
   ensureForgeLayout,
   FORGE_DIR,
   makeSessionId,
+  REPO_ROOT,
   saveSession,
   scaffoldSessionDirs,
   sessionPath,
@@ -54,6 +56,19 @@ scaffoldSessionDirs(dir);
 
 const session = defaultSession(sessionId, slug);
 if (cursorChatId) session.cursorChatId = cursorChatId;
+
+// Where this session started, so reviewers have a diff range even when the
+// project never enables checkpoints (and `forge checkpoint --range` has a
+// base from commit one).
+const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' });
+if (head.status === 0) {
+  session.baseCommit = head.stdout.trim();
+  const branch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+  });
+  if (branch.status === 0) session.branch = branch.stdout.trim();
+}
 
 const paceFields = resolveSessionPaceFields({
   forgeDir: FORGE_DIR,

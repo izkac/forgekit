@@ -24,6 +24,7 @@ import {
   queueMessage,
   sessionDirFor,
 } from './lib/fleet.mjs';
+import { healthCell, sessionHealth } from './health.mjs';
 
 function usage() {
   process.stderr.write(
@@ -70,21 +71,45 @@ function pad(str, len) {
   return s.length >= len ? s.slice(0, len) : s + ' '.repeat(len - s.length);
 }
 
+/**
+ * Health per entry, read from that project's session dir. A row showing a
+ * healthy-looking `27/32` while its e2e run is red and nobody has touched it
+ * for 14 hours is the failure this column exists to prevent.
+ */
+function healthFor(entry) {
+  if (entry.missing) return { state: 'unknown', line: 'missing' };
+  try {
+    const sessionDir = sessionDirFor(entry);
+    const session = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+    return sessionHealth({ cwd: entry.project, sessionDir, session });
+  } catch {
+    return { state: 'unknown', line: 'unknown' };
+  }
+}
+
 function renderTable(entries) {
   if (entries.length === 0) return 'No fleet sessions. Start one with `forge new <slug>`.\n';
-  const header = `${pad('PROJECT', 18)} ${pad('SESSION', 26)} ${pad('ENGINE', 7)} ${pad('PHASE', 18)} ${pad('TASKS', 16)} ${pad('PACE', 9)} ${pad('AGE', 4)} MSGS`;
+  const header = `${pad('PROJECT', 18)} ${pad('SESSION', 26)} ${pad('ENGINE', 7)} ${pad('PHASE', 18)} ${pad('TASKS', 16)} ${pad('HEALTH', 6)} ${pad('PACE', 9)} ${pad('AGE', 4)} MSGS`;
   const lines = [header, '-'.repeat(header.length)];
+  /** @type {string[]} */
+  const notes = [];
   for (const e of entries) {
     const pending = e.missing ? 0 : peekInbox(sessionDirFor(e)).length;
+    const health = healthFor(e);
+    if (health.state === 'red' || health.state === 'stale') {
+      notes.push(`${e.projectName}/${e.slug}: ${health.line}`);
+    }
     lines.push(
       `${pad(e.projectName, 18)} ${pad(e.slug, 26)} ${pad(e.engine ?? '—', 7)} ${pad(
         e.missing ? 'missing' : phaseBar(e.phase),
         18,
-      )} ${pad(tasksCell(e), 16)} ${pad(e.pace ?? '—', 9)} ${pad(relTime(e.lastSeen ?? e.updatedAt), 4)} ${
+      )} ${pad(tasksCell(e), 16)} ${pad(healthCell(health.state), 6)} ${pad(e.pace ?? '—', 9)} ${pad(relTime(e.lastSeen ?? e.updatedAt), 4)} ${
         pending > 0 ? `✉ ${pending}` : ''
       }`,
     );
   }
+  // The column says which row; the notes say why, without a second command.
+  if (notes.length) lines.push('', ...notes.map((n) => `  ! ${n}`));
   return `${lines.join('\n')}\n`;
 }
 

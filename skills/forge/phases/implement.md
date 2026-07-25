@@ -56,7 +56,24 @@ Honor [../references/runtime-integrity.md](../references/runtime-integrity.md) i
    ```
    (Refuses non-zero exit without `--allow-fail`; template + rules in [../references/test-evidence.md](../references/test-evidence.md).)
 7. Mark task complete (`tasks.md` `- [x]` or update `tasksComplete`). Detect group boundary: next line in `tasks.md` is a new `##` heading, or no remaining tasks under the current heading.
-8. Repeat.
+8. **Checkpoint** — when the project opts in (`.forge/config.json` → `git.checkpoint`):
+   ```bash
+   forge checkpoint --group <nn>-<slug> --tasks <ids>   # per-group: at the boundary; per-task: after each task
+   ```
+   Commits the group's work and records the sha on the session. Never pushes,
+   refuses on the default branch, and leaves `.forge/` scratch out of the
+   commit. Default is `off`: nothing is committed and reviewers read the
+   working tree, as before.
+
+   **Reviewer scope (step 4).** The group review runs *before* this
+   checkpoint, so fill `{DIFF_RANGE}` from `forge checkpoint --range --last` →
+   its **`reviewTarget`** field. While the group is uncommitted that is
+   `git diff <last checkpoint>` plus the untracked files named explicitly (a
+   diff never shows them); once checkpointed it collapses to a plain commit
+   range. Do **not** paste `range` during a pre-checkpoint review — it is
+   empty until the group lands. Without checkpoints, every reviewer after task
+   1 re-reads all previous tasks' diffs.
+9. Repeat.
 
 **Batching:** consecutive small same-area tasks (docs, config, wording) may share one implementer brief + one review — see the batching rules in [subagent-driven-development](../skills/subagent-driven-development/SKILL.md). Never batch money/auth/contract/migration tasks.
 
@@ -66,7 +83,7 @@ forge phase implement --tasks-complete <N> --subagents <total dispatched so far>
 
 ## Forge constraints (include in every brief)
 
-- **No** autonomous `git commit` or `git push`
+- **No** autonomous `git commit` or `git push` — implementer subagents never commit. Checkpoints are the coordinator's job and only when `git.checkpoint` is enabled (`forge checkpoint`, which still never pushes)
 - **Tier 2 tests only** before claiming task done — narrowest command for this task ([test-strategy.md](../references/test-strategy.md)); **not** the full workspace suite unless the task requires it
 - Trace ecosystem consumers when contracts change
 - Minimal diff — surgical changes only

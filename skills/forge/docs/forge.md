@@ -268,8 +268,12 @@ OpenSpec commands remain available standalone (OpenSpec-engine projects):
 
 ```bash
 forge new <slug> [--signal "…"]   # new session + set active (resolves pace; warn-only doctor)
-forge status                      # active session JSON (+ effective pace)
+forge status                      # active session JSON (+ effective pace + health verdict)
 forge phase <phase> […]           # update phase / openspec / task counters
+forge checkpoint --group <name> [--tasks <ids>]
+                                  # commit this group's work (opt-in; never pushes)
+forge checkpoint --dry-run        # what a checkpoint would commit
+forge checkpoint --range [--last] # diff range for a reviewer brief ({DIFF_RANGE})
 forge cleanup [--dry-run]         # prune sessions >14 days or finished
 forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<text>"
                                   # stamp tier-2 test-evidence.md
@@ -572,11 +576,84 @@ forge models metered                  # WRITE .forge/models.local.json
 
 Guardrails in every subagent brief (honor the **project’s** agent docs too):
 
-- No autonomous `git commit` / push unless the user asks
+- No autonomous `git commit` / push unless the user asks — subagents never commit at all
 - Implementer runs tier 1 (scoped) + tier 2 (narrow) tests; coordinator saves `tasks/<nn>-<slug>/test-evidence.md` before marking task done
 - Trace downstream consumers when contracts change
 
 Prompt templates: [subagents/](../subagents/)
+
+---
+
+## Checkpoints (opt-in commits)
+
+Off by default. Enable per project in `.forge/config.json`:
+
+```json
+{ "git": { "checkpoint": "per-group" } }
+```
+
+| Mode | When the coordinator runs `forge checkpoint` |
+| ---- | -------------------------------------------- |
+| `off` (default) | never — nothing is committed, reviewers read the working tree |
+| `per-group` | at each `tasks.md` group boundary |
+| `per-task` | after each task |
+
+Why: a long session otherwise accumulates the whole change as one uncommitted
+working tree — one bad `git checkout` from losing a day of agent work, with
+every reviewer after task 1 reading a diff that contains all previous tasks.
+
+Guarantees — the reason this is safe to automate:
+
+- **Never pushes.** Nothing leaves the machine.
+- **Refuses on the default branch** (`main` / `master`) unless
+  `--allow-default-branch` or `git.allowDefaultBranch: true`.
+- **Refuses mid-merge / rebase / cherry-pick / revert / bisect.**
+- **Excludes `.forge/`** — session scratch never lands in project history.
+- Nothing to commit is success, not an error, and never makes an empty commit.
+- Records `{ sha, group, tasks, at }` on the session, so reviewers get a real
+  range: `groupRange` (this group) and `range` (whole session, from
+  `session.baseCommit`, which `forge new` records even when checkpoints are off).
+
+```bash
+forge checkpoint --group 06-helm-cli --tasks 6.1-6.4
+forge checkpoint --dry-run          # list what would be committed
+forge checkpoint --range --last     # {DIFF_RANGE} for the group reviewer
+```
+
+**Reviewer scope.** A group review happens *before* that group's checkpoint,
+so HEAD is still the previous one and a `<base>..HEAD` range would be empty.
+Use the `reviewTarget` field from `forge checkpoint --range --last`:
+
+| Tree state | `reviewTarget` |
+| ---------- | -------------- |
+| group still uncommitted | `git diff <last checkpoint>` **plus** the untracked files listed by name — `git diff` never shows them, and new files are most of what an implementer writes |
+| group checkpointed | `<last checkpoint>..HEAD` |
+
+`range` in the same output is the commit range only; it is empty mid-group by
+design. `--last` scopes to the current group, without it the base is
+`session.baseCommit` (the whole session).
+
+Caveat: a checkpoint stages **everything outside `.forge/`**, including
+unrelated edits sitting in the tree. Check `--dry-run` when the working tree
+was not clean before the session started.
+
+---
+
+## Session health
+
+`forge status` returns a verdict next to the data, and the reminder hook
+surfaces it on resume when it is not healthy:
+
+| State | Meaning |
+| ----- | ------- |
+| `red` | e2e run failing (named step), or `verify-evidence.md` records BLOCKED |
+| `stale` | no session write for `health.idleHours` (default 4), or e2e results no longer match `e2e.json` |
+| `healthy` | none of the above |
+| `done` | phase `done` / `skipped` |
+
+`forge fleet list` renders the same verdict as a HEALTH column plus a reason
+line per unhealthy session, so a red or abandoned session is visible without
+opening the project.
 
 ---
 
