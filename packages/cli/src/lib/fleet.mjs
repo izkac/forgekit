@@ -134,10 +134,59 @@ export function unregisterSession(projectRoot, sessionId) {
 }
 
 /**
- * All registry entries, newest first. Self-heals: entries whose session dir
- * vanished (cleanup ran without unregister, project deleted the .forge dir)
- * are removed; entries whose whole project path is unreachable (unplugged
- * drive) are kept and marked `missing`.
+ * Fields the registry mirrors from session.json. `session.json` is the source
+ * of truth; the entry is only a cache, so reads refresh it.
+ */
+const MIRRORED_FIELDS = [
+  'slug',
+  'phase',
+  'planType',
+  'openspecChange',
+  'tasksTotal',
+  'tasksComplete',
+  'createdAt',
+  'updatedAt',
+];
+
+/**
+ * Refresh a cached entry from the session on disk. Returns true when anything
+ * changed. A registry write that never happened (older CLI, a crash mid-run,
+ * a hand-edited record) otherwise pins the entry at whatever phase it was
+ * first registered with, forever.
+ *
+ * @param {Record<string, any>} entry
+ * @param {string} sessionDir
+ */
+function reconcileEntry(entry, sessionDir) {
+  let session;
+  try {
+    session = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+  } catch {
+    return false; // unreadable/absent — keep the cached view
+  }
+  let changed = false;
+  for (const key of MIRRORED_FIELDS) {
+    const value = session[key];
+    if (value === undefined) continue;
+    if (entry[key] !== value) {
+      entry[key] = value;
+      changed = true;
+    }
+  }
+  const pace = session.resolvedPace ?? session.pace ?? null;
+  if (pace !== null && entry.pace !== pace) {
+    entry.pace = pace;
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * All registry entries, newest first. Self-heals: entries are reconciled
+ * against each session.json on disk; entries whose session dir vanished
+ * (cleanup ran without unregister, project deleted the .forge dir) are
+ * removed; entries whose whole project path is unreachable (unplugged drive)
+ * are kept and marked `missing`.
  *
  * @returns {Array<Record<string, any>>}
  */
@@ -156,6 +205,14 @@ export function listFleet() {
     }
     const sessionDir = path.join(entry.project, '.forge', 'sessions', entry.sessionId);
     if (fs.existsSync(sessionDir)) {
+      // Persist before stamping `missing`, which is a view flag, not state.
+      if (reconcileEntry(entry, sessionDir)) {
+        try {
+          fs.writeFileSync(file, `${JSON.stringify(entry, null, 2)}\n`, 'utf8');
+        } catch {
+          /* registry is advisory — a read-only registry still renders */
+        }
+      }
       entry.missing = false;
     } else if (fs.existsSync(entry.project)) {
       fs.rmSync(file, { force: true });

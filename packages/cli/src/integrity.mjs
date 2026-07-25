@@ -112,9 +112,15 @@ export function resolveChangeDir(opts = {}) {
     return forWrite ? openspecDir : liveOrArchived(openspecChanges, change);
   }
 
+  // Only a *specs* engine resolution can name the specs dir. The engine
+  // resolver's last resort is {engine:'openspec', dir:'openspec'}, so taking
+  // `.dir` unconditionally pointed specs sessions at `openspec/changes/<name>`
+  // in every project whose .forge/config.json has no `plan` block — the change
+  // dir, its brief.html, spine.json and e2e.json all silently missing.
   let specsRoot = DEFAULT_SPECS_DIR;
   try {
-    specsRoot = resolveProjectPlanEngine(cwd, { useUserDefault: false }).dir;
+    const engine = resolveProjectPlanEngine(cwd, { useUserDefault: false });
+    if (engine.engine === 'specs') specsRoot = engine.dir;
   } catch {
     // keep default
   }

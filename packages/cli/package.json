@@ -1,6 +1,6 @@
 {
   "name": "@izkac/forgekit",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "description": "Forgekit CLIs — forgekit (install), forge (workflow), review (code review)",
   "type": "module",
   "bin": {
@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "prepack": "node scripts/prepack.mjs",
+    "prepublishOnly": "npm run lint && npm test",
     "test": "node scripts/run-tests.mjs",
     "lint": "eslint src bin scripts"
   },

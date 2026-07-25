@@ -7,8 +7,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { registerSession } from './lib/fleet.mjs';
+import { findRepoRoot } from './repo-root.mjs';
 
-export const REPO_ROOT = process.cwd();
+export { findRepoRoot };
+
+export const REPO_ROOT = findRepoRoot();
 export const FORGE_DIR = path.join(REPO_ROOT, '.forge');
 export const SESSIONS_DIR = path.join(FORGE_DIR, 'sessions');
 export const ACTIVE_FILE = path.join(FORGE_DIR, 'active.json');
@@ -137,7 +140,21 @@ export function saveSession(dir, session) {
   registerSession(path.resolve(dir, '..', '..', '..'), session);
 }
 
+/**
+ * Age of a session in days, for retention. Legacy and hand-written records
+ * carry `startedAt` (or nothing) instead of `createdAt`; an undatable record
+ * counts as **infinitely old** rather than brand new — `new Date(undefined)`
+ * is NaN and `NaN > RETENTION_DAYS` is false, which let abandoned sessions
+ * survive every cleanup run forever.
+ *
+ * @param {Record<string, any>} session
+ * @returns {number} days, or Infinity when no date can be read
+ */
 export function sessionAgeDays(session) {
-  const created = new Date(session.createdAt).getTime();
-  return (Date.now() - created) / (1000 * 60 * 60 * 24);
+  for (const value of [session?.createdAt, session?.startedAt, session?.updatedAt]) {
+    if (!value) continue;
+    const at = new Date(value).getTime();
+    if (!Number.isNaN(at)) return (Date.now() - at) / (1000 * 60 * 60 * 24);
+  }
+  return Infinity;
 }

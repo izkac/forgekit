@@ -80,6 +80,56 @@ test('listFleet self-heals entries whose session dir is gone', () => {
   assert.equal(fs.existsSync(entryFile(project, 'gone')), false);
 });
 
+test('listFleet reconciles a stale entry against session.json on disk', () => {
+  // Regression: the registry is a cache, not a source of truth. A session
+  // whose phase advanced without a mirroring write (older CLI, a crash, a
+  // hand-edited record) showed its first-registered phase forever — helm's
+  // phase-0 sat at `brainstorm` in `forge fleet list` after reaching `done`.
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-reconcile-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  const sessionDir = makeProject(project, 's5');
+
+  registerSession(project, makeSession('s5', { phase: 'brainstorm', tasksComplete: 0 }));
+  // Disk moves on without the registry.
+  const later = new Date(Date.now() + 60_000).toISOString();
+  fs.writeFileSync(
+    path.join(sessionDir, 'session.json'),
+    `${JSON.stringify(
+      makeSession('s5', {
+        phase: 'done',
+        tasksTotal: 20,
+        tasksComplete: 20,
+        openspecChange: 'phase-0',
+        updatedAt: later,
+      }),
+    )}\n`,
+    'utf8',
+  );
+
+  const [entry] = listFleet();
+  assert.equal(entry.phase, 'done');
+  assert.equal(entry.tasksComplete, 20);
+  assert.equal(entry.tasksTotal, 20);
+  assert.equal(entry.openspecChange, 'phase-0');
+  assert.equal(entry.updatedAt, later);
+  // Reconciliation is persisted, so the next read is already correct.
+  assert.equal(JSON.parse(fs.readFileSync(entryFile(project, 's5'), 'utf8')).phase, 'done');
+  // lastSeen is a heartbeat, not a session field — reconciling must not forge one.
+  assert.ok(entry.lastSeen <= new Date().toISOString());
+});
+
+test('listFleet keeps registry-only fields when session.json is unreadable', () => {
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-unreadable-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  const sessionDir = makeProject(project, 's6');
+  registerSession(project, makeSession('s6', { phase: 'verify' }));
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), '{ not json', 'utf8');
+
+  const [entry] = listFleet();
+  assert.equal(entry.phase, 'verify');
+  assert.equal(entry.missing, false);
+});
+
 test('saveSession mirrors into the fleet registry', () => {
   process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-mirror-'), 'sessions');
   const project = tmp('fleet-proj-');

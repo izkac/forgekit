@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+## 0.3.14 — 2026-07-25
+
+### Fixes
+
+- **Specs-engine sessions no longer resolve into `openspec/`.** `resolveChangeDir`
+  took `.dir` from the plan-engine resolver unconditionally, and that resolver's
+  last resort is `{engine: 'openspec', dir: 'openspec'}` — so a session with
+  `planType: 'specs'` in a project whose `.forge/config.json` has no `plan` block
+  (ADR-only config, pre-engine config, hand-written) looked for its change under
+  `openspec/changes/<name>`. Symptom: `forge phase implement` hard-refused with
+  "operator brief missing" while the stamped brief sat in `specs/changes/<name>/`;
+  spine / e2e / integrity read the wrong tree the same way. Only a *specs*
+  resolution can name the specs dir now; anything else falls back to `specs/`.
+- **`forge` works from a subdirectory.** The project root was whatever `process.cwd()`
+  happened to be, so `cd crates && forge status` reported "no session" in a repo
+  that had one, and `forge new` there would have written a second `.forge` tree
+  inside the workspace. The bin now re-roots each subcommand at the nearest
+  ancestor holding `.forge/` (else `.git/`, which also stops the walk so a nested
+  checkout can't adopt its parent's sessions), exports `FORGE_INVOKED_FROM`, and
+  absolutizes a relative `--cwd` against the invocation dir first.
+- **Undatable sessions age out.** `sessionAgeDays` read only `createdAt`;
+  a record without one produced `NaN`, and `NaN > RETENTION_DAYS` is false, so
+  abandoned sessions survived every `forge cleanup` forever. It now falls back to
+  `startedAt` / `updatedAt` and treats a record with no readable date as
+  infinitely old.
+- **`forge fleet list` reconciles against disk.** Registry entries are a cache;
+  a session whose phase advanced without a mirroring write (older CLI, a crash)
+  showed its first-registered phase forever — a finished 20/20 session still
+  listed as an in-flight `brainstorm`. Entries are now refreshed from each
+  `session.json` on read and the corrected entry is persisted.
+- Removed a dead assignment in `specs-sync.mjs` that made `npm run lint` fail.
+
+### Release safety
+
+- `npm run lint` runs in CI, and `prepublishOnly` runs lint + tests — 0.3.13
+  shipped with a red suite (3 failures) and red CI, which this makes impossible.
+
 ## 0.3.13 — 2026-07-24
 
 - **Specs engine OpenSpec format parity.** Built-in engine now scaffolds the full

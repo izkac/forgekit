@@ -9,6 +9,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { findRepoRoot } from '../src/repo-root.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, '..', 'src');
@@ -93,12 +94,23 @@ if (!entry) {
   process.exit(1);
 }
 
-const args = [...(entry.prependArgs ?? []), ...rest];
+// Every subcommand is project-scoped, so run it from the project root rather
+// than wherever the shell happens to sit: `cd crates && forge status` used to
+// report "no session" and `forge new` would have written a second .forge tree
+// inside the workspace. An explicit relative `--cwd` still means what the
+// caller typed, so absolutize it against the invocation dir first.
+const invokedFrom = process.cwd();
+const repoRoot = findRepoRoot(invokedFrom);
+const args = [...(entry.prependArgs ?? []), ...rest].map((arg, i, all) =>
+  i > 0 && all[i - 1] === '--cwd' && !path.isAbsolute(arg) ? path.resolve(invokedFrom, arg) : arg,
+);
+
 const r = spawnSync(process.execPath, [path.join(SRC, entry.script), ...args], {
   stdio: 'inherit',
-  cwd: process.cwd(),
+  cwd: repoRoot,
   env: {
     ...process.env,
+    FORGE_INVOKED_FROM: invokedFrom,
     FORGEKIT_ROOT: path.resolve(__dirname, '..', '..', '..'),
     FORGEKIT_CLI_ROOT: path.resolve(__dirname, '..'),
   },

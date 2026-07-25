@@ -146,6 +146,52 @@ test('resolveChangeDir: falls back to the archived copy after archive', () => {
   }
 });
 
+test('resolveChangeDir: a specs session never falls back to the openspec dir', () => {
+  // Regression: resolveProjectPlanEngine's last-resort default is
+  // {engine:'openspec', dir:'openspec'}, so a specs-engine session in a
+  // project whose .forge/config.json has no `plan` block (ADR-only config,
+  // pre-engine config, hand-written) resolved into openspec/changes/<name> —
+  // which made `forge phase implement` refuse a brief that was right there.
+  const cwd = tmp('forge-specs-dir-');
+  try {
+    const session = { planType: 'specs', openspecChange: 'my-change' };
+    fs.mkdirSync(path.join(cwd, '.forge'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cwd, '.forge', 'config.json'),
+      `${JSON.stringify({ adr: { enabled: true, dir: 'docs/adr' } })}\n`,
+      'utf8',
+    );
+    const specsChange = path.join(cwd, 'specs', 'changes', 'my-change');
+    fs.mkdirSync(specsChange, { recursive: true });
+
+    assert.equal(resolveChangeDir({ cwd, session }), specsChange);
+    assert.equal(resolveChangeDir({ cwd, session, forWrite: true }), specsChange);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveChangeDir: specs engine honors a configured plan.dir', () => {
+  // `forge init --no-openspec --plan-dir openspec` — specs engine reusing an
+  // existing OpenSpec tree without moving files.
+  const cwd = tmp('forge-specs-plandir-');
+  try {
+    const session = { planType: 'specs', openspecChange: 'my-change' };
+    fs.mkdirSync(path.join(cwd, '.forge'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cwd, '.forge', 'config.json'),
+      `${JSON.stringify({ plan: { engine: 'specs', dir: 'openspec' } })}\n`,
+      'utf8',
+    );
+    const changeDir = path.join(cwd, 'openspec', 'changes', 'my-change');
+    fs.mkdirSync(changeDir, { recursive: true });
+
+    assert.equal(resolveChangeDir({ cwd, session }), changeDir);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('spinePath/e2ePath forWrite target the live dir even after archive', () => {
   const cwd = tmp('forge-write-guard-');
   try {

@@ -115,10 +115,8 @@ export function applyDeltaToMain(capability, mainBody, deltaBody) {
   const reqHeaderEnd = reqMatch ? reqMatch.index + reqMatch[0].length : main.length;
   const before = main.slice(0, reqHeaderEnd);
   const afterReq = main.slice(reqHeaderEnd);
-  // Stop at next ## section if any
-  const nextSection = /^##\s+/m.exec(afterReq.replace(/^\n/, ''));
-  // Simpler: treat everything after ## Requirements as the requirements body
-  // until EOF (OpenSpec main specs usually end there).
+  // Treat everything after ## Requirements as the requirements body until the
+  // next non-Requirements ## heading (OpenSpec main specs usually end there).
   let reqBody = afterReq.replace(/^\n+/, '');
   const trailingMatch = /\n##\s+(?!Requirements).*$/m.exec(`\n${reqBody}`);
   let trailing = '';
