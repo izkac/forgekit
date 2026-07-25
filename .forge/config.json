@@ -1,4 +1,5 @@
 {
   "plan": { "engine": "specs", "dir": "specs" },
-  "adr": { "enabled": true, "dir": "docs/adr" }
+  "adr": { "enabled": true, "dir": "docs/adr" },
+  "git": { "checkpoint": "per-group" }
 }
