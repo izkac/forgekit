@@ -8,7 +8,8 @@
  *   forge e2e run                     # execute steps, write e2e-results.json (session dir)
  *   forge e2e check                   # gate check: green + current results; exit 1 with problems
  *   forge e2e harness                 # show recorded project harness (reuse it!)
- *   forge e2e harness --set "<desc>" [--start "<cmd>"] [--dir <path>]
+ *   forge e2e harness --set "<desc>" [--start "<cmd>"] [--setup "<cmd>"]
+ *                                    [--probe "<cmd>"] [--dir <path>]
  *   forge e2e disable "<reason>"      # OPERATOR ONLY: project-level e2e off switch
  *   forge e2e enable                  # re-enable the executed-run requirement
  *   [--session <id>]
@@ -40,7 +41,7 @@ const sub = args[0] && !args[0].startsWith('--') ? args[0] : 'status';
 
 if (args[0] === '--help' || sub === 'help') {
   process.stdout.write(
-    'Usage: forge e2e [init [--force] | run | check | status | harness [--set <desc> --start <cmd> --dir <path>] | disable "<reason>" | enable] [--session <id>]\n',
+    'Usage: forge e2e [init [--force] | run | check | status | harness [--set <desc> --start <cmd> --setup <cmd> --probe <cmd> --dir <path>] | disable "<reason>" | enable] [--session <id>]\n',
   );
   process.exit(0);
 }
@@ -55,9 +56,26 @@ function loadHarness() {
 function harnessLines(h) {
   const lines = [`Existing e2e harness (REUSE it — do not build or ask for a new one):`];
   lines.push(`  ${h.description}`);
+  // Execution order: install it, start it, prove it, find it.
+  if (h.setup) lines.push(`  Setup: ${h.setup}   (this machine — once per checkout)`);
   if (h.start) lines.push(`  Start: ${h.start}`);
+  if (h.probe) lines.push(`  Probe: ${h.probe}`);
   if (h.dir) lines.push(`  Location: ${h.dir}`);
   return lines.join('\n');
+}
+
+/**
+ * Value of `--flag <value>`, or null when absent. A flag given without a value
+ * warns rather than recording nothing quietly: a harness silently missing the
+ * setup it was told to record is the failure this whole field exists to stop.
+ */
+function flagValue(name) {
+  const i = args.indexOf(name);
+  if (i < 0) return null;
+  const value = args[i + 1];
+  if (value && !value.startsWith('--')) return value;
+  process.stderr.write(`Warning: ${name} needs a value — not recorded.\n`);
+  return null;
 }
 
 // Project-level, no session needed.
@@ -66,14 +84,25 @@ if (sub === 'harness') {
   if (si >= 0) {
     const description = args[si + 1];
     if (!description || description.startsWith('--')) {
-      process.stderr.write('Usage: forge e2e harness --set "<description>" [--start "<cmd>"] [--dir <path>]\n');
+      process.stderr.write(
+        'Usage: forge e2e harness --set "<description>" [--start "<cmd>"] [--setup "<cmd>"] [--probe "<cmd>"] [--dir <path>]\n',
+      );
       process.exit(1);
     }
     const harness = { description, recordedAt: new Date().toISOString() };
-    const st = args.indexOf('--start');
-    if (st >= 0 && args[st + 1]) harness.start = args[st + 1];
-    const di = args.indexOf('--dir');
-    if (di >= 0 && args[di + 1]) harness.dir = args[di + 1];
+    // start = the app under test. setup = machine-local probe tooling the repo
+    // cannot carry (browsers, drivers, images, toolchains). probe = the command
+    // that proves the harness. A harness that records only `start` is proven
+    // wherever the agent happened to stand, not on the operator's checkout.
+    for (const [flag, key] of [
+      ['--start', 'start'],
+      ['--setup', 'setup'],
+      ['--probe', 'probe'],
+      ['--dir', 'dir'],
+    ]) {
+      const value = flagValue(flag);
+      if (value) harness[key] = value;
+    }
     saveProjectConfig(process.cwd(), { e2e: { harness } }, { mergeKeys: ['adr', 'plan', 'e2e'] });
     process.stdout.write(
       `Recorded harness in .forge/config.json (commit it). Future sessions will see it on forge e2e init.\n`,
@@ -83,7 +112,11 @@ if (sub === 'harness') {
   const h = loadHarness();
   if (!h) {
     process.stdout.write(
-      'No harness recorded. After building one (with operator approval), record it:\n  forge e2e harness --set "<what/where>" --start "<command>" [--dir <path>]\n',
+      'No harness recorded. After building one (with operator approval), record it:\n' +
+        '  forge e2e harness --set "<what/where>" --start "<command>" [--dir <path>]\n' +
+        '    --setup "<cmd>"  anything this machine needs that the repo cannot carry\n' +
+        '                     (browsers, drivers, images, toolchains) — never auto-run\n' +
+        '    --probe "<cmd>"  the command that proves the harness\n',
     );
     process.exit(0);
   }
@@ -243,6 +276,19 @@ if (sub === 'run') {
       if (!step.ok && step.outputTail) {
         process.stdout.write(`${step.outputTail.replace(/^/gm, '    ')}\n`);
       }
+    }
+  }
+  // A missing probe runtime reads exactly like a code regression: the step just
+  // fails. Forge cannot tell the difference — it detects nothing and installs
+  // nothing — but if the harness recorded machine-local prerequisites, naming
+  // them costs two lines and saves the "green for the agent, red for the human"
+  // hunt on a fresh checkout.
+  if (!results.ok) {
+    const setup = loadHarness()?.setup;
+    if (setup) {
+      process.stdout.write(
+        `\n  Harness setup recorded for this project — run it if you haven't on this checkout:\n    ${setup}\n\n`,
+      );
     }
   }
   process.stdout.write(`${results.ok ? 'GREEN' : 'FAILED'} — results: ${resultsFile}\n`);

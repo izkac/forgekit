@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const E2E = path.join(path.dirname(fileURLToPath(import.meta.url)), 'e2e.mjs');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -68,6 +69,100 @@ test('e2e harness: record → show → surfaced by init; config keys preserved',
   assert.equal(JSON.parse(run(root, ['status'])).harness.dir, 'scripts/e2e');
 });
 
+test('e2e harness records setup + probe and surfaces them to the next session', () => {
+  // A harness that records only "how to boot the app" is not portable: the
+  // agent installs a browser in its sandbox, the probe goes green, and the
+  // operator's fresh checkout fails on a runtime nobody wrote down.
+  const root = tmp('e2e-harness-portable-');
+  makeFixture(root);
+
+  run(root, [
+    'harness',
+    '--set',
+    'vite preview + playwright smoke',
+    '--start',
+    'npm run build && npm run preview',
+    '--setup',
+    'npx playwright install chromium',
+    '--probe',
+    'npm run test:e2e',
+    '--dir',
+    'e2e',
+  ]);
+
+  const cfg = JSON.parse(fs.readFileSync(path.join(root, '.forge', 'config.json'), 'utf8'));
+  assert.equal(cfg.e2e.harness.setup, 'npx playwright install chromium');
+  assert.equal(cfg.e2e.harness.probe, 'npm run test:e2e');
+  assert.equal(cfg.e2e.harness.start, 'npm run build && npm run preview');
+
+  // Printed in execution order: install it, start it, prove it, find it.
+  const shown = run(root, ['harness']);
+  assert.match(shown, /Setup:\s+npx playwright install chromium/);
+  assert.match(shown, /Probe:\s+npm run test:e2e/);
+  assert.ok(
+    shown.indexOf('Setup:') < shown.indexOf('Start:') &&
+      shown.indexOf('Start:') < shown.indexOf('Probe:') &&
+      shown.indexOf('Probe:') < shown.indexOf('Location:'),
+    `harness lines out of order:\n${shown}`,
+  );
+
+  assert.match(run(root, ['init']), /Setup:\s+npx playwright install chromium/);
+  const status = JSON.parse(run(root, ['status']));
+  assert.equal(status.harness.setup, 'npx playwright install chromium');
+  assert.equal(status.harness.probe, 'npm run test:e2e');
+});
+
+test('/forge:harness templates stay in sync and teach setup + probe', () => {
+  // The two editor templates are the same instruction shipped twice; they drift
+  // silently because nothing reads both. Verified by hand once — now mechanically.
+  const bodies = ['claude', 'cursor'].map((agent) => {
+    const file = path.join(REPO_ROOT, 'templates', 'project', agent, 'commands', 'forge-harness.md');
+    const text = fs.readFileSync(file, 'utf8');
+    // Drop the frontmatter only — `.pop()` here would silently shrink the
+    // compared region to whatever follows the last markdown rule in the body.
+    const [, ...body] = text.split('\n---\n');
+    return body.join('\n---\n').replace(/~\/\.(claude|cursor)\//g, '~/.AGENT/');
+  });
+  assert.equal(bodies[0], bodies[1], 'claude and cursor harness templates have drifted');
+
+  for (const body of bodies) {
+    assert.match(body, /--setup/, 'template must teach --setup');
+    assert.match(body, /--probe/, 'template must teach --probe');
+    // The rule has to generalize — a Playwright-only note is the thing this change rejects.
+    assert.match(body, /browsers, drivers, container images, toolchains/);
+  }
+});
+
+test('e2e harness warns when a flag is given without a value', () => {
+  // Recording a harness that quietly lost its --setup is the exact failure the
+  // field exists to prevent, so a valueless flag must not pass in silence.
+  const root = tmp('e2e-harness-noval-');
+  makeFixture(root);
+  run(root, ['harness', '--set', 'rig', '--start', 'make serve', '--setup']);
+  // The valueless flag is dropped, but the flags around it still land.
+  const cfg = JSON.parse(fs.readFileSync(path.join(root, '.forge', 'config.json'), 'utf8'));
+  assert.equal(cfg.e2e.harness.setup, undefined);
+  assert.equal(cfg.e2e.harness.start, 'make serve');
+
+  const withStderr = spawnSync(
+    process.execPath,
+    [E2E, 'harness', '--set', 'rig', '--setup'],
+    { cwd: root, encoding: 'utf8', env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('e2e-fleet-'), 's') } },
+  );
+  assert.match(withStderr.stderr, /Warning: --setup needs a value/);
+  assert.equal(withStderr.status, 0, 'a valueless optional flag warns, it does not fail the command');
+});
+
+test('e2e harness without setup/probe prints no empty rows', () => {
+  const root = tmp('e2e-harness-legacy-');
+  makeFixture(root);
+  run(root, ['harness', '--set', 'legacy rig', '--start', 'make serve']);
+  const shown = run(root, ['harness']);
+  assert.match(shown, /Start:\s+make serve/);
+  assert.doesNotMatch(shown, /Setup:/);
+  assert.doesNotMatch(shown, /Probe:/);
+});
+
 test('e2e harness --set requires a description', () => {
   const root = tmp('e2e-harness-req-');
   makeFixture(root);
@@ -104,6 +199,52 @@ function runAllowFail(cwd, args) {
     return `${String(err.stdout ?? '')}${String(err.stderr ?? '')}`;
   }
 }
+
+/** Write a one-step e2e.json for the fixture change; exit code drives red/green. */
+function writeLoop(root, exitCode) {
+  fs.writeFileSync(
+    path.join(root, 'specs', 'changes', 'my-change', 'e2e.json'),
+    `${JSON.stringify({ steps: [{ name: 'smoke', cmd: `node -e "process.exit(${exitCode})"` }] })}\n`,
+    'utf8',
+  );
+}
+
+const SETUP_CMD = 'npx playwright install chromium';
+
+test('a red loop names the recorded harness setup as the first suspicion', () => {
+  // The reported failure mode: the agent's sandbox already had the browsers, so
+  // the operator's fresh checkout read a missing runtime as a code regression.
+  const root = tmp('e2e-hint-red-');
+  makeFixture(root);
+  run(root, ['harness', '--set', 'preview + playwright', '--start', 'npm run preview', '--setup', SETUP_CMD]);
+  writeLoop(root, 1);
+
+  const out = runAllowFail(root, ['run']);
+  assert.match(out, /Harness setup recorded/);
+  assert.match(out, new RegExp(SETUP_CMD.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // Advisory only — the failing step stays the headline and drives the exit code.
+  assert.match(out, /FAILED/);
+  assert.ok(out.indexOf(SETUP_CMD) < out.indexOf('FAILED'), `hint must precede the verdict:\n${out}`);
+  assert.throws(() => run(root, ['run']), 'a red loop must still exit non-zero');
+});
+
+test('no prerequisite hint without a recorded setup, or on a green loop', () => {
+  const noSetup = tmp('e2e-hint-none-');
+  makeFixture(noSetup);
+  run(noSetup, ['harness', '--set', 'preview only', '--start', 'npm run preview']);
+  writeLoop(noSetup, 1);
+  const red = runAllowFail(noSetup, ['run']);
+  assert.match(red, /FAILED/);
+  assert.doesNotMatch(red, /Harness setup recorded/);
+
+  const green = tmp('e2e-hint-green-');
+  makeFixture(green);
+  run(green, ['harness', '--set', 'preview + playwright', '--setup', SETUP_CMD]);
+  writeLoop(green, 0);
+  const ok = run(green, ['run']);
+  assert.match(ok, /GREEN/);
+  assert.doesNotMatch(ok, /Harness setup recorded/);
+});
 
 test('e2e run --repeat measures flakiness instead of trusting one green run', () => {
   // volo's smoke suite pinned --workers=1 in 6/6 changes to route around a

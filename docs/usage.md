@@ -347,6 +347,33 @@ grades the product loop from evidence prose only (noted on every scorecard).
 }
 ```
 
+The harness those steps run against is recorded once per project and reused by
+every later session:
+
+```bash
+forge e2e harness                     # show what's recorded (agents check this first)
+forge e2e harness --set "vite preview + playwright smoke" \
+  --start "npm run build && npm run preview" \
+  --setup "npx playwright install chromium" \
+  --probe "npm run test:e2e" \
+  --dir e2e
+```
+
+| Field | What it holds |
+|-------|---------------|
+| `--start` | boots the app under test |
+| `--setup` | what **this machine** needs that the repo cannot carry — browsers, drivers, container images, toolchains |
+| `--probe` | the command that proves the harness, re-run by the next session's `/forge:harness` |
+| `--dir` | where the harness lives in the repo |
+
+`setup` exists because a harness proven in an agent's sandbox is not proven on
+your checkout: the agent installs a browser, the probe goes green, and your
+first `npm run test:e2e` fails on a runtime nobody wrote down. Forge never
+detects tools and never installs anything — but when a loop goes red and a
+`setup` is recorded, `forge e2e run` names it as the first thing to suspect, so
+a missing browser stops reading as a code regression. Only `--set` is required;
+`--start`, `--setup`, `--probe` and `--dir` are optional and print when set.
+
 Every step must exit 0 (and match `expect` when set). Results carry a hash of
 the steps — editing `e2e.json` after a green run makes the results stale, and
 the done gate demands a re-run. Steps must assert **domain side effects**: a
