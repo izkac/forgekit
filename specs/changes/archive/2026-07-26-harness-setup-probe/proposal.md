@@ -58,3 +58,7 @@ harness object so consumers see the new keys without a schema change.
 Not in scope (considered and rejected — see design.md): per-tool detection of
 Playwright/Cypress in `package.json`, a pre-prove environment check, and an
 `--install-setup` auto-runner.
+
+## Decision record
+
+This change is recorded as ADR-0001 (docs/adr/0001-harness-prerequisites-are-recorded-not-detected.md).
