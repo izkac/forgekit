@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 0.3.19 — 2026-07-26
+
+### The model overlay can now hold, instead of only advising
+
+`forge resolve-model` is a contract: run it before every subagent dispatch, pass
+back the model it returns. Measured in a real project, the contract is skipped —
+`.forge/models.local.json` said `opus` for every tier from 08:47Z onward, and
+dispatches at 11:24Z, 12:10Z, 13:58Z and 15:44Z still went out on `sonnet`. The
+resolver was right every time; nothing ever asked it. An overlay that silently
+does nothing is worse than no overlay, because the operator believes it took.
+
+`forge enforce-model` reads a `PreToolUse` payload on stdin and answers with a
+hook decision. `forge init --claude` ships `.claude/hooks/forge-model-hook.mjs`
+and registers it on `Agent|Task` in the hooks snippet.
+
+The dispatch payload carries a model but no tier, so the intended tier cannot be
+recovered. That admission shapes the whole design — two rules, and nothing else:
+
+- **A lane whose three tiers are one model** has nothing left to decide, so the
+  dispatch is rewritten to it (`inherit` rewrites to *no* `model` parameter).
+  Hand-write `fast`/`standard`/`capable` to the same value when every subagent
+  should get one model.
+- **A lane that keeps tiers apart** can only be checked, not corrected: a model
+  outside the resolved three is denied, and the denial names the table and sends
+  the coordinator back to `forge resolve-model`.
+
+**Without `.forge/models.local.json` the command allows everything, before
+either rule is consulted** — a project that has not opted in sees no behavior
+change, including for models outside the default table. Every failure path
+allows too: unparseable payload, corrupt overlay, unknown agent, `forge` missing
+from `PATH`. A policy hook that can block work is a worse bug than the one it
+fixes.
+
+Claude Code only — Cursor and Codex have no dispatch hook to hang this on, so
+there the resolver stays an instruction.
+
 ## 0.3.18 — 2026-07-26
 
 ### A recorded harness now travels to the operator's machine

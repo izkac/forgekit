@@ -517,6 +517,24 @@ forge models included       # default — subscription pool
 forge models metered        # WRITE .forge/models.local.json — only if you ask
 ```
 
+Resolution is a contract the coordinator can skip, and skipping it is invisible:
+the overlay sits there while dispatches keep going out on a remembered tier
+model. Claude Code projects can hold the line from the host side — `forge init
+--claude` ships `.claude/hooks/forge-model-hook.mjs` and registers it under
+`PreToolUse` in the snippet:
+
+- **No `.forge/models.local.json`** → the hook allows everything, always. Nothing
+  changes until you opt in.
+- **Overlay flattens a lane** (`fast`, `standard` and `capable` all one model) →
+  there is no tier left to guess, so dispatches are rewritten to that model.
+  Hand-write the lane when you want one model for every subagent.
+- **Overlay keeps tiers apart** → the dispatch carries a model but no tier, so
+  the hook can only check membership: a model outside the resolved three is
+  denied with the table and a pointer back to `forge resolve-model`.
+
+Cursor and Codex have no equivalent dispatch hook; there the resolver stays an
+instruction.
+
 ---
 
 ## 10. Standalone thorough review

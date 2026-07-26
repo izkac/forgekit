@@ -66,6 +66,26 @@ test('thin-rule templates are engine-neutral (no hardcoded OpenSpec-only flow)',
   }
 });
 
+test('claude init ships the model-policy hook and registers it in the snippet', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-model-hook-'));
+  try {
+    initProject(['claude'], { cwd, force: true, adr: false, planEngine: null });
+
+    const hook = path.join(cwd, '.claude', 'hooks', 'forge-model-hook.mjs');
+    assert.ok(fs.existsSync(hook), 'hook body copied into the project');
+    assert.match(fs.readFileSync(hook, 'utf8'), /forge['"],\s*\['enforce-model'\]/);
+
+    const snippet = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'forge-hooks.snippet.json'), 'utf8'),
+    );
+    const pre = snippet.hooks.PreToolUse[0];
+    assert.equal(pre.matcher, 'Agent|Task');
+    assert.match(pre.hooks[0].command, /forge-model-hook\.mjs/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('initProject wires templated envs and marks the rest skill-only', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-'));
   try {

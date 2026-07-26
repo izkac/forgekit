@@ -285,6 +285,8 @@ forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<text>"
                                   # stamp tier-2 test-evidence.md
 forge resolve-model --tier <fast|standard|capable>
                                   # JSON model resolution (included billing by default)
+forge enforce-model               # PreToolUse hook body (Claude Code): hold subagent
+                                  # dispatches to models.local.json; inert without it
 forge models                      # print effective billing (does NOT write a file)
 forge models included|metered     # WRITE .forge/models.local.json
 forge prefs                       # print effective pace (does NOT write a file)
@@ -587,6 +589,12 @@ forge models metered                  # WRITE .forge/models.local.json
 - Defaults: `packages/cli/src/models.defaults.json` (Cursor `included` = `inherit` → omit Task `model`).
 - Local overlay is optional — see **Checkout-local overrides** above.
 - **Never invent** host model slugs; honor `omitModel` / `model` from the resolver.
+- A Claude Code project may **enforce** the overlay at dispatch time
+  (`forge enforce-model`, wired as a `PreToolUse` hook by `forge init --claude`).
+  A lane whose three tiers are one model rewrites the dispatch; a lane that keeps
+  tiers apart denies a model outside the resolved three. A denial means resolve
+  and re-dispatch — not retry the same model. Without `.forge/models.local.json`
+  the hook allows everything.
 - Escalate **capability** within `included` on `BLOCKED`; switch to `metered` only on explicit user request.
 - Keep the **parent** session on Auto/Composer (Cursor) or Max (Claude Code) — `inherit` follows the parent.
 

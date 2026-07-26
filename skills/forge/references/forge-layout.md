@@ -22,7 +22,8 @@ Optional `cursorChatId` on `session.json` when available — not required.
 ```
 .forge/
   active.json
-  models.local.json            ← optional; only after `forge:models -- <lane>`
+  models.local.json            ← optional; after `forge:models -- <lane>` or a hand-written
+                                 per-tier overlay (enforced by the PreToolUse hook if wired)
   preferences.local.json       ← optional; only after `forge:prefs -- <pace>`
   sessions/<session-id>/
     session.json

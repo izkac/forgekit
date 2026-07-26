@@ -243,7 +243,7 @@ export function ensureClaudeHookHints(cwd, opts) {
   const notePath = path.join(cwd, '.claude', 'forge-hooks.snippet.json');
   const snippet = {
     _comment:
-      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit). Paths assume forge CLI is on PATH.',
+      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit + PreToolUse). Paths assume forge CLI is on PATH. The PreToolUse hook is inert until .forge/models.local.json exists.',
     hooks: {
       SessionStart: [
         {
@@ -265,6 +265,18 @@ export function ensureClaudeHookHints(cwd, opts) {
             {
               type: 'command',
               command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-prompt-hook.mjs"',
+            },
+          ],
+        },
+      ],
+      PreToolUse: [
+        {
+          matcher: 'Agent|Task',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-model-hook.mjs"',
+              statusMessage: 'Checking subagent model policy',
             },
           ],
         },

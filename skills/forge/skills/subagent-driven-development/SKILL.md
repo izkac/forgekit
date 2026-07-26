@@ -61,7 +61,9 @@ Before every Task/Agent dispatch, resolve:
 forge resolve-model --tier <fast|standard|capable>
 ```
 
-Honor the JSON: if `omitModel` is true, **omit** the host `model` parameter; otherwise pass `model` exactly as returned. Defaults live in `models.defaults.json`. Checkout overlay `.forge/models.local.json` exists only after `forge models included|metered` (bare `forge models` only prints).
+Honor the JSON: if `omitModel` is true, **omit** the host `model` parameter; otherwise pass `model` exactly as returned. Defaults live in `models.defaults.json`. Checkout overlay `.forge/models.local.json` exists only after `forge models included|metered` (bare `forge models` only prints) or a hand-written per-tier overlay.
+
+Claude Code projects may enforce that overlay at dispatch time (`forge enforce-model` on `PreToolUse`). Two things follow: a dispatch may come back **rewritten** to a different model than you asked for — that is the project's policy, not an error — and a **denied** dispatch names the resolved set. On a denial, run the resolver and re-dispatch with what it returns; never retry the same model.
 
 ## Handling implementer status
 
