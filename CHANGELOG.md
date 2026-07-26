@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.18 — 2026-07-26
+
 ### A recorded harness now travels to the operator's machine
 
 `forge e2e harness` recorded how to *boot the app* and nothing about the rig
@@ -30,6 +32,24 @@ harness was proven exactly where nobody needed it proven.
   behalf.
 
 Both fields are optional; harnesses recorded before this print unchanged.
+
+### `checkout` no longer reads as a payment term
+
+The high-risk detector listed a bare `checkout` alongside stripe/billing/wallet.
+But "checkout" is core git vocabulary — "a fresh checkout", "once per checkout"
+— so any change that discussed working copies read as high-risk and hit the
+review floor. Found the honest way: the harness change above blocked its own
+`forge phase done`, on a plan that said "checkout" four times in the git sense
+and touched no money surface.
+
+Now qualified — `checkout session|flow|page|form|button`, and
+`guest|express|one-page checkout`. Recall barely moves, because the words a
+real payment change carries (stripe, payment, billing) are already alternatives
+in that pattern, so "stripe checkout" still matches via `stripe`. Same shape as
+the 0.3.17 note about `auth\w*` swallowing "author": qualify, don't delete.
+
+Fail-closed on a *negated* mention ("No migration.") is unchanged — that is
+documented as deliberate.
 
 ## 0.3.17 — 2026-07-25
 
