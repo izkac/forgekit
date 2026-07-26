@@ -151,6 +151,25 @@ test('isHighRiskText', () => {
   assert.equal(isHighRiskText('toolbar padding'), false);
 });
 
+test('isHighRiskText: bare "checkout" is git vocabulary, not a payment signal', () => {
+  // "checkout" sat in the payment cluster next to stripe/billing/wallet, so
+  // every change that mentioned a working copy read as high-risk and hit the
+  // review floor. It blocked `forge phase done` on harness-setup-probe, whose
+  // plan said "checkout" four times and touched no money surface at all.
+  assert.equal(isHighRiskText('on the operator’s own checkout the probe failed'), false);
+  assert.equal(isHighRiskText('run it once per checkout'), false);
+  assert.equal(isHighRiskText('a fresh checkout of the repo'), false);
+  assert.equal(isHighRiskText('git checkout -b feat/x'), false);
+
+  // Real payment work still reads high-risk — either via a payment word it was
+  // always going to carry, or via a qualified checkout phrase on its own.
+  assert.equal(isHighRiskText('stripe checkout session'), true);
+  assert.equal(isHighRiskText('rework the checkout flow'), true);
+  assert.equal(isHighRiskText('checkout page validation'), true);
+  assert.equal(isHighRiskText('guest checkout'), true);
+  assert.equal(isHighRiskText('cart totals at checkout with billing address'), true);
+});
+
 test('parseAssignment', () => {
   assert.deepEqual(parseAssignment('review.perTask=always'), {
     key: 'review.perTask',

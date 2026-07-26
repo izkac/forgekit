@@ -33,9 +33,17 @@ export const BRAINSTORM_DEPTH = Object.freeze(['full', 'short', 'minimal']);
  * "authorized signer" — the words real specs and spine rows actually use for
  * the highest-risk category. `auth\w*` is not the fix: it would swallow
  * "author"/"authoring", which appear in every docs change.
+ *
+ * `checkout` is qualified for the same reason in reverse. Bare, it sat in the
+ * payment cluster while being core git vocabulary — "a fresh checkout", "once
+ * per checkout" — so any change that discussed working copies read as
+ * high-risk and hit the review floor. Recall barely moves: the qualifiers a
+ * payment change would naturally use (stripe, billing, payment, cart) are
+ * already alternatives here, so "stripe checkout" still matches via `stripe`.
+ * Only the standalone payment senses need spelling out.
  */
 const THOROUGH_RE =
-  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|contract|contracts|gdpr|pci|wallet|checkout)\b/i;
+  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|contract|contracts|gdpr|pci|wallet|checkout[- ](?:session|sessions|flow|flows|page|pages|form|forms|button)|(?:guest|express|one[- ]page)[- ]checkout)\b/i;
 
 /** Signals that suggest standard (multi-surface / API / platform / orchestration). */
 const STANDARD_RE =
