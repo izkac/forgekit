@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { findRepoRoot } from '../src/repo-root.mjs';
+import { isVersionFlag, versionLine } from '../src/version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, '..', 'src');
@@ -81,6 +82,7 @@ Prefer \`forgekit install\` to pick multiple skills + agents at once.
 
 Global:
   forge --help
+  forge --version
   forge <command> --help
 `);
 }
@@ -88,6 +90,11 @@ Global:
 const argv = process.argv.slice(2);
 if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
   printHelp();
+  process.exit(0);
+}
+
+if (isVersionFlag(argv[0])) {
+  process.stdout.write(versionLine('forge'));
   process.exit(0);
 }
 

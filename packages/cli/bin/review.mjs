@@ -9,6 +9,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { isVersionFlag, versionLine } from '../src/version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, '..', 'src');
@@ -47,6 +48,7 @@ Prefer \`forgekit install\` to pick multiple skills + agents at once.
 
 Global:
   review --help
+  review --version
   review <command> --help
 
 After install, invoke the skill explicitly in your agent (it does not auto-load).
@@ -56,6 +58,11 @@ After install, invoke the skill explicitly in your agent (it does not auto-load)
 const argv = process.argv.slice(2);
 if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
   printHelp();
+  process.exit(0);
+}
+
+if (isVersionFlag(argv[0])) {
+  process.stdout.write(versionLine('review'));
   process.exit(0);
 }
 

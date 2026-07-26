@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.3.20 — 2026-07-26
+
+### `--version`, because a stale install looks exactly like a missing feature
+
+None of the three bins answered `--version`; all of them treated it as an
+unknown command and printed help. That is a bad failure mode for a tool that
+ships new subcommands: `forge enforce-model` landing in 0.3.19 is
+indistinguishable from a global install still sitting on 0.3.18, and the first
+question — *which copy is answering?* — had no way to be asked.
+
+`forge`, `forgekit` and `review` now accept `--version` and `-v`, printing
+`<bin> <version>` (the bin name included because three commands share one
+package). The number is read from that package's own manifest rather than
+hardcoded, since a hardcoded string is precisely what drifts from the installed
+copy; an unreadable manifest reports `unknown` instead of throwing.
+
 ## 0.3.19 — 2026-07-26
 
 ### The model overlay can now hold, instead of only advising

@@ -10,6 +10,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { isVersionFlag, versionLine } from '../src/version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, '..', 'src');
@@ -52,12 +53,21 @@ Day-to-day skill CLIs (same package):
 
   forge install …         Alias → forgekit install --skills forge …
   review install …        Alias → forgekit install --skills thorough-code-review …
+
+Global:
+  forgekit --help
+  forgekit --version
 `);
 }
 
 const argv = process.argv.slice(2);
 if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
   printHelp();
+  process.exit(0);
+}
+
+if (isVersionFlag(argv[0])) {
+  process.stdout.write(versionLine('forgekit'));
   process.exit(0);
 }
 

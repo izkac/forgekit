@@ -30,6 +30,16 @@ forgekit install --skills forge,thorough-code-review --agents cursor,claude --fo
 forgekit list    # confirm installed / missing / outdated
 ```
 
+Every bin reports the version of the package it came from — check this first
+when a documented flag or command comes back as unknown, because a stale global
+install looks exactly like a missing feature:
+
+```bash
+forge --version      # forge 0.3.20
+forgekit --version
+review --version
+```
+
 What this does:
 
 - Copies skills into `~/.cursor/skills/`, `~/.claude/skills/`, and/or `~/.codex/skills/`

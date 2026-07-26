@@ -283,6 +283,7 @@ forge e2e run --repeat 5 [--record-baseline]
 forge cleanup [--dry-run]         # prune sessions >14 days or finished
 forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<text>"
                                   # stamp tier-2 test-evidence.md
+forge --version                   # forge <version> — which installed copy is answering
 forge resolve-model --tier <fast|standard|capable>
                                   # JSON model resolution (included billing by default)
 forge enforce-model               # PreToolUse hook body (Claude Code): hold subagent
