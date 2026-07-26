@@ -1,5 +1,28 @@
 {
-  "plan": { "engine": "specs", "dir": "specs" },
-  "adr": { "enabled": true, "dir": "docs/adr" },
-  "git": { "checkpoint": "per-group" }
+  "plan": {
+    "engine": "specs",
+    "dir": "specs"
+  },
+  "adr": {
+    "enabled": true,
+    "dir": "docs/adr"
+  },
+  "git": {
+    "checkpoint": "per-group"
+  },
+  "e2e": {
+    "baseline": {
+      "runs": 3,
+      "green": 3,
+      "flakySteps": [],
+      "measuredAt": "2026-07-26T08:01:48.208Z"
+    },
+    "harness": {
+      "description": "scratch-project loop over the shipped forge binary — scripts/e2e/harness-portability.mjs drives packages/cli/bin/forge.mjs against a throwaway project in a temp dir; no server, no machine-local tooling beyond node",
+      "recordedAt": "2026-07-26T08:00:37.897Z",
+      "start": "node scripts/e2e/harness-portability.mjs boot",
+      "probe": "node scripts/e2e/harness-portability.mjs all",
+      "dir": "scripts/e2e"
+    }
+  }
 }

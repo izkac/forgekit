@@ -112,13 +112,28 @@ cost instead:
   project code (never session scratch), then record it:
 
   ```bash
-  forge e2e harness --set "<what it is / where>" --start "<start command>" [--dir <path>]
+  forge e2e harness --set "<what it is / where>" \
+    --start "<start command>" \
+    --setup "<machine-local prerequisites>" \
+    --probe "<command that proves it>" \
+    [--dir <path>]
   ```
 
   This lands in `.forge/config.json` (committed), and every later session
   sees it — `forge e2e init` and `forge e2e status` print the recorded
   harness. Check `forge e2e harness` before proposing to build or asking the
   operator; proposing a new rig while one is recorded is a REJECT.
+- **A harness proven only in your environment is not proven.** `start` says
+  how to boot the app; it says nothing about the rig that exercises it. If you
+  installed *anything* to make the probe pass — browsers, drivers, container
+  images, a language toolchain — that install is in neither the repository nor
+  the operator's checkout, and the next person hits a failure you never saw.
+  Record it with `--setup`, and record the proving command with `--probe` so
+  the next session verifies the harness instead of re-deriving how to test it.
+  Your sandbox's caches are not the operator's. Never auto-install on their
+  behalf: `setup` is a recorded string forge prints, not a command it runs.
+  When a loop goes red and a `setup` is on file, `forge e2e run` names it as
+  the first thing to suspect — that hint only exists if you recorded it.
 - **One executed loop per capability, not per assertion.** Push edge cases
   into unit tests; e2e proves the wiring exists.
 - **Set `timeoutMs` from the step count up front.** A 10-step loop is never a

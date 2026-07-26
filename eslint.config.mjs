@@ -7,7 +7,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ['packages/cli/**/*.{js,mjs}', 'eslint.config.mjs'],
+    files: ['packages/cli/**/*.{js,mjs}', 'scripts/**/*.{js,mjs}', 'eslint.config.mjs'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',

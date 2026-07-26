@@ -1,0 +1,33 @@
+{
+  "change": "harness-setup-probe",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Recorded harness holds setup and probe",
+      "library": "packages/cli/src/e2e.mjs (--set flag parsing + harnessLines)",
+      "runtimeOwner": "forge e2e harness (bin/forge.mjs → e2e.mjs 'harness' branch)",
+      "writes": ".forge/config.json → e2e.harness.setup / e2e.harness.probe",
+      "reads": "argv --probe/--setup; existing e2e.harness on merge-write",
+      "uiConsumer": "forge e2e harness + forge e2e init stdout (Setup:/Probe: rows); forge e2e status JSON harness object",
+      "evidence": "packages/cli/src/e2e-cli.test.mjs — 'e2e harness: record → show → surfaced by init'"
+    },
+    {
+      "capability": "Failing loops name recorded prerequisites",
+      "library": "packages/cli/src/e2e.mjs ('run' branch failure hint)",
+      "runtimeOwner": "forge e2e run — the only caller; the integrity gates gate on checkE2eGate and never execute steps, so the hint does not print there",
+      "writes": "stdout suspicion block on a red run — advisory only, no persisted artifact, exit code unchanged",
+      "reads": ".forge/config.json → e2e.harness.setup; runE2eSteps results.ok",
+      "uiConsumer": "operator/agent reading forge e2e run output at the integrity gate",
+      "evidence": "packages/cli/src/e2e-cli.test.mjs — red-with-setup / red-without-setup / green-with-setup cases"
+    },
+    {
+      "capability": "A harness is proven on the operator's machine",
+      "library": "skills/forge/references/runtime-integrity.md; templates/project/{claude,cursor}/commands/forge-harness.md",
+      "runtimeOwner": "forgekit install --skills forge (skill tree) and forge init (project command templates)",
+      "writes": "~/.claude/skills/forge/references/runtime-integrity.md; <project>/.claude/commands/forge-harness.md",
+      "reads": "N/A",
+      "uiConsumer": "/forge:harness command text an agent follows when recording or re-proving a harness",
+      "evidence": "packages/cli/src/e2e-cli.test.mjs — '/forge:harness templates stay in sync and teach setup + probe' (mechanical drift guard) + docs/usage.md e2e reference"
+    }
+  ]
+}

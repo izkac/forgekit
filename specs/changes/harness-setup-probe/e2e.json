@@ -1,0 +1,36 @@
+{
+  "change": "harness-setup-probe",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot-scratch-project",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot",
+      "expect": "SCRATCH PROJECT READY",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "record-harness-through-the-real-cli",
+      "cmd": "node scripts/e2e/harness-portability.mjs record",
+      "expect": "CONFIG e2e\\.harness\\.setup=npx playwright install chromium[\\s\\S]*CONFIG e2e\\.harness\\.probe=npm run test:e2e",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "next-session-sees-setup-and-probe",
+      "cmd": "node scripts/e2e/harness-portability.mjs show",
+      "expect": "Setup:[\\s\\S]*npx playwright install chromium[\\s\\S]*Probe:[\\s\\S]*npm run test:e2e[\\s\\S]*INIT[\\s\\S]*npx playwright install chromium",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "red-loop-names-the-missing-prerequisite",
+      "cmd": "node scripts/e2e/harness-portability.mjs red-run",
+      "expect": "npx playwright install chromium[\\s\\S]*FAILED[\\s\\S]*EXIT 1",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "green-and-unrecorded-setup-stay-quiet",
+      "cmd": "node scripts/e2e/harness-portability.mjs quiet-cases",
+      "expect": "NO HINT green-with-setup[\\s\\S]*NO HINT red-without-setup",
+      "timeoutMs": 60000
+    }
+  ]
+}

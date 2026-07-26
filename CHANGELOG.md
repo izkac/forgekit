@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### A recorded harness now travels to the operator's machine
+
+`forge e2e harness` recorded how to *boot the app* and nothing about the rig
+that exercises it. Reported from the field: an agent recorded a Playwright
+harness, `/forge:harness` proved it green in the agent's environment, and the
+operator's fresh checkout failed on the first `npm run test:e2e` with "browser
+executable doesn't exist". The agent's sandbox already had the browsers, so the
+harness was proven exactly where nobody needed it proven.
+
+- `--setup "<cmd>"` records what **this machine** needs that the repository
+  cannot carry — browsers, drivers, container images, toolchains.
+- `--probe "<cmd>"` records the command that proves the harness. `/forge:harness`
+  step 1 already told agents to re-run "one real probe" against an existing
+  harness; there was nowhere to record which one, so every session re-derived it.
+- Both print wherever the harness is shown (`forge e2e harness`, `forge e2e
+  init`) and serialize in `forge e2e status`, ordered Setup → Start → Probe →
+  Location: the order you run them.
+- **When a loop goes red and a `setup` is recorded, `forge e2e run` names it as
+  the first thing to suspect.** Forge detects no tools and installs nothing —
+  the probe's own error is the check, and attributing it is what forge can do
+  without knowing Playwright from chromedriver. Advisory only: it never changes
+  the exit code, and prints on neither a green run nor an unrecorded setup.
+- Skill and command templates carry the rule: *a harness proven only in the
+  agent's environment is not proven.* Anything installed to make the probe pass
+  gets recorded as `setup`, and forge never auto-installs on the operator's
+  behalf.
+
+Both fields are optional; harnesses recorded before this print unchanged.
+
 ## 0.3.17 — 2026-07-25
 
 ### Pace is decided where the facts are

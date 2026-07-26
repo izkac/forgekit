@@ -1,0 +1,190 @@
+<!-- forge-brief-specs-hash:1f2aa98de26e6822 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — harness setup + probe</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+<style>
+  body {
+    max-width: 48rem;
+    margin: 3rem auto;
+    padding: 0 1.25rem;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.1rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5; padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f5; padding: .12em .35em; border-radius: 3px; font-size: .9em; }
+  pre.term {
+    background: #1a1a1a; color: #eaeaea; padding: .9rem 1.1rem;
+    border-radius: 6px; overflow-x: auto; font-size: .85rem; line-height: 1.5;
+  }
+  pre.term .hint { color: #ffd479; }
+  pre.term .bad { color: #ff8a80; }
+  blockquote {
+    margin: 1.25rem 0; padding: .6rem 1rem; border-left: 3px solid #c8c8c8;
+    background: #fafafa; color: #333;
+  }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e5e5e5; vertical-align: top; }
+  th { color: #555; font-weight: 600; }
+  .muted { color: #666; }
+</style>
+</head>
+<body>
+
+<h1>Making a recorded e2e harness work on someone else's machine</h1>
+<p class="sub">Operator brief — change <code>harness-setup-probe</code></p>
+
+<h2>TL;DR</h2>
+<p>
+When Forge records a project's e2e harness, it currently saves how to
+<em>start the app</em> and nothing else. It doesn't save the command that proves
+the harness works, and it doesn't save what the machine needs installed for that
+proof to run. So an agent can install a browser in its own sandbox, watch the
+tests go green, report "harness proven" — and the next human to clone the repo
+hits an error the agent never saw.
+</p>
+<p>
+This change adds two optional pieces to the recorded harness (<strong>setup</strong>
+and <strong>probe</strong>), shows them everywhere the harness is displayed, and
+makes a failing test loop point at the setup command instead of leaving you to
+guess.
+</p>
+
+<h2>What prompted it</h2>
+<blockquote>
+A team recorded a Playwright harness. Forge proved it green in the agent's
+environment. On the operator's own laptop the very first test run failed with
+<em>"browser executable doesn't exist — run <code>npx playwright install</code>"</em>.
+The harness had captured how to boot the product, but not how to make the thing
+that tests the product exist.
+</blockquote>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A harness can now remember <strong>the command that proves it</strong> —
+      so a later session verifies the harness instead of re-inventing how to
+      test it.</li>
+  <li>A harness can now remember <strong>what this machine needs installed</strong> —
+      browsers, drivers, container images, language toolchains. Anything that
+      lives on a machine rather than in the repository.</li>
+  <li>When a test loop fails and a setup command is on file, the output
+      <strong>names that command</strong> as the first thing to suspect. That
+      turns a confusing "the tests are broken" moment into "ah, I haven't run
+      the one-time install on this checkout yet."</li>
+  <li>A written rule in the Forge skill: <em>a harness proven only in the
+      agent's environment is not proven.</em> If an agent installed something to
+      make the test pass, that install has to be recorded.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+The recorded harness is a small block of JSON in the project's committed
+<code>.forge/config.json</code>. Today it holds a description, a start command,
+and a location. This adds two optional siblings. Nothing is auto-detected and
+nothing is auto-installed — Forge records what it is told and repeats it back at
+the moment it is useful.
+</p>
+
+<pre class="mermaid">
+flowchart TD
+  A["Agent builds and proves the harness"] --> B["forge e2e harness --set …<br/>--start · --setup · --probe"]
+  B --> C[".forge/config.json<br/>(committed to the repo)"]
+  C --> D["Next session:<br/>forge e2e harness / init<br/>prints Setup · Start · Probe"]
+  C --> E["forge e2e run"]
+  E --> F{"Loop green?"}
+  F -- yes --> G["Nothing extra printed"]
+  F -- no --> H{"Setup recorded?"}
+  H -- no --> I["Just the failing step"]
+  H -- yes --> J["Failing step<br/>+ 'try this setup command first'"]
+</pre>
+
+<p>What a failing run looks like after the change:</p>
+<pre class="term">  ✓ boot: exit 0 (412ms)
+  <span class="bad">✗ smoke: exit 1 (1204ms)</span>
+    Error: browser executable doesn't exist at …
+
+<span class="hint">  Harness setup recorded for this project — run it if you haven't on this checkout:
+    npx playwright install chromium</span>
+
+FAILED — results: .forge/sessions/…/e2e-results.json</pre>
+
+<h2>What changes for you</h2>
+<table>
+  <tr><th>Before</th><th>After</th></tr>
+  <tr>
+    <td><code>forge e2e harness --set "…" --start "…" --dir e2e</code></td>
+    <td>same, plus optional <code>--probe "npm run test:e2e"</code> and
+        <code>--setup "npx playwright install chromium"</code></td>
+  </tr>
+  <tr>
+    <td>Harness display shows <em>Start</em> and <em>Location</em></td>
+    <td>shows <em>Setup</em>, <em>Start</em>, <em>Probe</em>, <em>Location</em> —
+        in the order you'd actually run them</td>
+  </tr>
+  <tr>
+    <td>A red loop shows only the failing step</td>
+    <td>a red loop also names the recorded setup command, when there is one</td>
+  </tr>
+</table>
+<p class="muted">
+Existing harnesses keep working untouched — both fields are optional, and a
+harness recorded without them prints exactly as it does today.
+</p>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li><strong>The hint can point at the wrong thing.</strong> A step that fails
+      for an ordinary code reason still prints the setup line whenever a setup is
+      on file. It's worded as a suspicion, printed once at the end rather than per
+      step, and it never changes the exit code — the failing step stays the
+      headline. Watch whether it becomes noise; if it does, the answer is to
+      soften the wording, not to start guessing which failures are
+      environmental.</li>
+  <li><strong>Recording is still voluntary.</strong> Nothing forces an agent to
+      pass <code>--setup</code>; the skill text carries that obligation, the same
+      way it already does for <code>--start</code>.</li>
+  <li><strong>Deliberately not solved:</strong> Forge does not verify that the
+      setup was actually applied. That would mean teaching it how to check every
+      tool it might encounter.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li><strong>No tool detection.</strong> The original suggestion had Forge look
+      for Playwright in <code>package.json</code> and check for installed
+      browsers before proving the harness. That means a bespoke check per tool —
+      Playwright, then Cypress, chromedriver, Docker, Go — each one able to go
+      stale when the tool changes its CLI. The probe already fails with the
+      tool's own error message; Forge's job is to explain that failure, not to
+      predict it.</li>
+  <li><strong>No auto-install.</strong> Setup commands are large downloads by
+      nature. Forge prints the command; you decide when to run it.</li>
+  <li><strong>No third field for prose.</strong> The suggestion included a
+      separate human-readable hint alongside the setup command; the harness
+      description already covers that.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><td><strong>1. Record and surface</strong> <span class="muted">(2 tasks)</span></td>
+      <td>New flags, stored and printed wherever the harness is shown.</td></tr>
+  <tr><td><strong>2. Attribute failures</strong> <span class="muted">(1 task)</span></td>
+      <td>The suspicion block on a red loop, and the three cases where it must stay silent.</td></tr>
+  <tr><td><strong>3. Teach the rule</strong> <span class="muted">(3 tasks)</span></td>
+      <td>Skill reference, both editor command templates, usage docs and changelog.</td></tr>
+  <tr><td><strong>4. Prove it</strong> <span class="muted">(2 tasks)</span></td>
+      <td>A real end-to-end loop driving the shipped CLI against a scratch project —
+          and recording that loop as this repo's own harness, which it currently lacks.</td></tr>
+</table>
+
+</body>
+</html>
