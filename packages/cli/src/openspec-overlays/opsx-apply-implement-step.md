@@ -7,5 +7,5 @@ Prefer **`/forge:apply`** over bare `/opsx:apply` — same OpenSpec CLI steps pl
    - Show which task is being worked on
    - Dispatch **implementer** subagent (TDD first), then **spec** + **quality** reviewers
    - Keep changes minimal and focused
-   - Mark task complete in the tasks file: `- [ ]` → `- [x]`
+   - Mark task complete in the tasks file: `- [ ]` → `- [x]` (Forge fleet/status derive progress from these checkboxes)
    - Continue to next task

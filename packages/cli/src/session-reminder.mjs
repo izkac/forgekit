@@ -18,12 +18,14 @@ import {
 } from './lib/fleet.mjs';
 import { resolveEffectivePreferences } from './preferences.mjs';
 import { sessionHealth } from './health.mjs';
+import { healSessionProgress } from './plan-progress.mjs';
 
 function getActiveSessionInfo() {
   const active = readActive();
   if (!active?.sessionId) return null;
   try {
     const { dir, session } = loadSession(active.sessionId);
+    healSessionProgress({ cwd: REPO_ROOT, sessionDir: dir, session });
     return { active, dir, session };
   } catch {
     return null;

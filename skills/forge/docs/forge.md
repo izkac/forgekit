@@ -672,7 +672,7 @@ surfaces it on resume when it is not healthy:
 | State | Meaning |
 | ----- | ------- |
 | `red` | e2e run failing (named step), or `verify-evidence.md` records BLOCKED |
-| `stale` | no session write for `health.idleHours` (default 4), or e2e results no longer match `e2e.json` |
+| `stale` | no session activity for `health.idleHours` (default 4) — activity is `max(session.updatedAt, linked tasks.md mtime)` — or e2e results no longer match `e2e.json`. Task progress for openspec/specs sessions is derived from `tasks.md` checkboxes (session cache is healed on status/fleet/reminder). |
 | `healthy` | none of the above |
 | `done` | phase `done` / `skipped` |
 

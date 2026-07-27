@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { e2ePath, e2eStepsHash, loadE2eResults } from './integrity.mjs';
 import { readJson } from './lib.mjs';
+import { readPlanTaskProgress } from './plan-progress.mjs';
 
 /** Hours of no session write after which an unfinished session reads as stopped. */
 export const DEFAULT_IDLE_HOURS = 4;
@@ -112,12 +113,21 @@ export function sessionHealth(opts) {
   }
 
   // --- idle: nobody is driving this session ---
+  // tasks.md checkboxes are what agents actually update; their mtime counts as
+  // activity even when session.tasksComplete was never bumped.
+  const planProgress = readPlanTaskProgress({ cwd, session });
   const updatedAt = new Date(session.updatedAt ?? session.createdAt ?? NaN).getTime();
-  if (!Number.isNaN(updatedAt)) {
-    const idleMs = now - updatedAt;
+  const activityAt = Math.max(
+    Number.isNaN(updatedAt) ? 0 : updatedAt,
+    planProgress?.mtimeMs ?? 0,
+  );
+  if (activityAt > 0) {
+    const idleMs = now - activityAt;
     if (idleMs > idleHours * 3600 * 1000) {
+      const complete = planProgress?.complete ?? session.tasksComplete ?? 0;
+      const total = planProgress?.total ?? session.tasksTotal ?? 0;
       const where = `${session.phase ?? 'unknown'}${
-        Number(session.tasksTotal) > 0 ? ` ${session.tasksComplete ?? 0}/${session.tasksTotal}` : ''
+        Number(total) > 0 ? ` ${complete}/${total}` : ''
       }`;
       reasons.push(`idle ${humanDuration(idleMs)} at ${where}`);
       escalate('stale');

@@ -10,6 +10,7 @@ Written by the `archive-to-adr` skill when a change is archived. Configured in
 | # | Decision | Status | Date | Area |
 |---|----------|--------|------|------|
 | [0001](0001-harness-prerequisites-are-recorded-not-detected.md) | Harness prerequisites are recorded, not detected | Accepted | 2026-07-26 | e2e harness / runtime integrity |
+| [0002](0002-plan-tasks-md-is-progress-source-of-truth.md) | Plan `tasks.md` checkboxes are progress source of truth | Accepted | 2026-07-27 | session / fleet / health |
 
 ## When to write one
 

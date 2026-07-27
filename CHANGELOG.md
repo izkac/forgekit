@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.3.21 — 2026-07-27
+
+### Fleet/status progress follows `tasks.md` checkboxes
+
+Agents tick OpenSpec/specs task lists; fleet and health used to watch a separate
+`session.tasksComplete` cache that only moved on `forge phase --tasks-complete`.
+A busy implement session could show `0/N` and `STALE` for hours. Progress is now
+derived from the linked `tasks.md` on status/fleet/reminder (session cache is
+healed when it diverges), and idle detection treats `tasks.md` mtime as activity.
+
 ## 0.3.20 — 2026-07-26
 
 ### `--version`, because a stale install looks exactly like a missing feature

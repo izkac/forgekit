@@ -1,0 +1,5 @@
+{
+  "change": "sync-tasks-md-progress",
+  "notApplicable": "CLI bookkeeping for forge session/fleet progress — no production runtime path; behavior proven by packages/cli unit tests",
+  "rows": []
+}

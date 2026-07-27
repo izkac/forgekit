@@ -55,7 +55,7 @@ Honor [../references/runtime-integrity.md](../references/runtime-integrity.md) i
    forge evidence --task <nn>-<slug> --command "<tier-2 cmd>" --exit 0 --summary "<pass summary>"
    ```
    (Refuses non-zero exit without `--allow-fail`; template + rules in [../references/test-evidence.md](../references/test-evidence.md).)
-7. Mark task complete (`tasks.md` `- [x]` or update `tasksComplete`). Detect group boundary: next line in `tasks.md` is a new `##` heading, or no remaining tasks under the current heading.
+7. Mark task complete in `tasks.md` (`- [ ]` → `- [x]`). That checklist is the source of truth — fleet/status/health derive `tasksComplete` from it (and heal the session cache). Still run the progress command below when you want `--subagents` updated. Detect group boundary: next line in `tasks.md` is a new `##` heading, or no remaining tasks under the current heading.
 8. **Checkpoint** — when the project opts in (`.forge/config.json` → `git.checkpoint`):
    ```bash
    forge checkpoint --group <nn>-<slug> --tasks <ids>   # per-group: at the boundary; per-task: after each task

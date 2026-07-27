@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { healSessionProgress } from '../plan-progress.mjs';
 
 export const PHASE_ORDER = [
   'triage',
@@ -164,7 +165,14 @@ function reconcileEntry(entry, sessionDir) {
   } catch {
     return false; // unreadable/absent — keep the cached view
   }
-  let changed = false;
+  // tasks.md is authoritative for progress; heal the session cache when it
+  // diverges so fleet/status/health stop lying about idle 0/N sessions.
+  const healed = healSessionProgress({
+    cwd: entry.project,
+    sessionDir,
+    session,
+  });
+  let changed = healed.changed;
   for (const key of MIRRORED_FIELDS) {
     const value = session[key];
     if (value === undefined) continue;

@@ -118,6 +118,26 @@ test('listFleet reconciles a stale entry against session.json on disk', () => {
   assert.ok(entry.lastSeen <= new Date().toISOString());
 });
 
+test('listFleet heals progress from tasks.md when session cache is stale', () => {
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-tasksmd-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  const sessionDir = makeProject(project, 's6');
+  const changeDir = path.join(project, 'specs', 'changes', 'my-change');
+  fs.mkdirSync(changeDir, { recursive: true });
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] 1.1\n- [x] 1.2\n- [ ] 1.3\n', 'utf8');
+
+  const session = makeSession('s6', { tasksTotal: 46, tasksComplete: 0 });
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify(session)}\n`, 'utf8');
+  registerSession(project, session);
+
+  const [entry] = listFleet();
+  assert.equal(entry.tasksComplete, 2);
+  assert.equal(entry.tasksTotal, 3);
+  const disk = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+  assert.equal(disk.tasksComplete, 2);
+  assert.equal(disk.tasksTotal, 3);
+});
+
 test('listFleet keeps registry-only fields when session.json is unreadable', () => {
   process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-unreadable-'), 'sessions');
   const project = tmp('fleet-proj-');

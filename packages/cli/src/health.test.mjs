@@ -136,3 +136,31 @@ test('red outranks stale when both fire', () => {
   assert.equal(health.state, 'red');
   assert.equal(health.reasons.length, 2, 'both reasons are reported, severity picks the state');
 });
+
+test('fresh tasks.md activity keeps an otherwise-idle session healthy', () => {
+  const p = makeProject({ updatedAt: ago(14), tasksComplete: 0, tasksTotal: 46 });
+  const changeDir = path.join(p.cwd, 'specs', 'changes', 'phase-1');
+  fs.mkdirSync(changeDir, { recursive: true });
+  const tasksFile = path.join(changeDir, 'tasks.md');
+  fs.writeFileSync(tasksFile, '- [x] 1.1\n- [x] 1.2\n- [ ] 1.3\n', 'utf8');
+  // mtime within the idle window (1h ago)
+  const fresh = (NOW - HOUR) / 1000;
+  fs.utimesSync(tasksFile, fresh, fresh);
+
+  const health = sessionHealth({ ...p, now: NOW });
+  assert.equal(health.state, 'healthy');
+});
+
+test('idle reason prefers checkbox counts from tasks.md over session cache', () => {
+  const p = makeProject({ updatedAt: ago(14), tasksComplete: 0, tasksTotal: 46 });
+  const changeDir = path.join(p.cwd, 'specs', 'changes', 'phase-1');
+  fs.mkdirSync(changeDir, { recursive: true });
+  const tasksFile = path.join(changeDir, 'tasks.md');
+  fs.writeFileSync(tasksFile, '- [x] 1.1\n- [x] 1.2\n- [ ] 1.3\n', 'utf8');
+  const old = (NOW - 14 * HOUR) / 1000;
+  fs.utimesSync(tasksFile, old, old);
+
+  const health = sessionHealth({ ...p, now: NOW });
+  assert.equal(health.state, 'stale');
+  assert.match(health.reasons[0], /implement 2\/3/);
+});

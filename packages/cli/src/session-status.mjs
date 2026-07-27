@@ -18,6 +18,7 @@ import {
 import { resolveEffectivePreferences } from './preferences.mjs';
 import { sessionHealth } from './health.mjs';
 import { openFindings } from './findings.mjs';
+import { healSessionProgress } from './plan-progress.mjs';
 
 const args = process.argv.slice(2);
 let sessionId = null;
@@ -39,6 +40,7 @@ if (!sessionId) {
 }
 
 const { dir, session } = loadSession(sessionId);
+healSessionProgress({ cwd: REPO_ROOT, sessionDir: dir, session });
 const statusPath = path.join(dir, 'status.json');
 const status = fs.existsSync(statusPath) ? JSON.parse(fs.readFileSync(statusPath, 'utf8')) : null;
 

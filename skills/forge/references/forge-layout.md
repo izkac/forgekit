@@ -56,7 +56,7 @@ defaults and do **not** create the `*.local.json` files. See [pace.md](./pace.md
 | `planType` | `openspec` (default for new work), or legacy `throwaway` / `direct` |
 | `openspecChange` | Change folder name when `planType: openspec` |
 | `forgeSkipped` | `true` if user invoked `/forge:skip` |
-| `tasksTotal` / `tasksComplete` | Implementation progress |
+| `tasksTotal` / `tasksComplete` | Implementation progress (healed from linked `tasks.md` checkboxes on status/fleet/reminder) |
 | `pace` | Requested pace (`auto` \| `thorough` \| `standard` \| `brisk` \| `lite`) |
 | `resolvedPace` | Concrete pace after auto resolve or pin |
 | `paceReason` | Why auto picked this pace |

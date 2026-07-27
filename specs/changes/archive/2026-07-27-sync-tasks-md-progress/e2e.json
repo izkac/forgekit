@@ -1,0 +1,5 @@
+{
+  "change": "sync-tasks-md-progress",
+  "notApplicable": "No product loop — CLI session bookkeeping verified by packages/cli unit tests (plan-progress, health, fleet)",
+  "steps": []
+}

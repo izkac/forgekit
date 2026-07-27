@@ -35,7 +35,7 @@ when a documented flag or command comes back as unknown, because a stale global
 install looks exactly like a missing feature:
 
 ```bash
-forge --version      # forge 0.3.20
+forge --version      # forge 0.3.21
 forgekit --version
 review --version
 ```
@@ -594,7 +594,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase done` refuses — final review | High-risk change needs an independent final review; dispatch one, or `--final-review-waived "<reason>"` (recorded on the session and in the ledger) |
 | Verify passes but the suite is flaky | `forge e2e run --repeat 5 --record-baseline` — a non-zero baseline makes every verify a coin flip |
 | A finding keeps reappearing in reports | `forge finding add "<text>" --change <slug>` — then open that change, or mark it `--severity note` |
-| Session shows `RED` / `STALE` | `forge status` → `health.reasons`: fix the failing e2e step, re-run `forge e2e run`, or resume the idle phase |
+| Session shows `RED` / `STALE` | `forge status` → `health.reasons`: fix the failing e2e step, re-run `forge e2e run`, or resume the idle phase. Progress for openspec/specs comes from `tasks.md` checkboxes (not a separate counter you must bump by hand). |
 | Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
 | `forge fleet send` seems ignored | Delivery is next-turn via the reminder hook — idle sessions read it when they wake |
 | Session reminder missing | Merge `forge-hooks.snippet.json` from init into agent settings |
