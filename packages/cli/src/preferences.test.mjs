@@ -170,6 +170,36 @@ test('isHighRiskText: bare "checkout" is git vocabulary, not a payment signal', 
   assert.equal(isHighRiskText('cart totals at checkout with billing address'), true);
 });
 
+test('isHighRiskText: bare "contract" is ordinary software English, not a risk signal', () => {
+  // Third of the same family (after `auth` and `checkout`). "contract" is how
+  // programmers describe any function's promise, so plan prose that discusses
+  // interfaces escalated pace and hit the independent-review floor. The
+  // session-telemetry change matched six times and touched no money, auth,
+  // secrets or migration surface — every match was a sentence about a JS
+  // function's calling convention.
+  assert.equal(isHighRiskText('the same contract as readLedger'), false);
+  assert.equal(isHighRiskText('the existing must-never-block-work contract'), false);
+  assert.equal(isHighRiskText('Data contracts — additive only'), false);
+  assert.equal(isHighRiskText('the transcript layout is not a public contract'), false);
+  assert.equal(isHighRiskText('the contract already stated in ledger.mjs'), false);
+  assert.equal(isHighRiskText('a tolerant read that honours the reader contract'), false);
+
+  // The risk sense is qualified, exactly as STANDARD_RE already spells "wire
+  // contract". Recall is unaffected for changes that really do break a
+  // consumer or touch money.
+  assert.equal(isHighRiskText('the API contract changes for every caller'), true);
+  assert.equal(isHighRiskText('smart contract deployment'), true);
+  assert.equal(isHighRiskText('update the wire contract'), true);
+  assert.equal(isHighRiskText('schema contract for the events topic'), true);
+  assert.equal(isHighRiskText('contract tests must be regenerated'), true);
+  assert.equal(isHighRiskText('a breaking contract change'), true);
+
+  // A genuinely risky change is still caught by its other words, so the
+  // qualification costs nothing where it would matter.
+  assert.equal(isHighRiskText('billing contract for invoiced customers'), true);
+  assert.equal(isHighRiskText('migration contract between v1 and v2'), true);
+});
+
 test('parseAssignment', () => {
   assert.deepEqual(parseAssignment('review.perTask=always'), {
     key: 'review.perTask',

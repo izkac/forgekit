@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { collectMetrics } from './collect.mjs';
+import { collectMetrics, writeMetrics } from './collect.mjs';
 import { EMPTY_DISPATCHES } from './dispatches.mjs';
 
 function tmp(prefix) {
@@ -923,4 +923,72 @@ test('an unreadable dispatch ledger costs the counts, not the document', () => {
 
   assert.equal(doc.available, true);
   assert.deepEqual(doc.dispatches, EMPTY_DISPATCHES);
+});
+
+/* ---------- preserving a measurement already made ---------- */
+
+function metricsFile(dir) {
+  return path.join(dir, 'metrics.json');
+}
+
+function readDoc(dir) {
+  return JSON.parse(fs.readFileSync(metricsFile(dir), 'utf8'));
+}
+
+const GOOD = { available: true, requests: 42, collectedAt: '2026-07-28T10:00:00.000Z' };
+const DEGRADED = { available: false, reason: 'no transcript on disk — pruned', dispatches: {} };
+
+test('a degraded collection never replaces a measurement already on disk', () => {
+  // The host prunes transcripts. Re-running collect on a finished session then
+  // replaced real numbers with an admission that they can no longer be taken —
+  // and metrics.json is the only place the per-model and per-phase detail
+  // lives, since the digest keeps totals only.
+  const dir = tmp('forge-write-metrics-');
+  fs.writeFileSync(metricsFile(dir), `${JSON.stringify(GOOD)}\n`, 'utf8');
+
+  const result = writeMetrics({ sessionDir: dir, doc: DEGRADED });
+  assert.equal(result.written, false);
+  assert.equal(result.kept, true);
+  assert.deepEqual(readDoc(dir), GOOD);
+});
+
+test('--force is how you deliberately replace it, and nothing else is', () => {
+  const dir = tmp('forge-write-metrics-force-');
+  fs.writeFileSync(metricsFile(dir), `${JSON.stringify(GOOD)}\n`, 'utf8');
+
+  assert.equal(writeMetrics({ sessionDir: dir, doc: DEGRADED, force: true }).written, true);
+  assert.equal(readDoc(dir).available, false);
+});
+
+test('everything else writes: better news, equally bad news, or no news yet', () => {
+  for (const [label, existing, next, expected] of [
+    ['no file yet', null, DEGRADED, false],
+    ['no file yet, good doc', null, GOOD, true],
+    ['degraded replaced by degraded', DEGRADED, DEGRADED, false],
+    ['degraded replaced by good', DEGRADED, GOOD, true],
+    ['good replaced by good', GOOD, { ...GOOD, requests: 99 }, true],
+    ['corrupt file replaced', 'not json at all', GOOD, true],
+  ]) {
+    const dir = tmp('forge-write-metrics-cases-');
+    if (existing !== null) {
+      fs.writeFileSync(
+        metricsFile(dir),
+        typeof existing === 'string' ? existing : `${JSON.stringify(existing)}\n`,
+        'utf8',
+      );
+    }
+    const result = writeMetrics({ sessionDir: dir, doc: next });
+    assert.equal(result.written, true, label);
+    assert.equal(readDoc(dir).available, expected, label);
+  }
+});
+
+test('writeMetrics reports failure rather than throwing it', () => {
+  // Telemetry is advisory at every layer, this one included.
+  const dir = tmp('forge-write-metrics-fail-');
+  fs.mkdirSync(metricsFile(dir));
+  const result = writeMetrics({ sessionDir: dir, doc: GOOD });
+  assert.equal(result.written, false);
+  assert.equal(result.kept, false);
+  assert.ok(result.error, 'the caller needs something to warn with');
 });

@@ -2,6 +2,86 @@
 
 ## Unreleased
 
+## 0.3.24 — 2026-07-28
+
+### Review independence must be claimed, not inferred
+
+**Behaviour change — read this if you rely on session scores.** `reviewCensus`
+promoted a review to "independent" whenever it *lacked* a self-review phrase,
+and the phrases it knew were only the ones the templates emit. A group review
+headed `Reviewer: coordinator (self-check, not independent)` was therefore
+counted as an outside reader — inferring the strongest signal in the scorecard
+from the absence of a word, which is the exact mistake this module was written to
+remove one level up.
+
+It now fails closed. An explicit self-declaration is believed however it is
+phrased, and independence requires a `Reviewer:` attribution that does not name
+the coordinator. **A review that claims no reviewer counts as a self-check.**
+
+The cost is one line, and Forge now writes it for you: `forge phase implement`
+instructs the coordinator to head every review file with `Reviewer:`, and both
+reviewer prompts open their report with `Reviewer: <model> (<role>)`.
+
+Existing reviews that named nobody will re-score as self-checks. That is the
+honest count — this project's own session dropped from 3 independent reviews to
+1 — but it will move numbers in `.forge/scorecards.jsonl` for sessions you
+re-score.
+
+### Bare "contract" no longer reads as high-risk
+
+Third of the same family, after `auth` and `checkout`. "contract" is how
+programmers describe *any* function's promise, so a change whose plan said "the
+same contract as `readLedger`" or "not a public contract" was escalated to
+thorough pace and held at the independent-review floor while touching no money,
+auth, secret or migration surface — six such matches in one change, every one a
+sentence about a JavaScript calling convention.
+
+The risk sense is always qualified, exactly as `STANDARD_RE` already spells
+"wire contract": `(api|wire|schema|smart|service|breaking) contract(s)` and
+`contract test(s)/testing/breach` now match, the bare noun does not. A change
+that really does move money or break a consumer still matches on its other
+words.
+
+### A degraded metrics collection no longer overwrites real numbers
+
+Host transcripts get pruned. Re-running `forge metrics collect` on a finished
+session traded its per-model and per-phase detail for `available: false` — and
+`metrics.json` is the only place that detail lives, since the digest keeps
+totals alone. A document that says `available: true` is now preserved unless you
+pass `--force`; better news, equally bad news, a corrupt file and a first
+collection all write as before. `forge phase finish|done` gets the same
+protection, because a `finish` then `done` pair collects twice.
+
+### Re-scoring heals the cached score
+
+The score lives in three places: `scorecard.json`, the `sessions.jsonl` digest,
+and `session.score` / `session.scoreGrade`. `forge score --write` rewrote the
+first two and left the third asserting the old number — observed as session.json
+claiming 97/A against a scorecard reading 69/C. Same shape as ADR-0002: a
+derived cache heals when it diverges. `updatedAt` is deliberately left alone —
+re-scoring is not activity, and bumping it would reset idle/STALE detection.
+
+### Briefing rules that cost real defects
+
+Two lessons from the session-telemetry change, now in the skill rather than in a
+report nobody re-reads:
+
+- **Mark what you measured.** A brief is read by a subagent with no chat
+  history, so every sentence lands as fact. Load-bearing claims are tagged
+  `measured: <how>` or `assumed — verify`. A data-format rule stated flatly
+  alongside measured facts turned out to be an assumption, and it survived TDD,
+  self-review and a corpus check because every fixture had been built from the
+  brief's own premise.
+- **Never quote an expected value.** Briefs state the rule and the fixture; the
+  implementer derives the numbers in code and must prove each guard fires by
+  reintroducing the bug it guards. Three quoted figures reached one change's
+  briefs; each would have produced an assertion that passed against buggy code
+  while reading as coverage.
+
+`tdd-core.md` also gains **selection rules need a discriminating fixture**: when
+the behaviour is *which candidate wins*, the losers must differ from the winner,
+or the test proves only that the rule ran.
+
 ## 0.3.23 — 2026-07-28
 
 ### The scorer now reads risk from the same text the done gate does

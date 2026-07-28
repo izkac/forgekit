@@ -16,22 +16,24 @@
  * which is exactly what this whole subsystem promises never to do.
  *
  * Usage:
- *   forge metrics collect [--session <id>] [--json]
+ *   forge metrics collect [--session <id>] [--json] [--force]
  */
 
 import path from 'node:path';
-import { REPO_ROOT, loadSession, readActive, writeJson } from './lib.mjs';
-import { collectMetrics } from './metrics/collect.mjs';
+import { REPO_ROOT, loadSession, readActive } from './lib.mjs';
+import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 
 /** Asked-for help goes to stdout; usage shown because of a mistake goes to stderr. */
 function usage(stream = process.stderr) {
   stream.write(
     `Usage:
-  forge metrics collect [--session <id>] [--json]
+  forge metrics collect [--session <id>] [--json] [--force]
      Read the host transcripts this session is bound to and write
      metrics.json into the session directory.
      --session <id>  collect a session other than the active one
      --json          print the whole document instead of a one-line summary
+     --force         replace an existing document even when this collection
+                     produced no numbers (a pruned transcript, say)
 `,
   );
 }
@@ -82,10 +84,12 @@ if (cmd !== 'collect') {
 
 let sessionId = null;
 let asJson = false;
+let force = false;
 for (let i = 1; i < argv.length; i += 1) {
   if (argv[i] === '--session' && argv[i + 1]) sessionId = argv[(i += 1)];
   else if (argv[i] === '--session') fail('--session needs a session id');
   else if (argv[i] === '--json') asJson = true;
+  else if (argv[i] === '--force') force = true;
   else fail(`Unknown argument: ${argv[i]}`);
 }
 
@@ -101,11 +105,19 @@ try {
 }
 
 const doc = collectMetrics({ session, sessionDir: dir, env: process.env });
-const file = path.join(dir, 'metrics.json');
-writeJson(file, doc);
+const { written, kept, file, error } = writeMetrics({ sessionDir: dir, doc, force });
 
 process.stdout.write(
   asJson ? `${JSON.stringify(doc, null, 2)}\n` : `${summarise(doc, sessionId)}\n`,
 );
-process.stderr.write(`Wrote ${path.relative(REPO_ROOT, file) || file}\n`);
+const where = path.relative(REPO_ROOT, file) || file;
+if (written) process.stderr.write(`Wrote ${where}\n`);
+else if (kept) {
+  process.stderr.write(
+    `Kept the existing ${where} — it holds real numbers and this collection could not. ` +
+      'Re-run with --force to replace it.\n',
+  );
+} else {
+  process.stderr.write(`[forge] Warning: could not write ${where}: ${error}\n`);
+}
 process.exit(0);

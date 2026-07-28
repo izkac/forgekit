@@ -32,11 +32,18 @@
  * that a first-line-wins bug once cost 28.6% of all output tokens; anything
  * that counts usage outside that function reintroduces the risk.
  *
- * It reads, counts and returns — writing `metrics.json` belongs to the caller,
- * so the only thing it wants from the session directory is `dispatches.jsonl`,
- * the one input that is Forge's own rather than the host's. Every failure
- * degrades to `{available: false, reason}`: this runs inside `forge phase
- * done` and must never block a transition.
+ * `collectMetrics` reads, counts and returns; the only thing it wants from the
+ * session directory is `dispatches.jsonl`, the one input that is Forge's own
+ * rather than the host's. Every failure degrades to `{available: false,
+ * reason}`: this runs inside `forge phase done` and must never block a
+ * transition.
+ *
+ * `writeMetrics` is the one persisting function, and it lives here because the
+ * rule it enforces is about degradation: **a measurement already taken is never
+ * replaced by an admission that it can no longer be taken.** Host transcripts
+ * get pruned, so re-collecting a finished session would otherwise trade real
+ * per-model and per-phase numbers for `available: false` — and `metrics.json`
+ * is the only place that detail exists, since the digest keeps totals alone.
  */
 
 import fs from 'node:fs';
@@ -382,5 +389,40 @@ export function collectMetrics(options) {
       `metrics collection failed: ${error?.message ?? error}`,
       dispatches,
     );
+  }
+}
+
+/**
+ * Persist a metrics document, refusing to trade good news for bad.
+ *
+ * A degraded document does not overwrite an `available: true` one. That is the
+ * only case it declines: better news, equally bad news, a corrupt file and a
+ * first collection all write normally, and `force` writes unconditionally for
+ * the operator who genuinely wants the current (degraded) truth on disk.
+ *
+ * Never throws — the caller warns and carries on.
+ *
+ * @param {{ sessionDir: string, doc: Record<string, any>, force?: boolean }} opts
+ * @returns {{ written: boolean, kept: boolean, file: string, error?: string }}
+ *   `kept` distinguishes "deliberately preserved the old document" from
+ *   "could not write", which read the same to a caller checking only `written`.
+ */
+export function writeMetrics(opts) {
+  const file = path.join(opts.sessionDir, 'metrics.json');
+  try {
+    if (opts.force !== true && opts.doc?.available !== true) {
+      let existing = null;
+      try {
+        existing = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        existing = null; // absent or corrupt — nothing worth preserving
+      }
+      if (existing && existing.available === true) return { written: false, kept: true, file };
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify(opts.doc, null, 2)}\n`, 'utf8');
+    return { written: true, kept: false, file };
+  } catch (error) {
+    return { written: false, kept: false, file, error: String(error?.message ?? error) };
   }
 }

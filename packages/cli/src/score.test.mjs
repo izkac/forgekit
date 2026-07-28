@@ -650,6 +650,64 @@ test('writeSessionScorecard writes json and md', () => {
   }
 });
 
+test('re-scoring heals the cached score on session.json instead of leaving three answers', () => {
+  // scorecard.json, the sessions.jsonl digest and session.json all carry the
+  // score. Only the first two were rewritten, so `forge score --write` on a
+  // finished session left session.json asserting the old number — observed as
+  // 97/A on session.json against 69/C in the scorecard. Same shape as
+  // ADR-0002: a derived cache heals when it diverges.
+  const root = tmp('forge-score-heal-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'docs-only',
+      score: 97,
+      scoreGrade: 'A',
+    });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'docs-only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    const sessionFile = path.join(sessionDir, 'session.json');
+    const before = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+
+    const { card } = writeSessionScorecard({ cwd: root, sessionDir, session });
+    assert.notEqual(card.score, 97, 'fixture must actually score differently, or this proves nothing');
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.score, card.score);
+    assert.equal(after.scoreGrade, card.grade);
+    assert.equal(session.score, card.score, 'the in-memory object is healed too');
+    assert.equal(session.scoreGrade, card.grade);
+    assert.equal(
+      after.updatedAt,
+      before.updatedAt,
+      're-scoring is not activity — bumping updatedAt would reset idle/STALE detection',
+    );
+    assert.equal(after.slug, before.slug, 'nothing else on the session is rewritten');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('healing the cached score never costs the scorecard', () => {
+  const root = tmp('forge-score-heal-fail-');
+  try {
+    const { sessionDir, session } = makeSession(root, { slug: 'docs-only' });
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    // An unwritable session.json is the one failure the heal cannot dodge.
+    fs.rmSync(path.join(sessionDir, 'session.json'));
+    fs.mkdirSync(path.join(sessionDir, 'session.json'));
+
+    const { card, jsonPath } = writeSessionScorecard({ cwd: root, sessionDir, session });
+    assert.ok(fs.existsSync(jsonPath), 'the scorecard is still written');
+    assert.equal(JSON.parse(fs.readFileSync(jsonPath, 'utf8')).grade, card.grade);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('forge phase done writes scorecard and stamps session.scoreGrade', () => {
   const root = tmp('forge-score-phase-');
   try {

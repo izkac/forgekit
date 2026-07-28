@@ -14,14 +14,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { appendPhaseHistory, loadSession, readActive, saveSession, writeJson } from './lib.mjs';
+import { appendPhaseHistory, loadSession, readActive, saveSession } from './lib.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
 import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
 import { bindHost } from './metrics/host.mjs';
-import { collectMetrics } from './metrics/collect.mjs';
+import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -290,10 +290,17 @@ enforceDoneGate();
 // session its numbers, never its transition.
 if (phase === 'done' || phase === 'finish') {
   try {
-    writeJson(
-      path.join(dir, 'metrics.json'),
-      collectMetrics({ session, sessionDir: dir, env: process.env }),
-    );
+    const doc = collectMetrics({ session, sessionDir: dir, env: process.env });
+    // A `finish` then `done` pair collects twice. If the host pruned the
+    // transcript in between, the second pass must not trade the first pass's
+    // real numbers for `available: false`.
+    const { kept, error } = writeMetrics({ sessionDir: dir, doc });
+    if (error) throw new Error(error);
+    if (kept) {
+      process.stderr.write(
+        '[forge] Kept the metrics already collected for this session — this pass found nothing to measure.\n',
+      );
+    }
   } catch (err) {
     process.stderr.write(
       `[forge] Warning: could not collect session metrics: ${err instanceof Error ? err.message : err}\n`,

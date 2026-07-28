@@ -54,6 +54,10 @@ Diff range: {DIFF_RANGE}   <!-- `forge checkpoint --range --last` → paste its 
 - Ecosystem — dependents updated if contracts changed
 - AGENTS.md coding guidelines
 
+## Attribution (first line of your report)
+
+Open with `Reviewer: <your model> (<this prompt's role>)` — e.g. `Reviewer: claude-opus-5 (task-reviewer)`. The coordinator saves your report verbatim, and `forge score` counts a review that names no reviewer as a self-check. Do not write it if you are not a dispatched reviewer.
+
 ## Verdict
 
 - **APPROVED** — capability met, runtime owner present, quality acceptable

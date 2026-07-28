@@ -20,9 +20,39 @@ Full skill: [skills/test-driven-development/SKILL.md](../skills/test-driven-deve
 - **Tier 1 (each red/green cycle):** single test file or pattern — never the full workspace suite.
 - **Tier 2 (task done):** narrowest command proving this task — changed tests + directly related tests. Full workspace runs **once at verify (tier 3)**, not per task. Report command + exit code + pass/fail summary.
 
+## Expected values come from the fixture, never from the brief
+
+**Compute every expected number in code from the fixture you built.** A figure
+typed into a brief is a claim, not a measurement, and when it is wrong the test
+still passes — it just stops testing anything. Three such numbers reached one
+change's briefs; each would have produced an assertion that passed against buggy
+code while reading as coverage.
+
+Worst case is the negative assertion (`notEqual` / `notDeepEqual` / "must not
+be N"). A wrong expected value there fails silently and forever.
+
+**Every guard must be shown to fire.** If a test passes the moment you write it,
+temporarily reintroduce the bug it guards, watch it go red for the right reason,
+then revert by hand. A guard never observed failing is decoration. Say in your
+report which guards you proved this way.
+
+## Selection rules need a discriminating fixture
+
+When the behavior is *which of several candidates wins* — dedupe by key, first
+vs last, max, precedence, merge order — the fixture must make the losers
+**differ from the winner**. Otherwise the test only proves the rule ran, not
+that it picked correctly.
+
+A real case: a rule collapsed repeated transcript lines to one entry per
+request, and every fixture put identical token counts on all lines of a request.
+The tests could detect over-counting but were structurally incapable of
+detecting that the *wrong line* was kept — which is what shipped, costing 28.6%
+of all output tokens. Vary the discarded candidates, and assert on the value
+that only the correct choice produces.
+
 ## Red flags — stop and start over
 
-Code before test · test passes immediately · can't explain the failure · "I'll test after" · "already manually tested" · "too simple to test" · "keep as reference / adapt existing code" · "deleting X hours is wasteful" (sunk cost) · "run full workspace to be safe" (tier 3 belongs at verify) · "just this once".
+Code before test · test passes immediately · can't explain the failure · "I'll test after" · "already manually tested" · "too simple to test" · "keep as reference / adapt existing code" · "deleting X hours is wasteful" (sunk cost) · "run full workspace to be safe" (tier 3 belongs at verify) · "just this once" · copying an expected number out of the brief · a fixture whose discarded candidates are identical to the winner.
 
 ## Bugs
 

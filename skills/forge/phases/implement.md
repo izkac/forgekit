@@ -16,7 +16,9 @@ On test failures or unexpected behavior, use [../skills/systematic-debugging/SKI
 | `per-group` | When the task closes a `tasks.md` group (`##` section — OpenSpec or specs engine), or immediately if the task is high-risk (`standard`) |
 | `high-risk-only` / `never` | Only when hard-floor high-risk |
 
-When skipping the reviewer, still write `task-review.md` with `APPROVED (pace self-check)` and keep tier-2 evidence mandatory for behavior changes. For `per-group` reviews, cover all tasks in that section in one reviewer pass; save as `group-review.md` next to the group’s tasks (or under `.forge/sessions/<id>/tasks/group-<nn>-<slug>/group-review.md`). Prefer `--tier fast` when `models.bias` is `prefer-fast` and the task is mechanical. Cap fix→re-review loops at `review.maxRounds`.
+**Every review file must open with a `Reviewer:` line naming who wrote it** — the resolved model of the subagent you dispatched (`Reviewer: claude-opus-5 (task-reviewer)`), or `Reviewer: coordinator — self-check` when you wrote it yourself. `forge score` fails closed: a review that claims no reviewer counts as a **self-check**, because inferring an outside reader from the absence of a phrase is how a coordinator-written review once scored as independent. One line is the whole cost.
+
+When skipping the reviewer, still write `task-review.md` with `Reviewer: coordinator — APPROVED (pace self-check)` and keep tier-2 evidence mandatory for behavior changes. For `per-group` reviews, cover all tasks in that section in one reviewer pass; save as `group-review.md` next to the group’s tasks (or under `.forge/sessions/<id>/tasks/group-<nn>-<slug>/group-review.md`). Prefer `--tier fast` when `models.bias` is `prefer-fast` and the task is mechanical. Cap fix→re-review loops at `review.maxRounds`.
 
 ## Plan source
 
@@ -39,6 +41,27 @@ Honor [../references/runtime-integrity.md](../references/runtime-integrity.md) i
 - **Deferrals:** if wiring genuinely lands in a later task, register it — `forge defer add --task <id> --reason "…"` — and resolve it when that task lands. Unregistered "later" is a REJECT; unresolved deferrals block `forge phase done`.
 - **Spine:** when a task wires a capability into production, update its `spine.json` row (runtimeOwner / writes / evidence). `forge spine check` must pass before verify ends.
 - **E2E:** the product-loop acceptance task (last implement task) delivers working `e2e.json` steps and a green `forge e2e run` — steps that would pass against a stubbed handler are invalid.
+
+## Briefs: mark what you measured, and never quote an expected value
+
+A brief is read by a subagent with no chat history, so every sentence in it
+lands as established fact. Two habits, both bought the hard way:
+
+- **Tag each load-bearing claim `measured: <how>` or `assumed — verify`.** A
+  brief once stated a data-format rule flatly, alongside genuinely measured
+  facts, and the implementer had no way to tell which was which. It was an
+  assumption, it was wrong, and it survived TDD, self-review and a corpus check
+  because every fixture had been built from the brief's own premise. If you did
+  not run the command, say so and say what would settle it.
+- **State the rule and the fixture; never state the expected number.** The
+  implementer derives expected values in code (see
+  [../references/tdd-core.md](../references/tdd-core.md)). A quoted figure that
+  is wrong produces an assertion that passes against buggy code and looks like
+  coverage — three of them appeared in one change's briefs, two caught only
+  because an implementer recomputed rather than trusting the brief.
+
+Both apply to **reviewer** packets too: a reviewer told "the totals are 43" will
+check for 43.
 
 ## Per-task loop
 

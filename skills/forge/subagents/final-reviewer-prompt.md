@@ -48,6 +48,10 @@ would they pass against a stubbed handler? If yes, they prove nothing.
 - `BLOCKED` present → **`NOT READY`** (honest, but not READY)
 - Unresolved deferrals in `forge defer list` → **`NOT READY`**
 
+## Attribution (first line of your report)
+
+Open with `Reviewer: <your model> (<this prompt's role>)` — e.g. `Reviewer: claude-opus-5 (task-reviewer)`. The coordinator saves your report verbatim, and `forge score` counts a review that names no reviewer as a self-check. Do not write it if you are not a dispatched reviewer.
+
 ## Verdict
 
 - **READY** — every capability has a runtime owner, product loop evidenced, tests evidence real outcomes, no critical gaps

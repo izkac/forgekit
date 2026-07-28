@@ -636,6 +636,40 @@ export function appendScorecardLedger(sessionDir, card, session = {}) {
 }
 
 /**
+ * Keep `session.json`'s cached score honest.
+ *
+ * The score lives in three places — scorecard.json, the sessions.jsonl digest,
+ * and `session.score` / `session.scoreGrade`. Re-scoring rewrote the first two
+ * and left the third asserting the old number, which was observed in the wild
+ * as session.json claiming 97/A against a scorecard reading 69/C. Same shape as
+ * ADR-0002: a derived cache heals when it diverges rather than being trusted.
+ *
+ * Reads and rewrites the file rather than serialising the in-memory object, so
+ * nothing else on the session is touched — `updatedAt` in particular, because
+ * re-scoring is not activity and bumping it would reset idle/STALE detection.
+ *
+ * @param {string} sessionDir
+ * @param {Record<string, unknown>} session
+ * @param {{ score: number, grade: string }} card
+ */
+function healCachedScore(sessionDir, session, card) {
+  if (session && typeof session === 'object') {
+    session.score = card.score;
+    session.scoreGrade = card.grade;
+  }
+  try {
+    const file = path.join(sessionDir, 'session.json');
+    const onDisk = readJson(file);
+    if (onDisk.score === card.score && onDisk.scoreGrade === card.grade) return;
+    onDisk.score = card.score;
+    onDisk.scoreGrade = card.grade;
+    writeJson(file, onDisk);
+  } catch {
+    /* advisory — a cache that cannot be healed must not cost the scorecard */
+  }
+}
+
+/**
  * Write scorecard.json + scorecard.md into the session dir, and mirror a
  * summary line into the durable `.forge/scorecards.jsonl` ledger.
  *
@@ -647,6 +681,7 @@ export function writeSessionScorecard(opts) {
   const mdPath = path.join(opts.sessionDir, 'scorecard.md');
   writeJson(jsonPath, card);
   fs.writeFileSync(mdPath, formatScorecardMarkdown(card), 'utf8');
+  healCachedScore(opts.sessionDir, opts.session, card);
   appendScorecardLedger(opts.sessionDir, card, opts.session);
   // Durable ledgers: the session dir is deleted at cleanup, so the digest and
   // any unresolved deferrals have to leave the session while it still exists.

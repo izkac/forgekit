@@ -339,3 +339,56 @@ test('the command is registered under `forge metrics`', () => {
     fs.rmSync(configDir, { recursive: true, force: true });
   }
 });
+
+test('re-collecting a pruned session keeps the numbers it already has', () => {
+  // The transcript is gone by the second run. metrics.json is the only place
+  // the per-model and per-phase detail lives — the digest keeps totals alone —
+  // so replacing it with `available: false` would be a net loss of measurement.
+  const dir = tmp('forge-metrics-cli-keep-');
+  const configDir = tmp('forge-metrics-cfg-keep-');
+  try {
+    const { sessionDir, activityAt } = makeSession(dir, 'sess-keep', { host: ['host-1'] });
+    const transcript = writeTranscript(configDir, 'host-1', activityAt);
+
+    assert.equal(run(dir, ['collect'], { CLAUDE_CONFIG_DIR: configDir }).status, 0);
+    const good = readMetrics(sessionDir);
+    assert.equal(good.available, true);
+
+    fs.rmSync(transcript); // the host prunes it
+
+    const again = run(dir, ['collect'], { CLAUDE_CONFIG_DIR: configDir });
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(again.stderr, /Kept the existing/);
+    assert.match(again.stderr, /--force/, 'the operator is told how to override');
+    assert.deepEqual(readMetrics(sessionDir), good, 'the document on disk is untouched');
+    assert.match(again.stdout, /No metrics/, 'stdout still reports what this run actually found');
+
+    const forced = run(dir, ['collect', '--force'], { CLAUDE_CONFIG_DIR: configDir });
+    assert.equal(forced.status, 0, forced.stderr);
+    assert.match(forced.stderr, /^Wrote /m);
+    assert.equal(readMetrics(sessionDir).available, false, '--force means what it says');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a better collection always replaces a degraded one, no flag needed', () => {
+  const dir = tmp('forge-metrics-cli-upgrade-');
+  const configDir = tmp('forge-metrics-cfg-upgrade-');
+  try {
+    const { sessionDir, activityAt } = makeSession(dir, 'sess-upgrade', { host: ['host-1'] });
+
+    assert.equal(run(dir, ['collect'], { CLAUDE_CONFIG_DIR: configDir }).status, 0);
+    assert.equal(readMetrics(sessionDir).available, false, 'no transcript yet');
+
+    writeTranscript(configDir, 'host-1', activityAt);
+    const second = run(dir, ['collect'], { CLAUDE_CONFIG_DIR: configDir });
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stderr, /^Wrote /m);
+    assert.equal(readMetrics(sessionDir).requests, EXPECTED.requests);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
