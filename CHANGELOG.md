@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+## 0.3.25 — 2026-07-28
+
+### Thin review coverage caps the grade
+
+Review depth was 5 points of ~100 — it could not move a grade. A session whose
+own scorecard said *"1 dispatched review across 12 task groups"* and *"final
+review is self-authored"* still came out an A. Every other
+outcomes-outrank-artifacts lever in the scorer is a **cap** (incomplete → 59,
+red product loop → 69, high-risk without an independent final review → 69);
+this one now is too.
+
+It is deliberately narrow. The cap fires only where reviews were expected
+(`thorough` / `standard` pace, or 15+ tasks — `brisk` and `lite` are *told* to
+skip reviewers and are not punished for obeying), only on changes the plan split
+into **3 or more task groups**, and only when fewer than half the groups had an
+independent reviewer **and** no independent final review exists. An outsider who
+read the whole change lifts it, exactly as it lifts the high-risk floor.
+
+### The scorer stopped charging sessions for doing group reviews
+
+`tasks/` holds implementer batches *and* the `group-NN-*` folders their group
+reviews live in, and the scorer counted both as units of work. A session was
+penalised twice for reviewing properly: the tier-2 evidence ratio fell (a review
+folder carries no `test-evidence.md`) and review coverage was measured against
+an inflated denominator. This project's own session read *"tier-2 evidence in
+9/12 task dirs"* while all nine of its batches had evidence.
+
+Review folders are now identified by content rather than by name, and coverage
+is measured against **tasks.md groups** — the unit one `per-group` review
+actually covers. The same session now reads 9/9 and *"1 dispatched review across
+6 task groups"*.
+
 ## 0.3.24 — 2026-07-28
 
 ### Review independence must be claimed, not inferred

@@ -35,6 +35,17 @@ const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const OUTCOME_CAP = 69;
 
 /**
+ * Task groups below which thin review coverage is a deduction, not a ceiling.
+ *
+ * The complaint this cap answers was "1 dispatched review across 12 task
+ * groups" — coverage, which only means something once the plan itself split
+ * the work into several phases. A one- or two-group change that skipped its
+ * reviewer is already charged the review-depth points; a ceiling there would
+ * be disproportionate.
+ */
+const COVERAGE_CAP_MIN_GROUPS = 3;
+
+/**
  * @param {unknown} value
  */
 function isNonEmptyString(value) {
@@ -53,12 +64,35 @@ export function gradeForScore(score) {
 }
 
 /**
+ * A `group-NN-*` dir that holds only the group's review — a review, not a unit
+ * of work that needs one. Detected by content, not by name, so a batch dir that
+ * also carries a group review still counts as work.
+ *
+ * @param {string} dir
+ */
+function isReviewContainer(dir) {
+  return (
+    fs.existsSync(path.join(dir, 'group-review.md')) &&
+    !fs.existsSync(path.join(dir, 'test-evidence.md')) &&
+    !fs.existsSync(path.join(dir, 'brief.md'))
+  );
+}
+
+/**
  * @param {string} sessionDir
  */
 function listTaskEvidence(sessionDir) {
   const tasksDir = path.join(sessionDir, 'tasks');
   if (!fs.existsSync(tasksDir)) return { taskDirs: 0, withEvidence: 0, exitNonZero: 0 };
-  const entries = fs.readdirSync(tasksDir, { withFileTypes: true }).filter((e) => e.isDirectory());
+  // `tasks/` holds implementer batches *and* the `group-NN-*` dirs their group
+  // reviews live in. Counting a review as a unit of work needing evidence
+  // punished a session twice for doing group reviews: the evidence ratio fell
+  // because a review folder carries no test-evidence.md, and review coverage
+  // was measured against an inflated denominator.
+  const entries = fs
+    .readdirSync(tasksDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .filter((e) => !isReviewContainer(path.join(tasksDir, e.name)));
   let withEvidence = 0;
   let exitNonZero = 0;
   for (const e of entries) {
@@ -379,18 +413,36 @@ export function scoreSession(opts) {
   }
   checks.push({ id: 'pace', label: 'Pace sanity', points: pacePts, max: 5, notes: paceNotes });
 
+  // Read once and reused by the review-coverage denominator and the risk cap
+  // below — the gate reads the same facts, and two readings would drift.
+  let planFacts = null;
+  try {
+    planFacts = collectPlanFacts({ cwd, session });
+  } catch {
+    /* an unreadable plan must not break scoring */
+  }
+
   // --- review depth (5) — scored by what was dispatched ---
   const census = reviewCensus(sessionDir);
   let reviewPts = 0;
+  let reviewUnits = 0;
+  let reviewCoverage = 0;
   /** @type {string[]} */
   const reviewNotes = [];
   if (census.total === 0 && !census.finalReview) {
     reviewNotes.push('no review artifacts at all — nobody read this work but the author');
   } else {
     // Coverage, not presence: one review across eight task groups is not the
-    // same signal as nine across nine.
-    const groups = Math.max(ev.taskDirs, census.total);
+    // same signal as nine across nine. The denominator is the tasks.md group —
+    // the unit one `per-group` review actually covers — falling back to task
+    // dirs only when there is no readable plan to count.
+    const groups =
+      planFacts?.readable && planFacts.groups > 0
+        ? planFacts.groups
+        : Math.max(ev.taskDirs, census.total);
     const coverage = groups > 0 ? census.independent / groups : 0;
+    reviewUnits = groups;
+    reviewCoverage = coverage;
     if (census.independent > 0 && coverage >= 0.5) {
       reviewPts += 2;
       reviewNotes.push(`${census.independent} dispatched review(s) across ${groups} task group(s)`);
@@ -458,6 +510,39 @@ export function scoreSession(opts) {
     }
   }
 
+  // Review depth was 5 points of ~100 — it could not move a grade, so a session
+  // whose work nobody outside the author read still came out an A while its own
+  // notes said "1 dispatched review across 12 task groups". Every other
+  // outcomes-outrank-artifacts lever here is a cap; this one is too.
+  //
+  // Only where reviews were actually expected: `brisk` and `lite` set
+  // `review.perTask` to high-risk-only / never, and capping them would punish a
+  // recorded, deliberate choice — the task-count escalation already lifts large
+  // work to `standard`. An independent read of the *whole* change lifts the cap
+  // the way it lifts the high-risk floor: per-group coverage matters less once
+  // an outsider has seen all of it.
+  const reviewsExpected =
+    resolved === 'thorough' || resolved === 'standard' || total >= TASK_COUNT_ESCALATION_THRESHOLD;
+  if (
+    reviewsExpected &&
+    reviewUnits >= COVERAGE_CAP_MIN_GROUPS &&
+    census.finalReview !== 'independent' &&
+    reviewCoverage < 0.5
+  ) {
+    const before = score;
+    const what =
+      `thin review coverage — ${census.independent} of ${reviewUnits} task group(s) ` +
+      'independently reviewed, and no independent final review';
+    if (score > OUTCOME_CAP) {
+      score = OUTCOME_CAP;
+      caps.push(
+        `${what} — score capped at ${OUTCOME_CAP} (was ${before}); dispatch a reviewer per group, or an independent final reviewer for the whole change`,
+      );
+    } else {
+      caps.push(what);
+    }
+  }
+
   // Money/auth/contracts/migrations have a hard floor: an independent
   // reviewer. Prose saying dispatch was declined does not survive session
   // cleanup; a cap does.
@@ -480,12 +565,7 @@ export function scoreSession(opts) {
   const riskText = [session.paceSignal, session.slug, session.openspecChange, spineText]
     .filter(isNonEmptyString)
     .join(' ');
-  let planHighRisk = false;
-  try {
-    planHighRisk = collectPlanFacts({ cwd, session }).highRisk;
-  } catch {
-    // An unreadable plan must not silently lower the floor, nor break scoring.
-  }
+  const planHighRisk = planFacts?.highRisk === true;
   // The floor for a high-risk change is an independent reader of the *whole*
   // change. Per-group reviews do not substitute: they each saw one slice.
   if ((planHighRisk || isHighRiskText(riskText)) && census.finalReview !== 'independent') {
