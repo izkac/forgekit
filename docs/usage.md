@@ -633,14 +633,22 @@ no matter how polished the paperwork is:
 The high-risk read fails closed: a negated mention ("carries consumption, never
 money") still counts, because the cost of being wrong is one dispatched
 reviewer. Per-group reviews do not lift that cap — each saw one slice; the floor
-is an independent reader of the whole change. If dispatch is genuinely refused,
-record it with `forge defer` so the refusal survives session cleanup.
+is an independent reader of the whole change. If dispatch is genuinely refused, record it with
+`forge phase done --final-review-waived "<reason>"` — the reason is kept on the
+session and in the `sessions.jsonl` digest, so it outlives cleanup alongside the
+cap it explains. Do **not** use `forge defer` for this: an open deferral costs
+the full 10 deferral points and fails `forge integrity-check`.
 
-**Review depth is scored by what was dispatched**, not by the absence of a
-marker: coverage of independent reviews across task groups, whether the final
-review is independent or self-authored, and whether any round **rejected** work
-before approving (a review that sent work back demonstrably was not a rubber
-stamp).
+**Review depth is scored by what was dispatched**: coverage of independent
+reviews across task groups, whether the final review is independent or
+self-authored, and whether any round **rejected** work before approving (a
+review that sent work back demonstrably was not a rubber stamp).
+
+A review is read as independent unless its opening paragraphs or a `Reviewer:`
+line declare it a self-check. That is an inference from absence, and it is known
+to over-credit — a review file that says nothing about who wrote it counts as an
+outside reader it may not have had (finding F12). Head your review files with
+who wrote them.
 
 **Durable ledgers** — the session dir is deleted at cleanup, so `phase done`
 also appends:

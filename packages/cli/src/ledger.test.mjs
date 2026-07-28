@@ -353,3 +353,26 @@ test('a malformed dispatch block reads as zeros, never as two different answers'
   assert.equal(entry.dispatchesSkipped, entry.dispatches.skipped);
   assert.equal(entry.dispatchesSkipped, 0);
 });
+
+test('a declined reviewer survives cleanup, as set-phase promises it does', () => {
+  // enforceFinalReviewFloor tells the operator the waiver is "kept on the
+  // session and in .forge/sessions.jsonl". It was kept only on the session, so
+  // the reason a reviewer was declined vanished with the directory while the
+  // cap it explains lived on in the score.
+  const root = tmp('forge-ledger-waiver-');
+  const { sessionDir, session } = makeSession(root, 's1', {
+    finalReviewWaived: 'operator declined dispatch twice',
+  });
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  fs.rmSync(sessionDir, { recursive: true, force: true });
+
+  assert.equal(digestOf(root).finalReviewWaived, 'operator declined dispatch twice');
+});
+
+test('a session with no waiver records null, not an empty claim', () => {
+  const root = tmp('forge-ledger-nowaiver-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  assert.equal(digestOf(root).finalReviewWaived, null);
+});

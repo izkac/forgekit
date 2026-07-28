@@ -12,44 +12,103 @@ import path from 'node:path';
 /**
  * A review the coordinator wrote about its own work — a weaker signal.
  *
- * Deliberately generous: an author admitting this in their own words must be
- * believed however they phrase it. The narrow original knew only the phrases
- * the templates emit, so a group review headed "Reviewer: coordinator
- * (self-check, not independent)" was counted as an outside reader.
+ * REVERTED in 0.3.26. 0.3.24 made this fail closed: independence had to be
+ * claimed via a `Reviewer:` attribution, and anything unattributed counted as a
+ * self-check. An independent review measured that in the field and it was wrong
+ * in both directions — a dispatched review heading with `Reviewed:` (no such
+ * token) demoted, while `coordinator self-audit` promoted because that phrase is
+ * not listed here. `set-phase.mjs` gates `forge phase done` on the same
+ * function, so a high-risk session whose independent final review already
+ * existed was refused with the remedy already followed.
+ *
+ * Blocking correct work is worse than flattering a score, so this is back to
+ * the pre-0.3.24 reading and finding F9 (self-authored reviews can still count
+ * as independent) is reopened.
+ *
+ * The alternatives beyond the original four are load-bearing: the skill tells
+ * coordinators to head a self-written review `Reviewer: coordinator —
+ * self-check`, and the live corpus uses `coordinator self-audit`. An
+ * unrecognised declaration reads as *independent*, so a phrase Forge itself
+ * prescribes would otherwise defeat the money/auth done gate.
+ *
+ * They are matched against the **attribution region only** — the header block
+ * and any line that opens with an attribution — never the whole body. A first
+ * attempt scanned everything and demoted a dispatched reviewer who merely
+ * *discussed* the coordinator's self-checks, which is the ordinary thing to do
+ * when reviewing a change that has some. That is not a scoring nudge: the same
+ * function gates `forge phase done`, so it refused correct work — C1's exact
+ * failure class, reintroduced by C1's own fix. An earlier version of this
+ * comment claimed a new alternative "can only ever demote, never promote —
+ * the safe direction". In this module demotion *is* the unsafe direction. The real fix is structural — a stamp Forge
+ * writes when it dispatches — not a wider regex; prose cannot measure
+ * authorship, which is what both attempts have now demonstrated.
  */
 const SELF_REVIEW_RE =
-  /pace self-check|APPROVED \(pace|self[- ]review|self[- ]authored|self[- ]check|not independent|reviewed by the coordinator|dispatch(?:ing)?(?: was)? declined|no (?:independent )?reviewer(?: was)? dispatched/i;
+  /APPROVED \(pace|self[- ]review|self[- ]check|self[- ]audit|self[- ]authored|reviewed by the coordinator/i;
 
 /**
- * Who the review says reviewed it. Independence must be *claimed*, never
- * inferred, so this is the only thing that can promote a review — and the
- * claim must not name the coordinator.
+ * A line that opens by naming who reviewed — not prose that mentions one.
+ *
+ * The `^` anchor is the whole distinction: "the reviewer proved the gap" is a
+ * sentence about a reviewer, "Reviewer: opus 4d2" is an attribution.
  */
-const REVIEWER_ATTRIBUTION_RE = /reviewer\b[\s:—*_-]*([^\n]{0,80})/i;
-const COORDINATOR_RE = /coordinator|myself|in[- ]session|self/i;
+const ATTRIBUTION_LINE_RE = /^[\s#*_-]*(?:\*\*)?\s*(?:reviewer|reviewed by|review by)\b/i;
+
+/** A fence opening or closing, at any indent markdown accepts. */
+const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
+
+/**
+ * The part of a review that speaks about who wrote it.
+ *
+ * TWO PARAGRAPHS, NOT TWO LINES. A real declaration in this project's corpus
+ * hard-wraps across three lines — `**Reviewer:** the coordinator, … dispatch
+ * was / declined twice … so this is a self-review` — and a line-counted window
+ * stopped before the word that mattered, promoting a session that says in
+ * plain English that dispatch was declined. That is the same failure the
+ * `contract` narrowing was reverted for: prose wraps, regexes do not.
+ *
+ * Plus any attribution line anywhere, so a declaration far down the file still
+ * counts — except a fenced, quoted or indented one, which is a reviewer
+ * *showing* you another review's header rather than declaring their own.
+ *
+ * Body prose is deliberately out of scope in both directions: describing which
+ * groups were self-checked is a reviewer doing their job, and demoting them for
+ * it refuses correct work at the done gate.
+ *
+ * @param {string} body
+ * @returns {string}
+ */
+function attributionRegion(body) {
+  const lines = body.split('\n');
+  /** @type {string[]} */
+  const kept = [];
+  /** @type {string[]} */
+  const attributions = [];
+  let paragraphs = 0;
+  let inParagraph = false;
+  let fenced = false;
+
+  for (const line of lines) {
+    if (FENCE_RE.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    const quoted = fenced || /^\s*>/.test(line) || /^\s{4,}\S/.test(line);
+    if (!line.trim()) {
+      if (inParagraph) paragraphs += 1;
+      inParagraph = false;
+      continue;
+    }
+    inParagraph = true;
+    if (quoted) continue;
+    if (paragraphs < 2) kept.push(line);
+    else if (ATTRIBUTION_LINE_RE.test(line)) attributions.push(line);
+  }
+  return kept.concat(attributions).join('\n');
+}
 
 /** A round that sent work back: proof the review was not a rubber stamp. */
 const REJECTION_RE = /\bREJECT(ED)?\b/;
-
-/**
- * Was this review written by someone other than the coordinator?
- *
- * Fails closed. The old rule promoted a review whenever it *lacked* a
- * self-review phrase, which inferred the strongest signal in the scorecard
- * from the absence of a word — the same "counts what is absent" mistake this
- * module was written to remove one level up. An unattributed review is
- * therefore a self-check: the cost of being wrong is one line naming the
- * reviewer, against a score that silently over-credits.
- *
- * @param {string} body
- * @returns {'independent' | 'self'}
- */
-function classifyReview(body) {
-  if (SELF_REVIEW_RE.test(body)) return 'self';
-  const claim = REVIEWER_ATTRIBUTION_RE.exec(body);
-  if (claim && !COORDINATOR_RE.test(claim[1])) return 'independent';
-  return 'self';
-}
 
 /**
  * Census of the review artifacts on disk.
@@ -81,8 +140,8 @@ export function reviewCensus(sessionDir) {
         const body = read(path.join(tasksDir, e.name, name));
         if (body === null) continue;
         census.total += 1;
-        if (classifyReview(body) === 'independent') census.independent += 1;
-        else census.selfChecks += 1;
+        if (SELF_REVIEW_RE.test(attributionRegion(body))) census.selfChecks += 1;
+        else census.independent += 1;
         if (REJECTION_RE.test(body)) census.rejections += 1;
       }
     }
@@ -91,7 +150,7 @@ export function reviewCensus(sessionDir) {
   for (const name of ['final-review.md', 'final-review-outcome.md']) {
     const body = read(path.join(sessionDir, 'reviews', name));
     if (body === null) continue;
-    census.finalReview = classifyReview(body);
+    census.finalReview = SELF_REVIEW_RE.test(attributionRegion(body)) ? 'self' : 'independent';
     if (REJECTION_RE.test(body)) census.rejections += 1;
     break;
   }

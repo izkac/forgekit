@@ -42,18 +42,20 @@ export const BRAINSTORM_DEPTH = Object.freeze(['full', 'short', 'minimal']);
  * already alternatives here, so "stripe checkout" still matches via `stripe`.
  * Only the standalone payment senses need spelling out.
  *
- * `contract` is the third of that family, and the worst offender: it is how
- * programmers describe *any* function's promise. A change whose plan says "the
- * same contract as readLedger" or "not a public contract" was escalated to
- * thorough and held at the independent-review floor while touching no money,
- * auth, secret or migration surface — six such matches in one change, all of
- * them sentences about a JavaScript calling convention. The risk sense is
- * always qualified, exactly as STANDARD_RE already spells "wire contract", and
- * a change that really does move money or break a consumer still matches on
- * its other words.
+ * `contract` was narrowed the same way in 0.3.24 and it is REVERTED in 0.3.26.
+ * An independent review measured the cost: of twelve genuinely risky sentences,
+ * eight stopped matching — "alters the public contract of the /v1/orders
+ * endpoint", "breaking change to the data contract", "the OpenAPI contract
+ * gains two required fields". The surviving qualifiers also demanded a single
+ * space or hyphen, so plan prose hard-wrapped at 80 columns disarmed them at a
+ * line break. This regex fails closed on purpose: a false positive costs one
+ * dispatched reviewer, a false negative ships an unreviewed money/auth change,
+ * so the bare noun is back and finding F3 (ordinary software English about a
+ * function's promise escalates pace) is reopened. Narrowing it needs the
+ * qualified/unqualified split measured against a real corpus first.
  */
 const THOROUGH_RE =
-  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|(?:api|wire|schema|smart|service|breaking)[- ]contracts?|contracts?[- ](?:test|tests|testing|breach)|gdpr|pci|wallet|checkout[- ](?:session|sessions|flow|flows|page|pages|form|forms|button)|(?:guest|express|one[- ]page)[- ]checkout)\b/i;
+  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|contract|contracts|gdpr|pci|wallet|checkout[- ](?:session|sessions|flow|flows|page|pages|form|forms|button)|(?:guest|express|one[- ]page)[- ]checkout)\b/i;
 
 /** Signals that suggest standard (multi-surface / API / platform / orchestration). */
 const STANDARD_RE =

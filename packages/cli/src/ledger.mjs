@@ -217,6 +217,11 @@ export function appendSessionDigest(opts) {
       score: opts.card?.score ?? session.score ?? null,
       grade: opts.card?.grade ?? session.scoreGrade ?? null,
       incompleteReason: session.incompleteReason ?? null,
+      // set-phase tells the operator this is "kept on the session and in
+      // .forge/sessions.jsonl". It was kept only on the session, so the reason a
+      // reviewer was declined evaporated at cleanup — while the cap it explains
+      // survived in the score.
+      finalReviewWaived: session.finalReviewWaived ?? null,
       durationHours,
       startedAt: session.createdAt ?? null,
       endedAt: session.updatedAt ?? null,

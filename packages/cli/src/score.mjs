@@ -35,17 +35,6 @@ const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const OUTCOME_CAP = 69;
 
 /**
- * Task groups below which thin review coverage is a deduction, not a ceiling.
- *
- * The complaint this cap answers was "1 dispatched review across 12 task
- * groups" — coverage, which only means something once the plan itself split
- * the work into several phases. A one- or two-group change that skipped its
- * reviewer is already charged the review-depth points; a ceiling there would
- * be disproportionate.
- */
-const COVERAGE_CAP_MIN_GROUPS = 3;
-
-/**
  * @param {unknown} value
  */
 function isNonEmptyString(value) {
@@ -425,8 +414,6 @@ export function scoreSession(opts) {
   // --- review depth (5) — scored by what was dispatched ---
   const census = reviewCensus(sessionDir);
   let reviewPts = 0;
-  let reviewUnits = 0;
-  let reviewCoverage = 0;
   /** @type {string[]} */
   const reviewNotes = [];
   if (census.total === 0 && !census.finalReview) {
@@ -436,13 +423,13 @@ export function scoreSession(opts) {
     // same signal as nine across nine. The denominator is the tasks.md group —
     // the unit one `per-group` review actually covers — falling back to task
     // dirs only when there is no readable plan to count.
-    const groups =
-      planFacts?.readable && planFacts.groups > 0
-        ? planFacts.groups
-        : Math.max(ev.taskDirs, census.total);
+    // `pace.md`: a tasks.md with no `##` headings is ONE group, reviewed once
+    // when all tasks are done. Falling through to the batch count for that
+    // shape reported "1 of 6" for a plan the skill explicitly endorses.
+    const groups = planFacts?.readable
+      ? Math.max(planFacts.groups, 1)
+      : Math.max(ev.taskDirs, census.total);
     const coverage = groups > 0 ? census.independent / groups : 0;
-    reviewUnits = groups;
-    reviewCoverage = coverage;
     if (census.independent > 0 && coverage >= 0.5) {
       reviewPts += 2;
       reviewNotes.push(`${census.independent} dispatched review(s) across ${groups} task group(s)`);
@@ -510,39 +497,6 @@ export function scoreSession(opts) {
     }
   }
 
-  // Review depth was 5 points of ~100 — it could not move a grade, so a session
-  // whose work nobody outside the author read still came out an A while its own
-  // notes said "1 dispatched review across 12 task groups". Every other
-  // outcomes-outrank-artifacts lever here is a cap; this one is too.
-  //
-  // Only where reviews were actually expected: `brisk` and `lite` set
-  // `review.perTask` to high-risk-only / never, and capping them would punish a
-  // recorded, deliberate choice — the task-count escalation already lifts large
-  // work to `standard`. An independent read of the *whole* change lifts the cap
-  // the way it lifts the high-risk floor: per-group coverage matters less once
-  // an outsider has seen all of it.
-  const reviewsExpected =
-    resolved === 'thorough' || resolved === 'standard' || total >= TASK_COUNT_ESCALATION_THRESHOLD;
-  if (
-    reviewsExpected &&
-    reviewUnits >= COVERAGE_CAP_MIN_GROUPS &&
-    census.finalReview !== 'independent' &&
-    reviewCoverage < 0.5
-  ) {
-    const before = score;
-    const what =
-      `thin review coverage — ${census.independent} of ${reviewUnits} task group(s) ` +
-      'independently reviewed, and no independent final review';
-    if (score > OUTCOME_CAP) {
-      score = OUTCOME_CAP;
-      caps.push(
-        `${what} — score capped at ${OUTCOME_CAP} (was ${before}); dispatch a reviewer per group, or an independent final reviewer for the whole change`,
-      );
-    } else {
-      caps.push(what);
-    }
-  }
-
   // Money/auth/contracts/migrations have a hard floor: an independent
   // reviewer. Prose saying dispatch was declined does not survive session
   // cleanup; a cap does.
@@ -577,7 +531,7 @@ export function scoreSession(opts) {
     if (score > OUTCOME_CAP) {
       score = OUTCOME_CAP;
       caps.push(
-        `${what} — score capped at ${OUTCOME_CAP} (was ${before}); dispatch a final reviewer, or record the refusal with forge defer so it survives cleanup`,
+        `${what} — score capped at ${OUTCOME_CAP} (was ${before}); dispatch a final reviewer, or record the refusal with --final-review-waived, which now survives cleanup in the digest`,
       );
     } else {
       caps.push(what);

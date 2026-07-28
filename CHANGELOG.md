@@ -2,6 +2,71 @@
 
 ## Unreleased
 
+## 0.3.26 — 2026-07-28
+
+### Reverts 0.3.24 and 0.3.25's scoring changes
+
+**If you are on 0.3.24 or 0.3.25, upgrade.** An independent review of those two
+releases found two Critical defects, both reproduced:
+
+- **`forge phase done` refused correct sessions.** 0.3.24 made review
+  independence something a file had to *claim* via a `Reviewer:` attribution.
+  Measured against real artifacts it was wrong in both directions: a dispatched
+  review heading with `Reviewed:` — this project's own, the one that caught a
+  28.6% token undercount and rejected the work — demoted to a self-check, while
+  `coordinator self-audit` promoted to independent. `set-phase.mjs` gates the
+  done phase on the same function, so a high-risk session whose independent
+  final review already existed was blocked, with the remedy already followed.
+- **0.3.25's coverage cap was backwards.** `reviewUnits` was only assigned when
+  review artifacts existed, so a session with **zero** reviews kept `0`, failed
+  the group-count guard and scored **95/A uncapped** — while a session with one
+  independent review of six groups capped at 69/C. The cap that exists because
+  "nobody outside the author read this" gave full marks to exactly that session.
+
+Both are reverted. The `contract` narrowing from 0.3.24 goes with them: the same
+review measured eight of twelve genuinely risky sentences losing their match,
+and the surviving qualifiers required a single space or hyphen, so plan prose
+hard-wrapped at 80 columns disarmed them at a line break. This regex fails
+closed on purpose — a false positive costs one dispatched reviewer, a false
+negative ships an unreviewed money/auth change.
+
+The concerns F3, F9 and F10 addressed are live again, recorded as new entries in
+`.forge/findings.jsonl` (the ledger has no reopen verb, so the originals stay
+`resolved` with notes describing the now-reverted fixes). Both attempts at F9
+have shown the same thing: prose cannot measure authorship. The fix is
+structural — Forge stamping the review file when *it* dispatches the reviewer —
+not a wider regex.
+
+Because the census infers independence from the *absence* of a self-declaration,
+the phrases Forge itself prescribes have to be ones it recognises: `self-check`,
+`self-audit` and `self-authored` now join the four it already knew, matched
+against the review's **attribution** — its opening lines and any `Reviewer:`
+line — never its whole body. The skill, both reviewer prompts and `docs/usage.md`
+were corrected to stop asserting scorer behaviour that no longer exists.
+
+Three independent review rounds were needed to get that right, and each found a
+defect worse than the one being fixed. The first revert changed `packages/cli/src`
+only, leaving Forge instructing coordinators to write `Reviewer: coordinator —
+self-check` — which the reverted census read as **independent**, defeating the
+money/auth `forge phase done` gate with Forge's own documented phrasing. The fix
+for *that* then matched the new phrases against the entire review body, so a
+dispatched reviewer who merely described which groups were self-checked — the
+ordinary thing to do — was demoted and the gate refused correct work, under a
+code comment asserting that could not happen. Scoping *that* to the opening two
+lines then let a real hard-wrapped declaration escape: a live final review whose
+own text says dispatch was declined twice wraps `self-review` onto its third
+line, and a high-risk session sailed through the gate. The window is paragraphs
+now, because prose wraps and regexes do not — which is the same reason the
+`contract` narrowing was reverted, one section above.
+
+`forge phase done` also stopped making a promise it did not keep: the reason
+recorded by `--final-review-waived` is now carried into the `sessions.jsonl`
+digest, so it survives `forge cleanup` alongside the cap it explains.
+
+**Kept**, verified independently correct: the `isReviewContainer` denominator
+fix (a `group-NN-*` folder is a review, not a unit of work needing one),
+`healCachedScore`, `writeMetrics`, and 0.3.23's gate/scorer risk union.
+
 ## 0.3.25 — 2026-07-28
 
 ### Thin review coverage caps the grade

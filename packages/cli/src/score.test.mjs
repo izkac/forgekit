@@ -455,13 +455,17 @@ function makeCoverageFixture(root, { groups, batches, reviews, final = null, ses
     );
   }
   reviews.forEach((kind, i) => {
-    const d = path.join(sessionDir, 'tasks', `group-0${i + 1}-g`);
+    // Deliberately NOT named `group-*`: the exclusion is supposed to key on
+    // content, and a fixture that names its review dirs by convention lets a
+    // purely name-based implementation pass. The reviewer proved the old
+    // fixture did exactly that.
+    const d = path.join(sessionDir, 'tasks', `${i + 1}-reviewed-section`);
     fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(
       path.join(d, 'group-review.md'),
       kind === 'independent'
         ? `Reviewer: claude-opus-5 (task-reviewer)\n\n**Verdict: APPROVED**\n`
-        : `Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n`,
+        : `APPROVED (pace self-check) — coordinator wrote this one\n`,
       'utf8',
     );
   });
@@ -517,96 +521,70 @@ test('a group-review folder is a review, not a unit of work needing one', () => 
   }
 });
 
-test('thin independent review coverage caps the grade, like a red product loop', () => {
-  // Review depth was 5 points of ~100 — it could not move a grade, so a session
-  // that nobody outside the author read still scored an A. Every other
-  // outcome-over-artifacts lever here is a cap; this one now is too.
-  const root = tmp('forge-score-covercap-');
+test('a plan with no section headings is one group, not one per batch', () => {
+  // pace.md: "If tasks.md has no section headings, treat the whole file as one
+  // group (review once when all tasks are done)." Falling through to the batch
+  // count reported "1 of 6 task groups reviewed" for the shape the skill
+  // recommends. An independent review found this change had no test at all —
+  // restoring the previous expression passed the whole suite.
+  const root = tmp('forge-score-headingless-');
   try {
-    const { sessionDir, session } = makeCoverageFixture(root, {
-      groups: 6,
-      batches: 6,
-      reviews: ['independent', 'self', 'self'],
-      final: 'self',
-    });
-    const card = scoreSession({ cwd: root, sessionDir, session });
-
-    assert.ok(card.score <= 69, `expected a cap at C, got ${card.score}`);
-    assert.match(card.caps.join(' '), /1 of 6/, 'the cap states the coverage it saw');
-    assert.match(card.caps.join(' '), /independent/i);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('an independent reader of the whole change lifts the coverage cap', () => {
-  // Per-group coverage matters less when someone outside read the change end to
-  // end — the same signal the high-risk floor already accepts.
-  const root = tmp('forge-score-covercap-final-');
-  try {
-    const { sessionDir, session } = makeCoverageFixture(root, {
-      groups: 6,
-      batches: 6,
-      reviews: ['independent', 'self', 'self'],
-      final: 'independent',
-    });
-    const card = scoreSession({ cwd: root, sessionDir, session });
-
-    assert.equal(
-      card.caps.some((c) => /thin review coverage/i.test(c)),
-      false,
-      `unexpected cap: ${card.caps.join(' ')}`,
+    const f = makeCoverageFixture(root, { groups: 0, batches: 6, reviews: ['independent'] });
+    fs.writeFileSync(
+      path.join(root, 'specs', 'changes', 'my-change', 'tasks.md'),
+      '# Tasks\n\n- [x] 1.1 a\n- [x] 1.2 b\n',
+      'utf8',
     );
-    assert.ok(card.score > 69, `expected no cap, got ${card.score}`);
+    const notes = reviewCheck(scoreSession({ cwd: root, sessionDir: f.sessionDir, session: f.session })).notes;
+    assert.match(notes.join(' '), /across 1 task group\(s\)/);
+    assert.doesNotMatch(notes.join(' '), /thin coverage/, 'one review of one group is full coverage');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('half the groups reviewed by an outsider is enough to avoid the cap', () => {
-  const root = tmp('forge-score-covercap-half-');
+test('the 0.5 coverage boundary is worth a point, in both directions', () => {
+  // Deleted along with the coverage cap; an independent review showed the
+  // threshold still decides 2 points vs 1 and nothing pinned it any more.
+  const root = tmp('forge-score-boundary-');
   try {
-    const { sessionDir, session } = makeCoverageFixture(root, {
+    const half = makeCoverageFixture(root, {
       groups: 4,
       batches: 4,
       reviews: ['independent', 'independent', 'self'],
-      final: 'self',
     });
-    const card = scoreSession({ cwd: root, sessionDir, session });
-    assert.equal(
-      card.caps.some((c) => /thin review coverage/i.test(c)),
-      false,
-      `unexpected cap: ${card.caps.join(' ')}`,
-    );
-    assert.ok(card.score > 69);
+    const at = reviewCheck(scoreSession({ cwd: root, sessionDir: half.sessionDir, session: half.session }));
+    assert.match(at.notes.join(' '), /2 dispatched review\(s\) across 4 task group\(s\)(?!.*thin)/);
+
+    const root2 = tmp('forge-score-boundary-under-');
+    const under = makeCoverageFixture(root2, {
+      groups: 4,
+      batches: 4,
+      reviews: ['independent', 'self', 'self'],
+    });
+    const below = reviewCheck(scoreSession({ cwd: root2, sessionDir: under.sessionDir, session: under.session }));
+    assert.match(below.notes.join(' '), /thin coverage/);
+    assert.ok(at.points > below.points, `at-threshold ${at.points} should beat below ${below.points}`);
+    fs.rmSync(root2, { recursive: true, force: true });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('brisk and lite are not capped for skipping reviews they were told to skip', () => {
-  // The pace matrix sets review.perTask to high-risk-only / never below
-  // standard. Capping those sessions would punish a recorded, deliberate
-  // choice — and the task-count escalation already lifts big work to standard.
-  for (const pace of ['brisk', 'lite']) {
-    const root = tmp(`forge-score-covercap-${pace}-`);
-    try {
-      const { sessionDir, session } = makeCoverageFixture(root, {
-        groups: 4,
-        batches: 4,
-        reviews: ['self'],
-        final: 'self',
-        session: { resolvedPace: pace, pacePinned: true, tasksTotal: 6, tasksComplete: 6 },
-      });
-      const card = scoreSession({ cwd: root, sessionDir, session });
-      assert.equal(
-        card.caps.some((c) => /thin review coverage/i.test(c)),
-        false,
-        `${pace}: unexpected cap ${card.caps.join(' ')}`,
-      );
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
+test('an independent final review outscores a self-authored one', () => {
+  // Also unpinned by the revert: nothing asserted the self-vs-independent gap
+  // on the final review, so scoring them identically passed the suite.
+  const roots = [];
+  try {
+    const score = (final) => {
+      const root = tmp('forge-score-finalgap-');
+      roots.push(root);
+      const f = makeCoverageFixture(root, { groups: 3, batches: 3, reviews: ['independent'], final });
+      return reviewCheck(scoreSession({ cwd: root, sessionDir: f.sessionDir, session: f.session })).points;
+    };
+    assert.ok(score('independent') > score('self'), 'an outside reader of the whole change is worth more');
+  } finally {
+    roots.forEach((r) => fs.rmSync(r, { recursive: true, force: true }));
   }
 });
 

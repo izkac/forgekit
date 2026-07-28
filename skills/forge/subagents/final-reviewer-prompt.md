@@ -50,7 +50,9 @@ would they pass against a stubbed handler? If yes, they prove nothing.
 
 ## Attribution (first line of your report)
 
-Open with `Reviewer: <your model> (<this prompt's role>)` — e.g. `Reviewer: claude-opus-5 (task-reviewer)`. The coordinator saves your report verbatim, and `forge score` counts a review that names no reviewer as a self-check. Do not write it if you are not a dispatched reviewer.
+Open with `Reviewer: <your model> (<this prompt's role>)` — e.g. `Reviewer: claude-opus-5 (task-reviewer)`. The coordinator saves your report verbatim and `forge score` reads it, so this line is how a dispatched review is told apart from one the coordinator wrote. Do not write it if you are not a dispatched reviewer.
+
+Only your opening lines and this attribution are scanned for authorship, so discuss the coordinator's self-checks freely in the body — that is your job. Just keep `self-check` / `self-audit` / `self-review` / `self-authored` out of this line and out of your opening two paragraphs, where they mark the report as the author's own. If you quote another review's `Reviewer:` header, put it in a fenced block or a `>` blockquote — an unquoted copy of someone else's attribution reads as yours.
 
 ## Verdict
 
