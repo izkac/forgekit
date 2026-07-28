@@ -124,9 +124,232 @@ test('a session with no deferrals writes no ledger noise', () => {
   assert.equal(fs.existsSync(path.join(root, '.forge', 'deferrals.jsonl')), false);
 });
 
+/** A metrics.json as the collector writes it, with derivable totals. */
+function metricsDoc({ tokens, subagents = [], models = null } = {}) {
+  return {
+    available: true,
+    collectedAt: '2026-07-25T14:30:00.000Z',
+    source: { agent: 'claude-code', hostVersion: '2.1.220', transcripts: ['/t.jsonl'], sidecars: subagents.length },
+    window: { from: '2026-07-25T08:00:00.000Z', to: '2026-07-25T14:30:00.000Z' },
+    requests: 21,
+    tokens,
+    // Deliberately not in sorted order: the digest sorts so a diff of two
+    // ledger lines is about the numbers, not about hash iteration order.
+    byModel: models ?? {
+      'claude-opus-5': { requests: 20, ...tokens },
+      'claude-fable-5': { requests: 1, input: 1, output: 1, cacheRead: 1, cacheCreate: 1 },
+    },
+    byPhase: { implement: { requests: 21, ...tokens } },
+    tools: { Bash: { calls: 9, errors: 1 }, Read: { calls: 11, errors: 0 } },
+    errors: { toolResults: 20, errorResults: 1, rate: 0.05 },
+    subagents,
+    breakdown: { parent: { requests: 21, tokens }, subagents: { requests: 0, tokens } },
+  };
+}
+
+function writeMetrics(sessionDir, doc) {
+  fs.writeFileSync(
+    path.join(sessionDir, 'metrics.json'),
+    typeof doc === 'string' ? doc : `${JSON.stringify(doc, null, 2)}\n`,
+    'utf8',
+  );
+}
+
+function digestOf(root) {
+  return readLedger(path.join(root, '.forge', 'sessions.jsonl'))[0];
+}
+
+test('the digest carries compact metrics totals, so they survive cleanup', () => {
+  const root = tmp('forge-ledger-metrics-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: null });
+  const tokens = { input: 1207, output: 7451, cacheRead: 355006, cacheCreate: 1171 };
+  const doc = metricsDoc({
+    tokens,
+    subagents: [
+      { agentId: 'a1', agentType: 'general-purpose', requests: 4 },
+      { agentId: 'a2', agentType: 'Explore', requests: 2 },
+    ],
+  });
+  writeMetrics(sessionDir, doc);
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: { score: 88, grade: 'B' } });
+  fs.rmSync(sessionDir, { recursive: true, force: true });
+  const entry = digestOf(root);
+
+  assert.equal(entry.metrics.available, true);
+  assert.equal(entry.metrics.requests, doc.requests);
+  assert.equal(entry.metrics.outputTokens, tokens.output);
+  assert.equal(
+    entry.metrics.totalTokens,
+    Object.values(tokens).reduce((a, b) => a + b, 0),
+    'cache reads are the bulk of a long session — a digest must not report only input+output',
+  );
+  assert.deepEqual(entry.metrics.models, Object.keys(doc.byModel).slice().sort());
+  assert.equal(entry.metrics.errorRate, doc.errors.rate);
+  assert.equal(entry.metrics.subagents, doc.subagents.length);
+  assert.equal(entry.subagentsDispatched, doc.subagents.length);
+
+  // Totals only: the whole point of the ledger is one readable line per
+  // session, and byPhase/tools/per-subagent records stay in metrics.json.
+  assert.deepEqual(Object.keys(entry.metrics).sort(), [
+    'available',
+    'errorRate',
+    'models',
+    'outputTokens',
+    'requests',
+    'subagents',
+    'totalTokens',
+  ]);
+});
+
+test('a measured subagent count supersedes the hand-maintained one', () => {
+  // `--subagents N` is bookkeeping a coordinator maintains by hand, and the
+  // live ledger holds `null, null, 0` for three sessions that certainly
+  // dispatched. metrics.subagents is counted from the host's own sidecars.
+  const root = tmp('forge-ledger-metrics-sub-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: 0 });
+  const doc = metricsDoc({
+    tokens: { input: 1, output: 2, cacheRead: 3, cacheCreate: 4 },
+    subagents: [{ agentId: 'a1', requests: 4 }, { agentId: 'a2', requests: 1 }, { agentId: 'a3', requests: 9 }],
+  });
+  writeMetrics(sessionDir, doc);
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  assert.equal(digestOf(root).subagentsDispatched, doc.subagents.length);
+});
+
+test('a session with no metrics.json still writes a line, and invents no dispatch count', () => {
+  // `0` would read as "no subagents ran", which is a measurement nobody made.
+  const root = tmp('forge-ledger-nometrics-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: null });
+  appendSessionDigest({ cwd: root, sessionDir, session, card: { score: 70, grade: 'C' } });
+
+  const entry = digestOf(root);
+  assert.deepEqual(entry.metrics, { available: false });
+  assert.equal(entry.subagentsDispatched, null);
+  assert.equal(entry.score, 70, 'the rest of the line is unaffected');
+});
+
+test('with no metrics the hand-maintained dispatch count is still carried', () => {
+  const root = tmp('forge-ledger-nometrics-declared-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: 12 });
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  assert.equal(digestOf(root).subagentsDispatched, 12);
+});
+
+test('the digest carries how often the model policy had to correct a dispatch', () => {
+  // Cheap to keep and impossible to reconstruct later: the dispatch ledger dies
+  // with the session directory, and skip rate is the number this whole change
+  // was commissioned to produce.
+  const root = tmp('forge-ledger-dispatches-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: null });
+  const dispatches = { total: 9, allowed: 6, rewritten: 2, denied: 1, skipped: 3 };
+  writeMetrics(sessionDir, { ...metricsDoc({ tokens: { output: 1 } }), dispatches });
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const entry = digestOf(root);
+  assert.equal(entry.dispatchesSkipped, dispatches.skipped);
+  assert.deepEqual(
+    entry.dispatches,
+    dispatches,
+    'a skip count with no denominator cannot become a skip rate once the session dir is gone',
+  );
+});
+
+test('a degraded document still yields a measured dispatch count', () => {
+  // dispatches.jsonl is Forge's own file, so an unbound session — or one whose
+  // host transcript was pruned — still knows precisely what it dispatched. Two
+  // numbers survive where previously neither did: how many dispatches the
+  // policy corrected, and how many subagents actually ran (everything the hook
+  // saw except the ones it refused).
+  const root = tmp('forge-ledger-dispatches-degraded-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: null });
+  const dispatches = { total: 9, allowed: 6, rewritten: 2, denied: 1, skipped: 3 };
+  writeMetrics(sessionDir, { available: false, reason: 'no transcript on disk', dispatches });
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const entry = digestOf(root);
+  assert.deepEqual(entry.metrics, { available: false });
+  assert.equal(entry.dispatchesSkipped, 3);
+  assert.equal(
+    entry.subagentsDispatched,
+    dispatches.allowed + dispatches.rewritten,
+    'a denied dispatch never became a subagent',
+  );
+});
+
+test('a sidecar count beats a dispatch-derived one, and both beat the declared figure', () => {
+  const root = tmp('forge-ledger-dispatch-precedence-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: 99 });
+  writeMetrics(sessionDir, {
+    ...metricsDoc({
+      tokens: { output: 1 },
+      subagents: [{ agentId: 'a1' }, { agentId: 'a2' }],
+    }),
+    dispatches: { total: 7, allowed: 7, rewritten: 0, denied: 0, skipped: 0 },
+  });
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  assert.equal(
+    digestOf(root).subagentsDispatched,
+    2,
+    'sidecars are direct evidence a subagent ran; the hook only saw it dispatched',
+  );
+});
+
+test('a session with no dispatch counts at all says so, rather than claiming zero', () => {
+  const root = tmp('forge-ledger-nodispatches-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: 4 });
+  writeMetrics(sessionDir, metricsDoc({ tokens: { output: 1 } })); // pre-4.2 document
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  assert.equal(digestOf(root).dispatchesSkipped, null, 'never measured is not the same as zero');
+});
+
+test('a corrupt or degraded metrics.json does not lose the digest line', () => {
+  for (const [label, content] of [
+    ['half-written', '{"available": true, "tokens": {"in'],
+    ['not an object', '"metrics"'],
+    ['degraded', `${JSON.stringify({ available: false, reason: 'no transcript on disk' })}\n`],
+    ['available but empty', `${JSON.stringify({ available: true })}\n`],
+  ]) {
+    const root = tmp('forge-ledger-badmetrics-');
+    const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: 7 });
+    writeMetrics(sessionDir, content);
+
+    assert.equal(appendSessionDigest({ cwd: root, sessionDir, session, card: null }), 1, label);
+    const entry = digestOf(root);
+    assert.equal(entry.sessionId, 's1', label);
+    if (label === 'available but empty') {
+      // A document that says available with nothing in it is reported as zeros,
+      // not as a crash and not as a missing line.
+      assert.equal(entry.metrics.available, true, label);
+      assert.equal(entry.metrics.totalTokens, 0, label);
+      assert.deepEqual(entry.metrics.models, [], label);
+      assert.equal(entry.subagentsDispatched, 0, label);
+    } else {
+      assert.deepEqual(entry.metrics, { available: false }, label);
+      assert.equal(entry.subagentsDispatched, 7, label);
+    }
+  }
+});
+
 test('readLedger tolerates a truncated or corrupt line', () => {
   const root = tmp('forge-ledger-corrupt-');
   const file = path.join(root, 'x.jsonl');
   fs.writeFileSync(file, '{"a":1}\n{ broken\n{"a":2}\n', 'utf8');
   assert.deepEqual(readLedger(file), [{ a: 1 }, { a: 2 }]);
+});
+
+test('a malformed dispatch block reads as zeros, never as two different answers', () => {
+  // `null` means no dispatch block was ever written. Once one exists, a missing
+  // key inside it is a zero — the flat field and the block must not disagree.
+  const root = tmp('forge-ledger-dispatch-malformed-');
+  const { sessionDir, session } = makeSession(root, 's1', { subagentsDispatched: null });
+  writeMetrics(sessionDir, { ...metricsDoc({ tokens: { output: 1 } }), dispatches: {} });
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const entry = digestOf(root);
+  assert.equal(entry.dispatchesSkipped, entry.dispatches.skipped);
+  assert.equal(entry.dispatchesSkipped, 0);
 });

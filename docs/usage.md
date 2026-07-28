@@ -648,7 +648,7 @@ also appends:
 | File | Holds |
 |------|-------|
 | `.forge/scorecards.jsonl` | one score line per session |
-| `.forge/sessions.jsonl` | one digest per session: tasks, subagents, reviews by kind, rejections, checkpoints, health, duration |
+| `.forge/sessions.jsonl` | one digest per session: tasks, subagents, reviews by kind, rejections, checkpoints, health, duration, and compact telemetry totals |
 | `.forge/deferrals.jsonl` | unresolved deferrals, with the session that owed them |
 
 **After done — answer the L3 ship-check** (printed in the scorecard):
@@ -662,6 +662,49 @@ If L1 is green and (4) is `no`, **Forge failed** — open a Forgekit issue, don�
 only file a product bug.
 
 Trend over time: rate of sessions with L1 green + ship=`no` should fall.
+
+---
+
+## 13a. Session telemetry — what a session actually cost
+
+The scorecard measures how *disciplined* a session was. Telemetry measures how it
+*ran*: tokens, models, tool failures, subagents and whether the model policy was
+honoured. It is a reader, not a recorder — Claude Code already writes every
+request to a JSONL transcript, and Forge simply learns which transcripts belong to
+which session (from `CLAUDE_CODE_SESSION_ID`, so no hook is required).
+
+```bash
+forge metrics collect              # harvest now, into .forge/sessions/<id>/metrics.json
+forge metrics collect --json       # the whole document
+forge analyze                      # read the ledgers back as numbers
+forge analyze --json --since 2026-06-01 --limit 20
+```
+
+`forge phase finish|done` collects automatically, just before the scorecard, so a
+finished session always leaves its numbers behind.
+
+**What is recorded:** counts, model slugs, tool names, agent types, phase names
+and timestamps. **Never** prompt text, model responses, command strings, file
+contents, or a subagent's `description`. `metrics.json` is a file that outlives
+the conversation; it holds arithmetic, not content.
+
+**`available: false` is normal, not an error.** Running outside Claude Code, or
+against a transcript the host has since pruned, records a reason and exits 0.
+Telemetry may cost you a measurement; it never costs you a phase transition.
+
+`forge analyze` **states coverage first** — "6 of 9 analysed sessions carry
+metrics" — because sessions that predate telemetry still count in grades and
+deferrals but contribute no tokens. Per-model token splits come from
+`metrics.json` files that still exist; once `forge cleanup` has run, the digest's
+totals are what remain, and each model row says how many of its sessions still had
+the detail.
+
+**Model policy.** With the `forge enforce-model` PreToolUse hook wired
+(`forge init`), every subagent dispatch is logged to
+`.forge/sessions/<id>/dispatches.jsonl` and rolled into a skip rate: how often a
+dispatch had to be rewritten or refused because `forge resolve-model` was skipped.
+A skip rate of zero *with no dispatches recorded at all* means the hook is not
+installed — a different finding entirely, and `forge analyze` says which one it is.
 
 ## 14. Cheat sheet
 
@@ -690,8 +733,13 @@ forge defer add --task 3.2 --reason "wire handler in 3.2"
 forge defer resolve --task 3.2
 forge integrity-check
 forge score --write
-forge phase done
+forge phase done                  # also collects metrics + writes the durable digest
 forge cleanup
+
+# Telemetry — what a session actually cost
+forge metrics collect             # → .forge/sessions/<id>/metrics.json
+forge analyze                     # coverage, per-model/phase totals, policy skip rate
+forge analyze --json --since 2026-06-01
 
 # Fleet (any terminal, all projects)
 forge fleet list

@@ -1,0 +1,51 @@
+{
+  "change": "session-telemetry",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-metrics — host binding",
+      "library": "packages/cli/src/metrics/host.mjs",
+      "runtimeOwner": "packages/cli/src/new-session.mjs and set-phase.mjs (every `forge new` / `forge phase`)",
+      "writes": "session.json → host.{agent,sessionIds,boundAt}, phaseHistory[]",
+      "reads": "process env CLAUDE_CODE_SESSION_ID and CLAUDE_CONFIG_DIR (AI_AGENT is not consulted — its shape is version-dependent, so id presence decides the agent)",
+      "uiConsumer": "forge status (session block) and the collector's transcript resolution",
+      "evidence": "packages/cli/src/metrics/host.test.mjs + e2e step telemetry-collect"
+    },
+    {
+      "capability": "session-metrics — transcript harvest",
+      "library": "packages/cli/src/metrics/transcript.mjs, packages/cli/src/metrics/collect.mjs",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs on phase finish|done (before writeSessionScorecard), and `forge metrics collect` via packages/cli/bin/forge.mjs",
+      "writes": ".forge/sessions/<id>/metrics.json",
+      "reads": "host transcripts <configDir>/projects/*/<hostSessionId>.jsonl and their subagents/ sidecars",
+      "uiConsumer": "forge analyze; sessions.jsonl digest surfaced by forge status / fleet",
+      "evidence": "packages/cli/src/metrics/transcript.test.mjs (39-lines/12-requests dedupe), metrics/collect.test.mjs, metrics-cli.test.mjs (CLI writes the document), set-phase.test.mjs (`phase done` collects under a host id first seen on that very command) + e2e step telemetry-collect"
+    },
+    {
+      "capability": "session-metrics — dispatch enforcement telemetry",
+      "library": "packages/cli/src/metrics/dispatches.mjs (row format, append and fold), written from packages/cli/src/enforce-model.mjs",
+      "runtimeOwner": "PreToolUse hook templates/project/claude/hooks/forge-model-hook.mjs → `forge enforce-model`",
+      "writes": ".forge/sessions/<id>/dispatches.jsonl",
+      "reads": "PreToolUse subagent dispatch payload on stdin",
+      "uiConsumer": "metrics.dispatches → forge analyze enforcement row; sessions.jsonl subagentsDispatched",
+      "evidence": "packages/cli/src/metrics/dispatches.test.mjs + enforce-model.test.mjs (allow/rewrite/deny each logged; decision byte-identical when the log write fails; un-overlaid project still logged) + set-phase.test.mjs (dispatchesSkipped reaches the digest) + e2e step telemetry-analyze"
+    },
+    {
+      "capability": "session-metrics — durable digest",
+      "library": "packages/cli/src/ledger.mjs (appendSessionDigest)",
+      "runtimeOwner": "packages/cli/src/score.mjs writeSessionScorecard, invoked from set-phase on finish|done",
+      "writes": ".forge/sessions.jsonl → metrics{} and subagentsDispatched",
+      "reads": ".forge/sessions/<id>/metrics.json",
+      "uiConsumer": "forge analyze after forge cleanup has removed the session directory",
+      "evidence": "packages/cli/src/ledger.test.mjs (compact totals, declared-count fallback, corrupt file keeps the line) + set-phase.test.mjs (digest carries the collected metrics) + e2e step telemetry-analyze"
+    },
+    {
+      "capability": "session-analysis",
+      "library": "packages/cli/src/analyze.mjs (buildAnalysis + formatAnalysis)",
+      "runtimeOwner": "packages/cli/src/analyze-cli.mjs, registered as `analyze` in packages/cli/bin/forge.mjs; consumed by templates/project/claude/commands/forge-analyze.md step 1",
+      "writes": "N/A — stdout only, by design (the /forge:analyze command owns .forge/reports/)",
+      "reads": ".forge/sessions.jsonl, .forge/scorecards.jsonl, .forge/sessions/*/metrics.json",
+      "uiConsumer": "terminal stdout and the /forge:analyze narrative report",
+      "evidence": "packages/cli/src/analyze.test.mjs (coverage before aggregates, determinism + read-only, per-model/phase, skip rate, since/limit, CLI registration) + e2e step telemetry-analyze"
+    }
+  ]
+}

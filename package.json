@@ -1,6 +1,6 @@
 {
   "name": "forgekit",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "private": true,
   "description": "Forgekit — portable agent skills monorepo (Forge workflow and more)",
   "type": "module",

@@ -204,8 +204,11 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
   preferences.local.json              ← optional pace overlay
   sessions/
     2026-06-05T143022Z-my-feature-a3f9b2/
-      session.json                    ← phase, planType, openspecChange, pace
+      session.json                    ← phase, planType, openspecChange, pace,
+                                        host binding, phaseHistory
       status.json                     ← machine-readable progress
+      metrics.json                    ← host telemetry (phase finish|done, or on demand)
+      dispatches.jsonl                ← one line per subagent dispatch the policy saw
       brainstorm/
         notes.md
         decisions.md
@@ -301,6 +304,18 @@ forge e2e init|run|check          # executable product-loop acceptance (e2e.json
 forge defer add|resolve|list      # deferral registry — deferred wiring is tracked debt
 forge integrity-check             # mechanical gate: spine + deferrals + executed e2e
 forge score [--write] [--md]      # L2 session scorecard (also auto-written at phase done)
+forge metrics collect [--session <id>] [--json]
+                                  # harvest the host's own transcripts into
+                                  # metrics.json — requests, tokens, models, tool
+                                  # errors, subagents, dispatch decisions, per phase.
+                                  # Also runs automatically at phase finish|done.
+                                  # `available: false` (no host, pruned transcript)
+                                  # is a normal outcome and exits 0.
+forge analyze [--json] [--limit <n>] [--since <date>]
+                                  # read .forge/sessions.jsonl + scorecards.jsonl +
+                                  # surviving metrics.json back as numbers: coverage
+                                  # first, then per-model and per-phase totals and the
+                                  # model-policy skip rate. Read-only; writes nothing.
 forge overlay                     # re-apply OpenSpec vendor overlays in this project
 forge init […]                    # wire project commands / hooks / rules
 forge install […]                 # alias → forgekit install --skills forge

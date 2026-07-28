@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+## 0.3.22 — 2026-07-28
+
+### Session telemetry — what a session actually cost, and whether the model policy held
+
+A Forge session recorded how *disciplined* it was — score, reviews, deferrals —
+and nothing about how it *ran*. Tokens, models, failing tools, how much work went
+to subagents, and whether `forge resolve-model` was honoured were all invisible,
+so every claim about the workflow was an impression.
+
+Forge now reads that from the host's own JSONL transcripts. **It is a reader, not
+a recorder**: Claude Code already writes every request to disk, and the only
+missing link was knowing which transcripts belong to which session. That link is
+`CLAUDE_CODE_SESSION_ID`, which is already exported into the shell `forge` runs
+in — so binding needs no hook, and a session resumed tomorrow under a new host
+session simply appends the new id.
+
+- **`forge metrics collect`** harvests the bound transcripts into
+  `.forge/sessions/<id>/metrics.json`: requests, the four token classes, per-model
+  and per-phase splits, tool calls and failures, one record per subagent, and a
+  coordinator-vs-delegated breakdown. `forge phase finish|done` runs it
+  automatically, just before the scorecard.
+- **`forge analyze [--json]`** reads `sessions.jsonl`, `scorecards.jsonl` and any
+  surviving `metrics.json` back as numbers. Read-only, deterministic, and it
+  **states coverage first** — "6 of 9 analysed sessions carry metrics" — because a
+  partial history read as a complete one is worse than no history.
+  `/forge:analyze` now takes its quantitative source from here instead of
+  recomputing by hand.
+- **Dispatch ledger.** With the `forge enforce-model` PreToolUse hook wired, every
+  subagent dispatch is logged and rolled into a skip rate: how often a dispatch had
+  to be rewritten or refused because the resolver was skipped. Zero skips *with no
+  dispatches recorded at all* means the hook is not installed, and the output says
+  which of the two it is.
+- **`sessions.jsonl` carries compact totals**, so the numbers outlive
+  `forge cleanup` deleting the session directory. `subagentsDispatched` — `null` in
+  every digest this project has ever written, because it was a figure a
+  coordinator maintained by hand — is now measured from the host's own sidecars.
+
+Two rules the implementation is built around, both learned the hard way:
+
+- **Usage is counted once per request.** The host writes one transcript line per
+  content block and repeats the whole `usage` object on each, and the *first* line
+  of a request carries a preliminary output count that is later settled. Summing
+  lines inflates tokens ~3×; keeping the first line understated output by 28.6%
+  across a real corpus. Both numbers look entirely plausible downstream.
+- **Telemetry is advisory, always.** Collection, dispatch logging and digest
+  enrichment cannot throw, cannot change a hook decision, and cannot block a phase
+  transition. Every failure — no host, pruned transcript, corrupt file — is
+  recorded as `available: false` with a reason and exits 0.
+
+**Privacy:** persisted metrics contain counts, model slugs, tool names, agent
+types, phase names and timestamps. Never prompt text, model responses, command
+strings, file contents, or a subagent's `description`.
+
+`session.json` gains `host` (`{agent, sessionIds[], boundAt}`) and `phaseHistory`
+(`[{phase, at}]`, the join key that attributes requests to the phase they were
+spent in). Both are additive; sessions without them still load.
+
 ## 0.3.21 — 2026-07-27
 
 ### Fleet/status progress follows `tasks.md` checkboxes

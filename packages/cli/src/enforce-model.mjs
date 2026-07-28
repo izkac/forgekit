@@ -46,6 +46,7 @@ import {
   detectAgent,
   loadMergedConfig,
 } from './resolve-model.mjs';
+import { appendDispatch } from './metrics/dispatches.mjs';
 
 /** Host tool names that dispatch a subagent. */
 export const SUBAGENT_TOOLS = Object.freeze(['Agent', 'Task']);
@@ -214,7 +215,12 @@ export function hookOutput(decision, toolInput) {
  *   cwd?: string,
  *   env?: NodeJS.ProcessEnv,
  * }} opts
- * @returns {{ decision: Decision, toolInput: Record<string, unknown> }}
+ * @returns {{ decision: Decision, toolInput: Record<string, unknown>,
+ *   dispatch: { tool: string, agentType: string | null, toolUseId: string | null } | null }}
+ *   `dispatch` describes the subagent dispatch this payload actually is, and is
+ *   null when the payload was not one — an unparseable body, another tool, or
+ *   no input at all. It is what the dispatch ledger records; there is nothing
+ *   to record about a payload that never asked for a subagent.
  */
 export function enforceModel(raw, opts = {}) {
   /** @type {Record<string, unknown>} */
@@ -224,21 +230,29 @@ export function enforceModel(raw, opts = {}) {
   try {
     payload = JSON.parse(raw || '');
   } catch {
-    return { decision: { action: 'allow', reason: 'unparseable' }, toolInput: empty };
+    return { decision: { action: 'allow', reason: 'unparseable' }, toolInput: empty, dispatch: null };
   }
   if (!isPlainObject(payload)) {
-    return { decision: { action: 'allow', reason: 'unparseable' }, toolInput: empty };
+    return { decision: { action: 'allow', reason: 'unparseable' }, toolInput: empty, dispatch: null };
   }
 
   const toolName = payload.tool_name;
   if (typeof toolName === 'string' && !SUBAGENT_TOOLS.includes(toolName)) {
-    return { decision: { action: 'allow', reason: 'other-tool' }, toolInput: empty };
+    return { decision: { action: 'allow', reason: 'other-tool' }, toolInput: empty, dispatch: null };
   }
 
   const toolInput = payload.tool_input;
   if (!isPlainObject(toolInput)) {
-    return { decision: { action: 'allow', reason: 'no-input' }, toolInput: empty };
+    return { decision: { action: 'allow', reason: 'no-input' }, toolInput: empty, dispatch: null };
   }
+
+  // Identifiers only. `prompt` and `description` are free-form text and the
+  // ledger outlives nothing it should be able to leak.
+  const dispatch = {
+    tool: typeof toolName === 'string' ? toolName : SUBAGENT_TOOLS[0],
+    agentType: typeof toolInput.subagent_type === 'string' ? toolInput.subagent_type : null,
+    toolUseId: typeof payload.tool_use_id === 'string' ? payload.tool_use_id : null,
+  };
 
   let config;
   let sources;
@@ -250,7 +264,7 @@ export function enforceModel(raw, opts = {}) {
       cwd: opts.cwd,
     }));
   } catch {
-    return { decision: { action: 'allow', reason: 'unreadable-config' }, toolInput };
+    return { decision: { action: 'allow', reason: 'unreadable-config' }, toolInput, dispatch };
   }
 
   const hasOverlay = sources.includes(localPath);
@@ -270,7 +284,49 @@ export function enforceModel(raw, opts = {}) {
     billing,
   });
 
-  return { decision, toolInput };
+  return { decision, toolInput, dispatch };
+}
+
+/** Ledger names for the three actions — `pin` reads as what it does to a dispatch. */
+const LEDGER_DECISION = { allow: 'allow', pin: 'rewrite', deny: 'deny' };
+
+/**
+ * One dispatch, as the ledger records it.
+ *
+ * `modelResolved` is the model the dispatch actually ends up running under:
+ * what was asked for when nothing was corrected, the pinned model when it was,
+ * and nothing at all when the dispatch was refused. Comparing it to
+ * `modelRequested` is how a later analysis answers whether the policy was
+ * honoured without anyone having to have logged an intention.
+ *
+ * The deny reason the coordinator is shown is a paragraph of guidance; the
+ * ledger keeps a code, because this file is read in bulk.
+ *
+ * @param {{ decision: Decision, toolInput: Record<string, unknown>,
+ *   dispatch: { tool: string, agentType: string | null, toolUseId: string | null } }} result
+ * @returns {Record<string, any>}
+ */
+export function dispatchRow(result) {
+  const { decision, toolInput, dispatch } = result;
+  const requested = typeof toolInput.model === 'string' ? toolInput.model : null;
+  const resolved =
+    decision.action === 'pin' ? decision.model : decision.action === 'deny' ? null : requested;
+  const reason =
+    decision.action === 'pin'
+      ? 'flattened-tiers'
+      : decision.action === 'deny'
+        ? 'outside-resolved-set'
+        : (decision.reason ?? null);
+
+  return {
+    tool: dispatch.tool,
+    agentType: dispatch.agentType,
+    modelRequested: requested,
+    modelResolved: resolved,
+    decision: LEDGER_DECISION[decision.action] ?? decision.action,
+    reason,
+    toolUseId: dispatch.toolUseId,
+  };
 }
 
 /**
@@ -369,6 +425,22 @@ export async function runEnforceModel(argv, io = {}) {
 
   const out = hookOutput(result.decision, result.toolInput);
   if (out) stdout.write(`${JSON.stringify(out)}\n`);
+
+  // Deliberately after the decision is out the door, and deliberately not
+  // gated on the overlay: "how often is forge resolve-model skipped" is most
+  // worth knowing in a project that has not opted into enforcement yet.
+  // `appendDispatch` swallows its own failures; this guard is for everything
+  // else, because nothing below the decision may change the decision.
+  if (result.dispatch) {
+    try {
+      appendDispatch(dispatchRow(result), {
+        forgeDir: opts.forgeDir ?? undefined,
+        cwd: io.cwd,
+      });
+    } catch {
+      // a measurement lost, never a subagent
+    }
+  }
   return 0;
 }
 

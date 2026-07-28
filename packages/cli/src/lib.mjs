@@ -97,7 +97,37 @@ export function defaultSession(sessionId, slug) {
     paceSignal: null,
     pacePinned: false,
     preferencesOverride: null,
+    /** Host agent binding, filled by bindHost() — see metrics/host.mjs */
+    host: null,
+    /** Chronological {phase, at} trail, appended to on every transition */
+    phaseHistory: [],
   };
+}
+
+/**
+ * Record a phase transition on the session's timeline.
+ *
+ * The trail exists so telemetry can attribute host requests to the phase they
+ * were spent in — it is the join key, so the timestamps are real transition
+ * times and earlier rows are never rewritten. Re-entering the same phase is
+ * not a transition: `forge phase implement --tasks-complete N` runs after
+ * every task, and a row per run would bury the shape of the session.
+ *
+ * Lives here rather than in set-phase.mjs because `forge new` seeds the first
+ * row and `forge phase` appends the rest, and set-phase.mjs is a script that
+ * runs the CLI on import — importing it from new-session.mjs exits 1.
+ *
+ * @param {Record<string, any>} session
+ * @param {string} phase
+ * @param {string} at ISO timestamp
+ * @returns {Record<string, any>} the same session object
+ */
+export function appendPhaseHistory(session, phase, at) {
+  if (!Array.isArray(session.phaseHistory)) session.phaseHistory = [];
+  const last = session.phaseHistory[session.phaseHistory.length - 1];
+  if (last && last.phase === phase) return session;
+  session.phaseHistory.push({ phase, at });
+  return session;
 }
 
 export function defaultStatus(session) {

@@ -1,0 +1,156 @@
+<!-- forge-brief-specs-hash:2c8ed4df0d88e1a9 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session telemetry &amp; analysis — operator brief</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6; color: #1a1a1a; background: #fdfdfc;
+    max-width: 48rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem;
+  }
+  h1 { font-size: 1.75rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e3df; padding-bottom: .35rem; }
+  .sub { color: #6b6862; margin-top: 0; }
+  code { background: #f2f0ec; padding: .1rem .35rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #f6f4ef; border-left: 3px solid #b8ab8d; padding: .85rem 1rem; margin: 1.25rem 0; }
+  .warn { background: #fdf5f2; border-left-color: #c98d72; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e5e3df; vertical-align: top; }
+  th { background: #f6f4ef; }
+  pre.mermaid { background: #fff; text-align: center; margin: 1.5rem 0; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Session telemetry &amp; analysis</h1>
+<p class="sub">What a Forge session will remember about how it actually ran.</p>
+
+<h2>TL;DR</h2>
+<p>
+Today a finished session records how <em>disciplined</em> it was — a score, which reviews
+happened, what got deferred — and nothing about how it actually ran. This change starts
+keeping the other half: how many tokens it burned, which models did the work, how often
+tools failed, and how often a subagent was launched with a model the policy would not have
+chosen. Almost none of it needs new plumbing, because the coding agent already writes all
+of it to disk; Forge just has to read it before that record is deleted.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Every finished session leaves a small <strong>metrics file</strong>: token counts, the models
+      that ran, tool failure rate, one row per subagent, and where the effort went by phase.</li>
+  <li>Those totals are copied into the permanent session ledger, so they <strong>survive cleanup</strong>
+      deleting the session folder two weeks later — the same trick already used for scores.</li>
+  <li>A new <code>forge analyze</code> command prints the history back as numbers: a table per
+      session, a table per model, and where the tokens went.</li>
+  <li>You can finally see <strong>how often the model policy is bypassed</strong> — every time a
+      subagent is dispatched with a model the resolver would not have returned, it gets counted.</li>
+  <li>The existing <code>/forge:analyze</code> report gets these numbers as its input instead of
+      reading tea leaves from session folders.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+The coding agent already keeps a full transcript of every session on disk, and that transcript
+records — per request — the model used, the tokens spent, and whether each tool call failed.
+Subagents get their own transcript files alongside it. The session's own identifier is available
+in the environment Forge commands run in, so a session can note which transcripts belong to it
+without installing anything.
+</p>
+<p>
+When a session finishes, Forge reads those transcripts, keeps only the lines belonging to that
+session's lifetime, adds them up, and writes the totals. Nothing is recorded while you work; there
+is no new hook to install and nothing to keep wired. The one exception is subagent dispatch: a
+dispatch that gets <em>blocked</em> leaves no transcript behind, so the existing model-policy check —
+which already inspects every dispatch — notes its own decisions as it goes.
+</p>
+
+<pre class="mermaid">
+flowchart TD
+  A["Coding agent works<br/>(transcripts written automatically)"] --> B["Subagent dispatches<br/>model policy notes each decision"]
+  A --> C["forge phase done"]
+  B --> C
+  C --> D["Collector reads the transcripts<br/>counts once per request"]
+  D --> E["metrics.json in the session folder"]
+  D --> F["totals copied into the permanent ledger"]
+  F --> G["forge analyze — numbers"]
+  G --> H["/forge:analyze — the written report"]
+</pre>
+
+<div class="callout">
+  <strong>The subtlety that shaped the design.</strong> The transcript writes one line per piece of a
+  reply — the thinking, the text, each tool call — and repeats the same token count on every one of
+  them. In a sample session that was 39 lines for 12 real requests. Adding them up naively would
+  triple every number while still looking entirely believable. Counting once per request is treated
+  as a correctness rule with its own dedicated test, not a detail.
+</div>
+
+<h2>What changes for you</h2>
+<table>
+  <tr><th>Command</th><th>What it does</th></tr>
+  <tr><td><code>forge analyze</code></td><td>New. Prints session, model and phase tables from the recorded history. Writes nothing.</td></tr>
+  <tr><td><code>forge analyze --json</code></td><td>Same numbers as raw data, for the <code>/forge:analyze</code> report to consume.</td></tr>
+  <tr><td><code>forge metrics collect</code></td><td>New, rarely typed by hand — runs automatically when a session finishes.</td></tr>
+  <tr><td><code>/forge:analyze</code></td><td>Unchanged to use, but its report is now based on measured numbers.</td></tr>
+</table>
+<p>
+Nothing else changes. No new hook to install, no settings to merge, no change to how sessions are
+created or run. Sessions that already exist stay valid and simply have no metrics.
+</p>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li><strong>It reads a file format nobody promised to keep.</strong> The transcript layout could change
+      in a future release of the coding agent. All knowledge of the format is kept in one module, the
+      observed version is recorded with every result, and anything unfamiliar is reported as
+      "unavailable, here's why" rather than guessed at. A format change loses telemetry; it cannot
+      break Forge.</li>
+  <li><strong>Claude Code only, for now.</strong> Sessions run through Cursor or Codex will record no
+      metrics and say so. Adding them later is additive work.</li>
+  <li><strong>Two clocks.</strong> Transcripts are cleaned up after about a month, Forge sessions after two
+      weeks. Collection happens when a session finishes, comfortably inside both — but a session that
+      is abandoned rather than finished will have nothing to collect.</li>
+  <li><strong>Silence is possible.</strong> Because none of this may ever block your work, a failure is
+      recorded quietly rather than shouted. <code>forge analyze</code> therefore always leads with how
+      many sessions it could actually see, so a thin history is never mistaken for a complete one.</li>
+</ul>
+
+<div class="callout warn">
+  <strong>Deliberate boundary:</strong> these numbers never touch the session score. The score measures
+  discipline; this measures cost. If cheaper sessions scored higher, the incentive would be to reach
+  for weaker models — the opposite of the standing policy on this project.
+</div>
+
+<h2>Out of scope</h2>
+<ul>
+  <li><strong>No money.</strong> Tokens are counted; no price table, no dollar figures. Prices go stale and
+      the numbers would mislead on a subscription. Cost stays derivable later.</li>
+  <li><strong>No backfill.</strong> The three sessions already in the ledger stay blank rather than being
+      attributed by guesswork.</li>
+  <li><strong>No trend detection or automatic findings yet.</strong> This change produces the numbers; deciding
+      which shifts are worth an alert comes after we've seen some real ones.</li>
+  <li><strong>Nothing about your content is recorded</strong> — no prompts, no replies, no commands, no file
+      contents. Counts, model names, tool names and timestamps only.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What it covers</th><th>Size</th></tr>
+  <tr><td>Host binding &amp; phase history</td><td>A session learns which transcripts are its own, and when each phase started.</td><td>4 tasks</td></tr>
+  <tr><td>Transcript reader</td><td>Parsing, counting once per request, tool failures, subagents.</td><td>4 tasks</td></tr>
+  <tr><td>Collector</td><td>Assembling the metrics file and copying totals into the permanent ledger.</td><td>4 tasks</td></tr>
+  <tr><td>Dispatch ledger</td><td>Recording model-policy decisions so the bypass rate is measurable.</td><td>2 tasks</td></tr>
+  <tr><td>Read side</td><td>The <code>forge analyze</code> command and wiring it into the existing report.</td><td>3 tasks</td></tr>
+  <tr><td>Product loop &amp; docs</td><td>End-to-end proof against a scratch project, plus documentation.</td><td>2 tasks</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
+</body>
+</html>

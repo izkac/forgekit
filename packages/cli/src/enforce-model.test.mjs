@@ -278,3 +278,153 @@ test('readStdin gives up rather than holding a dispatch open', async () => {
   const stalled = new Readable({ read() {} });
   assert.equal(await readStdin(stalled, 10), '');
 });
+
+/* ---------- the dispatch ledger ---------- */
+
+/** Give a .forge dir an active session, and answer where its ledger will land. */
+function withActiveSession(dir, sessionId = 'sess-1') {
+  fs.mkdirSync(path.join(dir, 'sessions', sessionId), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'active.json'), `${JSON.stringify({ sessionId })}\n`, 'utf8');
+  return path.join(dir, 'sessions', sessionId, 'dispatches.jsonl');
+}
+
+function ledgerRows(file) {
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+}
+
+/** @param {string} dir @param {Record<string, unknown>} toolInput */
+async function dispatchUnder(dir, toolInput, extra = {}) {
+  const out = capture();
+  const code = await runEnforceModel(['--forge-dir', dir, '--agent', 'claude-code'], {
+    input: JSON.stringify({ tool_name: 'Agent', tool_input: toolInput, ...extra }),
+    stdout: out.stream,
+  });
+  return { code, stdout: out.text() };
+}
+
+test('a rewritten dispatch is recorded, naming both the asked-for and the resolved model', async () => {
+  const dir = forgeDir(pinnedOverlay('opus'));
+  const file = withActiveSession(dir);
+
+  await dispatchUnder(
+    dir,
+    { prompt: 'x', model: 'sonnet', subagent_type: 'general-purpose' },
+    { tool_use_id: 'toolu_01ABC' },
+  );
+
+  const [row] = ledgerRows(file);
+  assert.equal(row.decision, 'rewrite');
+  assert.equal(row.modelRequested, 'sonnet');
+  assert.equal(row.modelResolved, 'opus');
+  assert.equal(row.agentType, 'general-purpose');
+  assert.equal(row.tool, 'Agent');
+  assert.equal(row.toolUseId, 'toolu_01ABC');
+  assert.ok(!Number.isNaN(Date.parse(row.ts)));
+  assert.equal(
+    JSON.stringify(row).includes('x'.repeat(1)) && 'prompt' in row,
+    false,
+    'the ledger records counts and identifiers, never the dispatch prompt',
+  );
+});
+
+test('a denied dispatch is recorded as denied', async () => {
+  const dir = forgeDir({
+    agents: {
+      'claude-code': {
+        included: { fast: 'haiku', standard: 'sonnet', capable: 'opus' },
+        metered: { fast: 'haiku', standard: 'sonnet', capable: 'opus' },
+      },
+    },
+  });
+  const file = withActiveSession(dir);
+
+  await dispatchUnder(dir, { prompt: 'x', model: 'gpt-5', subagent_type: 'Explore' });
+
+  const [row] = ledgerRows(file);
+  assert.equal(row.decision, 'deny');
+  assert.equal(row.modelRequested, 'gpt-5');
+  assert.equal(row.modelResolved, null, 'a refused dispatch resolved to nothing');
+  assert.equal(row.reason, 'outside-resolved-set');
+  assert.ok(
+    JSON.stringify(row).length < 400,
+    'the ledger carries a reason code, not the paragraph the coordinator is shown',
+  );
+});
+
+test('a project with no models.local.json still records its dispatches', async () => {
+  // The whole point is measuring how often the resolver is skipped, and a
+  // project that has not opted into enforcement is exactly where that is worth
+  // knowing. Logging must not be a side effect of having an overlay.
+  const dir = forgeDir(null);
+  const file = withActiveSession(dir);
+
+  const { stdout } = await dispatchUnder(dir, { prompt: 'x', model: 'sonnet' });
+  assert.equal(stdout, '', 'an un-overlaid project is still left completely alone');
+
+  const [row] = ledgerRows(file);
+  assert.equal(row.decision, 'allow');
+  assert.equal(row.reason, 'no-overlay');
+  assert.equal(row.modelResolved, 'sonnet', 'nothing was corrected, so the ask stands');
+  assert.equal(row.agentType, null);
+});
+
+test('every dispatch appends — a session records its whole history', async () => {
+  const dir = forgeDir(pinnedOverlay('opus'));
+  const file = withActiveSession(dir);
+
+  await dispatchUnder(dir, { model: 'sonnet' });
+  await dispatchUnder(dir, { model: 'opus' });
+  await dispatchUnder(dir, { model: 'haiku' });
+
+  assert.deepEqual(
+    ledgerRows(file).map((r) => r.decision),
+    ['rewrite', 'allow', 'rewrite'],
+  );
+});
+
+test('with no active Forge session the hook records nothing at all', async () => {
+  const dir = forgeDir(pinnedOverlay('opus'));
+  const { stdout } = await dispatchUnder(dir, { model: 'sonnet' });
+
+  assert.equal(JSON.parse(stdout).hookSpecificOutput.updatedInput.model, 'opus');
+  assert.equal(fs.existsSync(path.join(dir, 'sessions')), false);
+});
+
+test('a tool that is not a subagent dispatch is not a dispatch', async () => {
+  const dir = forgeDir(pinnedOverlay('opus'));
+  const file = withActiveSession(dir);
+
+  const out = capture();
+  await runEnforceModel(['--forge-dir', dir, '--agent', 'claude-code'], {
+    input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }),
+    stdout: out.stream,
+  });
+  await runEnforceModel(['--forge-dir', dir, '--agent', 'claude-code'], {
+    input: 'not json at all',
+    stdout: out.stream,
+  });
+
+  assert.deepEqual(ledgerRows(file), []);
+});
+
+test('a ledger write failure leaves the hook decision byte-identical', async () => {
+  // The existing contract: this hook may cost a measurement, never a subagent.
+  const good = forgeDir(pinnedOverlay('opus'));
+  withActiveSession(good);
+  const expected = await dispatchUnder(good, { prompt: 'x', model: 'sonnet' });
+
+  const broken = forgeDir(pinnedOverlay('opus'));
+  const file = withActiveSession(broken);
+  fs.mkdirSync(file); // the one write failure a tolerant writer cannot dodge
+
+  const actual = await dispatchUnder(broken, { prompt: 'x', model: 'sonnet' });
+
+  assert.equal(actual.code, 0);
+  assert.equal(actual.stdout, expected.stdout);
+  assert.notEqual(expected.stdout, '', 'the comparison is worthless if both are empty');
+});

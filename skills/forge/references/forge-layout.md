@@ -25,9 +25,17 @@ Optional `cursorChatId` on `session.json` when available — not required.
   models.local.json            ← optional; after `forge:models -- <lane>` or a hand-written
                                  per-tier overlay (enforced by the PreToolUse hook if wired)
   preferences.local.json       ← optional; only after `forge:prefs -- <pace>`
+  sessions.jsonl               ← one digest line per finished session; survives cleanup
+  scorecards.jsonl             ← one scorecard line per finished session
+  deferrals.jsonl              ← unresolved deferrals, promoted out before deletion
   sessions/<session-id>/
     session.json
     status.json
+    metrics.json               ← host telemetry; written at phase finish|done and by
+                                 `forge metrics collect`. Counts only — never prompts,
+                                 responses, command strings or file contents.
+    dispatches.jsonl           ← one line per subagent dispatch the model policy saw,
+                                 written by the `forge enforce-model` PreToolUse hook
     brainstorm/
       notes.md
       decisions.md
@@ -41,6 +49,11 @@ Optional `cursorChatId` on `session.json` when available — not required.
     reviews/
       final-review.md
 ```
+
+Everything under `sessions/<session-id>/` dies with `forge cleanup`. The three
+`*.jsonl` ledgers at the top are what survive, which is why `sessions.jsonl`
+carries a compact `metrics` block and `dispatches` counts rather than only a
+pointer to files that will be gone.
 
 Bare `forge models` / `forge:prefs` **print** effective values from committed
 defaults and do **not** create the `*.local.json` files. See [pace.md](./pace.md) and
@@ -66,6 +79,8 @@ defaults and do **not** create the `*.local.json` files. See [pace.md](./pace.md
 Under `standard` (`review.perTask: per-group`), also write `group-review.md` when an OpenSpec `tasks.md` section completes (see [pace.md](./pace.md)).
 
 | `preferencesOverride` | Optional session-only prefs patch |
+| `host` | `{agent, sessionIds[], boundAt}` — which host agent sessions drove this one. Filled from `CLAUDE_CODE_SESSION_ID` on every `forge new` / `forge phase`, so no hook is needed. Ids accumulate: a session resumed tomorrow under a new host session appends rather than replaces, and a command run outside a host never erases an existing binding. This is what lets telemetry find the right transcripts. |
+| `phaseHistory` | Chronological `[{phase, at}]` trail, appended on every real transition. Re-entering the same phase does not add a row (`forge phase implement --tasks-complete N` runs after every task). It is the join key that attributes host requests to the phase they were spent in. |
 | `createdAt` / `updatedAt` | ISO timestamps |
 
 ## Retention
@@ -80,7 +95,9 @@ Under `standard` (`review.perTask: per-group`), also write `group-review.md` whe
 | `forge status` | Read active session (+ effective pace) |
 | `forge prefs` | Get/set pace preferences |
 | `forge doctor` | OpenSpec project + CLI check |
-| `forge phase <phase>` | Update phase |
+| `forge phase <phase>` | Update phase (also collects metrics on `finish`/`done`) |
+| `forge metrics collect` | Harvest host transcripts → `metrics.json` for a session |
+| `forge analyze [--json]` | Read the ledgers back as numbers (read-only) |
 | `forge cleanup` | Prune stale sessions |
 
 Pace matrix: [pace.md](./pace.md).

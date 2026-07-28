@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { findRepoRoot, sessionAgeDays } from './lib.mjs';
+import { defaultSession, findRepoRoot, sessionAgeDays } from './lib.mjs';
 
 const SESSION_STATUS = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -125,4 +125,98 @@ test('forge status finds the session from a subdirectory of the project', () => 
   const saved = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
   assert.equal(saved.phase, 'brainstorm');
   assert.equal(fs.existsSync(path.join(nested, '.forge')), false);
+});
+
+test('defaultSession declares the host binding and phase history fields', () => {
+  // Declared here with every other session field rather than sprung into
+  // existence by the first command that writes one: `bindHost` replaces the
+  // null, and each phase transition appends to the array.
+  const session = defaultSession('20260101T000000Z-telemetry-abc123', 'telemetry');
+  assert.equal(session.host, null);
+  assert.deepEqual(session.phaseHistory, []);
+});
+
+const SRC_DIR = path.dirname(SESSION_STATUS);
+const FORGE_BIN = path.join(SRC_DIR, '..', 'bin', 'forge.mjs');
+
+/**
+ * Run a forge command in a scratch project root, with a scratch fleet dir and
+ * no inherited host id — these tests may themselves run inside a host session.
+ *
+ * @param {string} root
+ * @param {string[]} args
+ * @param {Record<string, string>} [env]
+ * @returns {string} stdout
+ */
+function runForge(root, args, env = {}) {
+  const base = {
+    ...process.env,
+    FORGEKIT_FLEET_DIR: path.join(tmp('forge-new-fleet-'), 's'),
+  };
+  delete base.CLAUDE_CODE_SESSION_ID;
+  return execFileSync(process.execPath, [FORGE_BIN, ...args], {
+    cwd: root,
+    env: { ...base, ...env },
+  }).toString();
+}
+
+/** @param {string} sessionDir */
+function readSession(sessionDir) {
+  return JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+}
+
+test('forge new binds the session to the host session that created it', () => {
+  // Binding at creation is what makes it work mid-conversation: the host
+  // session is already running, and no hook had to be installed for it.
+  const root = tmp('forge-new-host-');
+  const out = runForge(root, ['new', 'telemetry-probe'], { CLAUDE_CODE_SESSION_ID: 'host-new' });
+  const session = readSession(JSON.parse(out).dir);
+
+  assert.equal(session.host.agent, 'claude-code');
+  assert.deepEqual(session.host.sessionIds, ['host-new']);
+});
+
+test('forge new outside any host session succeeds, silently, and stays unbound', () => {
+  // Cursor, Codex and a plain shell all land here. Creation must not depend on
+  // a host being present, and must not warn about it — a warning on every
+  // command in those editors would be trained away within a day.
+  const root = tmp('forge-new-nohost-');
+  const env = { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-new-fleet-'), 's') };
+  delete env.CLAUDE_CODE_SESSION_ID;
+
+  const res = spawnSync(process.execPath, [FORGE_BIN, 'new', 'telemetry-probe'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  });
+
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(res.stderr, /bind|host/i);
+
+  const session = readSession(JSON.parse(res.stdout).dir);
+  assert.equal(session.host.agent, 'unknown');
+  assert.deepEqual(session.host.sessionIds, []);
+  assert.equal(session.host.boundAt, undefined, 'nothing was bound, so nothing to timestamp');
+});
+
+test('forge new seeds phaseHistory with the triage phase it starts in', () => {
+  // phaseHistory is the join key telemetry attributes host requests by, so it
+  // has to cover the whole session: without a first row at createdAt, every
+  // request before the first `forge phase` falls into a hole.
+  const root = tmp('forge-new-history-');
+  const session = readSession(JSON.parse(runForge(root, ['new', 'telemetry-probe'])).dir);
+
+  assert.deepEqual(session.phaseHistory, [{ phase: 'triage', at: session.createdAt }]);
+});
+
+test('forge new then forge phase triage records one triage row, not two', () => {
+  const root = tmp('forge-new-history-idem-');
+  const dir = JSON.parse(runForge(root, ['new', 'telemetry-probe'])).dir;
+  const createdAt = readSession(dir).createdAt;
+
+  runForge(root, ['phase', 'triage']);
+
+  // The seeded row survives: re-entering the phase is not a transition, and
+  // the timeline still starts exactly where the session does.
+  assert.deepEqual(readSession(dir).phaseHistory, [{ phase: 'triage', at: createdAt }]);
 });

@@ -42,6 +42,8 @@ const COMMANDS = {
   fleet: { script: 'fleet.mjs' },
   brief: { script: 'brief-cli.mjs' },
   finding: { script: 'findings-cli.mjs', aliases: ['findings'] },
+  metrics: { script: 'metrics-cli.mjs' },
+  analyze: { script: 'analyze-cli.mjs', aliases: ['analyse'] },
 };
 
 function printHelp() {
@@ -77,6 +79,8 @@ Commands:
   fleet list|report|watch|view|send  Cross-project control terminal + trend
   brief stamp|check|open  Operator brief (plain-language HTML, gates implement)
   finding add|list|resolve    Findings ledger — give an observation a home
+  metrics collect         Harvest host transcripts → session metrics.json
+  analyze [--json]        Coverage, per-model/phase totals, policy skip rate
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.
 

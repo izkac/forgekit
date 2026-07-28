@@ -15,6 +15,15 @@
  *   show         forge e2e harness / forge e2e init surface both fields
  *   red-run      a failing loop names the recorded setup
  *   quiet-cases  green-with-setup and red-without-setup print no hint
+ *
+ * Session-telemetry loop (specs/changes/session-telemetry/e2e.json), sharing
+ * `boot` and layering its own fixture on top:
+ *   telemetry-collect  synthetic host transcript + sidecar + dispatch ledger →
+ *                      forge metrics collect
+ *   telemetry-analyze  forge phase done → digest → forge analyze --json
+ *
+ * `all` deliberately stays the harness-setup-probe rig's own five phases: it is
+ * that change's recorded probe and its verdict must keep meaning what it meant.
  */
 
 import fs from 'node:fs';
@@ -38,14 +47,21 @@ const PROBE_CMD = 'npm run test:e2e';
 const START_CMD = 'npm run build && npm run preview';
 const HINT = 'Harness setup recorded';
 
-/** Run the real forge binary in `cwd`; never throws on a non-zero exit. */
-function forge(cwd, args) {
-  const r = spawnSync(process.execPath, [FORGE_BIN, ...args], {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet') },
-  });
-  return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, code: r.status };
+/**
+ * Run the real forge binary in `cwd`; never throws on a non-zero exit.
+ *
+ * The operator's own host session id is dropped: this rig drives a throwaway
+ * project, and a session bound to the id of the Claude Code session that
+ * happens to be running the suite would be measuring the wrong thing.
+ *
+ * `stdout` is returned separately from the combined `out` because `--json`
+ * output has to be parsed, and forge writes advisory notes to stderr.
+ */
+function forge(cwd, args, extraEnv = {}) {
+  const env = { ...process.env, FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet'), ...extraEnv };
+  delete env.CLAUDE_CODE_SESSION_ID;
+  const r = spawnSync(process.execPath, [FORGE_BIN, ...args], { cwd, encoding: 'utf8', env });
+  return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, stdout: r.stdout ?? '', code: r.status };
 }
 
 /**
@@ -93,6 +109,86 @@ function writeLoop(dir, ok) {
 function fail(message, context) {
   process.stderr.write(`ASSERTION FAILED: ${message}\n${context ?? ''}\n`);
   process.exit(1);
+}
+
+/* ---------- session telemetry fixture ---------- */
+
+const HOST_ID = 'e2e0host-0000-1111-2222-333344445555';
+const HOST_CFG = path.join(SCRATCH, '.claude-host');
+/** 10 coordinator requests + 2 subagent requests. The step's expected total. */
+const PARENT_REQUESTS = 10;
+const SIDECAR_REQUESTS = 2;
+
+/**
+ * One assistant transcript line.
+ *
+ * The host writes one line per content block and repeats the whole `usage`
+ * object on each, so the fixture below spreads 12 requests over 24 lines: a
+ * reader that counted lines, or summed usage across them, gets a plausible and
+ * completely wrong answer. That is the regression this loop exists to catch.
+ */
+function assistantLine(requestId, block, at, sidechain) {
+  return JSON.stringify({
+    type: 'assistant',
+    requestId,
+    timestamp: at,
+    version: '2.1.220',
+    isSidechain: sidechain,
+    ...(sidechain ? { agentId: 'a1' } : {}),
+    message: {
+      id: `msg_${requestId}`,
+      model: 'claude-opus-5',
+      content: [{ type: 'tool_use', id: `toolu_${requestId}_${block}`, name: 'Bash' }],
+      usage: {
+        input_tokens: 3,
+        output_tokens: 40,
+        cache_read_input_tokens: 900,
+        cache_creation_input_tokens: 7,
+      },
+    },
+  });
+}
+
+/** A synthetic host transcript plus one subagent sidecar, under HOST_CFG. */
+function plantTranscripts(at) {
+  const projectDir = path.join(HOST_CFG, 'projects', '-scratch-project');
+  const sidecarDir = path.join(projectDir, HOST_ID, 'subagents');
+  fs.rmSync(HOST_CFG, { recursive: true, force: true });
+  fs.mkdirSync(sidecarDir, { recursive: true });
+
+  const parent = [];
+  for (let i = 0; i < PARENT_REQUESTS; i += 1) {
+    for (let block = 0; block <= i % 3; block += 1) {
+      parent.push(assistantLine(`req_p${i}`, block, at, false));
+    }
+  }
+  parent.push(
+    JSON.stringify({
+      type: 'user',
+      timestamp: at,
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_req_p0_0', is_error: true }] },
+    }),
+  );
+  fs.writeFileSync(path.join(projectDir, `${HOST_ID}.jsonl`), `${parent.join('\n')}\n`, 'utf8');
+
+  const sidecar = [];
+  for (let i = 0; i < SIDECAR_REQUESTS; i += 1) {
+    for (let block = 0; block < 2; block += 1) {
+      sidecar.push(assistantLine(`req_s${i}`, block, at, true));
+    }
+  }
+  fs.writeFileSync(path.join(sidecarDir, 'agent-a1.jsonl'), `${sidecar.join('\n')}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(sidecarDir, 'agent-a1.meta.json'),
+    `${JSON.stringify({
+      agentType: 'general-purpose',
+      description: 'PRIVATE-E2E-DESCRIPTION',
+      toolUseId: 'toolu_dispatch_1',
+      spawnDepth: 1,
+      model: 'opus',
+    })}\n`,
+    'utf8',
+  );
 }
 
 const phase = process.argv[2];
@@ -192,7 +288,105 @@ if (phase === 'boot') {
   if (red.out.includes(HINT)) fail('hint printed with no recorded setup', red.out);
   if (red.code === 0) fail('a failing loop must exit non-zero', red.out);
   process.stdout.write('NO HINT red-without-setup\n');
+} else if (phase === 'telemetry-collect') {
+  // Layer a bound session and a synthetic host transcript onto `boot`'s
+  // project, then run the shipped `forge metrics collect` over it.
+  const sessionDir = path.join(SCRATCH, '.forge', 'sessions', 's1');
+  const sessionFile = path.join(sessionDir, 'session.json');
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  const at = new Date(Date.now() - 60_000).toISOString();
+
+  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  session.createdAt = createdAt;
+  session.updatedAt = at;
+  session.phase = 'implement';
+  session.tasksTotal = 1;
+  session.tasksComplete = 1;
+  session.host = { agent: 'claude-code', sessionIds: [HOST_ID], boundAt: createdAt };
+  session.phaseHistory = [{ phase: 'implement', at: createdAt }];
+  fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+
+  plantTranscripts(at);
+
+  // Three dispatches, one of which the policy had to rewrite → skipped = 1.
+  fs.writeFileSync(
+    path.join(sessionDir, 'dispatches.jsonl'),
+    `${[
+      { ts: at, tool: 'Agent', decision: 'allow', modelRequested: 'opus', modelResolved: 'opus' },
+      { ts: at, tool: 'Agent', decision: 'rewrite', modelRequested: 'sonnet', modelResolved: 'opus' },
+      { ts: at, tool: 'Agent', decision: 'allow', modelRequested: 'opus', modelResolved: 'opus' },
+    ]
+      .map((r) => JSON.stringify(r))
+      .join('\n')}\n`,
+    'utf8',
+  );
+
+  const { out, code } = forge(SCRATCH, ['metrics', 'collect'], { CLAUDE_CONFIG_DIR: HOST_CFG });
+  if (code !== 0) fail(`forge metrics collect exited ${code}`, out);
+
+  const doc = JSON.parse(fs.readFileSync(path.join(sessionDir, 'metrics.json'), 'utf8'));
+  if (doc.available !== true) fail('collector degraded on a planted transcript', doc.reason);
+  const expected = PARENT_REQUESTS + SIDECAR_REQUESTS;
+  if (doc.requests !== expected) {
+    fail(`requests ${doc.requests}, expected ${expected} — per-content-block lines counted twice?`, out);
+  }
+  if (doc.subagents.length !== 1) fail(`subagents ${doc.subagents.length}, expected 1`, out);
+  if (doc.dispatches.skipped !== 1) fail(`dispatchesSkipped ${doc.dispatches.skipped}, expected 1`, out);
+  if (JSON.stringify(doc).includes('PRIVATE-E2E-DESCRIPTION')) {
+    fail('a subagent description reached the persisted document', out);
+  }
+
+  process.stdout.write(
+    `METRICS requests=${doc.requests} subagents=${doc.subagents.length} dispatchesSkipped=${doc.dispatches.skipped}\n`,
+  );
+} else if (phase === 'telemetry-analyze') {
+  // The other half of the loop: finishing the session must collect, digest and
+  // then be readable back as numbers by a separate command.
+  const done = forge(
+    SCRATCH,
+    ['phase', 'done', '--allow-incomplete', 'e2e telemetry fixture'],
+    { CLAUDE_CONFIG_DIR: HOST_CFG },
+  );
+  if (done.code !== 0) fail(`forge phase done exited ${done.code}`, done.out);
+
+  const digest = JSON.parse(
+    fs
+      .readFileSync(path.join(SCRATCH, '.forge', 'sessions.jsonl'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .at(-1),
+  );
+  const expected = PARENT_REQUESTS + SIDECAR_REQUESTS;
+  if (digest.metrics?.requests !== expected) {
+    fail(`digest requests ${digest.metrics?.requests}, expected ${expected}`, JSON.stringify(digest));
+  }
+  if (digest.dispatchesSkipped !== 1) {
+    fail(`digest dispatchesSkipped ${digest.dispatchesSkipped}, expected 1`, JSON.stringify(digest));
+  }
+  if (digest.subagentsDispatched !== 1) {
+    fail(`digest subagentsDispatched ${digest.subagentsDispatched}, expected 1`, JSON.stringify(digest));
+  }
+
+  const analysis = forge(SCRATCH, ['analyze', '--json']);
+  if (analysis.code !== 0) fail(`forge analyze exited ${analysis.code}`, analysis.out);
+  const a = JSON.parse(analysis.stdout);
+  const { sessionsWithMetrics, sessionsTotal } = a.coverage;
+  if (sessionsWithMetrics !== 1 || sessionsTotal !== 1) {
+    fail(`coverage ${sessionsWithMetrics}/${sessionsTotal}, expected 1/1`, analysis.stdout);
+  }
+  if (a.totals.requests !== expected) {
+    fail(`analysis requests ${a.totals.requests}, expected ${expected}`, analysis.stdout);
+  }
+  if (a.dispatches.skipped !== 1) fail(`analysis skipped ${a.dispatches.skipped}`, analysis.stdout);
+  const models = Object.keys(a.byModel);
+  if (!models.some((m) => m.startsWith('claude-'))) fail('no model reached the analysis', analysis.stdout);
+
+  process.stdout.write(
+    `ANALYZE coverage=${sessionsWithMetrics}/${sessionsTotal} models=${models.sort().join(',')}\n`,
+  );
 } else {
-  process.stderr.write('Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases\n');
+  process.stderr.write(
+    'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|telemetry-analyze\n',
+  );
   process.exit(1);
 }

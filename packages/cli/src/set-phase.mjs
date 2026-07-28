@@ -14,12 +14,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadSession, readActive, saveSession } from './lib.mjs';
+import { appendPhaseHistory, loadSession, readActive, saveSession, writeJson } from './lib.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
 import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
+import { bindHost } from './metrics/host.mjs';
+import { collectMetrics } from './metrics/collect.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -100,6 +102,21 @@ if (!sessionId) {
 
 const { dir, session } = loadSession(sessionId);
 session.phase = phase;
+appendPhaseHistory(session, phase, new Date().toISOString());
+
+// A session created in one host session and resumed in another accumulates
+// both ids, so telemetry can find every transcript that drove it. Bound here,
+// before the gates and the scorecard: the collector runs at scorecard time, so
+// an id first seen on this very command must already be recorded, and pure
+// bookkeeping on an in-memory object must not depend on which gates pass.
+// Silent on failure by design: running outside a host (Cursor, Codex, a plain
+// shell) is normal, and a warning on every command would be trained away.
+try {
+  bindHost(session, process.env);
+} catch {
+  // advisory — a missing binding must never block a phase transition
+}
+
 if (planType) session.planType = planType;
 if (openspecChange !== null) session.openspecChange = openspecChange;
 if (tasksTotal !== null) session.tasksTotal = tasksTotal;
@@ -262,6 +279,27 @@ function enforceFinalReviewFloor() {
 
 enforceFinalReviewFloor();
 enforceDoneGate();
+
+// Host telemetry on finish/done, and it has to happen *here* — before the
+// scorecard, which is what appends the sessions.jsonl digest, and the digest
+// reads metrics.json. Collected after it, every session's durable line would
+// carry the previous run's numbers, or none at all.
+//
+// `collectMetrics` already degrades instead of throwing; this guard is for the
+// write, and for the same reason as the scorecard's: telemetry may cost a
+// session its numbers, never its transition.
+if (phase === 'done' || phase === 'finish') {
+  try {
+    writeJson(
+      path.join(dir, 'metrics.json'),
+      collectMetrics({ session, sessionDir: dir, env: process.env }),
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not collect session metrics: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
 
 // L2 scorecard on finish/done — always write so sessions leave a measurable trail
 if (phase === 'done' || phase === 'finish') {

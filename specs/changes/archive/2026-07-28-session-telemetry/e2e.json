@@ -1,0 +1,20 @@
+{
+  "change": "session-telemetry",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "produce",
+      "cmd": "node scripts/e2e/harness-portability.mjs telemetry-collect",
+      "expect": "METRICS requests=12 subagents=1 dispatchesSkipped=1"
+    },
+    {
+      "name": "consume-assert",
+      "cmd": "node scripts/e2e/harness-portability.mjs telemetry-analyze",
+      "expect": "ANALYZE coverage=1/1 models=[^\\n]*claude-"
+    }
+  ]
+}

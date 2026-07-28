@@ -9,6 +9,7 @@
 
 import { spawnSync } from 'node:child_process';
 import {
+  appendPhaseHistory,
   defaultSession,
   defaultStatus,
   ensureForgeLayout,
@@ -20,6 +21,7 @@ import {
   sessionPath,
   writeActive,
 } from './lib.mjs';
+import { bindHost } from './metrics/host.mjs';
 import { resolveSessionPaceFields } from './preferences.mjs';
 import { warnIfDoctorFails } from './doctor.mjs';
 import { liveOverlaps, queueMessage, sessionDirFor } from './lib/fleet.mjs';
@@ -55,6 +57,9 @@ const dir = sessionPath(sessionId);
 scaffoldSessionDirs(dir);
 
 const session = defaultSession(sessionId, slug);
+// Start the timeline where the session starts — `createdAt`, not "now" — so
+// no work falls into a gap before the first `forge phase` transition.
+appendPhaseHistory(session, session.phase, session.createdAt);
 if (cursorChatId) session.cursorChatId = cursorChatId;
 
 // Where this session started, so reviewers have a diff range even when the
@@ -76,6 +81,15 @@ const paceFields = resolveSessionPaceFields({
   signalText: signalText || session.slug,
 });
 Object.assign(session, paceFields);
+
+// Record which host session is creating this one, so telemetry can find its
+// transcripts later. Silent on failure: sessions are routinely created outside
+// a host (Cursor, Codex, a plain shell), and creation must never depend on it.
+try {
+  bindHost(session, process.env);
+} catch {
+  // advisory — a missing binding must never break session creation
+}
 
 saveSession(dir, session);
 writeActive(sessionId);
