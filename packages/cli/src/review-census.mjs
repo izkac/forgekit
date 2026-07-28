@@ -31,6 +31,17 @@ import path from 'node:path';
  * unrecognised declaration reads as *independent*, so a phrase Forge itself
  * prescribes would otherwise defeat the money/auth done gate.
  *
+ * The last alternative names the coordinator *as the reviewer* — `**Reviewer:**
+ * coordinator`, which is the skill's own phrasing minus its `self-check`
+ * suffix. 0.3.26 shipped without it and a design review found the escape live:
+ * a helm final review whose next words are "a final-reviewer subagent was
+ * dispatched and declined by the operator" classified as **independent** on a
+ * high-risk session with no waiver. Adjacency is what keeps it safe — only
+ * punctuation and emphasis may sit between `reviewer` and `coordinator`, so
+ * "Reviewer: claude-opus-5, dispatched by the coordinator" is untouched. The
+ * trailing `(?!-)` is the other half: `Reviewer: coordinator-dispatched opus
+ * subagent` uses the word as an adjective, and demoting it would refuse work.
+ *
  * They are matched against the **attribution region only** — the header block
  * and any line that opens with an attribution — never the whole body. A first
  * attempt scanned everything and demoted a dispatched reviewer who merely
@@ -44,7 +55,7 @@ import path from 'node:path';
  * authorship, which is what both attempts have now demonstrated.
  */
 const SELF_REVIEW_RE =
-  /APPROVED \(pace|self[- ]review|self[- ]check|self[- ]audit|self[- ]authored|reviewed by the coordinator/i;
+  /APPROVED \(pace|self[- ]review|self[- ]check|self[- ]audit|self[- ]authored|reviewed by the coordinator|reviewer[\s*_:—–-]*(?:the\s+)?(?:coordinator|author|myself)\b(?!-)/i;
 
 /**
  * A line that opens by naming who reviewed — not prose that mentions one.

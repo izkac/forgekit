@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.3.27 — 2026-07-28
+
+### Naming the coordinator as the reviewer is a self-declaration
+
+0.3.26 shipped with a gate escape, found by an independent design review an hour
+after publish. `SELF_REVIEW_RE` knew `reviewed by the coordinator` but not
+`Reviewer: coordinator` — the skill's own prescribed phrasing minus its
+`self-check` suffix. A real final review reading
+
+> **Reviewer:** coordinator. A final-reviewer subagent was dispatched and
+> **declined by the operator**
+
+classified as **independent**, on a high-risk session with no waiver: exactly the
+case the money/auth `forge phase done` floor exists for.
+
+Two guards keep the new alternative from erring the other way, both with tests.
+Only punctuation and emphasis may sit between the attribution and the name, so
+`Reviewer: claude-opus-5, dispatched by the coordinator` stays independent; and a
+trailing `(?!-)` keeps `Reviewer: coordinator-dispatched opus subagent` — the word
+used as an adjective — from being demoted. Demotion refuses work, so a false one
+costs more than a false promotion.
+
+One artifact in the local corpus of 34 changes classification, which is the one
+that prompted the fix.
+
 ## 0.3.26 — 2026-07-28
 
 ### Reverts 0.3.24 and 0.3.25's scoring changes

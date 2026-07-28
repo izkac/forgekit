@@ -124,6 +124,35 @@ test('a self-declaration is read wherever attribution actually lives', () => {
   }
 });
 
+test('naming the coordinator as the reviewer is a self-declaration', () => {
+  // The escape 0.3.26 shipped with, found by a design review after publish. The
+  // real helm artifact opens `**Reviewer:** coordinator` and its very next words
+  // are "a final-reviewer subagent was dispatched and declined by the operator";
+  // it classified as independent on a high-risk session with no waiver.
+  for (const body of [
+    '# Final review\n\n**Verdict: APPROVED**\n**Reviewer:** coordinator. A final-reviewer subagent was dispatched and\ndeclined by the operator.\n',
+    'Reviewer: the coordinator\n\nAPPROVED\n',
+    'Reviewer: the author\n\nAPPROVED\n',
+  ]) {
+    assert.equal(reviewCensus(sessionWith({}, body)).finalReview, 'self', body.split('\n')[0]);
+  }
+
+  // Adjacency is one guard: only punctuation and emphasis may sit between the
+  // attribution and the name, so a dispatched reviewer who merely says who
+  // dispatched them stays independent. The trailing `(?!-)` is the other —
+  // `coordinator-dispatched` uses the word as an adjective, and demoting on it
+  // would refuse work at the gate. Found by an adversarial pass before ship.
+  for (const body of [
+    'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n',
+    'Reviewer: claude-opus-5, dispatched by the coordinator for group 3.\n\n**READY**\n',
+    'Reviewer: coordinator-dispatched opus subagent\n\n**READY**\n',
+    'Reviewer: authored by claude-opus-5\n\n**READY**\n',
+    'Reviewer: independent task reviewer, single pass.\n\nAPPROVED\n',
+  ]) {
+    assert.equal(reviewCensus(sessionWith({}, body)).finalReview, 'independent', body.split('\n')[0]);
+  }
+});
+
 test('a hard-wrapped declaration is still a declaration', () => {
   // The real volo final review. Its attribution wraps across three lines and
   // the word `self-review` lands on the third, so a line-counted window
