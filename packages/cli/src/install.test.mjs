@@ -12,12 +12,14 @@ import {
   uninstallSkillsFromAgents,
   updateOutdatedSkills,
   readInstallStamp,
+  adrConfigPatch,
   resolveAdrInstallOptions,
   FORGEKIT_STAMP,
   SKILL_IDS,
   AGENT_IDS,
   AGENTS,
 } from './install.mjs';
+import { loadUserConfig, saveUserConfig } from './config.mjs';
 
 test('parseArgs supports multi skills and agents', () => {
   const opts = parseArgs([
@@ -149,13 +151,25 @@ test('reconcileInstall without prune is additive (no removals)', () => {
   }
 });
 
-test('resolveAdrInstallOptions: no ADR skill selected → disabled, no path prompt', async () => {
-  const off = await resolveAdrInstallOptions({
+test('resolveAdrInstallOptions: saying nothing is not saying no', async () => {
+  // `forgekit install --skills forge` expresses no ADR preference. Collapsing
+  // that to `false` and persisting it overwrote a user's stored `enabled: true`
+  // and announced "ADR preference saved: disabled" — from a command whose whole
+  // job was refreshing one skill. inferAdrFromSkills is tri-state precisely so
+  // "unknown" survives; it was being flattened one line later.
+  const unstated = await resolveAdrInstallOptions({
     adr: null,
     adrDir: null,
     skills: ['forge'],
   });
-  assert.equal(off.enabled, false);
+  assert.equal(unstated.enabled, null, 'no signal must stay null, not become false');
+
+  const off = await resolveAdrInstallOptions({
+    adr: false,
+    adrDir: null,
+    skills: ['forge'],
+  });
+  assert.equal(off.enabled, false, '--no-adr is a real preference');
   const on = await resolveAdrInstallOptions({
     adr: null,
     adrDir: 'docs/decisions',
@@ -163,6 +177,26 @@ test('resolveAdrInstallOptions: no ADR skill selected → disabled, no path prom
   });
   assert.equal(on.enabled, true);
   assert.equal(on.dir, 'docs/decisions');
+});
+
+test('a run that states no ADR preference leaves the stored one alone', () => {
+  // The `agents` key in the same saveUserConfig call already works this way —
+  // "narrow flag runs don't clobber it". The `adr` key did not.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-adrpref-'));
+  try {
+    saveUserConfig({ adr: { enabled: true, dir: 'docs/adr' } }, home);
+
+    saveUserConfig(adrConfigPatch(null, 'docs/adr'), home);
+    assert.equal(loadUserConfig(home).adr.enabled, true, 'silence must not disable');
+
+    saveUserConfig(adrConfigPatch(false, 'docs/adr'), home);
+    assert.equal(loadUserConfig(home).adr.enabled, false, 'an explicit --no-adr still lands');
+
+    saveUserConfig(adrConfigPatch(true, 'docs/decisions'), home);
+    assert.deepEqual(loadUserConfig(home).adr, { enabled: true, dir: 'docs/decisions' });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('updateOutdatedSkills refreshes unversioned installs', () => {

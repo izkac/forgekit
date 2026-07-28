@@ -110,3 +110,30 @@ test('the rendered report leads with the fleet summary', () => {
   assert.match(text, /volo/);
   assert.match(text, /reviews/);
 });
+
+test('review totals from different census rules are flagged, not silently summed', () => {
+  // Four classifiers wrote verdicts in one day. Adding `independent` across
+  // rules produces a number with no meaning, and the report used to print it
+  // with the same confidence as a single-rule total.
+  const mixed = makeProject('mixed', {
+    scores: [{ sessionId: 'a', score: 90, grade: 'A' }, { sessionId: 'b', score: 80, grade: 'B' }],
+    digests: [
+      { sessionId: 'a', reviews: { independent: 2, selfChecks: 0, rejections: 0, final: 'independent', rule: 3 } },
+      { sessionId: 'b', reviews: { independent: 1, selfChecks: 1, rejections: 0, final: 'self' } },
+    ],
+  });
+  const report = buildFleetReport([mixed]);
+
+  assert.deepEqual(report.totals.reviews.rules, [0, 3], 'a missing rule is rule 0, not absent');
+  assert.equal(report.totals.reviews.mixedRules, true);
+  assert.match(formatFleetReport(report), /mixed census rules/i);
+
+  const uniform = makeProject('uniform', {
+    scores: [{ sessionId: 'a', score: 90, grade: 'A' }],
+    digests: [{ sessionId: 'a', reviews: { independent: 2, selfChecks: 0, rejections: 0, final: 'independent', rule: 3 } }],
+  });
+  const clean = buildFleetReport([uniform]);
+  assert.deepEqual(clean.totals.reviews.rules, [3]);
+  assert.equal(clean.totals.reviews.mixedRules, false);
+  assert.doesNotMatch(formatFleetReport(clean), /mixed census rules/i);
+});

@@ -118,6 +118,21 @@ function attributionRegion(body) {
   return kept.concat(attributions).join('\n');
 }
 
+/**
+ * Which classifier produced a verdict.
+ *
+ * Four rules have written verdicts into `.forge/sessions.jsonl` — in one day —
+ * and nothing recorded which, so a cross-project total sums numbers that were
+ * never comparable. Bump this whenever classification changes; a digest line
+ * with no `rule` predates the field and is rule 0.
+ *
+ *   0  ≤ 0.3.23 — narrow phrase list, independent by default
+ *   1  0.3.24–0.3.25 — fail closed: independence had to be claimed
+ *   2  0.3.26 — inference again, self-declarations read in the attribution region
+ *   3  0.3.27 — `Reviewer: coordinator` counts as a declaration
+ */
+export const CENSUS_RULE = 3;
+
 /** A round that sent work back: proof the review was not a rubber stamp. */
 const REJECTION_RE = /\bREJECT(ED)?\b/;
 
@@ -132,7 +147,14 @@ const REJECTION_RE = /\bREJECT(ED)?\b/;
  * @param {string} sessionDir
  */
 export function reviewCensus(sessionDir) {
-  const census = { total: 0, independent: 0, selfChecks: 0, rejections: 0, finalReview: null };
+  const census = {
+    total: 0,
+    independent: 0,
+    selfChecks: 0,
+    rejections: 0,
+    finalReview: null,
+    rule: CENSUS_RULE,
+  };
   /** @param {string} file */
   const read = (file) => {
     if (!fs.existsSync(file)) return null;

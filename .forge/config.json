@@ -4,7 +4,7 @@
     "dir": "specs"
   },
   "adr": {
-    "enabled": true,
+    "enabled": false,
     "dir": "docs/adr"
   },
   "git": {

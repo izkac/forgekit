@@ -579,16 +579,42 @@ export function inferAdrFromSkills(skills, adrFlag) {
 }
 
 /**
+ * The `adr` slice of the user-config patch, or nothing at all.
+ *
+ * `null` means the user expressed no preference — no `--adr`, no `--no-adr`, no
+ * ADR skill in the selection — and a run that says nothing must not overwrite
+ * what they chose before. `forgekit install --skills forge` used to persist
+ * `enabled: false` and announce "ADR preference saved: disabled", silently
+ * changing the default for every future `forge init`.
+ *
+ * The `agents` key in the same `saveUserConfig` call already works this way:
+ * written only when deliberately chosen, so narrow flag runs do not clobber it.
+ *
+ * @param {boolean | null} enabled
+ * @param {string} dir
+ * @returns {Record<string, unknown>} `{}` when there is nothing to record
+ */
+export function adrConfigPatch(enabled, dir) {
+  return enabled === null ? {} : { adr: { enabled, dir } };
+}
+
+/**
  * Resolve ADR enablement + directory. ADRs turn on when an ADR skill is picked
  * (or --adr); the path is only asked when enabled — never a standalone prompt.
+ *
+ * `enabled` is tri-state on purpose: `null` is "the user said nothing", and
+ * collapsing it to `false` is what let a skill refresh rewrite a stored
+ * preference. Callers deciding whether to *install* ADR skills should test
+ * `=== true`; callers deciding whether to *persist* must not treat null as no.
+ *
  * @param {{ adr: boolean | null, adrDir: string | null, skills: string[] }} opts
- * @returns {Promise<{ enabled: boolean, dir: string }>}
+ * @returns {Promise<{ enabled: boolean | null, dir: string }>}
  */
 export async function resolveAdrInstallOptions(opts) {
-  const enabled = inferAdrFromSkills(opts.skills, opts.adr) === true;
-  if (!enabled) {
+  const inferred = inferAdrFromSkills(opts.skills, opts.adr);
+  if (inferred !== true) {
     return {
-      enabled: false,
+      enabled: inferred,
       dir: opts.adrDir ? normalizeAdrDir(opts.adrDir) : DEFAULT_ADR_DIR,
     };
   }
@@ -726,10 +752,10 @@ export async function runInstall(argv = process.argv.slice(2)) {
     skills,
   });
 
-  skills = applyAdrSkills(skills, adrOpts.enabled);
+  skills = applyAdrSkills(skills, adrOpts.enabled === true);
 
   saveUserConfig({
-    adr: { enabled: adrOpts.enabled, dir: adrOpts.dir },
+    ...adrConfigPatch(adrOpts.enabled, adrOpts.dir),
     // Remember the environment set so `forge init` can pre-check it. Only when
     // deliberately chosen (picker or --all-agents) — narrow flag runs don't clobber it.
     ...(resolved.agentsPrompted || opts.allAgents || opts.all ? { agents } : {}),
@@ -761,16 +787,18 @@ export async function runInstall(argv = process.argv.slice(2)) {
       } — per-project setup happens at \`forge init\`.\n`,
     );
   }
-  process.stdout.write(
-    `${useOpenSpec !== null ? '' : '\n'}ADR preference saved (~/.forgekit/config.json): ${
-      adrOpts.enabled ? `enabled, dir=${adrOpts.dir}` : 'disabled'
-    }\n`,
-  );
+  if (adrOpts.enabled !== null) {
+    process.stdout.write(
+      `${useOpenSpec !== null ? '' : '\n'}ADR preference saved (~/.forgekit/config.json): ${
+        adrOpts.enabled ? `enabled, dir=${adrOpts.dir}` : 'disabled'
+      }\n`,
+    );
+  }
 
   const inRepo = isGitRepo(opts.cwd);
   const shouldScaffold =
     !opts.noAdrProject &&
-    adrOpts.enabled &&
+    adrOpts.enabled === true &&
     (opts.adrProject || (inRepo && process.stdin.isTTY));
 
   if (shouldScaffold) {

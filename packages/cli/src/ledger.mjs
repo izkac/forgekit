@@ -210,6 +210,9 @@ export function appendSessionDigest(opts) {
         selfChecks: census.selfChecks,
         rejections: census.rejections,
         final: census.finalReview,
+        // Which classifier judged them. Without it, fleet-report sums verdicts
+        // from incompatible rules and prints the result as one number.
+        rule: census.rule ?? 0,
       },
       checkpoints: Array.isArray(session.checkpoints) ? session.checkpoints.length : 0,
       health: health.state,

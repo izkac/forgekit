@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { appendDeferralLedger, appendSessionDigest, readLedger } from './ledger.mjs';
+import { CENSUS_RULE } from './review-census.mjs';
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
@@ -375,4 +376,20 @@ test('a session with no waiver records null, not an empty claim', () => {
   const { sessionDir, session } = makeSession(root, 's1');
   appendSessionDigest({ cwd: root, sessionDir, session, card: null });
   assert.equal(digestOf(root).finalReviewWaived, null);
+});
+
+test('the digest records which census rule judged its reviews', () => {
+  const root = tmp('forge-ledger-censusrule-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, 'reviews', 'final-review.md'),
+    'Reviewer: claude-opus-5 (final-reviewer)\n\nREADY\n',
+    'utf8',
+  );
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const entry = digestOf(root);
+  assert.equal(entry.reviews.rule, CENSUS_RULE);
+  assert.equal(entry.reviews.final, 'independent');
 });

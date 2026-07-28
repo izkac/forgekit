@@ -35,7 +35,16 @@ export function buildFleetReport(entries) {
       capped: 0,
       capReasons: /** @type {string[]} */ ([]),
       topDeductions: /** @type {any[]} */ ([]),
-      reviews: { independent: 0, selfChecks: 0, rejections: 0, finalIndependent: 0, finalSelf: 0 },
+      reviews: {
+        independent: 0,
+        selfChecks: 0,
+        rejections: 0,
+        finalIndependent: 0,
+        finalSelf: 0,
+        /** Census rules seen, sorted. More than one means these totals mix scales. */
+        rules: /** @type {number[]} */ ([]),
+        mixedRules: false,
+      },
       subagents: 0,
       openDeferrals: 0,
     },
@@ -87,6 +96,9 @@ export function buildFleetReport(entries) {
         out.totals.capReasons.push(...s.caps);
       }
       if (s.reviews) {
+        // A line written before the field existed is rule 0, not "no rule".
+        const rule = typeof s.reviews.rule === 'number' ? s.reviews.rule : 0;
+        if (!out.totals.reviews.rules.includes(rule)) out.totals.reviews.rules.push(rule);
         out.totals.reviews.independent += s.reviews.independent ?? 0;
         out.totals.reviews.selfChecks += s.reviews.selfChecks ?? 0;
         out.totals.reviews.rejections += s.reviews.rejections ?? 0;
@@ -124,6 +136,8 @@ export function buildFleetReport(entries) {
   out.totals.projects = out.projects.length;
   const scored = out.projects.reduce((n, p) => n + p.scored, 0);
   out.totals.meanScore = scored ? Math.round(scoreSum / scored) : null;
+  out.totals.reviews.rules.sort((a, b) => a - b);
+  out.totals.reviews.mixedRules = out.totals.reviews.rules.length > 1;
   out.totals.topDeductions = [...deductions.values()].sort((a, b) => b.lostPoints - a.lostPoints);
   return out;
 }
@@ -148,6 +162,11 @@ export function formatFleetReport(report) {
   lines.push(
     `  reviews: ${t.reviews.independent} dispatched · ${t.reviews.selfChecks} self-check · ${t.reviews.rejections} rejection round(s) · final independent ${t.reviews.finalIndependent} / self ${t.reviews.finalSelf}`,
   );
+  if (t.reviews.mixedRules) {
+    lines.push(
+      `    ⚠ mixed census rules (${t.reviews.rules.join(', ')}) — these review totals sum verdicts produced by different classifiers and are not comparable`,
+    );
+  }
   if (t.openDeferrals) lines.push(`  carried debt: ${t.openDeferrals} unresolved deferral(s)`);
   lines.push('');
 

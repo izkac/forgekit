@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+## 0.3.28 — 2026-07-28
+
+### Review totals from different census rules are flagged, not silently summed
+
+Four classifiers wrote review verdicts into `.forge/sessions.jsonl` in a single
+day — the pre-0.3.24 phrase list, 0.3.24's fail-closed attribution, 0.3.26's
+attribution region, and 0.3.27's coordinator declaration — and nothing recorded
+which. `fleet-report` added `independent` and `selfChecks` across projects
+regardless, printing a cross-project total that mixed incompatible scales with
+the confidence of a single-rule one.
+
+`reviewCensus` now stamps an integer `CENSUS_RULE` on its verdict, the digest
+carries it as `reviews.rule`, and a line written before the field existed reads
+as rule 0 rather than as "no rule". When a fleet spans more than one, the report
+says so instead of hiding it:
+
+```
+  reviews: 12 dispatched · 5 self-check · 2 rejection round(s) · …
+    ⚠ mixed census rules (0, 3) — these review totals sum verdicts produced by
+      different classifiers and are not comparable
+```
+
+Bump `CENSUS_RULE` whenever classification changes. Every existing session on
+this machine is rule 0, so the warning appears the first time a session finishes
+under 0.3.28.
+
+### `forgekit install` no longer disables ADRs when you never mentioned them
+
+`inferAdrFromSkills` is tri-state on purpose — `true` (`--adr`, or an ADR skill
+in the selection), `false` (`--no-adr`), `null` (the user said nothing) — and
+`resolveAdrInstallOptions` collapsed it with `=== true` one line later. `null`
+became `false`, and that was persisted to `~/.forgekit/config.json` and
+announced as *"ADR preference saved: disabled"*.
+
+So `forgekit install --skills forge` — a command whose entire job is refreshing
+one skill — silently changed the ADR default for every future `forge init`.
+Per-project config was untouched, which is why it was easy to miss.
+
+Silence is no longer a preference: with no signal the stored value is left
+alone and nothing is printed. `--adr` and `--no-adr` behave exactly as before.
+The `agents` key in the same `saveUserConfig` call already worked this way
+("narrow flag runs don't clobber it"); `adr` now matches it.
+
+Worth naming the shape, because it is the second one today: **absence of a
+signal treated as a negative signal**. The same mistake in `reviewCensus` took
+four review rounds and three releases to settle.
+
 ## 0.3.27 — 2026-07-28
 
 ### Naming the coordinator as the reviewer is a self-declaration

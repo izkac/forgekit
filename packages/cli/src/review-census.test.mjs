@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { reviewCensus } from './review-census.mjs';
+import { CENSUS_RULE, reviewCensus } from './review-census.mjs';
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -249,7 +249,16 @@ test('rejection rounds are still counted, on either kind of review', () => {
 });
 
 test('a session with no review artifacts at all counts nothing', () => {
-  const empty = { total: 0, independent: 0, selfChecks: 0, rejections: 0, finalReview: null };
+  // The rule is stamped even when there is nothing to judge — a digest line
+  // with counts of zero still needs to say which classifier produced them.
+  const empty = {
+    total: 0,
+    independent: 0,
+    selfChecks: 0,
+    rejections: 0,
+    finalReview: null,
+    rule: CENSUS_RULE,
+  };
   assert.deepEqual(reviewCensus(sessionWith({})), empty);
   assert.deepEqual(reviewCensus('/nonexistent/path'), empty);
 });
@@ -277,4 +286,15 @@ test('the real corpus case that forced the revert', () => {
 
   const dir = sessionWith({ '01-a/group-review.md': body });
   assert.equal(reviewCensus(dir).independent, 1, 'a dispatched review must not read as self');
+});
+
+test('the census stamps which rule produced its verdict', () => {
+  // Four classifiers have written review verdicts into sessions.jsonl in one
+  // day, and nothing recorded which. fleet-report sums `independent` across
+  // projects regardless, so a cross-project total silently mixes verdicts that
+  // were produced by incompatible rules.
+  const census = reviewCensus(sessionWith({ '01-a/group-review.md': 'APPROVED\n' }));
+  assert.equal(typeof census.rule, 'number');
+  assert.ok(Number.isInteger(census.rule) && census.rule > 0, `got ${census.rule}`);
+  assert.equal(census.rule, CENSUS_RULE);
 });
