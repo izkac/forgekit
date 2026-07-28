@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.3.23 — 2026-07-28
+
+### The scorer now reads risk from the same text the done gate does
+
+`forge phase done`'s independent-final-review floor and the scorecard's matching
+cap were built on two different definitions of "high-risk". The gate asks
+`collectPlanFacts`, which scans `proposal.md` / `design.md` / `tasks.md` and the
+spine; `score.mjs` built its own string from slug + paceSignal + change name +
+spine only. A change that states its risk in plan prose — the ordinary case,
+since a slug written at session start rarely says "auth" — was blocked by the
+gate and then scored **uncapped**.
+
+The 0.3.22 release was itself the proof: it blocked on the floor, recorded a
+waiver, and scored 97/A with `caps: []`, while `score.mjs`'s own comment says a
+cap is the thing that survives cleanup. Re-scored with this fix it is 69/C, with
+the cap naming the self-authored final review. Found by the telemetry that
+release shipped.
+
+The scorer now takes the union of both readings, so it can only ever become more
+sensitive: a session with no change dir (direct/throwaway) still gets the old
+slug-based read, and an unreadable plan cannot lower the floor.
+
 ## 0.3.22 — 2026-07-28
 
 ### Session telemetry — what a session actually cost, and whether the model policy held

@@ -12,6 +12,7 @@ import {
   writeSessionScorecard,
 } from './score.mjs';
 import { e2eStepsHash } from './integrity.mjs';
+import { collectPlanFacts } from './plan-facts.mjs';
 
 const PHASE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 const SCORE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'score-cli.mjs');
@@ -288,6 +289,121 @@ test('a high-risk session with no independent review is capped, however good its
       false,
     );
     assert.ok(reviewed.score > 69, `expected no cap, got ${reviewed.score}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A specs-engine change dir whose plan prose carries the risk, exactly as the
+ * done gate reads it. The slug, paceSignal and spine stay deliberately bland.
+ */
+function makePlanFixture(root, planFiles, sessionOverrides = {}) {
+  const { sessionDir, session, taskDir } = makeReviewFixture(root, {
+    slug: 'telemetry',
+    paceSignal: 'record token usage from host transcripts',
+    planType: 'specs',
+    openspecChange: 'my-change',
+    ...sessionOverrides,
+  });
+  fs.writeFileSync(
+    path.join(root, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' } }, null, 2)}\n`,
+    'utf8',
+  );
+  const changeDir = path.join(root, 'specs', 'changes', 'my-change');
+  fs.mkdirSync(changeDir, { recursive: true });
+  // A change-linked session is scored against the CHANGE dir's spine, not the
+  // session's — without this the fixture scores 40 on a missing spine and the
+  // cap has nothing left to cap.
+  fs.writeFileSync(
+    path.join(changeDir, 'spine.json'),
+    `${JSON.stringify({ rows: [], notApplicable: 'sync reads only' }, null, 2)}\n`,
+    'utf8',
+  );
+  for (const [name, body] of Object.entries(planFiles)) {
+    fs.writeFileSync(path.join(changeDir, name), body, 'utf8');
+  }
+  return { sessionDir, session, taskDir, changeDir };
+}
+
+test('the scorer reads risk from the same plan text the done gate does', () => {
+  // The gate (set-phase → collectPlanFacts) reads proposal/design/tasks/specs;
+  // the scorer used to build its own riskText from slug + paceSignal + change +
+  // spine only. A change whose risk is stated in its plan prose — the ordinary
+  // case — blocked at `forge phase done` and then scored an uncapped A, so the
+  // one record that survives cleanup said nothing about the missing review.
+  // Shipped that way in 0.3.22; this is the regression test.
+  const root = tmp('forge-score-gate-parity-');
+  try {
+    const { sessionDir, session, changeDir } = makePlanFixture(root, {
+      'proposal.md': '# Proposal\n\nAdds an auth token exchange for the payments webhook.\n',
+      'tasks.md': '# Tasks\n\n- [x] 1.1 wire it\n',
+    });
+
+    const facts = collectPlanFacts({ cwd: root, session });
+    assert.equal(facts.highRisk, true, 'precondition: the gate sees the risk');
+    assert.equal(facts.changeDir, changeDir);
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(card.score <= 69, `the gate blocked this change; the scorer gave it ${card.score}`);
+    assert.match(card.caps.join(' '), /independent final review/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a plan that says nothing risky is still not capped', () => {
+  // The union must not turn every session into a high-risk one: scanning more
+  // text is only safe if bland text stays bland.
+  const root = tmp('forge-score-gate-parity-bland-');
+  try {
+    const { sessionDir, session } = makePlanFixture(root, {
+      'proposal.md': '# Proposal\n\nHarvest token counts from the host transcript and total them.\n',
+      'tasks.md': '# Tasks\n\n- [x] 1.1 read the jsonl\n',
+    });
+
+    assert.equal(collectPlanFacts({ cwd: root, session }).highRisk, false);
+    const bland = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(
+      bland.caps.some((c) => /final review/i.test(c)),
+      false,
+      `unexpected cap: ${bland.caps.join(' ')}`,
+    );
+
+    // Same fixture, one risky sentence added: the cap appears and the score
+    // drops. Comparing the two is what shows the union discriminates rather
+    // than simply capping everything it can now read.
+    fs.writeFileSync(
+      path.join(root, 'specs', 'changes', 'my-change', 'proposal.md'),
+      '# Proposal\n\nHarvest token counts, and add an auth token exchange for payments.\n',
+      'utf8',
+    );
+    const risky = scoreSession({ cwd: root, sessionDir, session });
+    assert.match(risky.caps.join(' '), /independent final review/i);
+    assert.ok(
+      bland.score > risky.score,
+      `bland ${bland.score} should outscore risky-with-no-reviewer ${risky.score}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an unreadable plan does not make the scorer less sensitive than it was', () => {
+  // Fail closed: with no change dir at all, the old slug/paceSignal/spine read
+  // is still the answer, not a silently lowered bar.
+  const root = tmp('forge-score-gate-parity-noplan-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'add-stripe-refund-auth',
+      paceSignal: 'payment refunds behind an authorization gate',
+      openspecChange: null,
+    });
+    assert.equal(collectPlanFacts({ cwd: root, session }).readable, false);
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(card.score <= 69, `expected the slug-based cap to still fire, got ${card.score}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

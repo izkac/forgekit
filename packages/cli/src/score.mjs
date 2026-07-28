@@ -23,6 +23,7 @@ import {
   validateSpine,
 } from './integrity.mjs';
 import { sessionHealth } from './health.mjs';
+import { collectPlanFacts } from './plan-facts.mjs';
 import { isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { appendDeferralLedger, appendSessionDigest } from './ledger.mjs';
@@ -463,12 +464,31 @@ export function scoreSession(opts) {
   // Fails closed, like pace resolution: a *negated* mention ("carries
   // consumption, never money") still counts as a money-shaped change, because
   // the cost of being wrong is one dispatched reviewer.
+  //
+  // Read from the SAME text the done gate reads. `enforceFinalReviewFloor` in
+  // set-phase.mjs asks `collectPlanFacts`, which scans proposal/design/tasks
+  // and the spine; this used to build its own string from slug + paceSignal +
+  // change + spine only. A change that states its risk in plan prose — the
+  // ordinary case, since a slug written at session start rarely says "auth" —
+  // was therefore blocked by the gate and then scored uncapped, so the one
+  // record that outlives cleanup stayed silent about the missing review.
+  // Shipped that way in 0.3.22 and caught by this project's own telemetry.
+  //
+  // Union, not replacement: the plan is the richer source but a session with
+  // no change dir (direct/throwaway) has only the local text, and neither may
+  // make the floor less sensitive than it already was.
   const riskText = [session.paceSignal, session.slug, session.openspecChange, spineText]
     .filter(isNonEmptyString)
     .join(' ');
+  let planHighRisk = false;
+  try {
+    planHighRisk = collectPlanFacts({ cwd, session }).highRisk;
+  } catch {
+    // An unreadable plan must not silently lower the floor, nor break scoring.
+  }
   // The floor for a high-risk change is an independent reader of the *whole*
   // change. Per-group reviews do not substitute: they each saw one slice.
-  if (isHighRiskText(riskText) && census.finalReview !== 'independent') {
+  if ((planHighRisk || isHighRiskText(riskText)) && census.finalReview !== 'independent') {
     const before = score;
     const what =
       census.finalReview === 'self'
