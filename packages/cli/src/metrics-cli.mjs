@@ -20,7 +20,7 @@
  */
 
 import path from 'node:path';
-import { REPO_ROOT, loadSession, readActive } from './lib.mjs';
+import { REPO_ROOT, loadSession, resolveSessionOrExit } from './lib.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 
 /** Asked-for help goes to stdout; usage shown because of a mistake goes to stderr. */
@@ -93,7 +93,7 @@ for (let i = 1; i < argv.length; i += 1) {
   else fail(`Unknown argument: ${argv[i]}`);
 }
 
-if (!sessionId) sessionId = readActive()?.sessionId ?? null;
+if (!sessionId) sessionId = resolveSessionOrExit(sessionId, { command: 'forge metrics', strict: false });
 if (!sessionId) fail('No active session. Run forge new first, or pass --session <id>.');
 
 let dir;

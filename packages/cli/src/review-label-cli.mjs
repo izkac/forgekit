@@ -70,10 +70,15 @@ if (!isReviewUnit(unit)) {
   process.exit(1);
 }
 
+// THE LABEL IS GATE-CLASS, so it refuses on ambiguity rather than warning.
+// `forge phase implement` guessing wrong costs a re-run; this string decides
+// which change is credited with the reviewer, and a wrong one passes that
+// change's money/auth floor on a reviewer that never read it — permanently, in
+// the durable ledger. Same reason `forge phase done` and `finish` refuse.
 const resolved0 = resolveSessionId(sessionId);
-if (resolved0.id === null) {
+if (resolved0.id === null || resolved0.ambiguous) {
   process.stderr.write(
-    resolved0.problem
+    resolved0.problem || resolved0.ambiguous
       ? sessionAmbiguityMessage(resolved0, 'forge review-label final')
       : 'No active session. Run forge new first.\n',
   );

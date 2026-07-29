@@ -14,7 +14,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { appendPhaseHistory, loadSession, readActive, saveSession } from './lib.mjs';
+import {
+  appendPhaseHistory,
+  loadSession,
+  readActive,
+  resolveSessionOrExit,
+  saveSession,
+  writeActive,
+} from './lib.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
 import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
 import { reviewCensus } from './review-census.mjs';
@@ -93,14 +100,23 @@ for (let i = 1; i < args.length; i += 1) {
   }
 }
 
-if (!sessionId) {
-  const active = readActive();
-  sessionId = active?.sessionId;
-}
-if (!sessionId) {
-  process.stderr.write('No active session. Run forge:new first.\n');
-  process.exit(1);
-}
+/**
+ * The phases that write a permanent record: the scorecard, the `sessions.jsonl`
+ * digest, and the money/auth review verdict. Acting on the wrong session here
+ * cannot be undone by re-running — it scores and files the wrong change, and
+ * the right one never reaches the final-review floor at all. Everywhere else a
+ * wrong guess costs a re-run, so everywhere else warns instead of refusing.
+ */
+const GATE_PHASES = new Set(['done', 'finish']);
+
+// One decision point for which session this acts on, and one implementation of
+// what ambiguity costs — `resolveSessionOrExit`. An earlier version of this
+// file inlined its own copy of that logic, which is how two call sites drift
+// into disagreeing about the same rule.
+sessionId = resolveSessionOrExit(sessionId, {
+  command: `forge phase ${phase}`,
+  strict: GATE_PHASES.has(phase),
+});
 
 const { dir, session } = loadSession(sessionId);
 
@@ -488,6 +504,31 @@ if (phase === 'done' || phase === 'finish') {
 // session is refused and the verdict is discarded unwritten, so the next pass
 // measures again instead of inheriting the mistake. Moving this above the gates
 // would pin it.
+// THE POINTER FOLLOWS THE WORK — but only once the transition has been allowed,
+// and never for work that is over.
+//
+// `active.json` was written by `forge new` alone, so "active" meant *most
+// recently created*. Placed below every gate because a *refused* transition
+// must not move it: the phase never changed, so claiming that session is now
+// the one being driven is a lie the next command and the SessionStart hook both
+// repeat. Terminal phases are excluded because making a finished session active
+// points `forge status`, the resume hook and `forge review-label` at work that
+// is done, and hides a session with tasks still in flight.
+if (phase !== 'done' && phase !== 'skipped' && readActive()?.sessionId !== sessionId) {
+  try {
+    writeActive(sessionId);
+  } catch (err) {
+    // NOT SILENT. The pointer used to be "a convenience"; it stopped being one
+    // when commands began resolving through it. A failed write leaves the next
+    // command pointing somewhere else, so the transition still succeeds and the
+    // operator is told.
+    process.stderr.write(
+      `[forge] Warning: could not mark ${sessionId} as the active session ` +
+        `(${err instanceof Error ? err.message : err}). Pass --session to later commands.\n`,
+    );
+  }
+}
+
 saveSession(dir, session);
 process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));
 process.stdout.write('\n');

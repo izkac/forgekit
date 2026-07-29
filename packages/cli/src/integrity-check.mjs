@@ -13,7 +13,7 @@
  *     verify-evidence.md contains an explicit BLOCKED marker
  */
 
-import { loadSession, readActive } from './lib.mjs';
+import { loadSession, resolveSessionOrExit } from './lib.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
 
 const args = process.argv.slice(2);
@@ -31,8 +31,7 @@ for (let i = 0; i < args.length; i += 1) {
 }
 
 if (!sessionId) {
-  const active = readActive();
-  sessionId = active?.sessionId;
+  sessionId = resolveSessionOrExit(sessionId, { command: 'forge integrity-check', strict: false });
 }
 if (!sessionId) {
   process.stderr.write('No active session. Run forge new first.\n');

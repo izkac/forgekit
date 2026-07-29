@@ -76,7 +76,10 @@ forge new <kebab-slug>
 plan-engine doctor in warn-only mode (missing OpenSpec CLI does not block
 session creation; specs-engine projects skip the CLI check).
 
-Resume: read `.forge/active.json` → `forge status`.
+Resume: `forge status` — it resolves the session itself and says so when more
+than one is open. Do **not** read `.forge/active.json` and pass the id along:
+the pointer is a hint, and passing it as `--session` silences the very check
+that would have told you it was the wrong one.
 
 Update phase as you progress:
 

@@ -1,0 +1,132 @@
+<!-- forge-brief-specs-hash:48b6e2c98ca0c3a5 -->
+<!doctype html>
+<meta charset="utf-8">
+<title>Forge brief — session-resolution</title>
+<style>
+  body { font: 16px/1.6 -apple-system, system-ui, sans-serif; max-width: 46rem; margin: 3rem auto; padding: 0 1.25rem; color: #1a1a1a; }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; border-bottom: 1px solid #e5e5e5; padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  pre { background: #f7f7f7; padding: .8rem 1rem; border-radius: 5px; overflow-x: auto; font-size: .85rem; }
+  .bad { color: #a11; font-weight: 600; }
+  .ok { color: #161; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: .6rem 0; }
+  td, th { border: 1px solid #e0e0e0; padding: .45rem .6rem; text-align: left; font-size: .92rem; vertical-align: top; }
+  th { background: #fafafa; }
+  li { margin: .35rem 0; }
+</style>
+
+<h1>Forge commands disagree about which session they are acting on</h1>
+<p class="sub">And the one that matters most — the money/auth gate — gets it wrong silently.</p>
+
+<h2>The problem, in one paragraph</h2>
+<p>
+  <code>.forge/active.json</code> records "the active session". It is written by
+  <strong><code>forge new</code> and nothing else</strong>, so it actually means
+  <em>most recently created</em> — not the session you are working on. Twelve
+  commands read it when you do not pass <code>--session</code>.
+</p>
+
+<h2>What that costs, measured</h2>
+<p>Two sessions open, the pointer naming the wrong one, driven through the real CLI:</p>
+<table>
+  <tr><th>Command</th><th>What happens</th></tr>
+  <tr>
+    <td><code>forge phase done</code></td>
+    <td><span class="bad">Gates the wrong change.</span> It scores the neighbour, writes its
+      scorecard and its permanent ledger line. The high-risk change it was meant to judge
+      ends at <code>implement</code> with no verdict, no scorecard, and no record it was
+      ever gated. <strong>The final-review floor never runs at all.</strong></td>
+  </tr>
+  <tr>
+    <td><code>forge phase verify</code></td>
+    <td><span class="bad">Reopens a finished neighbour</span> (<code>done → verify</code>).</td>
+  </tr>
+  <tr>
+    <td><code>forge status</code>, session-start hook</td>
+    <td>Agree with the pointer, so nothing on screen contradicts the wrong answer.</td>
+  </tr>
+</table>
+
+<h2>Why you are seeing this as a separate change</h2>
+<p>
+  It was found while shipping <strong>0.3.29</strong> (review authorship measured from the
+  host's dispatch record), which needed to know which session a reviewer was dispatched for.
+  That release fixed it <em>for its own command</em> — <code>forge review-label</code> refuses
+  rather than guessing — and left the rest of Forge as it was.
+</p>
+<p>
+  Absorbing the general fix took a two-file change past thirty files. It is a different bug,
+  it is larger, and it deserves its own review. That is this change.
+</p>
+
+<h2>What you will get</h2>
+<ul>
+  <li><strong>One place decides which session a command acts on.</strong>
+    <code>--session</code> always wins. If more than one session is unfinished, or the
+    sessions directory cannot be read, the command <strong>refuses and names each
+    candidate</strong> as the flag that selects it. The pointer wins only when it names
+    unfinished work.</li>
+  <li><strong>The pointer follows the work.</strong> <code>forge phase</code> marks the
+    session it transitioned — below every gate, so a <em>refused</em> transition does not
+    move it, and never on <code>done</code>/<code>skipped</code>, so finished work cannot
+    capture your status line or the resume hook.</li>
+  <li><strong>A failed pointer write says so</strong> instead of being swallowed.</li>
+  <li><strong>Writes to <code>.forge</code> JSON become atomic.</strong> Measured with two
+    concurrent writers: 62 torn reads in 79 on a plain write, 0 over a rename. It only
+    starts to matter once the pointer is written on every transition.</li>
+</ul>
+
+<h2>What changes for you</h2>
+<pre>$ forge phase done          # two sessions open, no --session
+Refusing to guess which session to act on — 2 sessions are unfinished.
+  --session 20260729T…-billing    (add-refunds, verify)
+  --session 20260728T…-search     (search-index, implement)
+
+Re-run naming one, e.g. forge phase done --session &lt;id&gt;.</pre>
+<p>
+  <strong>The refusal applies to <code>done</code> and <code>finish</code> only.</strong>
+  Those two write the scorecard, the permanent ledger line and the money/auth verdict — being
+  wrong there is unrecoverable. Every other phase <span class="ok">warns and carries on</span>:
+</p>
+<pre>$ forge phase implement     # two sessions open
+[forge] Warning: 2 sessions are unfinished; acting on 20260729T…-billing (add-refunds).
+[forge] Pass --session &lt;id&gt; to act on 20260728T…-search instead.</pre>
+<p>
+  Being wrong about which session is at <code>implement</code> costs a re-run. Refusing there
+  would be an obstruction rather than a guard. With a single session open, nothing changes at
+  any phase.
+</p>
+
+<h2>Risks</h2>
+<ul>
+  <li><strong>The warning path can still act on the wrong session</strong> at
+    <code>implement</code> or <code>verify</code> — deliberately. It says which one it chose
+    and how to choose the other; it does not stop you. Only the two phases that write a
+    permanent record refuse.</li>
+  <li><strong>It touches <code>set-phase.mjs</code> and <code>lib.mjs</code></strong> — the
+    two files everything else depends on.</li>
+  <li><strong>Four of these guards were written once already and were unpinned</strong> — the
+    mutant survived. Every one is re-proven by mutation here rather than trusted because its
+    test passes.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Anything about review authorship — that shipped in 0.3.29.</li>
+  <li>Multi-session workflow features (switching, listing, naming). This only makes the
+    existing resolution honest.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><td>1 · One resolver</td><td>One decision point; <code>done</code>/<code>finish</code> refuse on ambiguity, other phases warn and proceed; <code>status</code> reports it</td></tr>
+  <tr><td>2 · The pointer tracks the work</td><td>Marked below the gates, never on terminal phases; a failed write warns</td></tr>
+  <tr><td>3 · Atomic writes</td><td>Temp file plus rename, pinned by inode rather than by racing a writer</td></tr>
+  <tr><td>4 · Close the back door</td><td>The remaining nine <code>readActive()</code> callers migrate, or it becomes private</td></tr>
+  <tr><td>5 · Product loop</td><td>An e2e step: two sessions, bare <code>forge phase done</code>, refuses and scores neither</td></tr>
+</table>
+
+<p class="ok">Prior work attached: <code>starting-point.patch</code> holds the implementation as
+it stood when it was split out of 0.3.29, with tests.</p>

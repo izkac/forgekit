@@ -21,7 +21,7 @@
  */
 
 import fs from 'node:fs';
-import { loadSession, readActive, readJson } from './lib.mjs';
+import { loadSession, resolveSessionOrExit, readJson } from './lib.mjs';
 import { loadProjectConfig, saveProjectConfig } from './config.mjs';
 import {
   checkE2eGate,
@@ -158,8 +158,7 @@ for (let i = 0; i < args.length; i += 1) {
 }
 
 if (!sessionId) {
-  const active = readActive();
-  sessionId = active?.sessionId;
+  sessionId = resolveSessionOrExit(sessionId, { command: 'forge e2e', strict: false });
 }
 if (!sessionId) {
   process.stderr.write('No active session. Run forge new first.\n');

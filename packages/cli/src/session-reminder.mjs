@@ -8,7 +8,7 @@
  *   forge reminder --format plain
  */
 
-import { FORGE_DIR, loadSession, readActive, REPO_ROOT } from './lib.mjs';
+import { FORGE_DIR, loadSession, resolveSessionId, REPO_ROOT } from './lib.mjs';
 import {
   drainInbox,
   liveOverlaps,
@@ -21,12 +21,17 @@ import { sessionHealth } from './health.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
 
 function getActiveSessionInfo() {
-  const active = readActive();
-  if (!active?.sessionId) return null;
+  // Resolved the same way `forge phase` resolves it, and reported the same way:
+  // this line is the first thing an agent reads at session start, so telling it
+  // "you are on X" when the gate would refuse to act on X is the failure. It
+  // never exits — a reminder that blocks a session start is worse than the
+  // ambiguity it is reporting.
+  const resolved = resolveSessionId(null);
+  if (!resolved.id) return null;
   try {
-    const { dir, session } = loadSession(active.sessionId);
+    const { dir, session } = loadSession(resolved.id);
     healSessionProgress({ cwd: REPO_ROOT, sessionDir: dir, session });
-    return { active, dir, session };
+    return { active: { sessionId: resolved.id }, dir, session, resolved };
   } catch {
     return null;
   }
@@ -79,9 +84,17 @@ export const RUNTIME_INTEGRITY_REMINDER =
   'Integrity: spine.json mandatory every change (rows or notApplicable); no stubs/false success; specs beat task wording; product-loop when spine has rows; defer wiring only via `forge defer` — `forge phase done` runs `forge integrity-check` (forge references/runtime-integrity.md).';
 
 export function buildForgeMessage(info) {
-  const { session } = info;
+  const { session, resolved } = info;
   const lines = [];
   lines.push(`[forge] Active Forge session: ${session.id}`);
+  if (resolved?.ambiguous) {
+    // Say it here or nowhere: this is the line the agent believes.
+    lines.push(
+      `[forge] ${resolved.candidates?.length ?? 0} sessions are unfinished — this is the one ` +
+        '.forge/active.json names. Pass --session <id> to work on another; ' +
+        'forge phase done|finish will refuse until you do.',
+    );
+  }
   lines.push(
     `Phase: ${session.phase} | Plan: ${session.planType ?? 'pending'}${
       session.openspecChange ? ` (${session.openspecChange})` : ''

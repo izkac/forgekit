@@ -31,6 +31,7 @@ import {
 import {
   loadSession,
   readActive,
+  resolveSessionOrExit,
   saveSession,
 } from './lib.mjs';
 
@@ -135,11 +136,8 @@ export function runSetPrefs(argv, io = {}) {
       if (!PACES.includes(opts.sessionSet)) {
         throw new Error(`Unknown pace "${opts.sessionSet}". Expected one of: ${PACES.join(', ')}`);
       }
-      const active = readActive();
-      if (!active?.sessionId) {
-        throw new Error('No active Forge session. Run forge:new first.');
-      }
-      const { dir, session } = loadSession(active.sessionId);
+      const activeId = resolveSessionOrExit(null, { command: 'forge prefs', strict: false });
+      const { dir, session } = loadSession(activeId);
       if (opts.sessionSet === 'auto') {
         const fields = resolveSessionPaceFields({
           forgeDir,
@@ -167,11 +165,8 @@ export function runSetPrefs(argv, io = {}) {
     }
 
     if (opts.resolve) {
-      const active = readActive();
-      if (!active?.sessionId) {
-        throw new Error('No active Forge session. Run forge:new first.');
-      }
-      const { dir, session } = loadSession(active.sessionId);
+      const activeId = resolveSessionOrExit(null, { command: 'forge prefs', strict: false });
+      const { dir, session } = loadSession(activeId);
       const signal = opts.signal || session.paceSignal || session.slug || '';
       const fields = resolveSessionPaceFields({
         forgeDir,
@@ -236,6 +231,9 @@ export function runSetPrefs(argv, io = {}) {
       return 0;
     }
 
+    // Reporting only, and it must survive there being no session at all — this
+    // is `forge prefs` printing what pace would apply. Resolution that can exit
+    // belongs on the paths that write.
     let session = null;
     const active = readActive();
     if (active?.sessionId) {

@@ -14,7 +14,7 @@
  */
 
 import fs from 'node:fs';
-import { loadSession, readActive, readJson } from './lib.mjs';
+import { loadSession, resolveSessionOrExit, readJson } from './lib.mjs';
 import { initSpine, spinePath, validateSpine } from './integrity.mjs';
 
 const args = process.argv.slice(2);
@@ -38,10 +38,7 @@ for (let i = 0; i < args.length; i += 1) {
   }
 }
 
-if (!sessionId) {
-  const active = readActive();
-  sessionId = active?.sessionId;
-}
+sessionId = resolveSessionOrExit(sessionId, { command: 'forge spine', strict: false });
 if (!sessionId) {
   process.stderr.write('No active session. Run forge new first.\n');
   process.exit(1);

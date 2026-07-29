@@ -763,10 +763,82 @@ if (phase === 'boot') {
       `before ${JSON.stringify(before.reviews)}\nafter  ${JSON.stringify(after.reviews)}`,
     );
   }
+} else if (phase === 'session-ambiguity') {
+  // THE REGRESSION THAT MUST NEVER COME BACK. `.forge/active.json` is written by
+  // `forge new` alone, so "active" means *most recently created*. Before this
+  // change, a bare `forge phase done` with two sessions open gated whichever one
+  // the pointer happened to name: it scored that change, wrote its permanent
+  // ledger line, and left the other — the one actually being finished — with no
+  // verdict, no scorecard and no trip through the money/auth floor at all.
+  //
+  // The severity split is the operator's: `done`/`finish` refuse because their
+  // damage is unrecoverable; every other phase warns and carries on, because
+  // being wrong at `implement` costs a re-run and refusing there would block
+  // ordinary work in any project with two sessions open.
+  const project = makeProject(`${SCRATCH}-ambiguity`);
+  const second = path.join(project, '.forge', 'sessions', 's2');
+  fs.mkdirSync(second, { recursive: true });
+  fs.writeFileSync(
+    path.join(second, 'session.json'),
+    `${JSON.stringify({ id: 's2', slug: 'neighbour', phase: 'implement' })}\n`,
+  );
+
+  const gated = forge(project, ['phase', 'done']);
+  if (gated.code === 0) {
+    fail(
+      'forge phase done picked a session for itself with two open',
+      'this is the defect: it scores and files whichever the pointer names, and the other change never reaches the floor',
+    );
+  }
+  for (const needle of ['Refusing to guess', '--session s1', '--session s2']) {
+    if (!gated.out.includes(needle)) {
+      fail(`the refusal did not name ${needle}`, tail(gated.out, 20));
+    }
+  }
+  // And it must have changed nothing at all.
+  if (fs.existsSync(path.join(project, '.forge', 'sessions.jsonl'))) {
+    fail('a refused gate wrote a durable ledger line');
+  }
+  if (fs.existsSync(path.join(project, '.forge', 'sessions', 's1', 'scorecard.json'))) {
+    fail('a refused gate wrote a scorecard');
+  }
+
+  // A reversible phase is deliberately NOT refused. `verify` rather than
+  // `implement` because implement has its own brief gate, and a refusal from
+  // that would look identical to the one under test.
+  const soft = forge(project, ['phase', 'verify']);
+  if (soft.code !== 0) {
+    fail('a reversible phase refused instead of warning', tail(soft.out, 20));
+  }
+  if (!soft.out.includes('sessions are unfinished')) {
+    fail('a reversible phase proceeded silently', tail(soft.out, 20));
+  }
+
+  // AND IT MUST HAVE ACTED ON THE POINTER'S SESSION, NOT THE OTHER ONE. Warning
+  // about ambiguity and then transitioning the neighbour is the original defect
+  // wearing a diagnostic. Checked here because the loop asserted the *refuse*
+  // side and merely that the *warn* side warned — a mutant that warned and then
+  // acted on the wrong session shipped this loop green.
+  const s1 = JSON.parse(
+    fs.readFileSync(path.join(project, '.forge', 'sessions', 's1', 'session.json'), 'utf8'),
+  );
+  const s2 = JSON.parse(
+    fs.readFileSync(path.join(project, '.forge', 'sessions', 's2', 'session.json'), 'utf8'),
+  );
+  if (s1.phase !== 'verify') {
+    fail('the warn path did not transition the session active.json names', `s1.phase = ${s1.phase}`);
+  }
+  if (s2.phase !== 'implement') {
+    fail('the warn path transitioned the neighbour', `s2.phase = ${s2.phase}`);
+  }
+
+  process.stdout.write(
+    `AMBIGUITY done=refused verify=warned+acted-on-s1 neighbour=untouched candidates=2\n`,
+  );
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
-      'telemetry-analyze|review-evidence-decides|review-evidence-survives\n',
+      'telemetry-analyze|review-evidence-decides|review-evidence-survives|session-ambiguity\n',
   );
   process.exit(1);
 }

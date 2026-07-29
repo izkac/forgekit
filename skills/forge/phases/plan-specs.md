@@ -119,6 +119,7 @@ Change lives under `<plan.dir>/changes/<change-name>/`.
 
    ```bash
    forge brief stamp    # records specs hash (does NOT auto-open)
+   # with more than one session open this refuses — re-run with --session <id>
    ```
 
    `forge phase implement` hard-refuses while the brief is missing or stale

@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { loadSession, readActive, REPO_ROOT, saveSession } from './lib.mjs';
+import { loadSession, resolveSessionOrExit, REPO_ROOT, saveSession } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
 
 const MODES = ['off', 'per-group', 'per-task'];
@@ -205,11 +205,17 @@ for (let i = 0; i < args.length; i += 1) {
 
 const cwd = REPO_ROOT;
 
-if (!sessionId) {
-  const active = readActive();
-  if (!active?.sessionId) fail('No active Forge session — run forge new <slug> first.');
-  sessionId = active.sessionId;
-}
+// Strict: a checkpoint makes a git commit. Committing one session's work under
+// another's name is not undone by re-running.
+// Strict only when it commits. `--dry-run` reports what would be committed and
+// `--range` prints a diff range for a reviewer brief; neither writes anything,
+// so refusing there is an obstruction with no damage behind it. Keyed on both,
+// because the first version keyed on `dryRun` alone and left the bare
+// `forge checkpoint --range --last` in `implement.md` refusing.
+sessionId = resolveSessionOrExit(sessionId, {
+  command: 'forge checkpoint',
+  strict: !dryRun && !rangeOnly,
+});
 const { dir: sessionDir, session } = loadSession(sessionId);
 
 const checkpoints = Array.isArray(session.checkpoints) ? session.checkpoints : [];

@@ -9,7 +9,7 @@
  * With --write: also write scorecard.json + scorecard.md into the session dir.
  */
 
-import { loadSession, readActive } from './lib.mjs';
+import { loadSession, resolveSessionOrExit } from './lib.mjs';
 import { formatScorecardMarkdown, scoreSession, writeSessionScorecard } from './score.mjs';
 
 const args = process.argv.slice(2);
@@ -40,8 +40,11 @@ for (let i = 0; i < args.length; i += 1) {
 }
 
 if (!sessionId) {
-  const active = readActive();
-  sessionId = active?.sessionId;
+  // Strict only when it writes. `forge score` without `--write` prints JSON and
+  // touches nothing, so refusing there is an obstruction with no damage behind
+  // it — severity follows what the invocation does, not what the command is
+  // called.
+  sessionId = resolveSessionOrExit(sessionId, { command: 'forge score', strict: write });
 }
 if (!sessionId) {
   process.stderr.write('No active session. Run forge new first.\n');

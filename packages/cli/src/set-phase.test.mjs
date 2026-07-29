@@ -1427,3 +1427,146 @@ test('a low-risk change is not asked for an independent final review', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('done and finish refuse an ambiguous session; reversible phases warn and proceed', () => {
+  // The operator's call, and it is the difference between a guard and an
+  // obstruction. `done` and `finish` write the scorecard, the durable
+  // `sessions.jsonl` line and the money/auth verdict — acting on the wrong
+  // session there cannot be undone by re-running, and the right change never
+  // reaches the final-review floor at all. Reproduced before this change:
+  // with two sessions open and `.forge/active.json` naming the neighbour,
+  // `forge phase done` scored the neighbour and left the high-risk change at
+  // `implement` with no verdict and no ledger line.
+  //
+  // Everywhere else a wrong guess costs a re-run, so everywhere else says which
+  // session it chose and carries on.
+  const dir = tmp('forge-phase-severity-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-live');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    const neighbour = path.join(dir, '.forge', 'sessions', 'sess-neighbour');
+    fs.mkdirSync(neighbour, { recursive: true });
+    fs.writeFileSync(
+      path.join(neighbour, 'session.json'),
+      `${JSON.stringify({ id: 'sess-neighbour', slug: 'neighbour', phase: 'implement' })}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'active.json'),
+      `${JSON.stringify({ sessionId: 'sess-live' })}\n`,
+      'utf8',
+    );
+
+    const base = { ...process.env };
+    delete base.CLAUDE_CODE_SESSION_ID;
+    delete base.CLAUDE_CONFIG_DIR;
+    const run = (...args) =>
+      spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env: base });
+
+    // A reversible phase: warns, names the alternative, and transitions.
+    const soft = run('verify');
+    assert.equal(soft.status, 0, soft.stderr);
+    assert.match(soft.stderr, /Warning: 2 sessions are unfinished/);
+    assert.match(soft.stderr, /acting on sess-live/);
+    assert.match(soft.stderr, /--session sess-neighbour/, 'and how to act on the other');
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'verify');
+
+    // The two that write a permanent record refuse, and change nothing.
+    for (const phase of ['finish', 'done']) {
+      const hard = run(phase);
+      assert.notEqual(hard.status, 0, `${phase} must not pick a session for you`);
+      assert.match(hard.stderr, /Refusing to guess/i, phase);
+      assert.match(hard.stderr, /--session sess-live/, phase);
+      assert.match(hard.stderr, /--session sess-neighbour/, phase);
+      assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'verify', phase);
+      assert.equal(fs.existsSync(path.join(dir, '.forge', 'sessions.jsonl')), false, phase);
+      assert.equal(fs.existsSync(path.join(sessionDir, 'scorecard.json')), false, phase);
+    }
+
+    // Named explicitly, the gate proceeds.
+    const named = run('done', '--session', 'sess-live');
+    assert.equal(named.status, 0, named.stderr);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'done');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the active pointer follows the transition, but not past a gate or into a finished session', () => {
+  const dir = tmp('forge-phase-pointer-');
+  try {
+    makeForgeFixture(dir, 'sess-a');
+    const other = path.join(dir, '.forge', 'sessions', 'sess-b');
+    fs.mkdirSync(other, { recursive: true });
+    fs.writeFileSync(
+      path.join(other, 'session.json'),
+      `${JSON.stringify({ id: 'sess-b', slug: 'b', phase: 'implement' })}\n`,
+      'utf8',
+    );
+    const pointer = () =>
+      JSON.parse(fs.readFileSync(path.join(dir, '.forge', 'active.json'), 'utf8')).sessionId;
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'active.json'),
+      `${JSON.stringify({ sessionId: 'sess-a' })}\n`,
+      'utf8',
+    );
+    const base = { ...process.env };
+    delete base.CLAUDE_CODE_SESSION_ID;
+    const run = (...args) =>
+      spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env: base });
+
+    // An ordinary transition moves it.
+    assert.equal(run('implement', '--session', 'sess-b').status, 0);
+    assert.equal(pointer(), 'sess-b', 'the session being driven becomes the active one');
+
+    // A REFUSED transition must not: the phase never changed, so saying that
+    // session is now the one being driven is a lie the next command repeats.
+    const refused = run('done', '--session', 'sess-a');
+    assert.notEqual(refused.status, 0, 'fixture: this must be refused for the test to mean anything');
+    assert.equal(pointer(), 'sess-b', 'a refused transition leaves the pointer alone');
+
+    // And a terminal phase must not capture it — `forge status` and the resume
+    // hook would then point the next agent at work that is over, hiding the
+    // session with tasks still in flight.
+    assert.equal(run('skipped', '--session', 'sess-a').status, 0);
+    assert.equal(pointer(), 'sess-b', 'finished work does not take the pointer');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failed pointer write warns instead of being swallowed', () => {
+  // Task 2.2, and it was unpinned: the final review reverted this guard to the
+  // exact pre-change silent swallow and the whole suite stayed green. The
+  // pointer stopped being "a convenience" the moment commands began resolving
+  // through it — a failed write leaves the next one acting on a different
+  // session, so the transition succeeds and the operator is told.
+  const dir = tmp('forge-pointer-warn-');
+  try {
+    makeForgeFixture(dir, 'sess-a');
+    const forgeDir = path.join(dir, '.forge');
+    fs.writeFileSync(path.join(forgeDir, 'active.json'), `${JSON.stringify({ sessionId: 'other' })}\n`);
+    // A directory where the pointer file belongs: the write fails, the
+    // transition must not.
+    fs.rmSync(path.join(forgeDir, 'active.json'));
+    fs.mkdirSync(path.join(forgeDir, 'active.json'));
+
+    const base = { ...process.env };
+    delete base.CLAUDE_CODE_SESSION_ID;
+    const r = spawnSync(process.execPath, [SCRIPT, 'implement', '--session', 'sess-a', '--allow-incomplete', 'fixture'], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: base,
+    });
+
+    assert.equal(r.status, 0, 'the transition must survive a failed pointer write');
+    assert.match(r.stderr, /could not mark sess-a as the active session/);
+    assert.match(r.stderr, /--session/, 'and name the remedy');
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(dir, '.forge', 'sessions', 'sess-a', 'session.json'), 'utf8')).phase,
+      'implement',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

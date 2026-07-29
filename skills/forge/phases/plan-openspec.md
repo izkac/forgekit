@@ -38,6 +38,7 @@ Thin wrapper around the project **`openspec-propose`** skill (or `/opsx:propose`
 
    ```bash
    forge brief stamp    # records specs hash (does NOT auto-open)
+   # with more than one session open this refuses — re-run with --session <id>
    ```
 
    `forge phase implement` hard-refuses while the brief is missing or stale

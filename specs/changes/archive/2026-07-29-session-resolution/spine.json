@@ -1,0 +1,14 @@
+{
+  "change": "session-resolution",
+  "rows": [
+    {
+      "capability": "session-resolution \u2014 one place decides which session a command acts on",
+      "library": "packages/cli/src/lib.mjs \u2014 unfinishedSessions(), resolveSessionId(), resolveSessionOrExit(), sessionAmbiguityMessage()",
+      "reads": ".forge/sessions/*/session.json (phase, id, slug) and .forge/active.json as a hint, never as a fact",
+      "writes": ".forge/active.json via writeActive, from set-phase.mjs below every gate and never on done|skipped; writeJson is temp+rename",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs resolves before any gate and refuses on ambiguity for done|finish; checkpoint.mjs, score-cli.mjs and review-label-cli.mjs refuse; defer, brief, e2e, metrics, spine, prefs and integrity-check warn and proceed; metrics/dispatches.mjs reads the pointer privately and stays on it deliberately (append-only telemetry, no gate) \u2014 recorded here so it is in an artifact rather than only in a grep",
+      "uiConsumer": "packages/cli/src/session-status.mjs reports sessionAmbiguity alongside its answer; session-reminder.mjs says so on the line the agent reads at session start",
+      "evidence": "e2e session-ambiguity: two sessions open, bare `forge phase done` refuses and writes neither a scorecard nor a ledger line, while `forge phase verify` warns and proceeds"
+    }
+  ]
+}

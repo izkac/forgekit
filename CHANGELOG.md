@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.3.30 — 2026-07-29
+
+### Forge commands no longer disagree about which session they are acting on
+
+`.forge/active.json` was written by `forge new` and nothing else, so "the active
+session" meant *most recently created* — not the one being worked on. Fourteen
+commands read it when not given `--session`.
+
+With two sessions open and the pointer naming the wrong one, a bare
+`forge phase done` — the money/auth gate — gated the neighbour: it scored that
+change, wrote its permanent `sessions.jsonl` line, and left the change actually
+being finished at `implement` with no verdict, no scorecard, and no trip through
+the final-review floor at all. `forge status` and the session-start hook agreed
+with the pointer, so nothing on screen contradicted it.
+
+`resolveSessionId()` in `lib.mjs` is now the one decision point, and it reports
+ambiguity rather than pricing it — what ambiguity *costs* is the caller's to
+choose:
+
+- **Refuse**, because being wrong writes something re-running does not undo:
+  `forge phase done|finish`, `forge checkpoint`, `forge score --write`,
+  `forge brief stamp`, `forge review-label`. They exit non-zero and list each
+  candidate as the `--session <id>` that selects it.
+- **Warn and proceed** everywhere else. Being wrong about which session is at
+  `implement` costs a re-run; refusing there would block ordinary work in any
+  project with two sessions open.
+- Severity follows what an invocation *writes*, not what the command is called:
+  `forge checkpoint --dry-run|--range`, `forge score` without `--write` and
+  `forge brief check|open` do not refuse.
+
+`forge status` and the session-start reminder report the ambiguity alongside
+their answer instead of presenting a guess as a fact, and `forge phase` marks
+the session it transitioned as active — below every gate, so a refused
+transition does not move the pointer, and never on `done`/`skipped`, so finished
+work cannot capture your status line.
+
+### `forge cleanup` no longer deletes work in progress
+
+`(tooOld || isDone)` removed a twenty-day session sitting at `implement`, its
+verify evidence and final review inside, while keeping the *finished* session
+the pointer named — and `finish.md` runs `forge cleanup` on the line after
+`forge phase done`.
+
+The line is not finished-versus-unfinished, since retention exists to clear
+abandoned sessions and those are unfinished by definition. It is whether the
+directory holds anything beyond Forge's own bookkeeping. Scaffolding still ages
+out. `--include-unfinished` deletes work, so it now requires `--session <id>`
+and refuses to sweep a project.
+
+### Smaller
+
+- `forge evidence` records against a resolved session and refuses to *overwrite*
+  existing evidence for one it only guessed at — that file is gitignored and
+  feeds the durable scorecard.
+- `writeJson` is atomic (temp + rename). Measured with two concurrent writer
+  processes: 62 torn reads in 79 on a plain write, 0 over a rename. It starts to
+  matter once `active.json` is written on every transition.
+- A stray file in `.forge/sessions` no longer reads as an unreadable session and
+  refuses the gate forever; a *symlinked* session is no longer invisible to it.
+- `forge status` no longer crashes on a session whose declared id differs from
+  its directory name.
+
 ## 0.3.29 — 2026-07-29
 
 ### Review authorship is measured, not read

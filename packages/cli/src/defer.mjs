@@ -11,7 +11,7 @@
  * Unresolved deferrals block `forge phase done|finish`.
  */
 
-import { loadSession, readActive } from './lib.mjs';
+import { loadSession, resolveSessionOrExit } from './lib.mjs';
 import { addDeferral, loadDeferrals, resolveDeferral } from './integrity.mjs';
 
 const args = process.argv.slice(2);
@@ -41,8 +41,7 @@ for (let i = 0; i < args.length; i += 1) {
 }
 
 if (!sessionId) {
-  const active = readActive();
-  sessionId = active?.sessionId;
+  sessionId = resolveSessionOrExit(sessionId, { command: 'forge defer', strict: false });
 }
 if (!sessionId) {
   process.stderr.write('No active session. Run forge new first.\n');

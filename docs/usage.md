@@ -707,6 +707,47 @@ outside reader you did not have.
 `forge fleet report` will not sum verdicts across grades without saying so — a
 measured `independent` and a guessed one are not the same fact.
 
+### Which session a bare command acts on
+
+Every Forge command takes `--session <id>`. Without it, the command resolves one
+for you — and until 0.3.30 that resolution read `.forge/active.json`, which is
+written by **`forge new` alone**. "Active" therefore meant *most recently
+created*, not the one you were working on, so with two sessions open a bare
+`forge phase done` could gate the wrong change: scoring it, writing its
+permanent ledger line, and leaving the change you were actually finishing with
+no verdict and no trip through the money/auth floor.
+
+Now:
+
+- `--session` always wins.
+- With one session open, it is used — even if the pointer names a finished one.
+- With several open, the pointer decides, and **you are told**:
+
+```
+$ forge phase verify
+[forge] Warning: 2 sessions are unfinished; acting on 20260729T…-billing (from .forge/active.json).
+[forge] To act on another instead:
+  --session 20260728T…-search   (search-index, implement)
+```
+
+- **Commands that write a permanent record refuse instead of warning**, and
+  severity follows what the *invocation* writes rather than what the command is
+  called: `forge phase done|finish`, `forge checkpoint` (not `--dry-run` or
+  `--range`), `forge score --write`, `forge brief stamp` (not `check`/`open`),
+  and `forge review-label`. They exit non-zero and list each candidate as the
+  flag that selects it.
+- **`forge evidence`** warns and records, but refuses to *overwrite* existing
+  evidence for a session it only guessed at — that file feeds the scorecard and
+  the durable ledger, and it is not in git.
+- **`forge cleanup`** never ages out a session that holds work; scaffolding
+  still ages out. `--include-unfinished` deletes work, so it requires
+  `--session <id>` and will not sweep a project.
+- `forge phase` marks the session it transitioned as active, so the pointer
+  follows your work. Not on a *refused* transition, and never on
+  `done`/`skipped` — finished work must not capture your status line.
+- `forge status` and the session-start reminder report the ambiguity alongside
+  their answer rather than presenting a guess as a fact.
+
 **Durable ledgers** — the session dir is deleted at cleanup, so `phase done`
 also appends:
 

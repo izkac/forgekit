@@ -1,0 +1,15 @@
+{
+  "change": "session-resolution",
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot",
+      "expect": "SCRATCH PROJECT READY"
+    },
+    {
+      "name": "session-ambiguity",
+      "cmd": "node scripts/e2e/harness-portability.mjs session-ambiguity",
+      "expect": "AMBIGUITY done=refused verify=warned\\+acted-on-s1 neighbour=untouched candidates=2"
+    }
+  ]
+}

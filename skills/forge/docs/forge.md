@@ -192,6 +192,23 @@ See the Forge skill’s [references/plan-routing.md](../references/plan-routing.
 
 ---
 
+## Which session a bare command acts on
+
+`--session <id>` always wins. With one session open it is used. With several,
+`.forge/active.json` decides and the command **says so on stderr** — except the
+ones that write a permanent record, which **refuse** and list the candidates:
+`forge phase done|finish`, `forge checkpoint`, `forge score --write`,
+`forge brief stamp` and `forge review-label`.
+
+Severity follows what the invocation writes, not the command's name, so
+`forge checkpoint --dry-run|--range`, `forge score` without `--write` and
+`forge brief check|open` do not refuse. `forge evidence` records with a warning
+but will not *overwrite* existing evidence for a guessed session.
+
+`forge phase` marks the session it transitioned as active — below every gate, so
+a refused transition does not move it, and never on `done`/`skipped`, so
+finished work cannot capture your status line or the resume hook.
+
 ## `.forge/` session layout
 
 One session per substantial task. **Per-checkout** active pointer — works across

@@ -30,7 +30,14 @@ function emit(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
-/** Active session, or nulls — findings are often filed between sessions. */
+/**
+ * Active session, or nulls — findings are often filed between sessions.
+ *
+ * Stays on the pointer deliberately: this only *annotates* a finding with
+ * whichever session is around, and must tolerate there being none. Resolving
+ * through `resolveSessionOrExit` would make `forge finding add` exit when two
+ * sessions are open, which is when you most want to write one down.
+ */
 function activeSessionInfo() {
   try {
     const active = readActive();

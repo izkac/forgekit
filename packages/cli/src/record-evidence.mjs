@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { unfinishedSessions } from './lib.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
 
@@ -90,15 +91,53 @@ export function buildEvidence({ task, tier, command, exit, summary, runAt }) {
  * @returns {string | null}
  */
 function resolveSessionId(session, forgeDir) {
-  if (session) return session;
-  const activeFile = path.join(forgeDir, 'active.json');
-  if (!fs.existsSync(activeFile)) return null;
-  try {
-    const active = JSON.parse(fs.readFileSync(activeFile, 'utf8'));
-    return typeof active?.sessionId === 'string' ? active.sessionId : null;
-  } catch {
-    return null;
+  if (session) return { id: session, warning: null, ambiguous: false };
+
+  // THIS FILE WAS THE THIRTEENTH CALL SITE AND APPEARED IN NO AUDIT. It carried
+  // its own copy of "read active.json", so a sweep looking for `readActive`
+  // importers could not see it. The lesson is the audit's: the criterion has to
+  // be "decides which session to act on", never "imports the helper the last
+  // bug used".
+  //
+  // The first fix borrowed the *enumerator* and kept its own decision, which is
+  // the same mistake one layer down — it wrote even where the shared resolver
+  // would have answered "no defensible session", including into a finished one.
+  // This routes the decision and keeps only the severity, which is this
+  // command's to choose.
+  const candidates = unfinishedSessions(path.join(forgeDir, 'sessions'));
+  if (candidates === null) {
+    return { id: null, warning: `could not read ${path.join(forgeDir, 'sessions')}`, ambiguous: true };
   }
+  /** @type {string | null} */
+  let active = null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(forgeDir, 'active.json'), 'utf8'));
+    if (typeof parsed?.sessionId === 'string') active = parsed.sessionId;
+  } catch {
+    active = null;
+  }
+  const activeIsOpen = active !== null && candidates.some((c) => c.id === active);
+  if (candidates.length > 1) {
+    return activeIsOpen
+      ? {
+          id: active,
+          ambiguous: true,
+          warning:
+            `${candidates.length} sessions are unfinished; recording against ${active} ` +
+            '(from .forge/active.json). Pass --session <id> to record against another.',
+        }
+      : { id: null, ambiguous: true, warning: `${candidates.length} sessions are unfinished and .forge/active.json names none of them` };
+  }
+  if (activeIsOpen) return { id: active, warning: null, ambiguous: false };
+  // A pointer naming finished work must not win over the one session still
+  // open — evidence recorded against a closed session is evidence nobody reads.
+  if (candidates.length === 1) return { id: candidates[0].id, warning: null, ambiguous: false };
+  // Nothing open to be ambiguous *between* — a project whose sessions predate
+  // `session.json`, or one whose only session is finished. The pointer is the
+  // only answer there is, and there is no rival for it to be wrong about.
+  // Matches `lib.mjs`'s `resolveSessionId`, deliberately: two resolvers that
+  // disagree about the same edge is how this class of bug starts.
+  return { id: active, ambiguous: false, warning: null };
 }
 
 /**
@@ -120,10 +159,20 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
   }
 
   const forgeDir = path.resolve(cwd, opts.forgeDir ?? '.forge');
-  const sessionId = resolveSessionId(opts.session, forgeDir);
+  const {
+    id: sessionId,
+    warning: sessionWarning,
+    ambiguous: sessionAmbiguous,
+  } = resolveSessionId(opts.session, forgeDir);
   if (!sessionId) {
-    return { exitCode: 1, message: 'No active session. Run forge:new first or pass --session.' };
+    return {
+      exitCode: 1,
+      message: sessionWarning
+        ? `Cannot tell which session to record against — ${sessionWarning}. Pass --session <id>.`
+        : 'No active session. Run forge:new first or pass --session.',
+    };
   }
+  if (sessionWarning) process.stderr.write(`[forge] Warning: ${sessionWarning}\n`);
 
   const sessionDir = path.join(forgeDir, 'sessions', sessionId);
   if (!fs.existsSync(sessionDir)) {
@@ -138,9 +187,24 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
   }
 
   const taskDir = path.join(sessionDir, 'tasks', opts.task);
-  fs.mkdirSync(taskDir, { recursive: true });
-
   const filePath = path.join(taskDir, 'test-evidence.md');
+
+  // OVERWRITING SOMEBODY ELSE'S RUN IS NOT RECOVERABLE. This file is
+  // gitignored, `score.mjs` reads it into the evidence ratio, and that lands in
+  // the durable ledger — so a guessed session that clobbers an existing
+  // `test-evidence.md` destroys a record and moves another change's score.
+  // Writing a *new* file on a guess is a stray file; replacing one is not, so
+  // only that case refuses.
+  if (sessionAmbiguous && fs.existsSync(filePath)) {
+    return {
+      exitCode: 1,
+      message:
+        `Refusing to overwrite existing evidence for task ${opts.task} in session ${sessionId} ` +
+        'while more than one session is unfinished.\n' +
+        'Pass --session <id> to say which one this run belongs to.',
+    };
+  }
+  fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
     filePath,
     buildEvidence({

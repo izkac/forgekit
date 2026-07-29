@@ -30,11 +30,17 @@ it is larger, and bundling it took an unrelated change from two files to thirty.
 ## What changes
 
 - `resolveSessionId()` in `lib.mjs` becomes the one place this is decided, and
-  `forge phase` uses it: explicit `--session` wins; an unreadable sessions
-  directory refuses; more than one unfinished session refuses and names each
-  candidate as the flag that selects it; the pointer wins only when it names
-  unfinished work. `unfinishedSessions()` and `resolveSessionId()` already exist
-  and are already used by `forge review-label`.
+  it reports **ambiguity as a fact rather than as a verdict** — the caller
+  chooses the severity. Explicit `--session` always wins; the pointer is
+  preferred when it names unfinished work; an unreadable sessions directory, or
+  ambiguity with no pointer to break it, cannot be resolved at all.
+- **`forge phase` refuses only where being wrong is unrecoverable.**
+  `done` and `finish` write the scorecard, the durable ledger line and the
+  money/auth verdict, so an ambiguous resolution there is refused outright.
+  Every other phase **warns and proceeds** on the pointer: being wrong about
+  which session is at `implement` costs a re-run, not a permanently mis-scored
+  change. Operator's decision, and it is the difference between a guard and an
+  obstruction.
 - **`forge phase` marks the session it transitioned as active** — below every
   gate, so a refused transition does not move the pointer, and never on
   `done`/`skipped`, so finished work cannot capture `forge status`, the resume
@@ -51,10 +57,24 @@ it is larger, and bundling it took an unrelated change from two files to thirty.
 
 ## Impact
 
-- `packages/cli/src/lib.mjs`, `set-phase.mjs`, `session-status.mjs`, and the ten
-  commands listed in the finding
-- **Behaviour change worth naming:** `forge phase` will refuse in a project with
-  two sessions open unless `--session` is given. That is heavier than today and
-  needs its own review — it can block `implement` and `verify`, not only `done`.
-- `starting-point.patch` in this directory holds the implementation as it stood
-  when it was split out, with tests. It is a starting point, not a plan.
+- `packages/cli/src/lib.mjs`, `set-phase.mjs`, `session-status.mjs`,
+  `session-reminder.mjs`, `cleanup-sessions.mjs`, `record-evidence.mjs` and the
+  command CLIs
+- **Severity follows what an invocation actually writes**, not what the command
+  is called. Refuse: `forge phase done|finish`, `forge checkpoint` (not
+  `--dry-run`/`--range`), `forge score --write`, `forge brief stamp` (not
+  `check`/`open`), `forge review-label`. Warn and proceed: everything else.
+- **`forge cleanup` no longer ages out a session holding work.** It deleted a
+  twenty-day session at `implement` — evidence and review inside — while keeping
+  the finished session the pointer named. Scaffolding still ages out;
+  `--include-unfinished` deletes work, so it requires `--session <id>` and will
+  not sweep a project.
+- **`forge evidence`** records with a warning but refuses to *overwrite*
+  existing evidence for a session it guessed at.
+- `starting-point.patch` holds the implementation as it stood when it was split
+  out of 0.3.29. It is a starting point, not a plan.
+
+## Decision record
+
+No ADR — non-architectural change. It makes an existing resolution honest and
+prices its ambiguity; it establishes no new boundary.

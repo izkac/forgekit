@@ -9,7 +9,7 @@
  */
 
 import fs from 'node:fs';
-import { loadSession, readActive } from './lib.mjs';
+import { loadSession, resolveSessionOrExit } from './lib.mjs';
 import { resolveChangeDir } from './integrity.mjs';
 import { BRIEF_FILE, briefPath, checkBrief, openInBrowser, stampBrief } from './brief.mjs';
 
@@ -24,10 +24,14 @@ if (!cmd || !['stamp', 'check', 'open'].includes(cmd)) {
 let sessionId = null;
 const si = rest.indexOf('--session');
 if (si >= 0 && rest[si + 1]) sessionId = rest[si + 1];
-if (!sessionId) sessionId = readActive()?.sessionId ?? null;
+// `stamp` writes the hash `enforceBriefGate` reads, so stamping the neighbour's
+// brief makes *their* `forge phase implement` pass on your approval — and
+// re-running only fixes yours; nothing un-stamps theirs. `check`/`open` read.
 if (!sessionId) {
-  process.stderr.write('No active session. Run forge new first.\n');
-  process.exit(1);
+  sessionId = resolveSessionOrExit(sessionId, {
+    command: `forge brief ${cmd}`,
+    strict: cmd === 'stamp',
+  });
 }
 
 const { session } = loadSession(sessionId);

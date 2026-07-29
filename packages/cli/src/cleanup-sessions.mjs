@@ -24,7 +24,32 @@ import { appendScorecardLedger } from './score.mjs';
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
 const includeActive = args.has('--include-active');
+/**
+ * Age alone never deletes work in progress; this is how you say you mean it —
+ * and it must name the session, because a project-wide sweep of unfinished work
+ * is protected only by `active.json`, which is the pointer this whole change
+ * exists because you cannot trust. Reproduced: a bare
+ * `--include-unfinished` deleted a twenty-day live session and kept a
+ * ninety-day abandoned one, purely because the pointer named the abandoned one.
+ */
+const includeUnfinished = args.has('--include-unfinished');
+/** The session `--include-unfinished` is allowed to remove, and only that one. */
+const argv = process.argv.slice(2);
+const onlySession = argv.includes('--session') ? argv[argv.indexOf('--session') + 1] : null;
+if (includeUnfinished && !onlySession) {
+  process.stderr.write(
+    'Refusing to sweep unfinished sessions across the whole project.\n' +
+      '--include-unfinished deletes work, and the only thing that would stand between it\n' +
+      'and the wrong session is .forge/active.json — the pointer this cannot trust.\n\n' +
+      'Name the one you mean: forge cleanup --include-unfinished --session <id>\n',
+  );
+  process.exit(1);
+}
 
+// Read to know which session must NOT be deleted, not to pick one to act on —
+// so this stays on the pointer deliberately. It is a floor, not a resolution:
+// protecting one session too many is harmless, protecting one too few is data
+// loss.
 const active = readActive();
 const activeId = active?.sessionId ?? null;
 const removed = [];
@@ -54,8 +79,55 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
   const tooOld = sessionAgeDays(session) > RETENTION_DAYS;
   const isDone = session.phase === 'done' || session.phase === 'skipped';
 
+  // AGE ALONE MUST NOT DELETE WORK IN PROGRESS. `(tooOld || isDone)` deleted a
+  // twenty-day session sitting at `implement` — with its verify evidence and
+  // its final review inside — while keeping the *finished* session the pointer
+  // named. `finish.md` runs `forge cleanup` on the line after
+  // `forge phase done`, and the pointer never moves onto a finished session, so
+  // the one thing between a long-running change and deletion was whether it
+  // happened to be named in `active.json`.
+  //
+  // The line is not finished-versus-unfinished — retention exists precisely to
+  // clear *abandoned* sessions, and those are unfinished by definition. It is
+  // whether the directory holds anything but its own `session.json`: evidence,
+  // reviews, task output, a scorecard. An empty shell is scratch and ages out
+  // as before; a directory with work in it is somebody's week, and needs
+  // `--include-unfinished` to be said out loud.
+  // WORK MEANS SOMETHING SOMEBODY PRODUCED, not the scaffolding `forge new`
+  // lays down. The first version asked whether the directory held anything
+  // besides `session.json` — but every new session ships `status.json` and
+  // empty `brainstorm/`, `reviews/` and `tasks/` directories, so `hasWork` was
+  // true from birth and retention could never clear an abandoned session at
+  // all. That re-created the failure it was written to prevent, one level over:
+  // an abandoned session keeps the project ambiguous, and the gate then refuses
+  // forever.
+  //
+  // So: any *file* anywhere under the session dir that is not one of Forge's
+  // own bookkeeping records. Empty scaffold directories contain none.
+  const SCAFFOLD = new Set(['session.json', 'status.json']);
+  const holdsWork = (root) => {
+    /** @type {string[]} */
+    const stack = [root];
+    while (stack.length) {
+      const at = stack.pop();
+      /** @type {import('node:fs').Dirent[]} */
+      let entries;
+      try {
+        entries = fs.readdirSync(at, { withFileTypes: true });
+      } catch {
+        return true; // cannot tell what is inside — do not delete it
+      }
+      for (const e of entries) {
+        if (e.isDirectory()) stack.push(path.join(at, e.name));
+        else if (!(at === root && SCAFFOLD.has(e.name))) return true;
+      }
+    }
+    return false;
+  };
+  const hasWork = !isDone && holdsWork(dir);
+  const unfinishedAndProtected = hasWork && !(includeUnfinished && sessionId === onlySession);
   const shouldRemove =
-    (tooOld || isDone) && (!isActive || includeActive);
+    (tooOld || isDone) && !unfinishedAndProtected && (!isActive || includeActive);
 
   if (shouldRemove) {
     if (!dryRun) {

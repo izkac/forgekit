@@ -5,7 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { defaultSession, findRepoRoot, sessionAgeDays } from './lib.mjs';
+import { defaultSession, findRepoRoot, sessionAgeDays, writeJson } from './lib.mjs';
 
 const SESSION_STATUS = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -219,4 +219,314 @@ test('forge new then forge phase triage records one triage row, not two', () => 
   // The seeded row survives: re-entering the phase is not a transition, and
   // the timeline still starts exactly where the session does.
   assert.deepEqual(readSession(dir).phaseHistory, [{ phase: 'triage', at: createdAt }]);
+});
+
+test('writeJson replaces the file rather than truncating it in place', () => {
+  // `active.json` is now written on every phase transition, so a concurrent
+  // reader hits it far more often than when these files were written once per
+  // command. `writeFileSync` truncates and *then* writes: measured with two
+  // concurrent writer processes, a plain write produced **62 torn reads in
+  // 79**; the same probe over a rename produced 0. A torn read of `active.json`
+  // costs real guards — `forge cleanup` loses the live-session check that stops
+  // it deleting work in progress, and the SessionStart hook tells the next
+  // agent there is no session at all.
+  //
+  // Asserted through the inode rather than by racing a writer, because a timing
+  // test that passes on a fast machine and fails on a loaded one teaches
+  // nothing. A rename installs a *new* file; an in-place write keeps the inode.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'forge-writejson-'));
+  const file = path.join(dir, 'active.json');
+
+  writeJson(file, { sessionId: 'first' });
+  const before = fs.statSync(file).ino;
+
+  writeJson(file, { sessionId: 'second', padding: 'x'.repeat(4096) });
+  const after = fs.statSync(file).ino;
+
+  assert.notEqual(after, before, 'the destination must be replaced, not rewritten in place');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).sessionId, 'second');
+  // And no temp file left beside it, which would confuse anything globbing the dir.
+  assert.deepEqual(fs.readdirSync(dir), ['active.json']);
+});
+
+test('cleanup will not age out a session with work in it', () => {
+  // Reproduced by the final review: `(tooOld || isDone)` deleted a twenty-day
+  // session sitting at `implement`, verify evidence and final review inside,
+  // while keeping the *finished* session `active.json` named. `finish.md` runs
+  // `forge cleanup` on the line after `forge phase done`.
+  //
+  // The line is not finished-versus-unfinished — retention exists to clear
+  // abandoned sessions and those are unfinished by definition. It is whether
+  // the directory holds anything but its own session.json.
+  const root = tmp('forge-cleanup-work-');
+  const old = new Date(Date.now() - 30 * 864e5).toISOString();
+  const plant = (id, extra) => {
+    const dir = path.join(root, '.forge', 'sessions', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      `${JSON.stringify({ id, slug: id, phase: 'implement', createdAt: old, updatedAt: old })}\n`,
+    );
+    if (extra) fs.writeFileSync(path.join(dir, extra), 'work\n');
+    return dir;
+  };
+  const withWork = plant('has-work', 'verify-evidence.md');
+  // Scaffolding only — what `forge new` lays down and nobody has written to.
+  // The first version of this rule counted `status.json` as work, so retention
+  // could never clear an abandoned session at all.
+  const shell = plant('empty-shell', null);
+  fs.writeFileSync(path.join(shell, 'status.json'), '{}\n');
+  for (const d of ['tasks', 'reviews', 'brainstorm']) fs.mkdirSync(path.join(shell, d));
+
+  const cleanup = path.join(path.dirname(SESSION_STATUS), 'cleanup-sessions.mjs');
+  execFileSync(process.execPath, [cleanup], {
+    cwd: root,
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-cleanup-fleet-'), 's') },
+  });
+
+  assert.equal(fs.existsSync(withWork), true, 'a session with work in it must survive its age');
+  assert.equal(fs.existsSync(shell), false, 'an empty shell is scratch and still ages out');
+
+  // A project-wide sweep of unfinished work is refused outright: the only thing
+  // standing between it and the wrong session would be `active.json`, the
+  // pointer this change exists because you cannot trust. Reproduced by the
+  // review — a bare sweep deleted a 20-day live session and kept a 90-day
+  // abandoned one, purely because the pointer named the abandoned one.
+  const swept = spawnSync(process.execPath, [cleanup, '--include-unfinished'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-cleanup-fleet-'), 's') },
+  });
+  assert.notEqual(swept.status, 0, 'a project-wide unfinished sweep must be refused');
+  assert.match(swept.stderr, /Name the one you mean/);
+  assert.equal(fs.existsSync(withWork), true, 'and it must not have deleted anything');
+
+  // Named, it goes.
+  execFileSync(process.execPath, [cleanup, '--include-unfinished', '--session', 'has-work'], {
+    cwd: root,
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-cleanup-fleet-'), 's') },
+  });
+  assert.equal(fs.existsSync(withWork), false, 'naming it is how you say you mean it');
+});
+
+test('a stray file in .forge/sessions is not an unreadable session', () => {
+  // A `.DS_Store` produced ENOTDIR, which became an `unreadable: true`
+  // candidate — so a one-session project's money gate refused *forever* and
+  // offered `--session .DS_Store` as the remedy. `cleanup-sessions.mjs` already
+  // skipped non-directories; the resolver did not.
+  const root = tmp('forge-stray-');
+  const dir = path.join(root, '.forge', 'sessions', 'real-one');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'session.json'),
+    `${JSON.stringify({ id: 'real-one', slug: 'real', phase: 'implement' })}\n`,
+  );
+  fs.writeFileSync(path.join(root, '.forge', 'sessions', '.DS_Store'), 'junk');
+
+  const probe = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { unfinishedSessions } from ${JSON.stringify(path.join(path.dirname(SESSION_STATUS), 'lib.mjs'))};
+       process.stdout.write(JSON.stringify(unfinishedSessions()));`,
+    ],
+    { cwd: root, encoding: 'utf8' },
+  );
+  assert.equal(probe.status, 0, probe.stderr);
+  assert.deepEqual(JSON.parse(probe.stdout).map((c) => c.id), ['real-one']);
+});
+
+test('status and the session-start reminder report ambiguity instead of asserting it', () => {
+  // Task 1.4 shipped with **zero** coverage, found by the final review. These
+  // two are what an operator and an agent read to learn which session they are
+  // on, so agreeing with a pointer the gate would refuse is the whole failure —
+  // before this, `status` said one thing and `phase done` did another with
+  // nothing on screen to say so.
+  const root = tmp('forge-status-ambiguous-');
+  const plant = (id, slug) => {
+    const dir = path.join(root, '.forge', 'sessions', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      `${JSON.stringify({ id, slug, phase: 'implement', createdAt: '2026-07-29T10:00:00.000Z' })}\n`,
+    );
+  };
+  plant('sess-a', 'billing');
+  plant('sess-b', 'search');
+  fs.writeFileSync(
+    path.join(root, '.forge', 'active.json'),
+    `${JSON.stringify({ sessionId: 'sess-a' })}\n`,
+  );
+
+  const status = JSON.parse(
+    execFileSync(process.execPath, [SESSION_STATUS], { cwd: root, encoding: 'utf8' }),
+  );
+  assert.equal(status.sessionId, 'sess-a', 'it still answers');
+  assert.equal(status.sessionAmbiguity?.ambiguous, true, 'and says the answer was a pointer’s guess');
+  assert.deepEqual(
+    status.sessionAmbiguity.candidates.map((c) => c.sessionId).sort(),
+    ['sess-a', 'sess-b'],
+  );
+  assert.match(status.sessionAmbiguity.note, /refuse/, 'and what it will cost at the gate');
+
+  const reminder = path.join(path.dirname(SESSION_STATUS), 'session-reminder.mjs');
+  const out = execFileSync(process.execPath, [reminder], { cwd: root, encoding: 'utf8' });
+  assert.match(out, /Active Forge session: sess-a/);
+  assert.match(out, /2 sessions are unfinished/, 'the line the agent believes must say so');
+
+  // With one session open there is nothing to report, and neither should.
+  fs.rmSync(path.join(root, '.forge', 'sessions', 'sess-b'), { recursive: true });
+  const single = JSON.parse(
+    execFileSync(process.execPath, [SESSION_STATUS], { cwd: root, encoding: 'utf8' }),
+  );
+  assert.equal('sessionAmbiguity' in single, false, 'no noise when there is no ambiguity');
+});
+
+test('severity follows what an invocation writes, not what the command is called', () => {
+  // F17: four mutants restoring the F1/F2/F7 defects all survived the full
+  // suite, so three blocker fixes shipped untested. These are the assertions
+  // that were missing.
+  const root = tmp('forge-severity-');
+  const bin = path.dirname(SESSION_STATUS);
+  const plant = (id, slug) => {
+    const dir = path.join(root, '.forge', 'sessions', id);
+    fs.mkdirSync(path.join(dir, 'tasks'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      `${JSON.stringify({ id, slug, phase: 'implement', planType: 'specs', openspecChange: 'c' })}\n`,
+    );
+  };
+  plant('sess-a', 'billing');
+  plant('sess-b', 'search');
+  fs.writeFileSync(
+    path.join(root, '.forge', 'active.json'),
+    `${JSON.stringify({ sessionId: 'sess-a' })}\n`,
+  );
+  const run = (script, ...args) =>
+    spawnSync(process.execPath, [path.join(bin, script), ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-sev-fleet-'), 's') },
+    });
+
+  // Reads never refuse — refusing there is an obstruction with no damage.
+  for (const [script, args] of [
+    ['score-cli.mjs', []],
+    ['checkpoint.mjs', ['--dry-run']],
+    ['checkpoint.mjs', ['--range', '--last']],
+    ['brief-cli.mjs', ['check']],
+  ]) {
+    const r = run(script, ...args);
+    assert.equal(
+      /Refusing to guess/.test(r.stderr),
+      false,
+      `${script} ${args.join(' ')} refuses though it writes nothing`,
+    );
+  }
+
+  // `forge brief stamp` writes the hash `enforceBriefGate` reads, so stamping
+  // the neighbour's brief passes *their* implement gate on your approval — and
+  // re-running only fixes yours.
+  const stamp = run('brief-cli.mjs', 'stamp');
+  assert.notEqual(stamp.status, 0);
+  assert.match(stamp.stderr, /Refusing to guess/);
+});
+
+test('forge evidence will not overwrite another session run it only guessed at', () => {
+  // F14. The file is gitignored and `score.mjs` reads it into the evidence
+  // ratio that lands in the durable ledger, so clobbering it destroys a record
+  // and moves another change's score. Writing a *new* file on a guess is a
+  // stray file; replacing one is not.
+  const root = tmp('forge-evidence-guess-');
+  const plant = (id) => {
+    const dir = path.join(root, '.forge', 'sessions', id);
+    fs.mkdirSync(path.join(dir, 'tasks', '1.1'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      `${JSON.stringify({ id, slug: id, phase: 'implement' })}\n`,
+    );
+    return dir;
+  };
+  const a = plant('sess-a');
+  plant('sess-b');
+  fs.writeFileSync(
+    path.join(root, '.forge', 'active.json'),
+    `${JSON.stringify({ sessionId: 'sess-a' })}\n`,
+  );
+  const existing = path.join(a, 'tasks', '1.1', 'test-evidence.md');
+  fs.writeFileSync(existing, '# somebody else’s run\n');
+
+  const record = path.join(path.dirname(SESSION_STATUS), 'record-evidence.mjs');
+  const r = spawnSync(
+    process.execPath,
+    [record, '--task', '1.1', '--command', 'npm test', '--exit', '0', '--summary', 'ok'],
+    { cwd: root, encoding: 'utf8' },
+  );
+
+  assert.notEqual(r.status, 0, 'a guessed session must not clobber existing evidence');
+  assert.equal(fs.readFileSync(existing, 'utf8'), '# somebody else’s run\n', 'and must not have');
+  assert.match(`${r.stdout}${r.stderr}`, /--session/);
+});
+
+test('a session is what has a session.json, whatever its dirent says', () => {
+  // F12. The first fix asked the dirent whether it was a directory — a check
+  // copied from `cleanup-sessions.mjs`, where skipping means *don't delete* and
+  // is safe, into the resolver, where skipping means *don't count* and hides a
+  // session from the gate. A symlinked session directory is not
+  // `isDirectory()`, so `forge phase done` acted on the pointer with no warning
+  // and no refusal.
+  const root = tmp('forge-dirent-');
+  const outside = tmp('forge-dirent-target-');
+  fs.writeFileSync(
+    path.join(outside, 'session.json'),
+    `${JSON.stringify({ id: 'linked', slug: 'linked', phase: 'implement' })}\n`,
+  );
+  const sessions = path.join(root, '.forge', 'sessions');
+  fs.mkdirSync(path.join(sessions, 'plain'), { recursive: true });
+  fs.writeFileSync(
+    path.join(sessions, 'plain', 'session.json'),
+    `${JSON.stringify({ id: 'plain', slug: 'plain', phase: 'implement' })}\n`,
+  );
+  fs.symlinkSync(outside, path.join(sessions, 'linked'));
+  // And a stray file, which genuinely is not a session.
+  fs.writeFileSync(path.join(sessions, '.DS_Store'), 'junk');
+
+  const seen = JSON.parse(
+    spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { unfinishedSessions } from ${JSON.stringify(path.join(path.dirname(SESSION_STATUS), 'lib.mjs'))};
+         process.stdout.write(JSON.stringify(unfinishedSessions().map((c) => c.id).sort()));`,
+      ],
+      { cwd: root, encoding: 'utf8' },
+    ).stdout,
+  );
+  assert.deepEqual(seen, ['linked', 'plain'], 'a symlinked session still counts');
+});
+
+test('the addressable key is the directory name, not the declared id', () => {
+  // F15, and this change caused it: `unfinishedSessions` returned the id
+  // declared inside `session.json`, while `loadSession` and `--session` address
+  // `SESSIONS_DIR/<name>`. A session whose declared id differed from its
+  // directory crashed `forge status` with an uncaught "Session not found", and
+  // the remedy the gate printed crashed the same way.
+  const root = tmp('forge-idkey-');
+  const dir = path.join(root, '.forge', 'sessions', 'dirname-a');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'session.json'),
+    `${JSON.stringify({ id: 'declared-b', slug: 'x', phase: 'implement' })}\n`,
+  );
+  fs.writeFileSync(
+    path.join(root, '.forge', 'active.json'),
+    `${JSON.stringify({ sessionId: 'declared-b' })}\n`,
+  );
+
+  const r = spawnSync(process.execPath, [SESSION_STATUS], { cwd: root, encoding: 'utf8' });
+  assert.equal(r.status, 0, `status must not crash:\n${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.sessionId, 'dirname-a', 'addressed by the directory, which is what exists');
 });
