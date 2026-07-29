@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { appendDeferralLedger, appendSessionDigest, readLedger } from './ledger.mjs';
-import { CENSUS_RULE } from './review-census.mjs';
+import { CENSUS_RULE, reviewCensus } from './review-census.mjs';
+import { frozenReviewVerdict } from './review-verdict.mjs';
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
@@ -376,6 +377,160 @@ test('a session with no waiver records null, not an empty claim', () => {
   const { sessionDir, session } = makeSession(root, 's1');
   appendSessionDigest({ cwd: root, sessionDir, session, card: null });
   assert.equal(digestOf(root).finalReviewWaived, null);
+});
+
+/** A final review the prose rule reads as self-authored. */
+const SELF_PROSE = '# Final review\n\nReviewer: the coordinator — a self-check of the diff.\n';
+
+/** A final review the prose rule reads as written by an outside reader. */
+const INDEPENDENT_PROSE =
+  '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n';
+
+/** @param {string} sessionDir @param {string} body */
+function writeFinalReview(sessionDir, body) {
+  fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'reviews', 'final-review.md'), body, 'utf8');
+}
+
+test('the digest records the frozen verdict, not a fresh reading of the review file', () => {
+  // The verdict was measured from the host's dispatch record at the transition
+  // and written onto the session. By the time anything reads the digest back,
+  // that evidence may be gone — measured: a one-day-old session on this machine
+  // already has no surviving host transcript. Re-reading the file here would
+  // hand the verdict back to the party being judged.
+  const root = tmp('forge-ledger-frozen-');
+  const { sessionDir, session } = makeSession(root, 's1', {
+    reviewVerdict: { final: 'independent', evidence: 'host', stoppedByOperator: false },
+  });
+  writeFinalReview(sessionDir, SELF_PROSE);
+
+  // Discriminating fixture: the prose says the opposite of the frozen verdict.
+  assert.equal(reviewCensus(sessionDir).finalReview, 'self', 'fixture: prose alone says self');
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const { reviews } = digestOf(root);
+  assert.equal(reviews.final, 'independent');
+  assert.equal(reviews.evidence, 'host');
+  assert.equal(reviews.rule, CENSUS_RULE);
+});
+
+test('a declined reviewer is reported in the record that outlives the session', () => {
+  // The spec requires a stopped dispatch to be surfaced, and the session
+  // directory — where the census computed it — is deleted at cleanup. Recorded
+  // beside `evidence` because the flag is a measurement only under `host`; on
+  // any other grade it is a placeholder, exactly as `reviewCensus` documents.
+  const root = tmp('forge-ledger-frozen-stopped-');
+  const { sessionDir, session } = makeSession(root, 's1', {
+    reviewVerdict: { final: 'self', evidence: 'host', stoppedByOperator: true },
+  });
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const { reviews } = digestOf(root);
+  assert.equal(reviews.final, 'self');
+  assert.equal(reviews.evidence, 'host');
+  assert.equal(reviews.stoppedByOperator, true);
+
+  // The control: same grade, same verdict, no stop. Without it the assertion
+  // above cannot tell a carried flag from a hard-coded one.
+  const quiet = tmp('forge-ledger-frozen-unstopped-');
+  const pair = makeSession(quiet, 's1', {
+    reviewVerdict: { final: 'self', evidence: 'host', stoppedByOperator: false },
+  });
+  appendSessionDigest({ cwd: quiet, sessionDir: pair.sessionDir, session: pair.session, card: null });
+  assert.equal(digestOf(quiet).reviews.stoppedByOperator, false);
+});
+
+test('a frozen "there is no final review" is not re-read from a file that appeared later', () => {
+  // The commonest frozen shape by a wide margin — 12 of the 20 real sessions
+  // behind this change — and the one where a fallback that ignores `null` is
+  // invisible: `frozenReviewVerdict` must read an explicit `null` verdict as a
+  // verdict, not as a missing field, or the digest quietly re-reads the file
+  // and reports a review the session did not have when it was measured.
+  const root = tmp('forge-ledger-frozen-none-');
+  const { sessionDir, session } = makeSession(root, 's1', {
+    reviewVerdict: { final: null, evidence: 'none', stoppedByOperator: false },
+  });
+  writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+  assert.equal(
+    reviewCensus(sessionDir).finalReview,
+    'independent',
+    'fixture: prose alone says independent, so a re-read would be visible',
+  );
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const { reviews } = digestOf(root);
+  assert.equal(reviews.final, null);
+  assert.equal(reviews.evidence, 'none');
+});
+
+test('a session with no frozen verdict falls back to a live census, graded inferred', () => {
+  // Every session that finished before this change. The digest must still
+  // carry a verdict and must say plainly how it was reached.
+  const root = tmp('forge-ledger-nofrozen-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  writeFinalReview(sessionDir, SELF_PROSE);
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const { reviews } = digestOf(root);
+  assert.equal(reviews.final, reviewCensus(sessionDir).finalReview);
+  assert.equal(reviews.evidence, 'inferred');
+});
+
+test('frozenReviewVerdict answers null for anything that is not a session object', () => {
+  // Lives here rather than in its own file so the group's tier-2 command still
+  // covers it. `frozenReviewVerdict` documents "never throws" and every caller
+  // is on the `forge phase done` path, but the whole promise rests on one
+  // guard: without it, reading `.reviewVerdict` off a string is merely
+  // undefined while reading it off `null` throws — and that throw would land
+  // inside the done gate, which has no try/catch of its own.
+  for (const notASession of [null, undefined, 'session', 42, true, Symbol('s')]) {
+    assert.equal(frozenReviewVerdict(notASession), null, String(notASession));
+  }
+  assert.equal(frozenReviewVerdict({}), null, 'a session with no verdict on it');
+});
+
+test('a legacy session with no final review at all is graded none, never inferred', () => {
+  // The fallback path's own absence case, and the one place this change could
+  // still have left an absence wearing a grade: `inferred` asserts that the
+  // review file's prose was read and produced this verdict, and there was no
+  // prose to read. The consequence is small — `fleet-report` ignores lines with
+  // no verdict — which is exactly why it is not the place to make an exception.
+  const root = tmp('forge-ledger-nofrozen-nofile-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  assert.equal(reviewCensus(sessionDir).finalReview, null, 'fixture: no final review to judge');
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const { reviews } = digestOf(root);
+  assert.equal(reviews.final, null);
+  assert.equal(reviews.evidence, 'none');
+});
+
+test('a reviewVerdict that is not the shape set-phase writes falls back to a live census', () => {
+  // A hand-edited or half-written field is not a measurement, and a partial one
+  // read generously would put an invented verdict into the record that outlives
+  // the session — and, through the same reader, in front of the done gate.
+  const live = (dir) => ({ final: reviewCensus(dir).finalReview, evidence: 'inferred' });
+  for (const [label, reviewVerdict] of [
+    ['not an object', 'independent'],
+    ['an array', ['independent']],
+    ['no evidence grade', { final: 'independent', stoppedByOperator: false }],
+    ['an unknown grade', { final: 'independent', evidence: 'vibes', stoppedByOperator: false }],
+    ['an unknown verdict', { final: 'probably', evidence: 'host', stoppedByOperator: false }],
+    ['a missing verdict', { evidence: 'host', stoppedByOperator: false }],
+    ['a non-boolean flag', { final: 'independent', evidence: 'host', stoppedByOperator: 'no' }],
+  ]) {
+    const root = tmp('forge-ledger-badfrozen-');
+    const { sessionDir, session } = makeSession(root, 's1', { reviewVerdict });
+    writeFinalReview(sessionDir, SELF_PROSE);
+    const expected = live(sessionDir);
+    // The fixture discriminates: the prose verdict differs from the one the
+    // malformed field claims, so accepting it would be visible here.
+    assert.notEqual(expected.final, 'independent', label);
+
+    appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+    const { reviews } = digestOf(root);
+    assert.equal(reviews.final, expected.final, label);
+    assert.equal(reviews.evidence, expected.evidence, label);
+  }
 });
 
 test('the digest records which census rule judged its reviews', () => {

@@ -26,6 +26,7 @@ import { sessionHealth } from './health.mjs';
 import { collectPlanFacts } from './plan-facts.mjs';
 import { isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
+import { frozenReviewVerdict } from './review-verdict.mjs';
 import { appendDeferralLedger, appendSessionDigest } from './ledger.mjs';
 
 /** Keep in sync with set-phase.mjs TASK_COUNT_ESCALATION_THRESHOLD. */
@@ -412,7 +413,29 @@ export function scoreSession(opts) {
   }
 
   // --- review depth (5) — scored by what was dispatched ---
-  const census = reviewCensus(sessionDir);
+  // ONE CENSUS, TWO CONSUMERS. Review depth below and the high-risk cap further
+  // down both read `finalReview`, and the cap has to agree with the done gate:
+  // a session the gate refuses and the scorecard then scores uncapped leaves
+  // the record that outlives cleanup silent about the missing review. That
+  // happened once already, in 0.3.22, for a different reason.
+  //
+  // `finalReview` comes from the verdict `set-phase.mjs` measured from the
+  // host's dispatch record and froze onto the session at the transition — the
+  // same value the gate read. Not re-measured: the evidence expires, and this
+  // function also runs from `forge score` long after the fact. A session with
+  // no frozen verdict — anything that finished before this change, or a
+  // scorecard taken mid-session — falls back to the prose reading, graded
+  // `inferred`. The per-group counts stay on prose by design.
+  const live = reviewCensus(sessionDir);
+  const frozen = frozenReviewVerdict(session);
+  const census = frozen
+    ? {
+        ...live,
+        finalReview: frozen.final,
+        finalReviewEvidence: frozen.evidence,
+        stoppedByOperator: frozen.stoppedByOperator,
+      }
+    : live;
   let reviewPts = 0;
   /** @type {string[]} */
   const reviewNotes = [];

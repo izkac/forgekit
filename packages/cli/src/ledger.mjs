@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadDeferrals } from './integrity.mjs';
 import { reviewCensus } from './review-census.mjs';
+import { frozenReviewVerdict } from './review-verdict.mjs';
 import { sessionHealth } from './health.mjs';
 
 /**
@@ -173,6 +174,22 @@ export function appendSessionDigest(opts) {
   const { sessionDir, session } = opts;
   try {
     const census = reviewCensus(sessionDir);
+    // THE VERDICT IS NOT RE-MEASURED HERE. `set-phase.mjs` measured it at the
+    // `finish`/`done` transition from the host's own dispatch record and froze
+    // it onto the session; this line only reads it back. Recomputing would be
+    // wrong twice over. The evidence expires — a one-day-old session on this
+    // machine already has no surviving host transcript, so the answer would
+    // silently drift to the prose reading, and a digest line is a record of
+    // what was measured at the transition rather than a claim about what is
+    // true now.
+    //
+    // `null` means no verdict was frozen — every session that finished before
+    // this change — and only then does the live census decide.
+    //
+    // The other three counts stay on the live census deliberately: per-group
+    // `independent`/`selfChecks` are read from prose by design (see the scope
+    // note in `review-census.mjs`), and only `finalReview` is graded.
+    const frozen = frozenReviewVerdict(session);
     const metricsDoc = readMetricsDoc(sessionDir);
     const metrics = compactMetrics(metricsDoc);
     const dispatch = dispatchFacts(metricsDoc);
@@ -209,7 +226,27 @@ export function appendSessionDigest(opts) {
         independent: census.independent,
         selfChecks: census.selfChecks,
         rejections: census.rejections,
-        final: census.finalReview,
+        final: frozen ? frozen.final : census.finalReview,
+        // How `final` was reached. Without it, fleet-report adds a verdict
+        // measured from the host's dispatch record to one inferred from prose
+        // and prints the sum as one number — and `rule` cannot separate them,
+        // because rule 4 is *defined* as "host evidence where available, prose
+        // otherwise", so a rule-4 line carries either kind. A line written
+        // before this field existed has no `evidence` at all, which is
+        // unknown — not a grade.
+        evidence: frozen ? frozen.evidence : census.finalReviewEvidence,
+        // The host's own record of an operator declining a reviewer. The spec
+        // requires a stopped dispatch to be *reported*, and until this line the
+        // only place it existed was the session directory, which cleanup
+        // deletes — so the fact vanished while the cap it explains lived on in
+        // the score, exactly like `finalReviewWaived` before it.
+        //
+        // Read it beside `evidence`: it is a measurement only under `host`, and
+        // a placeholder `false` on every other grade, in the same sense
+        // `reviewCensus` zeroes it when nothing could be measured. It applies
+        // no waiver — declining a reviewer is the operator's decision to
+        // record, and `finalReviewWaived` below is theirs to set.
+        stoppedByOperator: frozen ? frozen.stoppedByOperator : census.stoppedByOperator,
         // Which classifier judged them. Without it, fleet-report sums verdicts
         // from incompatible rules and prints the result as one number.
         rule: census.rule ?? 0,

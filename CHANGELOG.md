@@ -1,6 +1,84 @@
 # Changelog
 
-## Unreleased
+## 0.3.29 — 2026-07-29
+
+### Review authorship is measured, not read
+
+Forge decides whether a change got an independent review or was reviewed by the
+agent that wrote it. That verdict drives the money/auth `forge phase done` gate,
+the scorecard's 69-point ceiling for an unreviewed high-risk change, the durable digest and cross-project fleet totals — and
+it was decided by reading the review file's prose, which is written by the party
+being judged. The rule was rewritten five times in one day and was wrong every
+time; twice at the gate, once refusing correct work and once passing a session
+whose own text said its reviewer had been declined.
+
+Claude Code already records every subagent it runs. Dispatch reviewers with the
+description `forge review-label <unit>` prints — `forge-review <unit>
+<forge-session-id>` — and Forge reads that record instead. It cannot
+be fabricated without actually dispatching a **subagent**. It does not yet prove
+that subagent reviewed anything — request counts are collected for that and not
+yet read.
+
+- **Evidence outranks wording**, and where a host record exists the file is not
+  consulted at all.
+- **Absence never refuses.** No record — Cursor, Codex, a pruned transcript, a
+  repo that has not adopted the convention — falls back to today's reading. A
+  repo where dispatches exist but none are labelled is detected as *not using the
+  convention* rather than judged as unreviewed; without that, measured against
+  every real dispatch record on the author's machine at the time — several hundred,
+  of which a handful carried a label and **none** labelled a final review — the
+  gate would have refused essentially every existing session.
+- **The verdict is frozen** at `finish`/`done`, before the gate reads it, because
+  transcripts are pruned within days. A measured `independent` is never later
+  downgraded to a guess; a stale `self` never survives to refuse a session that
+  was since reviewed.
+- **Every verdict carries a grade** — `host`, `inferred` or `none` — in
+  `session.json` and in `sessions.jsonl`, and `forge fleet report` refuses to sum
+  across grades silently. A digest line predating the field reads as unknown,
+  never as a grade.
+- **A declined reviewer is reported, not assumed.** The host records when an
+  operator stops a dispatch; Forge records it on the session and in the digest
+  rather than applying a waiver on your behalf. It is not yet shown in any
+  human-readable output — the gate and the scorecard still say only "missing or
+  self-authored".
+
+- **A dispatch record names the session that made it.** The description is now
+  `forge-review <unit> <forge-session-id>`, and `forge review-label final`
+  prints it. Without the id the join was "a review dispatch somewhere in this
+  conversation while this session was open" — and one Claude Code conversation
+  routinely hosts several Forge sessions, so a neighbour's reviewer was
+  indistinguishable from your own. Three independent review rounds each found a
+  fresh way for that to pass a *self-written* review through the money/auth
+  floor at score 93: a window a later session's dispatch still landed inside, a
+  `forge cleanup` that erased the neighbour's record, and a ledger line predating
+  the field that said which conversation a session ran in. Naming the session
+  ends the class rather than patching it — there is no window, no sibling search
+  and no shared-conversation index left to get wrong.
+
+  A dispatch described in the older two-word form is counted for nobody: Forge
+  reports that it cannot tell and reads the review file's wording, which is the
+  fallback rather than a refusal. That cost is per *conversation* and permanent
+  — one old-form dispatch anywhere in a Claude Code session, including a
+  neighbouring Forge session's, keeps the whole conversation on the prose rule.
+  Adoption is near zero today, so nearly every existing session lands on the
+  prose fallback rather than on measured evidence.
+
+  `forge review-label [<unit>]` prints the label, and `forge phase` now marks
+  the session it transitions as active — `active.json` was written only by
+  `forge new`, so "active" meant *most recently created*, and a coordinator
+  resuming an earlier session was handed the neighbour's id.
+
+Also from that review: a measured `independent` is no longer overwritten when the
+dispatch record is *pruned* between `finish` and `done` — which previously
+refused the session permanently, since the refused pass never wrote its own
+downgrade. `SKIPPED (pace=…)`, the string Forge itself prescribes for a
+pace-skipped final review, no longer counts as an outside reader. And a dispatch
+that ran but cannot be placed in time is counted rather than dropped, so a pruned
+sidecar transcript falls back to prose instead of reading as "nothing ran".
+
+Still open and filed: host evidence is read from a partial binding without
+saying so (a session bound to two host sessions, one of whose transcripts has
+expired, answers confidently from the other).
 
 ## 0.3.28 — 2026-07-28
 

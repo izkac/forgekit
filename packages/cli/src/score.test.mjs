@@ -294,6 +294,150 @@ test('a high-risk session with no independent review is capped, however good its
   }
 });
 
+test('the high-risk cap and the review points both follow the frozen verdict', () => {
+  // The cap and the done gate must reach the same answer: a session refused at
+  // the gate and then scored uncapped leaves the one record that outlives
+  // cleanup silent about the missing review. `score.mjs` reads the census once
+  // for review depth and again for the cap — both are pinned here.
+  const root = tmp('forge-score-frozen-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'add-stripe-refund-auth',
+      paceSignal: 'payment refunds behind an authorization gate',
+    });
+    const reviewFile = path.join(sessionDir, 'reviews', 'final-review.md');
+    fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+
+    // Prose says the coordinator wrote it; the host recorded a dispatched
+    // reviewer. Without the frozen verdict this session is capped — the control
+    // that makes the assertion below mean something.
+    fs.writeFileSync(reviewFile, '# Final review\n\nReviewer: the coordinator — a self-check.\n', 'utf8');
+    const prose = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(prose.score <= 69, `fixture: prose alone caps, got ${prose.score}`);
+
+    const measured = scoreSession({
+      cwd: root,
+      sessionDir,
+      session: {
+        ...session,
+        reviewVerdict: { final: 'independent', evidence: 'host', stoppedByOperator: false },
+      },
+    });
+    assert.equal(
+      measured.caps.some((c) => /final review/i.test(c)),
+      false,
+      measured.caps.join(' '),
+    );
+    assert.ok(measured.score > prose.score, `expected the cap lifted, got ${measured.score}`);
+    assert.match(reviewCheck(measured).notes.join(' '), /independent final review/);
+
+    // And the other direction: prose names an outside reader, the host says no
+    // final reviewer was dispatched. The cap must follow the measurement.
+    fs.writeFileSync(reviewFile, '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2.\n', 'utf8');
+    const proseIndependent = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(proseIndependent.score > 69, 'fixture: prose alone lifts the cap');
+
+    const refuted = scoreSession({
+      cwd: root,
+      sessionDir,
+      session: {
+        ...session,
+        reviewVerdict: { final: 'self', evidence: 'host', stoppedByOperator: false },
+      },
+    });
+    assert.ok(refuted.score <= 69, `expected a cap at C, got ${refuted.score}`);
+    assert.match(refuted.caps.join(' '), /self-authored/i);
+    assert.match(reviewCheck(refuted).notes.join(' '), /self-authored/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a frozen verdict read from prose is honoured too, not only a measured one', () => {
+  // C1 in this group was a rule that treated the evidence grades asymmetrically
+  // where they should have been equal. The scorer must not repeat it from the
+  // other side: the freeze is the measurement taken at the transition whatever
+  // grade it carries, and the cap has to agree with the gate — which honours an
+  // `inferred` verdict without qualification, because on a host that writes no
+  // sidecars that is the only verdict there will ever be.
+  //
+  // Discriminating fixture: a frozen `independent`/`inferred` sitting beside a
+  // file whose prose reads as a self-check — the state a session is in when the
+  // review file has moved on since the transition. Were the scorer to honour
+  // only `host`, it would silently re-read the file and cap.
+  const root = tmp('forge-score-frozen-inferred-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'add-stripe-refund-auth',
+      paceSignal: 'payment refunds behind an authorization gate',
+    });
+    const reviewFile = path.join(sessionDir, 'reviews', 'final-review.md');
+    fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+    fs.writeFileSync(reviewFile, '# Final review\n\nReviewer: the coordinator — a self-check.\n', 'utf8');
+
+    const live = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(live.score <= 69, `fixture: prose alone caps, got ${live.score}`);
+
+    const frozen = scoreSession({
+      cwd: root,
+      sessionDir,
+      session: {
+        ...session,
+        reviewVerdict: { final: 'independent', evidence: 'inferred', stoppedByOperator: false },
+      },
+    });
+    assert.equal(
+      frozen.caps.some((c) => /final review/i.test(c)),
+      false,
+      frozen.caps.join(' '),
+    );
+    assert.ok(frozen.score > live.score, `expected the cap lifted, got ${frozen.score}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a frozen "there is no final review" keeps the cap on, whatever turned up afterwards', () => {
+  // `{final: null, evidence: 'none'}` is the commonest frozen shape — 12 of the
+  // 20 real sessions behind this change — and the one where treating an
+  // explicit `null` verdict as a missing field is invisible: the cap would lift
+  // itself off a review file dropped in after the measurement, on a high-risk
+  // session, while the gate that read the same verdict had already refused.
+  const root = tmp('forge-score-frozen-none-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'add-stripe-refund-auth',
+      paceSignal: 'payment refunds behind an authorization gate',
+    });
+    const reviewFile = path.join(sessionDir, 'reviews', 'final-review.md');
+    fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+    fs.writeFileSync(reviewFile, '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2.\n', 'utf8');
+
+    const prose = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(prose.score > 69, `fixture: prose alone lifts the cap, got ${prose.score}`);
+
+    const frozen = scoreSession({
+      cwd: root,
+      sessionDir,
+      session: {
+        ...session,
+        reviewVerdict: { final: null, evidence: 'none', stoppedByOperator: false },
+      },
+    });
+    assert.ok(frozen.score <= 69, `expected a cap at C, got ${frozen.score}`);
+    assert.match(frozen.caps.join(' '), /no independent final review/i);
+    // The review-depth check reads the same verdict as the cap, so it must lose
+    // the points the file would otherwise have earned. Compared against the
+    // prose run rather than a quoted number: the difference is the measurement.
+    assert.ok(
+      reviewCheck(frozen).points < reviewCheck(prose).points,
+      `depth followed the file instead of the verdict: ${reviewCheck(frozen).points} vs ${reviewCheck(prose).points}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /**
  * A specs-engine change dir whose plan prose carries the risk, exactly as the
  * done gate reads it. The slug, paceSignal and spine stay deliberately bland.

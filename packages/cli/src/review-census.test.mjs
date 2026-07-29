@@ -251,12 +251,16 @@ test('rejection rounds are still counted, on either kind of review', () => {
 test('a session with no review artifacts at all counts nothing', () => {
   // The rule is stamped even when there is nothing to judge — a digest line
   // with counts of zero still needs to say which classifier produced them.
+  // `finalReviewEvidence: 'none'` says the same thing about the verdict: there
+  // was no review to grade, which is not a host reading that found no reviewer.
   const empty = {
     total: 0,
     independent: 0,
     selfChecks: 0,
     rejections: 0,
     finalReview: null,
+    finalReviewEvidence: 'none',
+    stoppedByOperator: false,
     rule: CENSUS_RULE,
   };
   assert.deepEqual(reviewCensus(sessionWith({})), empty);
@@ -288,6 +292,344 @@ test('the real corpus case that forced the revert', () => {
   assert.equal(reviewCensus(dir).independent, 1, 'a dispatched review must not read as self');
 });
 
+/**
+ * A host-evidence answer of the shape `reviewEvidence` returns.
+ *
+ * `seen` and `prescribed` default to the number of dispatches in `units`, so a
+ * fixture cannot quietly contradict itself — a hand-typed tally that disagrees
+ * with the units it is meant to describe would test a state the reader never
+ * produces. Pass them explicitly only when the point of the test *is* that they
+ * differ from the units (the adoption gate below).
+ *
+ * @param {{ units?: Record<string, {dispatched: number, stopped: number, requests: number}>,
+ *   seen?: number, prescribed?: number, available?: boolean, reason?: string }} [spec]
+ */
+function evidence(spec = {}) {
+  const units = spec.units ?? {};
+  // Tolerant of a deliberately malformed bucket, which the tallies are always
+  // passed explicitly alongside anyway.
+  const dispatches = Object.values(units).reduce((n, u) => n + (Number(u?.dispatched) || 0), 0);
+  const answer = {
+    available: spec.available ?? true,
+    units,
+    seen: spec.seen ?? dispatches,
+    prescribed: spec.prescribed ?? dispatches,
+  };
+  if (spec.reason !== undefined) answer.reason = spec.reason;
+  return answer;
+}
+
+test('host evidence decides the final review and the prose is not consulted', () => {
+  // The whole point of the change: the review file is written by the party
+  // being judged. Both fixtures are built so the prose rule ALONE returns the
+  // opposite verdict — asserted here off the fixture rather than assumed — so
+  // either half goes red the moment the prose is consulted on the host path.
+  const dispatched = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  assert.equal(reviewCensus(dispatched).finalReview, 'self', 'fixture: prose alone says self');
+
+  const measured = reviewCensus(dispatched, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+  });
+  assert.equal(measured.finalReview, 'independent');
+  assert.equal(measured.finalReviewEvidence, 'host');
+
+  const claimed = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  assert.equal(
+    reviewCensus(claimed).finalReview,
+    'independent',
+    'fixture: prose alone says independent',
+  );
+
+  const refuted = reviewCensus(claimed, {
+    evidence: evidence({ units: { 'group-01': { dispatched: 1, stopped: 0, requests: 46 } } }),
+  });
+  assert.equal(refuted.finalReview, 'self');
+  assert.equal(refuted.finalReviewEvidence, 'host');
+});
+
+test('with no evidence passed the verdict is the prose rule, graded inferred', () => {
+  // Five of the six callers do not pass evidence today, and a session on a host
+  // that writes no sidecars never will. Both must behave exactly as 0.3.28 did.
+  for (const body of [
+    'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n',
+    'Reviewer: coordinator — self-check\n\nAPPROVED\n',
+  ]) {
+    const dir = sessionWith({}, body);
+    const census = reviewCensus(dir);
+    assert.equal(census.finalReviewEvidence, 'inferred', body.split('\n')[0]);
+    assert.deepEqual(reviewCensus(dir, {}), census, 'an options object without evidence');
+    assert.deepEqual(reviewCensus(dir, { evidence: null }), census, 'a null evidence');
+  }
+});
+
+test('no final review file is evidence none, whatever the host recorded', () => {
+  // A dispatched reviewer that wrote nothing is not a review. `finalReview`
+  // stays null — the done gate refuses on null, which is correct here — and the
+  // grade says there was nothing to grade rather than claiming a host reading.
+  const dir = sessionWith({ '01-a/group-review.md': 'APPROVED\n' });
+  const census = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+  });
+  assert.equal(census.finalReview, null, 'absent is not the same as self');
+  assert.equal(census.finalReviewEvidence, 'none');
+});
+
+test('the adoption gate reads four states, and only two of them are a host verdict', () => {
+  // Measured on the real corpus (the count lives in review-census.mjs): plenty
+  // of dispatches are review-shaped and almost none carries the label. Reading "no prescribed
+  // dispatch" as "no reviewer ran" would mark nearly every existing session
+  // self-reviewed and refuse it at the money/auth gate. Each row below is given
+  // a fixture whose prose says the OPPOSITE of the expected host verdict, so no
+  // row can pass by accidentally falling through to the prose rule.
+  const selfProse = sessionWith({}, 'Reviewer: coordinator — self-check\n\nAPPROVED\n');
+  const claimProse = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  assert.equal(reviewCensus(selfProse).finalReview, 'self', 'fixture: prose alone says self');
+  assert.equal(
+    reviewCensus(claimProse).finalReview,
+    'independent',
+    'fixture: prose alone says independent',
+  );
+
+  // 1. prescribed > 0 and the unit is present — follow the unit.
+  const followed = reviewCensus(selfProse, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+  });
+  assert.equal(followed.finalReview, 'independent');
+  assert.equal(followed.finalReviewEvidence, 'host');
+
+  // 2. prescribed > 0 and the unit is absent — the convention IS in use here,
+  //    so the final reviewer's absence from the table means something.
+  const absent = reviewCensus(claimProse, {
+    evidence: evidence({ units: { 'group-01': { dispatched: 2, stopped: 0, requests: 46 } } }),
+  });
+  assert.equal(absent.finalReview, 'self');
+  assert.equal(absent.finalReviewEvidence, 'host');
+
+  // 3. seen > 0, prescribed === 0 — nobody in this repo labels their dispatches,
+  //    so the host has no answer to give. Whatever the prose rule returns,
+  //    field for field, in both directions.
+  for (const dir of [selfProse, claimProse]) {
+    const unadopted = reviewCensus(dir, {
+      evidence: evidence({ units: {}, seen: 7, prescribed: 0 }),
+    });
+    assert.deepEqual(unadopted, reviewCensus(dir), 'exactly what the prose rule alone returns');
+    assert.equal(unadopted.finalReviewEvidence, 'inferred');
+  }
+
+  // The boundary of that row: ONE unlabelled dispatch is already the convention
+  // not being in use. `seen: 7` above would survive a rule that read `seen > 1`.
+  const single = reviewCensus(claimProse, {
+    evidence: evidence({ units: {}, seen: 1, prescribed: 0 }),
+  });
+  assert.deepEqual(single, reviewCensus(claimProse), 'one unlabelled dispatch is enough');
+
+  // 4. seen === 0 — nothing identifiable was dispatched at all, which IS the
+  //    host saying no reviewer ran. Same empty `units` as row 3 and the
+  //    opposite verdict on the same fixture: the tallies, not the table, are
+  //    what tell those two states apart.
+  const nothing = reviewCensus(claimProse, { evidence: evidence({ units: {} }) });
+  assert.equal(nothing.finalReview, 'self');
+  assert.equal(nothing.finalReviewEvidence, 'host');
+});
+
+test('an unavailable reading never refuses on the grounds of absence alone', () => {
+  // `available: false` means "I could not look", and its `units`, `seen` and
+  // `prescribed` are placeholders that keep the shape uniform — not
+  // measurements. A census that reads the tallies without the flag sees
+  // `seen === 0`, returns `self` for every session nobody could measure, and
+  // refuses correct work at the done gate. This fixture's prose says
+  // independent, so that is precisely what it fails on.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'independent', 'fixture: prose alone says independent');
+
+  for (const unreadable of [
+    evidence({ available: false, reason: 'no host session bound to this Forge session' }),
+    // `reviewEvidence` never fills these in on an unavailable answer; the row
+    // is here to pin the ORDER of the reads — the flag before the table.
+    evidence({
+      available: false,
+      units: { final: { dispatched: 1, stopped: 1, requests: 3 } },
+      reason: 'placeholders are not measurements',
+    }),
+    // `available` must be exactly `true`, not merely truthy and not merely
+    // present. A reader that is not this reader — a future host adapter, a
+    // JSON round-trip — has not earned a gate decision by writing a string.
+    { available: 'true', units: {}, seen: 0, prescribed: 0 },
+    { available: 1, units: {}, seen: 0, prescribed: 0 },
+    { units: {}, seen: 0, prescribed: 0 },
+  ]) {
+    const census = reviewCensus(dir, { evidence: unreadable });
+    assert.deepEqual(census, bare, 'identical to passing no evidence at all');
+    assert.equal(census.finalReviewEvidence, 'inferred');
+  }
+});
+
+test('an evidence object the census cannot read falls back to prose and never throws', () => {
+  // Group 3.1 hands `reviewEvidence`'s answer straight through, inside
+  // `forge phase done`, where telemetry must never block a transition. A shape
+  // this cannot read is a shape it cannot decide on: absent tallies would make
+  // `seen > 0` false and read as "nothing was dispatched" — an absence turned
+  // into a negative — and an absent table would throw on the way there.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'independent', 'fixture: prose alone says independent');
+
+  for (const malformed of [
+    { available: true },
+    { available: true, units: {} },
+    { available: true, seen: 'two', prescribed: 0, units: {} },
+    { available: true, seen: 2, prescribed: 1, units: null },
+    'available',
+    42,
+  ]) {
+    const census = reviewCensus(dir, { evidence: malformed });
+    assert.deepEqual(census, bare, JSON.stringify(malformed));
+  }
+});
+
+test('a final bucket that cannot be read is not a reviewer that did not run', () => {
+  // A record for the unit is PRESENT and unreadable. That is "I cannot tell",
+  // and answering `self` on host grade turns it into "nobody reviewed" — the
+  // same collapse group 1 closed three times one layer up, and a confident
+  // refusal at the money/auth gate built on an absence. `reviewEvidence` cannot
+  // emit these today, but 3.2 round-trips the verdict through JSON and the
+  // module's own JSDoc promises a shape it cannot read lands on prose.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'independent', 'fixture: prose alone says independent');
+
+  for (const bucket of [
+    '2',
+    2,
+    null,
+    ['dispatched'],
+    { dispatched: '2', stopped: 0 },
+    { dispatched: null, stopped: 0 },
+    { dispatched: 1, stopped: '1' }, // an unreadable STOP is equally unreadable
+    { stopped: 1 },
+    {},
+  ]) {
+    const census = reviewCensus(dir, {
+      evidence: evidence({ units: { final: bucket }, seen: 2, prescribed: 2 }),
+    });
+    assert.deepEqual(census, bare, `units.final = ${JSON.stringify(bucket)}`);
+  }
+
+  // The boundary of that guard: a bucket whose numbers ARE readable still
+  // decides, including the zero the producer never writes.
+  const zero = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 0, stopped: 0, requests: 0 } }, seen: 2, prescribed: 2 }),
+  });
+  assert.equal(zero.finalReview, 'self');
+  assert.equal(zero.finalReviewEvidence, 'host');
+});
+
+test('a declined reviewer is surfaced even when it wrote no review file', () => {
+  // The likeliest instantiation of the spec's own scenario: the operator stops
+  // the reviewer BEFORE it writes anything. The host verdict used to be
+  // computed inside the review-file loop, so exactly that case reported
+  // `stoppedByOperator: false` — and after 3.1 that false freezes into
+  // session.json and the digest for a session where the operator demonstrably
+  // declined. `ledger.mjs` already documents that evaporation for the waiver.
+  const dir = sessionWith({});
+  assert.equal(fs.existsSync(path.join(dir, 'reviews', 'final-review.md')), false, 'fixture: no file');
+
+  const census = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 1, requests: 40 } } }),
+  });
+  assert.equal(census.stoppedByOperator, true, 'the fact is the host record, not the file');
+  assert.equal(census.finalReview, null, 'no file is still no review');
+  assert.equal(census.finalReviewEvidence, 'none', 'and nothing to grade');
+  assert.equal('finalReviewWaived' in census, false);
+
+  // Not stopped, no file: the flag stays false because nothing was stopped.
+  const quiet = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 40 } } }),
+  });
+  assert.equal(quiet.stoppedByOperator, false);
+});
+
+test('host evidence never reaches the per-group counts', () => {
+  // A deliberate scope boundary stated in the module header and held by nothing
+  // until now: every other evidence-carrying fixture has an empty `tasks/`, so
+  // wiring the host verdict into the per-artifact loop would have gone
+  // unnoticed. Those counts are worth ~2 scorecard points and widening the
+  // evidence path to them would put every review artifact behind a gate call.
+  const dir = sessionWith(
+    {
+      '01-a/group-review.md': 'Reviewer: coordinator — self-check\n\nAPPROVED\n',
+      '02-b/group-review.md': 'Reviewer: claude-opus-5 (group-reviewer)\n\nAPPROVED\n',
+    },
+    'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n',
+  );
+  const bare = reviewCensus(dir);
+  assert.equal(bare.selfChecks, 1, 'fixture: prose alone counts one self-check');
+  assert.equal(bare.independent, 1, 'fixture: prose alone counts one independent');
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says the final review is self');
+
+  const census = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+  });
+  assert.equal(census.finalReview, 'independent', 'the final verdict does follow the host');
+  assert.equal(census.total, bare.total);
+  assert.equal(census.selfChecks, bare.selfChecks, 'per-group counts stay on prose');
+  assert.equal(census.independent, bare.independent, 'per-group counts stay on prose');
+});
+
+test('a stopped dispatch is reported, and no waiver is applied on the operator behalf', () => {
+  // The host's own record of an operator declining a reviewer: measured, 5 of
+  // Most metas carry it and a couple of those are review dispatches. A unit whose
+  // only dispatch was stopped is a reviewer that did not finish.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'independent', 'fixture: prose alone says independent');
+  const sessionFile = path.join(dir, 'session.json');
+  fs.writeFileSync(sessionFile, '{"id":"s1","phase":"implement"}\n', 'utf8');
+  const before = fs.readFileSync(sessionFile, 'utf8');
+
+  const declined = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 1, requests: 40 } } }),
+  });
+  assert.equal(declined.finalReview, 'self');
+  assert.equal(declined.finalReviewEvidence, 'host');
+  assert.equal(declined.stoppedByOperator, true);
+
+  // Declining a reviewer is the operator's decision to record. Forge surfaces
+  // the fact and names the remedy; it does not waive on their behalf.
+  assert.equal('finalReviewWaived' in declined, false);
+  assert.equal(fs.readFileSync(sessionFile, 'utf8'), before, 'the census wrote to the session');
+
+  const finished = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 40 } } }),
+  });
+  assert.equal(finished.stoppedByOperator, false, 'nothing was stopped');
+});
+
+test('a stopped dispatch followed by a completed one is independent, stop still reported', () => {
+  // The brief left this as `assumed — verify`. Verified against the real corpus
+  // on this machine: of the 20 repeated dispatch descriptions, one is a stopped
+  // run followed by a completed re-run, so a unit carrying both is a shape that
+  // occurs, not a hypothetical. A reviewer did run to completion, so the
+  // verdict follows the completed dispatch — and the stop is still surfaced,
+  // because it is a fact the host recorded, not the verdict's cause.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\nAPPROVED\n');
+  assert.equal(reviewCensus(dir).finalReview, 'self', 'fixture: prose alone says self');
+
+  const retried = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 2, stopped: 1, requests: 61 } } }),
+  });
+  assert.equal(retried.finalReview, 'independent');
+  assert.equal(retried.finalReviewEvidence, 'host');
+  assert.equal(retried.stoppedByOperator, true);
+
+  // Both stopped is the other edge: no reviewer finished.
+  const bothStopped = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 2, stopped: 2, requests: 8 } } }),
+  });
+  assert.equal(bothStopped.finalReview, 'self');
+  assert.equal(bothStopped.stoppedByOperator, true);
+});
+
 test('the census stamps which rule produced its verdict', () => {
   // Four classifiers have written review verdicts into sessions.jsonl in one
   // day, and nothing recorded which. fleet-report sums `independent` across
@@ -297,4 +639,29 @@ test('the census stamps which rule produced its verdict', () => {
   assert.equal(typeof census.rule, 'number');
   assert.ok(Number.isInteger(census.rule) && census.rule > 0, `got ${census.rule}`);
   assert.equal(census.rule, CENSUS_RULE);
+});
+
+test("a pace skip is not an outside reader — Forge's own SKIPPED string counts as a self-check", () => {
+  // I2, from the final review. `phases/review.md` prescribes writing
+  // `SKIPPED (pace=…)` into `final-review.md` when pace skips the final review
+  // on a change that is not high-risk. The recognised list carried
+  // `APPROVED (pace` but not `SKIPPED (pace`, so a file whose entire content
+  // records that *nobody read the change* was classified `independent`: +2
+  // review points, no 29-point cap, and a permanent `{independent, inferred}`
+  // line in `sessions.jsonl` and the cross-project totals.
+  //
+  // Not a gate escape — the instruction is conditioned on the session not being
+  // high-risk, and the gate uses the same predicate — but the durable ledger
+  // recorded the opposite of what happened, which is what the ledger is for.
+  for (const body of [
+    'SKIPPED (pace=brisk)\n',
+    '# Final review\n\nSKIPPED (pace=lite) — final review not required at this pace.\n',
+  ]) {
+    const dir = sessionWith({}, body);
+    assert.equal(reviewCensus(dir).finalReview, 'self', body.split('\n')[0]);
+  }
+
+  // And the string the pace table actually renders, verbatim from review.md.
+  const dir = sessionWith({}, 'SKIPPED (pace=standard)\n');
+  assert.notEqual(reviewCensus(dir).finalReview, 'independent');
 });

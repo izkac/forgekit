@@ -18,10 +18,12 @@ import { appendPhaseHistory, loadSession, readActive, saveSession } from './lib.
 import { briefProblem, checkBrief } from './brief.mjs';
 import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
 import { reviewCensus } from './review-census.mjs';
+import { frozenReviewVerdict } from './review-verdict.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
 import { bindHost } from './metrics/host.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
+import { reviewEvidence } from './metrics/review-evidence.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -101,6 +103,7 @@ if (!sessionId) {
 }
 
 const { dir, session } = loadSession(sessionId);
+
 session.phase = phase;
 appendPhaseHistory(session, phase, new Date().toISOString());
 
@@ -263,7 +266,36 @@ function enforceFinalReviewFloor() {
     delete session.finalReviewWaived;
     return;
   }
-  if (reviewCensus(dir).finalReview === 'independent') {
+  // The frozen verdict, measured moments ago by `freezeReviewVerdict` below —
+  // which runs *before* this gate, and must keep doing so. A live census here
+  // would read the review file's prose, the text this whole change exists to
+  // stop trusting.
+  //
+  // NO VERDICT MEANS THE MEASUREMENT FAILED, AND THAT IS NOT A REFUSAL.
+  // `freezeReviewVerdict` runs on exactly the phases this gate acts on, and it
+  // leaves the verdict absent only when `reviewCensus` raised — in which case
+  // it has already warned. A live-census fallback here (which `score.mjs` and
+  // `ledger.mjs` do keep, because they run for sessions that never reached a
+  // freeze) would therefore be reached only in the state where it is certain to
+  // raise the same error again: it shipped that way for one round and turned an
+  // advisory warning into an uncaught stack trace and a lost transition. Same
+  // rule as `collectPlanFacts` above — cannot judge, do not invent a refusal.
+  const verdict = frozenReviewVerdict(session);
+  if (!verdict) {
+    // Failing open is the right direction — see above — but it must not be
+    // silent. Only a high-risk change reaches this line, so what just happened
+    // is that the money/auth floor did not run, and the session may well end up
+    // with no scorecard and no `sessions.jsonl` line either, since the failure
+    // that costs the verdict costs those too. The two warnings already on
+    // stderr are telemetry-shaped and neither says a gate was skipped; without
+    // this, a high-risk session passes unjudged with nothing recorded anywhere.
+    process.stderr.write(
+      '[forge] Warning: the money/auth final-review floor could not be evaluated — ' +
+        'no review verdict was measured, so this high-risk change was not judged.\n',
+    );
+    return;
+  }
+  if (verdict.final === 'independent') {
     delete session.finalReviewWaived;
     return;
   }
@@ -277,6 +309,130 @@ function enforceFinalReviewFloor() {
   process.exit(1);
 }
 
+/**
+ * Measure who wrote the final review, once, and freeze the answer.
+ *
+ * BEFORE THE GATE, NOT MERELY BEFORE THE SCORECARD. `enforceFinalReviewFloor`
+ * below is the money/auth floor and it reads this verdict; the scorecard is
+ * another twenty lines down. An earlier draft of this task said "before the
+ * scorecard", which is where the metrics block sits and is too late — the same
+ * ordering mistake that shipped once already, when `bindHost` ran after the
+ * scorecard and a session whose first Forge command was `phase done` recorded
+ * `available: false` for good.
+ *
+ * FROZEN BECAUSE THE EVIDENCE DOES NOT LAST. A one-day-old session on this
+ * machine already has no surviving host transcript, so a consumer that
+ * remeasured later would get a different answer, or none. Writing it down once
+ * is what keeps the gate, the cap and the digest on one reading.
+ *
+ * FREEZING IS NOT WHAT MAKES THE ATTRIBUTION CORRECT. It never was: three
+ * independent review rounds each defeated a version that inferred attribution
+ * from something adjacent to the dispatch — a `[createdAt, now]` window a later
+ * session's reviewer still landed inside, a sibling search that `forge cleanup`
+ * blinded, a ledger index that predated its own field. Each one froze a
+ * neighbour's reviewer as `{independent, host}` onto a session whose own final
+ * review was a self-check, and passed it through this gate.
+ *
+ * What makes it correct is that the dispatch description now carries the Forge
+ * session id, so a record names the session that made it and crediting one is
+ * an equality test. Freezing does what it always did and no more: it keeps the
+ * verdict after the host prunes the transcript that proved it.
+ *
+ * NOT A CLAIM THAT THE MEASUREMENT IS COMPLETE. `reviewEvidence` answers from
+ * whatever bound host sessions it can read, and a session bound to two whose
+ * second sidecar directory is unreadable still answers confidently from the
+ * first (F27, owned by `host.mjs`). This freezes what was measured, no more.
+ *
+ * Advisory, exactly like the metrics block below: telemetry may cost a session
+ * its measurement, never its transition.
+ */
+function freezeReviewVerdict() {
+  if (phase !== 'done' && phase !== 'finish') return;
+  try {
+    const evidence = reviewEvidence({ session, env: process.env });
+    const census = reviewCensus(dir, { evidence });
+    const next = {
+      final: census.finalReview,
+      evidence: census.finalReviewEvidence,
+      stoppedByOperator: census.stoppedByOperator,
+    };
+    // A MEASURED `independent` IS NEVER REPLACED BY A GUESS — and nothing else
+    // is protected. `finish` then `done` a day apart is ordinary, and the host
+    // prunes transcripts in days, so the second pass routinely cannot see what
+    // the first one measured; without this, an independent reviewer measured at
+    // `finish` would silently degrade to whatever the review file's prose says.
+    // That is the spec's "verdict outlives its evidence", and its GIVEN names
+    // this exact case.
+    //
+    // THE RULE IS ASYMMETRIC BECAUSE THE TWO VERDICTS ARE NOT SYMMETRIC IN
+    // CONSEQUENCE. A first version kept any `host` verdict, and a stale `self`
+    // then refused work: freeze `self` at `finish` when no reviewer had run
+    // yet, dispatch a real one, let the host prune overnight, and `done` exits
+    // 1 with a remedy the operator has already followed — a regression against
+    // 0.3.28 on the very scenario titled "absence of evidence never refuses
+    // work", plus a permanent `self`/`host` line in the durable ledger for a
+    // session that was independently reviewed. Losing a measurement costs a
+    // grade; keeping a stale one costs the work. `review-census.mjs` states the
+    // governing rule — fall back to prose, the side that cannot refuse correct
+    // work — and this is the one place that could invert it.
+    //
+    // Everything else refreshes, so a review written between the two passes
+    // still counts and a stale `none` or `self` can never strand a session.
+    // Same shape as `writeMetrics`' `kept` below, narrower on purpose.
+    const frozen = frozenReviewVerdict(session);
+    // Widened after the final review (I1). The test used to be `next.evidence
+    // !== 'host'`, which let a *host-graded* second reading overwrite the
+    // measurement — and the reading that does that needs no adversary: an
+    // emptied `subagents/` directory scans clean, yields `seen === 0`, and
+    // `seen === 0` is graded `host` ("nothing was dispatched"), so a session
+    // that froze `independent` at `finish` was re-graded `self` at `done` and
+    // refused. Permanently: `saveSession` runs last, so the refused pass never
+    // records the new verdict and every retry repeats it, with
+    // `--final-review-waived` the only escape — for a reviewer that really ran.
+    //
+    // The axis is whether this pass saw **the unit that decides**, not how much
+    // it saw. Two host-graded second readings look identical in
+    // `{final, evidence}` and must be treated oppositely:
+    //
+    //   the record CHANGED   a `final` dispatch is still on record and now
+    //                        carries `stoppedByUser`. The operator's refusal is
+    //                        new information about the thing being judged, so
+    //                        refresh — keeping the stale verdict would reopen
+    //                        the 0.3.26 escape and pass a session whose
+    //                        reviewer was declined.
+    //   the record is GONE   no `final` unit in this reading. Whatever else is
+    //                        or is not there, nothing was learnt about the
+    //                        final review, so keep the measurement.
+    //
+    // An earlier fix keyed on `seen === 0` instead. That is *narrower* than the
+    // rule it replaced, not wider, and an independent review found three ways
+    // it stranded a session permanently: a pruned `final` record beside a
+    // surviving unlabelled dispatch (`seen > 0`, prose fallback), a partial
+    // binding whose older transcript expired between the two passes, and a
+    // surviving `forge-review group-01` label — which refused even when the
+    // review file read independent. All three are `seen > 0` with no `final`.
+    //
+    // A frozen `self` or `none` still refreshes freely, which is what the
+    // asymmetry was for — a stale negative can never strand a session.
+    const measured = frozen?.final === 'independent' && frozen?.evidence === 'host';
+    const remeasured = next.final === 'independent' && next.evidence === 'host';
+    const sawTheUnit =
+      evidence.available && !!evidence.units && Object.hasOwn(evidence.units, 'final');
+    if (measured && !remeasured && !sawTheUnit) {
+      process.stderr.write(
+        '[forge] Kept the review verdict already measured for this session — this pass had no host evidence to read.\n',
+      );
+      return;
+    }
+    session.reviewVerdict = next;
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not measure review authorship: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
+
+freezeReviewVerdict();
 enforceFinalReviewFloor();
 enforceDoneGate();
 
@@ -324,6 +480,14 @@ if (phase === 'done' || phase === 'finish') {
   }
 }
 
+// LAST, AND THAT IS LOAD-BEARING. Every gate above refuses with `process.exit`,
+// so a refused pass writes nothing at all — not the phase, and not the review
+// verdict measured moments before it. That is what keeps a wrong positive from
+// becoming permanent: `reviewEvidence` can answer confidently from a partially
+// readable binding (F27, owned by `host.mjs`), and if that lands on `self` the
+// session is refused and the verdict is discarded unwritten, so the next pass
+// measures again instead of inheriting the mistake. Moving this above the gates
+// would pin it.
 saveSession(dir, session);
 process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));
 process.stdout.write('\n');

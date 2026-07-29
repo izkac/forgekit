@@ -583,7 +583,7 @@ Each implementation task:
 2. **Implementer** subagent — must follow `skills/test-driven-development` first.
 3. **Task reviewer** subagent (spec then quality) — unless pace skips low-risk tasks.
 4. Mark task complete (`tasks.md` checkbox or session progress).
-5. After all tasks: **verify** (tier 3 scope from pace) → **final reviewer** (unless pace skips) → finish.
+5. After all tasks: **verify** (tier 3 scope from pace) → **final reviewer** (unless pace skips; dispatch it with the Task description exactly what `forge review-label final` prints — see [phases/review.md](../phases/review.md)) → finish.
 
 Test tiers: [test-strategy.md](../references/test-strategy.md) — scoped TDD per task, narrow evidence per task, full workspace **once** at verify when pace requires it (not every task).
 

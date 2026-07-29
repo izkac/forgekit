@@ -1,0 +1,397 @@
+diff --git a/packages/cli/src/lib.mjs b/packages/cli/src/lib.mjs
+index a86cf13..607de2a 100644
+--- a/packages/cli/src/lib.mjs
++++ b/packages/cli/src/lib.mjs
+@@ -49,9 +49,36 @@ export function readJson(filePath) {
+   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+ }
+ 
++/**
++ * Write JSON so a concurrent reader sees the old file or the new one, never a
++ * half-written one.
++ *
++ * `writeFileSync` truncates and then writes, so a reader landing between the
++ * two gets an empty or partial file — measured at 2 torn reads in 2445 under
++ * two concurrent writers. That was tolerable while these files were written
++ * once per command; `active.json` is now written on every phase transition, and
++ * a torn read of *it* costs a real guard: `forge cleanup` loses the live-session
++ * check that stops it deleting work in progress, and the SessionStart hook
++ * silently tells the next agent there is no session.
++ *
++ * Rename within the same directory is atomic on POSIX and on Windows for a
++ * same-volume replace. If the rename fails the temp file is cleaned up and the
++ * error propagates — callers already treat a failed write as advisory.
++ */
+ export function writeJson(filePath, data) {
+   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+-  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
++  const tmpPath = `${filePath}.${process.pid}.tmp`;
++  try {
++    fs.writeFileSync(tmpPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
++    fs.renameSync(tmpPath, filePath);
++  } catch (err) {
++    try {
++      fs.rmSync(tmpPath, { force: true });
++    } catch {
++      // best effort — the write already failed
++    }
++    throw err;
++  }
+ }
+ 
+ export function readActive() {
+@@ -71,6 +98,129 @@ export function writeActive(sessionId) {
+   });
+ }
+ 
++/**
++ * Every session in this project that could still be the one being worked on.
++ *
++ * `null` means the directory could not be enumerated — which is not the same as
++ * finding nothing in it, and a caller must never read it as "one session, no
++ * ambiguity". Only a *missing* `session.json` means a directory is not a
++ * session; unreadable, truncated or permission-denied is a session we could not
++ * judge, and it is returned marked `unreadable` so the caller can say so.
++ *
++ * @returns {{ id: string, slug?: string, phase?: string, unreadable?: boolean }[] | null}
++ */
++export function unfinishedSessions() {
++  /** @type {{ id: string, slug?: string, phase?: string, unreadable?: boolean }[]} */
++  const out = [];
++  /** @type {string[]} */
++  let names;
++  try {
++    names = fs.readdirSync(SESSIONS_DIR);
++  } catch (err) {
++    if (err?.code === 'ENOENT') return out; // no sessions dir: nothing to be ambiguous about
++    return null;
++  }
++  for (const name of names) {
++    /** @type {Record<string, any>} */
++    let raw;
++    try {
++      raw = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, name, 'session.json'), 'utf8'));
++    } catch (err) {
++      if (err?.code === 'ENOENT') continue;
++      out.push({ id: name, unreadable: true });
++      continue;
++    }
++    if (raw?.phase === 'done' || raw?.phase === 'skipped') continue;
++    out.push({ id: raw?.id ?? name, slug: raw?.slug, phase: raw?.phase });
++  }
++  return out;
++}
++
++/**
++ * Which session a command should act on when the operator did not name one.
++ *
++ * THE ONE PLACE THIS IS DECIDED. It used to be decided independently wherever a
++ * command needed a session — `readActive()` has a dozen importers — and each
++ * one trusted the pointer differently. `active.json` was written only by
++ * `forge new`, so "active" meant *most recently created*, and every command
++ * that resolved without being told answered for the wrong change: the label
++ * named a neighbour, `forge status` agreed with it, and `forge phase done` —
++ * the money/auth gate — ran against the neighbour while the high-risk change it
++ * was supposed to judge ended with no verdict, no scorecard and no ledger line
++ * at all. Eight review rounds each found this at a different call site, because
++ * each fix landed where the reproduction was written rather than where the
++ * decision lives.
++ *
++ * The rules, in order:
++ *   - an explicitly named session wins, always
++ *   - if the sessions directory cannot be read, refuse — inability to look is
++ *     never "there is only one"
++ *   - if more than one session is unfinished, refuse and name them; guessing
++ *     between them is silent and fails open at the gate
++ *   - prefer the pointer when it names an unfinished session, otherwise the one
++ *     session still open — a pointer naming finished work must not win over
++ *     work in progress
++ *
++ * Never throws. `id` is null exactly when `problem` is set.
++ *
++ * @param {string | null | undefined} explicit a `--session` argument
++ * @returns {{ id: string | null, from: 'flag' | 'active' | 'only-open' | 'none',
++ *   problem?: string, candidates?: { id: string, slug?: string, phase?: string, unreadable?: boolean }[] }}
++ */
++export function resolveSessionId(explicit) {
++  if (typeof explicit === 'string' && explicit) return { id: explicit, from: 'flag' };
++
++  const candidates = unfinishedSessions();
++  if (candidates === null) {
++    return {
++      id: null,
++      from: 'none',
++      problem: `could not read ${SESSIONS_DIR} to tell which session to act on`,
++    };
++  }
++  if (candidates.length > 1) {
++    return {
++      id: null,
++      from: 'none',
++      problem: `${candidates.length} sessions are unfinished in this project`,
++      candidates,
++    };
++  }
++
++  const active = readActive()?.sessionId ?? null;
++  if (active !== null && candidates.some((c) => c.id === active)) {
++    return { id: active, from: 'active' };
++  }
++  if (candidates.length === 1) return { id: candidates[0].id, from: 'only-open' };
++  return active === null ? { id: null, from: 'none' } : { id: active, from: 'active' };
++}
++
++/**
++ * The refusal text for a `resolveSessionId` that could not decide, phrased the
++ * same way wherever it is printed.
++ *
++ * @param {ReturnType<typeof resolveSessionId>} resolved
++ * @param {string} command e.g. `forge phase done`
++ * @returns {string}
++ */
++export function sessionAmbiguityMessage(resolved, command) {
++  const lines = [`Refusing to guess which session to act on — ${resolved.problem}.`];
++  for (const c of resolved.candidates ?? []) {
++    lines.push(
++      `  --session ${c.id}` +
++        (c.unreadable
++          ? '   (session.json unreadable — cannot tell whether it is finished)'
++          : c.slug
++            ? `   (${c.slug}, ${c.phase ?? 'no phase'})`
++            : ''),
++    );
++  }
++  lines.push('', `Re-run naming one, e.g. ${command} --session <id>.`);
++  lines.push('Acting on the wrong session credits its review to the wrong change,');
++  lines.push('and that passes the money/auth floor silently.');
++  return `${lines.join('\n')}\n`;
++}
++
+ export function clearActive() {
+   if (fs.existsSync(ACTIVE_FILE)) fs.unlinkSync(ACTIVE_FILE);
+ }
+diff --git a/packages/cli/src/lib.test.mjs b/packages/cli/src/lib.test.mjs
+index e9ea345..2cd6abc 100644
+--- a/packages/cli/src/lib.test.mjs
++++ b/packages/cli/src/lib.test.mjs
+@@ -5,7 +5,7 @@ import path from 'node:path';
+ import { tmpdir } from 'node:os';
+ import { execFileSync, spawnSync } from 'node:child_process';
+ import { fileURLToPath } from 'node:url';
+-import { defaultSession, findRepoRoot, sessionAgeDays } from './lib.mjs';
++import { defaultSession, findRepoRoot, sessionAgeDays, writeJson } from './lib.mjs';
+ 
+ const SESSION_STATUS = path.join(
+   path.dirname(fileURLToPath(import.meta.url)),
+@@ -220,3 +220,31 @@ test('forge new then forge phase triage records one triage row, not two', () =>
+   // the timeline still starts exactly where the session does.
+   assert.deepEqual(readSession(dir).phaseHistory, [{ phase: 'triage', at: createdAt }]);
+ });
++
++test('writeJson replaces the file rather than truncating it in place', () => {
++  // `active.json` is now written on every phase transition, so a concurrent
++  // reader hits it far more often than when these files were written once per
++  // command. `writeFileSync` truncates and *then* writes: measured with two
++  // concurrent writer processes, a plain write produced **62 torn reads in
++  // 79**; the same probe over a rename produced 0. A torn read of `active.json`
++  // costs real guards — `forge cleanup` loses the live-session check that stops
++  // it deleting work in progress, and the SessionStart hook tells the next
++  // agent there is no session at all.
++  //
++  // Asserted through the inode rather than by racing a writer, because a
++  // timing test that passes on a fast machine and fails on a loaded one teaches
++  // nothing. A rename installs a *new* file; an in-place write keeps the inode.
++  const dir = fs.mkdtempSync(path.join(tmpdir(), 'forge-writejson-'));
++  const file = path.join(dir, 'active.json');
++
++  writeJson(file, { sessionId: 'first' });
++  const before = fs.statSync(file).ino;
++
++  writeJson(file, { sessionId: 'second', padding: 'x'.repeat(4096) });
++  const after = fs.statSync(file).ino;
++
++  assert.notEqual(after, before, 'the destination must be replaced, not rewritten in place');
++  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).sessionId, 'second');
++  // And no temp file left beside it, which would confuse anything globbing the dir.
++  assert.deepEqual(fs.readdirSync(dir), ['active.json']);
++});
+diff --git a/packages/cli/src/set-phase.mjs b/packages/cli/src/set-phase.mjs
+index 2d5a16e..fdaaab5 100644
+--- a/packages/cli/src/set-phase.mjs
++++ b/packages/cli/src/set-phase.mjs
+@@ -14,7 +14,15 @@
+ 
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import { appendPhaseHistory, loadSession, readActive, saveSession } from './lib.mjs';
++import {
++  appendPhaseHistory,
++  loadSession,
++  readActive,
++  resolveSessionId,
++  saveSession,
++  sessionAmbiguityMessage,
++  writeActive,
++} from './lib.mjs';
+ import { briefProblem, checkBrief } from './brief.mjs';
+ import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
+ import { reviewCensus } from './review-census.mjs';
+@@ -93,16 +101,24 @@ for (let i = 1; i < args.length; i += 1) {
+   }
+ }
+ 
+-if (!sessionId) {
+-  const active = readActive();
+-  sessionId = active?.sessionId;
+-}
+-if (!sessionId) {
+-  process.stderr.write('No active session. Run forge:new first.\n');
++// Resolved through the one place that decides this — see `resolveSessionId`.
++// `forge phase done` is the money/auth gate, and it used to follow the same
++// stale pointer as everything else: with two sessions open it gated the wrong
++// one, scored it, wrote its ledger line, and left the high-risk change it was
++// meant to judge with no verdict at all.
++const resolvedSession = resolveSessionId(sessionId);
++if (resolvedSession.id === null) {
++  process.stderr.write(
++    resolvedSession.problem
++      ? sessionAmbiguityMessage(resolvedSession, `forge phase ${phase}`)
++      : 'No active session. Run forge:new first.\n',
++  );
+   process.exit(1);
+ }
++sessionId = resolvedSession.id;
+ 
+ const { dir, session } = loadSession(sessionId);
++
+ session.phase = phase;
+ appendPhaseHistory(session, phase, new Date().toISOString());
+ 
+@@ -324,19 +340,18 @@ function enforceFinalReviewFloor() {
+  * remeasured later would get a different answer, or none. Writing it down once
+  * is what keeps the gate, the cap and the digest on one reading.
+  *
+- * FREEZING DOES NOT MAKE THE ATTRIBUTION CORRECT, AND MUST NOT BE READ AS
+- * DOING SO. `reviewEvidence` attributes a dispatch by asking whether it started
+- * inside `[createdAt, now]`. Only the lower edge is sound. Any other Forge
+- * session sharing this host session falls inside that window — including one
+- * created *after* this one, which can dispatch its reviewer *before* this
+- * transition, so it is already inside the window while `now` genuinely is now.
+- * An earlier version of this comment said measuring at the transition made the
+- * reading sound; that was refuted by reproduction — a session frozen
+- * `{independent, host}` on a neighbour's reviewer, its own final review a
+- * self-check, passed this gate. Freezing bounds the candidate set to one
+- * instant rather than one that widens with every later recompute; it does not
+- * make the answer right. The fix is upstream — attribution by a stamp written
+- * at dispatch rather than by timestamp — filed as **F31** alongside F27.
++ * FREEZING IS NOT WHAT MAKES THE ATTRIBUTION CORRECT. It never was: three
++ * independent review rounds each defeated a version that inferred attribution
++ * from something adjacent to the dispatch — a `[createdAt, now]` window a later
++ * session's reviewer still landed inside, a sibling search that `forge cleanup`
++ * blinded, a ledger index that predated its own field. Each one froze a
++ * neighbour's reviewer as `{independent, host}` onto a session whose own final
++ * review was a self-check, and passed it through this gate.
++ *
++ * What makes it correct is that the dispatch description now carries the Forge
++ * session id, so a record names the session that made it and crediting one is
++ * an equality test. Freezing does what it always did and no more: it keeps the
++ * verdict after the host prunes the transcript that proved it.
+  *
+  * NOT A CLAIM THAT THE MEASUREMENT IS COMPLETE. `reviewEvidence` answers from
+  * whatever bound host sessions it can read, and a session bound to two whose
+@@ -349,9 +364,8 @@ function enforceFinalReviewFloor() {
+ function freezeReviewVerdict() {
+   if (phase !== 'done' && phase !== 'finish') return;
+   try {
+-    const census = reviewCensus(dir, {
+-      evidence: reviewEvidence({ session, env: process.env }),
+-    });
++    const evidence = reviewEvidence({ session, env: process.env });
++    const census = reviewCensus(dir, { evidence });
+     const next = {
+       final: census.finalReview,
+       evidence: census.finalReviewEvidence,
+@@ -381,7 +395,45 @@ function freezeReviewVerdict() {
+     // still counts and a stale `none` or `self` can never strand a session.
+     // Same shape as `writeMetrics`' `kept` below, narrower on purpose.
+     const frozen = frozenReviewVerdict(session);
+-    if (frozen?.evidence === 'host' && frozen.final === 'independent' && next.evidence !== 'host') {
++    // Widened after the final review (I1). The test used to be `next.evidence
++    // !== 'host'`, which let a *host-graded* second reading overwrite the
++    // measurement — and the reading that does that needs no adversary: an
++    // emptied `subagents/` directory scans clean, yields `seen === 0`, and
++    // `seen === 0` is graded `host` ("nothing was dispatched"), so a session
++    // that froze `independent` at `finish` was re-graded `self` at `done` and
++    // refused. Permanently: `saveSession` runs last, so the refused pass never
++    // records the new verdict and every retry repeats it, with
++    // `--final-review-waived` the only escape — for a reviewer that really ran.
++    //
++    // The axis is whether this pass saw **the unit that decides**, not how much
++    // it saw. Two host-graded second readings look identical in
++    // `{final, evidence}` and must be treated oppositely:
++    //
++    //   the record CHANGED   a `final` dispatch is still on record and now
++    //                        carries `stoppedByUser`. The operator's refusal is
++    //                        new information about the thing being judged, so
++    //                        refresh — keeping the stale verdict would reopen
++    //                        the 0.3.26 escape and pass a session whose
++    //                        reviewer was declined.
++    //   the record is GONE   no `final` unit in this reading. Whatever else is
++    //                        or is not there, nothing was learnt about the
++    //                        final review, so keep the measurement.
++    //
++    // An earlier fix keyed on `seen === 0` instead. That is *narrower* than the
++    // rule it replaced, not wider, and an independent review found three ways
++    // it stranded a session permanently: a pruned `final` record beside a
++    // surviving unlabelled dispatch (`seen > 0`, prose fallback), a partial
++    // binding whose older transcript expired between the two passes, and a
++    // surviving `forge-review group-01` label — which refused even when the
++    // review file read independent. All three are `seen > 0` with no `final`.
++    //
++    // A frozen `self` or `none` still refreshes freely, which is what the
++    // asymmetry was for — a stale negative can never strand a session.
++    const measured = frozen?.final === 'independent' && frozen?.evidence === 'host';
++    const remeasured = next.final === 'independent' && next.evidence === 'host';
++    const sawTheUnit =
++      evidence.available && !!evidence.units && Object.hasOwn(evidence.units, 'final');
++    if (measured && !remeasured && !sawTheUnit) {
+       process.stderr.write(
+         '[forge] Kept the review verdict already measured for this session — this pass had no host evidence to read.\n',
+       );
+@@ -451,6 +503,36 @@ if (phase === 'done' || phase === 'finish') {
+ // session is refused and the verdict is discarded unwritten, so the next pass
+ // measures again instead of inheriting the mistake. Moving this above the gates
+ // would pin it.
++// THE SESSION YOU DRIVE IS THE ACTIVE ONE — but only once the transition has
++// actually been allowed. `active.json` was written by `forge new` alone, so
++// "active" meant *most recently created*, and a coordinator resuming an earlier
++// session was answered for the wrong one by everything that resolves a session
++// without being told which.
++//
++// Placed here, below every gate, for two reasons an independent review found by
++// reproduction. A *refused* `forge phase done` must not move the pointer: the
++// phase never changed, so claiming that session is now the one being driven is
++// a lie the SessionStart hook then repeats. And terminal phases are excluded
++// outright — making a finished session active points `forge status`, the
++// resume hook and `forge review-label` at work that is over, hides a session
++// with tasks still in flight, and shields the finished one from cleanup's
++// retention sweep.
++if (phase !== 'done' && phase !== 'skipped' && readActive()?.sessionId !== sessionId) {
++  try {
++    writeActive(sessionId);
++  } catch (err) {
++    // NOT SILENT. The comment here used to call the pointer "a convenience";
++    // this change made that false — every command that resolves a session
++    // without being told reads it, including the money/auth gate. A failed
++    // write leaves the next command pointing at a different session, so the
++    // transition still succeeds but the operator has to know.
++    process.stderr.write(
++      `[forge] Warning: could not mark ${sessionId} as the active session ` +
++        `(${err instanceof Error ? err.message : err}). Pass --session to later commands.\n`,
++    );
++  }
++}
++
+ saveSession(dir, session);
+ process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));
+ process.stdout.write('\n');

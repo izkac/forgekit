@@ -54,14 +54,54 @@ export function detectEngine(env = process.env) {
 }
 
 /**
+ * Is this project root a scratch tree under the system temp dir?
+ *
+ * A real project is never there, and the unit suite's fixtures always are.
+ * Compared as a path prefix rather than by string matching so that a project
+ * legitimately named `/home/me/tmpfoo` is not caught, and resolved through
+ * `realpathSync` because macOS hands out `/var/folders/...` paths whose
+ * canonical form is `/private/var/folders/...`.
+ *
+ * @param {string} projectRoot
+ * @returns {boolean}
+ */
+function underTempDir(projectRoot) {
+  const real = (p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p); // does not exist yet; the literal path still tells us
+    }
+  };
+  const rel = path.relative(real(os.tmpdir()), real(projectRoot));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
  * Mirror a session into the registry. Never throws — a broken registry must
  * not break session saves.
+ *
+ * SCRATCH PROJECTS ARE NOT REGISTERED. The unit suite spawns real `forge`
+ * processes against fixture projects under `os.tmpdir()`, and the only thing
+ * keeping those out of the operator's registry was `FORGEKIT_FLEET_DIR` being
+ * set by `scripts/run-tests.mjs`. Running a suite file directly with
+ * `node --test` — which is what every Forge tier-2 command instructs — bypassed
+ * it: measured on the author's machine, 8572 scratch entries against 10 real
+ * ones, so `forge fleet report` was aggregating almost entirely dead `/tmp`
+ * paths. The guard belongs here and not in the harness, because the harness is
+ * the thing being bypassed. Same shape as F28, one layer down.
  *
  * @param {string} projectRoot absolute project path
  * @param {Record<string, any>} session forge session.json contents
  */
 export function registerSession(projectRoot, session) {
   try {
+    // Only the *default* registry is protected. `FORGEKIT_FLEET_DIR` means the
+    // caller has already pointed the registry somewhere it owns — that is the
+    // sandbox the fleet suite registers scratch projects into deliberately, to
+    // exercise the registry at all. What must never happen is a fixture landing
+    // in `~/.forgekit`, which is precisely the case where the variable is unset.
+    if (!process.env.FORGEKIT_FLEET_DIR && underTempDir(projectRoot)) return;
     const file = entryFile(projectRoot, session.id);
     let prev = {};
     try {

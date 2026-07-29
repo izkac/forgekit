@@ -71,6 +71,129 @@ export function writeActive(sessionId) {
   });
 }
 
+/**
+ * Every session in this project that could still be the one being worked on.
+ *
+ * `null` means the directory could not be enumerated — which is not the same as
+ * finding nothing in it, and a caller must never read it as "one session, no
+ * ambiguity". Only a *missing* `session.json` means a directory is not a
+ * session; unreadable, truncated or permission-denied is a session we could not
+ * judge, and it is returned marked `unreadable` so the caller can say so.
+ *
+ * @returns {{ id: string, slug?: string, phase?: string, unreadable?: boolean }[] | null}
+ */
+export function unfinishedSessions() {
+  /** @type {{ id: string, slug?: string, phase?: string, unreadable?: boolean }[]} */
+  const out = [];
+  /** @type {string[]} */
+  let names;
+  try {
+    names = fs.readdirSync(SESSIONS_DIR);
+  } catch (err) {
+    if (err?.code === 'ENOENT') return out; // no sessions dir: nothing to be ambiguous about
+    return null;
+  }
+  for (const name of names) {
+    /** @type {Record<string, any>} */
+    let raw;
+    try {
+      raw = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, name, 'session.json'), 'utf8'));
+    } catch (err) {
+      if (err?.code === 'ENOENT') continue;
+      out.push({ id: name, unreadable: true });
+      continue;
+    }
+    if (raw?.phase === 'done' || raw?.phase === 'skipped') continue;
+    out.push({ id: raw?.id ?? name, slug: raw?.slug, phase: raw?.phase });
+  }
+  return out;
+}
+
+/**
+ * Which session a command should act on when the operator did not name one.
+ *
+ * THE ONE PLACE THIS IS DECIDED. It used to be decided independently wherever a
+ * command needed a session — `readActive()` has a dozen importers — and each
+ * one trusted the pointer differently. `active.json` was written only by
+ * `forge new`, so "active" meant *most recently created*, and every command
+ * that resolved without being told answered for the wrong change: the label
+ * named a neighbour, `forge status` agreed with it, and `forge phase done` —
+ * the money/auth gate — ran against the neighbour while the high-risk change it
+ * was supposed to judge ended with no verdict, no scorecard and no ledger line
+ * at all. Eight review rounds each found this at a different call site, because
+ * each fix landed where the reproduction was written rather than where the
+ * decision lives.
+ *
+ * The rules, in order:
+ *   - an explicitly named session wins, always
+ *   - if the sessions directory cannot be read, refuse — inability to look is
+ *     never "there is only one"
+ *   - if more than one session is unfinished, refuse and name them; guessing
+ *     between them is silent and fails open at the gate
+ *   - prefer the pointer when it names an unfinished session, otherwise the one
+ *     session still open — a pointer naming finished work must not win over
+ *     work in progress
+ *
+ * Never throws. `id` is null exactly when `problem` is set.
+ *
+ * @param {string | null | undefined} explicit a `--session` argument
+ * @returns {{ id: string | null, from: 'flag' | 'active' | 'only-open' | 'none',
+ *   problem?: string, candidates?: { id: string, slug?: string, phase?: string, unreadable?: boolean }[] }}
+ */
+export function resolveSessionId(explicit) {
+  if (typeof explicit === 'string' && explicit) return { id: explicit, from: 'flag' };
+
+  const candidates = unfinishedSessions();
+  if (candidates === null) {
+    return {
+      id: null,
+      from: 'none',
+      problem: `could not read ${SESSIONS_DIR} to tell which session to act on`,
+    };
+  }
+  if (candidates.length > 1) {
+    return {
+      id: null,
+      from: 'none',
+      problem: `${candidates.length} sessions are unfinished in this project`,
+      candidates,
+    };
+  }
+
+  const active = readActive()?.sessionId ?? null;
+  if (active !== null && candidates.some((c) => c.id === active)) {
+    return { id: active, from: 'active' };
+  }
+  if (candidates.length === 1) return { id: candidates[0].id, from: 'only-open' };
+  return active === null ? { id: null, from: 'none' } : { id: active, from: 'active' };
+}
+
+/**
+ * The refusal text for a `resolveSessionId` that could not decide, phrased the
+ * same way wherever it is printed.
+ *
+ * @param {ReturnType<typeof resolveSessionId>} resolved
+ * @param {string} command e.g. `forge phase done`
+ * @returns {string}
+ */
+export function sessionAmbiguityMessage(resolved, command) {
+  const lines = [`Refusing to guess which session to act on — ${resolved.problem}.`];
+  for (const c of resolved.candidates ?? []) {
+    lines.push(
+      `  --session ${c.id}` +
+        (c.unreadable
+          ? '   (session.json unreadable — cannot tell whether it is finished)'
+          : c.slug
+            ? `   (${c.slug}, ${c.phase ?? 'no phase'})`
+            : ''),
+    );
+  }
+  lines.push('', `Re-run naming one, e.g. ${command} --session <id>.`);
+  lines.push('Acting on the wrong session credits its review to the wrong change,');
+  lines.push('and that passes the money/auth floor silently.');
+  return `${lines.join('\n')}\n`;
+}
+
 export function clearActive() {
   if (fs.existsSync(ACTIVE_FILE)) fs.unlinkSync(ACTIVE_FILE);
 }

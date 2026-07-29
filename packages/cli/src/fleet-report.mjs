@@ -44,6 +44,14 @@ export function buildFleetReport(entries) {
         /** Census rules seen, sorted. More than one means these totals mix scales. */
         rules: /** @type {number[]} */ ([]),
         mixedRules: false,
+        /**
+         * How the counted final-review verdicts were reached, sorted. More
+         * than one means `finalIndependent` / `finalSelf` add measurements of
+         * different kinds. `unknown` is a line written before the grade was
+         * recorded — not a grade, and never folded into one.
+         */
+        evidence: /** @type {string[]} */ ([]),
+        mixedEvidence: false,
       },
       subagents: 0,
       openDeferrals: 0,
@@ -104,6 +112,30 @@ export function buildFleetReport(entries) {
         out.totals.reviews.rejections += s.reviews.rejections ?? 0;
         if (s.reviews.final === 'independent') out.totals.reviews.finalIndependent += 1;
         if (s.reviews.final === 'self') out.totals.reviews.finalSelf += 1;
+        if (s.reviews.final === 'independent' || s.reviews.final === 'self') {
+          // Graded per line, because `rule` cannot do it: rule 4 is *defined*
+          // as "host evidence where available, prose otherwise", so a rule-4
+          // line carries either kind permanently and no future rule number
+          // separates them. Measured across 20 real sessions on this machine:
+          // 1 host, 7 inferred, 12 with no final review at all.
+          //
+          // Only lines that contribute a verdict are graded. A line with no
+          // final review adds nothing to the two totals below, so it cannot
+          // make them incomparable, and counting it would raise the warning on
+          // almost every fleet — a warning that always fires is trained away.
+          //
+          // A line whose grade is missing, or is not a string, is `unknown`:
+          // both mean the grade cannot be named, and neither is allowed to
+          // become one. That is the same absence-is-not-a-negative rule this
+          // whole subsystem is built on, at the last place the data is read.
+          const grade =
+            typeof s.reviews.evidence === 'string' && s.reviews.evidence
+              ? s.reviews.evidence
+              : 'unknown';
+          if (!out.totals.reviews.evidence.includes(grade)) {
+            out.totals.reviews.evidence.push(grade);
+          }
+        }
       }
       if (typeof s.subagents === 'number') out.totals.subagents += s.subagents;
     }
@@ -138,6 +170,8 @@ export function buildFleetReport(entries) {
   out.totals.meanScore = scored ? Math.round(scoreSum / scored) : null;
   out.totals.reviews.rules.sort((a, b) => a - b);
   out.totals.reviews.mixedRules = out.totals.reviews.rules.length > 1;
+  out.totals.reviews.evidence.sort((a, b) => a.localeCompare(b));
+  out.totals.reviews.mixedEvidence = out.totals.reviews.evidence.length > 1;
   out.totals.topDeductions = [...deductions.values()].sort((a, b) => b.lostPoints - a.lostPoints);
   return out;
 }
@@ -165,6 +199,11 @@ export function formatFleetReport(report) {
   if (t.reviews.mixedRules) {
     lines.push(
       `    ⚠ mixed census rules (${t.reviews.rules.join(', ')}) — these review totals sum verdicts produced by different classifiers and are not comparable`,
+    );
+  }
+  if (t.reviews.mixedEvidence) {
+    lines.push(
+      `    ⚠ mixed authorship evidence (${t.reviews.evidence.join(', ')}) — the final-review verdicts above were measured different ways and are not comparable; "unknown" is a line whose grade could not be read, whether because it predates the field or because it is corrupt`,
     );
   }
   if (t.openDeferrals) lines.push(`  carried debt: ${t.openDeferrals} unresolved deferral(s)`);

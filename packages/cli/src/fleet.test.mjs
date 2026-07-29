@@ -249,3 +249,95 @@ test('liveOverlaps flags only live sessions in the same project', () => {
 test('sanitizePath matches Claude Code project-dir naming', () => {
   assert.equal(sanitizePath('S:\\Projects\\forgekit'), 'S--Projects-forgekit');
 });
+
+test('registerSession keeps scratch projects out of the default registry', () => {
+  // F32. The unit suite spawns real `forge` processes against fixture projects
+  // under os.tmpdir(), and the only thing keeping those out of the operator's
+  // registry was `FORGEKIT_FLEET_DIR` being set by scripts/run-tests.mjs.
+  // Running a suite file directly with `node --test` — which is what every
+  // Forge tier-2 command instructs — bypassed it. Measured on the author's
+  // machine before the fix: **8572** scratch entries against 10 real ones, so
+  // `forge fleet report` was aggregating almost entirely dead /tmp paths.
+  //
+  // The guard cannot live in the harness, because the harness is the thing
+  // being bypassed. This case therefore runs with `FORGEKIT_FLEET_DIR` unset —
+  // the unprotected configuration — and redirects HOME instead, so the default
+  // registry resolves somewhere disposable.
+  const fakeHome = tmp('forge-fleet-home-');
+  const scratchProject = tmp('forge-scratch-project-');
+  const prevFleet = process.env.FORGEKIT_FLEET_DIR;
+  const prevHome = process.env.HOME;
+  delete process.env.FORGEKIT_FLEET_DIR;
+  process.env.HOME = fakeHome;
+  try {
+    const registry = path.join(fakeHome, '.forgekit', 'fleet', 'sessions');
+    registerSession(scratchProject, makeSession('sess-scratch'));
+    assert.equal(fs.existsSync(registry), false, 'a scratch project must not create the registry');
+
+    // A real project root still registers — the guard must not disable the
+    // feature it protects. `registerSession` never stats the path, so this need
+    // not exist; it only has to be somewhere a person keeps code, and it must
+    // not be derived from HOME, which this case has pointed at a temp dir.
+    const realProject = path.join(path.sep, 'home', 'demo-user', 'Projects', 'demo-project');
+    registerSession(realProject, makeSession('sess-real'));
+    assert.equal(fs.existsSync(entryFile(realProject, 'sess-real')), true);
+    assert.deepEqual(
+      fs.readdirSync(registry).filter((f) => f.includes('scratch')),
+      [],
+    );
+  } finally {
+    if (prevFleet === undefined) delete process.env.FORGEKIT_FLEET_DIR;
+    else process.env.FORGEKIT_FLEET_DIR = prevFleet;
+    process.env.HOME = prevHome;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test('a real project whose path merely contains the temp dir name is registered', () => {
+  // The guard compares path *segments*, not substrings. A naive
+  // `projectRoot.includes(os.tmpdir())` also swallows `/home/me/tmp-project`
+  // and `/home/me/tmpfoo/app`, silently dropping real work out of the fleet
+  // report — a guard against pollution that quietly loses data instead. Added
+  // after a mutant survived: the comment claimed this and no case proved it.
+  const fakeHome = tmp('forge-fleet-home-substr-');
+  const prevFleet = process.env.FORGEKIT_FLEET_DIR;
+  const prevHome = process.env.HOME;
+  delete process.env.FORGEKIT_FLEET_DIR;
+  process.env.HOME = fakeHome;
+  try {
+    for (const [i, root] of [
+      path.join(path.sep, 'home', 'demo-user', `${path.basename(tmpdir())}-project`),
+      path.join(path.sep, 'home', 'demo-user', `${path.basename(tmpdir())}foo`, 'app'),
+    ].entries()) {
+      registerSession(root, makeSession(`sess-substr-${i}`));
+      assert.equal(
+        fs.existsSync(entryFile(root, `sess-substr-${i}`)),
+        true,
+        `${root} is a real project and must be registered`,
+      );
+    }
+  } finally {
+    if (prevFleet === undefined) delete process.env.FORGEKIT_FLEET_DIR;
+    else process.env.FORGEKIT_FLEET_DIR = prevFleet;
+    process.env.HOME = prevHome;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test('an explicitly redirected registry may hold scratch projects', () => {
+  // The fleet suite's own fixtures are temp projects, and they must keep
+  // working: pointing FORGEKIT_FLEET_DIR at a directory is a statement that the
+  // caller owns it. Without this the guard would make the registry untestable.
+  const registry = tmp('forge-fleet-explicit-');
+  const scratchProject = tmp('forge-scratch-allowed-');
+  const prev = process.env.FORGEKIT_FLEET_DIR;
+  process.env.FORGEKIT_FLEET_DIR = registry;
+  try {
+    registerSession(scratchProject, makeSession('sess-allowed'));
+    assert.equal(fs.existsSync(entryFile(scratchProject, 'sess-allowed')), true);
+  } finally {
+    if (prev === undefined) delete process.env.FORGEKIT_FLEET_DIR;
+    else process.env.FORGEKIT_FLEET_DIR = prev;
+    fs.rmSync(registry, { recursive: true, force: true });
+  }
+});

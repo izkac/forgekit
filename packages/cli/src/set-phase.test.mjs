@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runE2eSteps, writeE2eResults } from './integrity.mjs';
 import { readLedger } from './ledger.mjs';
+import { reviewCensus } from './review-census.mjs';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 
@@ -174,6 +175,542 @@ function writeHostTranscript(configDir, hostId, at) {
   );
   return new Set(lines.map((l) => l.requestId)).size;
 }
+
+/**
+ * Reviewer sidecars beside a host transcript, in the host's own layout: an
+ * `agent-<id>.meta.json` naming the dispatch and an `agent-<id>.jsonl` placing
+ * it in time. `at` has to sit inside `[session.createdAt, now]`, or the
+ * dispatch belongs to some other Forge session sharing the host session.
+ *
+ * @param {string} configDir
+ * @param {string} hostId
+ * @param {string} at
+ * @param {Record<string, { description: string, stoppedByUser?: boolean }>} agents
+ * @param {string} [forgeSessionId] completes a bare `forge-review <unit>` into
+ *   the prescribed `forge-review <unit> <forge-session-id>`, which is what makes
+ *   a dispatch record attributable to one Forge session rather than to whatever
+ *   else shared the conversation.
+ * @returns {string} the sidecar directory
+ */
+function writeReviewerSidecars(configDir, hostId, at, agents, forgeSessionId) {
+  const dir = path.join(configDir, 'projects', '-scratch', hostId, 'subagents');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [agentId, { description, stoppedByUser }] of Object.entries(agents)) {
+    const named =
+      forgeSessionId && /^forge-review\s+\S+$/.test(description)
+        ? `${description} ${forgeSessionId}`
+        : description;
+    const meta = { agentType: 'general-purpose', description: named, model: 'opus' };
+    if (stoppedByUser !== undefined) meta.stoppedByUser = stoppedByUser;
+    fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(meta), 'utf8');
+    fs.writeFileSync(
+      path.join(dir, `agent-${agentId}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        requestId: `req_${agentId}`,
+        timestamp: at,
+        message: {
+          id: `msg_${agentId}`,
+          model: 'claude-opus-5',
+          content: [{ type: 'text' }],
+          usage: { input_tokens: 1, output_tokens: 2 },
+        },
+      })}\n`,
+      'utf8',
+    );
+  }
+  return dir;
+}
+
+/** A final review whose prose declares the coordinator wrote it. */
+const SELF_PROSE = '# Final review\n\nReviewer: the coordinator — a self-check of the diff.\n';
+/** A final review whose prose names an outside reader. */
+const INDEPENDENT_PROSE =
+  '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n';
+
+/** @param {string} sessionDir @param {string} body */
+function writeFinalReview(sessionDir, body) {
+  fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'reviews', 'final-review.md'), body, 'utf8');
+}
+
+test('phase done freezes the verdict host evidence produces, not the one the prose claims', () => {
+  const dir = tmp('forge-verdict-freeze-');
+  const configDir = tmp('forge-verdict-freeze-cfg-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-verdict');
+    const sessionDir = path.dirname(sessionFile);
+    makeDoneable(sessionDir);
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-verdict', createdAt);
+    writeReviewerSidecars(configDir, 'host-verdict', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-verdict');
+    writeFinalReview(sessionDir, SELF_PROSE);
+
+    // The fixture only discriminates because the prose says the opposite of the
+    // evidence. Were they to agree, a verdict read off the file under suspicion
+    // would pass this test unnoticed.
+    assert.equal(reviewCensus(sessionDir).finalReview, 'self', 'fixture: prose alone says self');
+
+    runSetPhase(dir, ['done'], {
+      CLAUDE_CODE_SESSION_ID: 'host-verdict',
+      CLAUDE_CONFIG_DIR: configDir,
+    });
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('the frozen verdict and its digest line survive the host pruning the transcript', () => {
+  // The spec requirement this change is named for: the verdict outlives its
+  // evidence. Measured — a one-day-old session on this machine already has no
+  // surviving host transcript, and `finish` then `done` a day apart is
+  // ordinary. A second pass that re-measured would find nothing, fall back to
+  // the prose, and hand the verdict back to the party being judged; on a
+  // high-risk change it would then refuse work that was genuinely reviewed.
+  const dir = tmp('forge-verdict-prune-');
+  const configDir = tmp('forge-verdict-prune-cfg-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-prune');
+    const sessionDir = path.dirname(sessionFile);
+    makeDoneable(sessionDir);
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-prune', createdAt);
+    writeReviewerSidecars(configDir, 'host-prune', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-prune');
+    writeFinalReview(sessionDir, SELF_PROSE);
+    assert.equal(reviewCensus(sessionDir).finalReview, 'self', 'fixture: prose alone says self');
+
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-prune', CLAUDE_CONFIG_DIR: configDir };
+    const ledger = path.join(dir, '.forge', 'sessions.jsonl');
+    runSetPhase(dir, ['finish'], env);
+    const measured = JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict;
+    assert.deepEqual(measured, { final: 'independent', evidence: 'host', stoppedByOperator: false });
+    const recorded = readLedger(ledger).at(-1).reviews;
+    assert.equal(recorded.final, 'independent');
+    assert.equal(recorded.evidence, 'host');
+
+    fs.rmSync(configDir, { recursive: true, force: true });
+    runSetPhase(dir, ['done'], env);
+
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict,
+      measured,
+      'a measurement that can no longer be taken must not be replaced by a guess',
+    );
+    assert.deepEqual(readLedger(ledger).at(-1).reviews, recorded);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a stale self verdict never survives to refuse a session that was then reviewed', () => {
+  // The keep rule is asymmetric because the two verdicts are not symmetric in
+  // consequence. Losing a measured `independent` costs a correct verdict;
+  // keeping a stale `self` REFUSES WORK, and refusing work is the failure this
+  // whole change exists to stop. Reproduced end to end:
+  //
+  //   1. high-risk session, convention in use, no final reviewer yet → self/host
+  //   2. operator proceeds with --final-review-waived, the escape the gate's
+  //      own message tells them to use
+  //   3. a genuine prescribed reviewer is then dispatched and writes its report
+  //   4. the host prunes the transcript overnight — the premise of the freeze
+  //   5. `forge phase done` must pass: the remedy it would print has been done
+  //
+  // Only a frozen `independent` on `host` grade is preserved — precisely the
+  // GIVEN of the spec's "verdict outlives its evidence" scenario, and nothing
+  // wider.
+  const dir = tmp('forge-verdict-stale-self-');
+  const configDir = tmp('forge-verdict-stale-self-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-stale-self');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-stale', createdAt);
+    writeReviewerSidecars(configDir, 'host-stale', createdAt, {
+      g1: { description: 'forge-review group-01' },
+    }, 'sess-stale-self');
+    writeFinalReview(sessionDir, SELF_PROSE);
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-stale', CLAUDE_CONFIG_DIR: configDir };
+
+    runSetPhase(dir, ['finish', '--final-review-waived', 'reviewer declined — cost'], env);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'self',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+
+    // The reviewer that was declined at step 1 is now dispatched for real, and
+    // writes the report the gate asked for.
+    writeReviewerSidecars(configDir, 'host-stale', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-stale-self');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    fs.rmSync(configDir, { recursive: true, force: true });
+
+    runSetPhase(dir, ['done'], env);
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.deepEqual(session.reviewVerdict, {
+      final: 'independent',
+      evidence: 'inferred',
+      stoppedByOperator: false,
+    });
+    assert.equal(session.finalReviewWaived, undefined, 'a real review retires the waiver');
+    const { reviews } = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(reviews.final, 'independent');
+    assert.equal(reviews.evidence, 'inferred', 'and the durable record does not claim it was measured');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a frozen verdict inferred from prose is never protected — only a measured one is', () => {
+  // The first conjunct of the keep rule. `evidence === 'host'` is what makes
+  // the rule "a measurement is not replaced by a guess"; drop it and a *guess*
+  // is protected too, which is worse than the defect it was written to stop —
+  // the stale prose reading then outranks a fresher prose reading of the very
+  // same file.
+  //
+  // Discriminator: no host evidence anywhere, so both passes are `inferred`.
+  // The review file is independent at `finish` and a self-check by `done`.
+  const dir = tmp('forge-verdict-keep-inferred-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-keep-inferred');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+
+    runSetPhase(dir, ['finish']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'inferred',
+      stoppedByOperator: false,
+    });
+
+    writeFinalReview(sessionDir, SELF_PROSE);
+    assert.throws(
+      () => runSetPhase(dir, ['done']),
+      /self-authored/,
+      'a stale guess must not stand in for a fresh reading of the same file',
+    );
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'finish');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a measured independent verdict survives its dispatch record being pruned', () => {
+  // I1, from the final review. The keep rule used to be `next.evidence !==
+  // 'host'`, and the reading that defeated it needs no adversary: an emptied
+  // `subagents/` directory scans clean and yields `seen === 0`, which is graded
+  // `host` — "nothing was dispatched" — so it overwrote the measurement taken
+  // at `finish` and `done` then refused the session as self-reviewed.
+  //
+  // Permanently, which is what made it a blocker: `saveSession` runs last, so
+  // the refused pass never writes the downgraded verdict, and every retry
+  // repeats the same downgrade. The only escape was `--final-review-waived`,
+  // for a reviewer that really did run.
+  const dir = tmp('forge-verdict-pruned-');
+  const configDir = tmp('forge-verdict-pruned-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-pruned');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-pruned', createdAt);
+    writeReviewerSidecars(configDir, 'host-pruned', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-pruned');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-pruned', CLAUDE_CONFIG_DIR: configDir };
+
+    runSetPhase(dir, ['finish'], env);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+
+    // The host prunes the sidecars. The directory still exists and reads
+    // cleanly; it is simply empty, which is exactly `seen === 0`.
+    const sidecars = path.join(configDir, 'projects', '-scratch', 'host-pruned', 'subagents');
+    for (const name of fs.readdirSync(sidecars)) fs.rmSync(path.join(sidecars, name));
+
+    runSetPhase(dir, ['done'], env);
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'done', 'the transition must not be refused on vanished evidence');
+    assert.deepEqual(after.reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a surviving group label does not overwrite a measured final verdict', () => {
+  // K3. The `seen === 0` rule this replaced was *narrower* than the one before
+  // it, not wider: any surviving dispatch made `seen > 0` and let a reading
+  // with no `final` unit overwrite the measurement. A `forge-review group-01`
+  // sidecar outliving the `final` one is the ordinary shape — and it refused
+  // the session even though the review file itself reads independent.
+  //
+  // The axis is whether this pass saw *the unit that decides*.
+  const dir = tmp('forge-verdict-group-');
+  const configDir = tmp('forge-verdict-group-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-group');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-group', createdAt);
+    writeReviewerSidecars(configDir, 'host-group', createdAt, {
+      r1: { description: 'forge-review final' },
+      g1: { description: 'forge-review group-01' },
+    }, 'sess-group');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-group', CLAUDE_CONFIG_DIR: configDir };
+
+    runSetPhase(dir, ['finish'], env);
+    assert.equal(
+      JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict.final,
+      'independent',
+    );
+
+    // The final reviewer's sidecar is pruned; the group one survives.
+    const sidecars = path.join(configDir, 'projects', '-scratch', 'host-group', 'subagents');
+    for (const name of fs.readdirSync(sidecars)) {
+      if (name.includes('r1')) fs.rmSync(path.join(sidecars, name));
+    }
+
+    runSetPhase(dir, ['done'], env);
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'done', 'a surviving group label must not refuse the session');
+    assert.equal(after.reviewVerdict.final, 'independent');
+    assert.equal(after.reviewVerdict.evidence, 'host');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a fresh host reading always wins over a stale one, including when it is worse', () => {
+  // The third conjunct of the keep rule. When this pass can measure on `host`
+  // grade too it is strictly better informed, so it must refresh — and the case
+  // that matters is the one where the newer answer is *less* flattering.
+  //
+  // The mechanism is real, not contrived: the host writes the meta when the
+  // subagent spawns and adds `stoppedByUser` when the operator stops it. A
+  // `finish` taken while the reviewer is still running measures a completed
+  // dispatch; by `done` the same meta says the operator stopped it. Keeping the
+  // stale verdict would erase the operator's refusal and let the gate pass a
+  // session whose reviewer was declined — the 0.3.26 escape this change exists
+  // to close.
+  const dir = tmp('forge-verdict-keep-fresh-');
+  const configDir = tmp('forge-verdict-keep-fresh-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-keep-fresh');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-keep', createdAt);
+    writeReviewerSidecars(configDir, 'host-keep', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-keep-fresh');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-keep', CLAUDE_CONFIG_DIR: configDir };
+
+    runSetPhase(dir, ['finish'], env);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+
+    // The operator stops that same dispatch; the host stamps the meta it wrote.
+    writeReviewerSidecars(configDir, 'host-keep', createdAt, {
+      r1: { description: 'forge-review final', stoppedByUser: true },
+    }, 'sess-keep-fresh');
+
+    assert.throws(() => runSetPhase(dir, ['done'], env), /self-authored/);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'finish');
+
+    // And the refreshed verdict is what gets recorded once the operator owns
+    // the decision themselves.
+    runSetPhase(dir, ['done', '--final-review-waived', 'I stopped the reviewer'], env);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'self',
+      evidence: 'host',
+      stoppedByOperator: true,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a reviewer dispatched between finish and done still reaches the frozen verdict', () => {
+  // Freezing is not write-once, and the difference matters at the gate: the
+  // first pass measures `self` on host evidence because nobody has been
+  // dispatched yet, and a verdict pinned there would refuse the session at
+  // `done` after its reviewer had genuinely run. Only a measurement that can no
+  // longer be repeated is protected — see the pruning test above.
+  const dir = tmp('forge-verdict-refresh-');
+  const configDir = tmp('forge-verdict-refresh-cfg-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-refresh');
+    const sessionDir = path.dirname(sessionFile);
+    makeDoneable(sessionDir);
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-refresh', createdAt);
+    // An empty sidecar directory: the host looked and this session dispatched
+    // nothing. That is a measurement, not an absence of one.
+    writeReviewerSidecars(configDir, 'host-refresh', createdAt, {}, 'sess-refresh');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    assert.equal(
+      reviewCensus(sessionDir).finalReview,
+      'independent',
+      'fixture: prose alone says independent, so the host reading is visible either way',
+    );
+
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-refresh', CLAUDE_CONFIG_DIR: configDir };
+    runSetPhase(dir, ['finish'], env);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'self',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+
+    writeReviewerSidecars(configDir, 'host-refresh', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-refresh');
+    runSetPhase(dir, ['done'], env);
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('an operator declining the final reviewer is measured, frozen and recorded', () => {
+  // The spec's own scenario end to end. The host records `stoppedByUser` on a
+  // prescribed final-review dispatch: the reviewer did not finish, so the
+  // verdict is `self` on `host` grade, and the stop is reported as a fact
+  // rather than treated as either a completed review or an automatic waiver.
+  // Without this the freeze could hard-code the flag and no test would notice —
+  // the ledger tests set the verdict directly and never run the measurement.
+  const dir = tmp('forge-verdict-stopped-');
+  const configDir = tmp('forge-verdict-stopped-cfg-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-stopped');
+    const sessionDir = path.dirname(sessionFile);
+    makeDoneable(sessionDir);
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-stopped', createdAt);
+    writeReviewerSidecars(configDir, 'host-stopped', createdAt, {
+      r1: { description: 'forge-review final', stoppedByUser: true },
+    }, 'sess-stopped');
+    // The prose claims an outside reader; the host recorded the operator
+    // stopping that very dispatch.
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    assert.equal(
+      reviewCensus(sessionDir).finalReview,
+      'independent',
+      'fixture: prose alone says independent',
+    );
+
+    runSetPhase(dir, ['done'], {
+      CLAUDE_CODE_SESSION_ID: 'host-stopped',
+      CLAUDE_CONFIG_DIR: configDir,
+    });
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.deepEqual(session.reviewVerdict, {
+      final: 'self',
+      evidence: 'host',
+      stoppedByOperator: true,
+    });
+    assert.equal(
+      session.finalReviewWaived,
+      undefined,
+      'declining a reviewer is the operator’s to record — no waiver is applied for them',
+    );
+    const { reviews } = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(reviews.final, 'self');
+    assert.equal(reviews.stoppedByOperator, true, 'and it outlives the session directory');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a failing review measurement warns, invents no verdict, and still finishes the transition', () => {
+  // Telemetry may cost a session its measurement, never its transition — the
+  // rule the metrics block beneath the gate already follows.
+  //
+  // THE FIXTURE IS HIGH-RISK ON PURPOSE. An earlier version was not, so
+  // `enforceFinalReviewFloor` returned at `!facts.highRisk` and never reached
+  // the verdict at all: the test claimed a property in the one case the gate
+  // does not run. On a high-risk session the gate does run, finds no frozen
+  // verdict because the measurement it depends on just failed, and must not
+  // invent a refusal out of that — the same rule `collectPlanFacts` above it
+  // already follows.
+  //
+  // The injected failure is `tasks` as a *file*: `reviewCensus` sees it exists
+  // and `readdirSync` raises ENOTDIR, the one failure that census does not
+  // swallow. It is also the only one reachable from outside, and it therefore
+  // costs the scorecard too — `scoreSession` reads the same census. So this
+  // asserts both guards fire independently and the transition survives both;
+  // the scorecard and digest under a *successful* measurement are asserted by
+  // the metrics and digest tests either side of this one.
+  const dir = tmp('forge-verdict-throw-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-verdict-throw');
+    fs.writeFileSync(path.join(sessionDir, 'tasks'), 'not a directory\n', 'utf8');
+
+    const base = { ...process.env };
+    delete base.CLAUDE_CODE_SESSION_ID;
+    delete base.CLAUDE_CONFIG_DIR;
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8', env: base });
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /could not measure review authorship/);
+    assert.match(r.stderr, /could not write scorecard/, 'a second, separate guard');
+    // Failing open is deliberate; failing open in silence is not. This session
+    // ends up with no verdict, no scorecard and no durable line at all, so the
+    // one thing stderr must say is that the floor did not run.
+    assert.match(
+      r.stderr,
+      /final-review floor could not be evaluated/,
+      'a high-risk change passing unjudged has to be announced, not inferred from telemetry warnings',
+    );
+    assert.equal(
+      fs.existsSync(path.join(dir, '.forge', 'sessions.jsonl')),
+      false,
+      'fixture: nothing was recorded anywhere — which is why the notice above is the only trace',
+    );
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.equal(
+      session.reviewVerdict,
+      undefined,
+      'a measurement that failed must leave no verdict — an invented one would go on to decide a gate',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('phase done collects metrics under a host id first seen on that very command', () => {
   // Two orderings in one assertion, and neither was observable before the
@@ -618,7 +1155,6 @@ function makeHighRiskFixture(dir, sessionId) {
   raw.openspecChange = 'add-refunds';
   fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
   fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
-
   const changeDir = path.join(dir, 'specs', 'changes', 'add-refunds');
   fs.mkdirSync(changeDir, { recursive: true });
   fs.writeFileSync(
@@ -662,6 +1198,197 @@ test('phase done refuses a high-risk change whose final review is missing or sel
     assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'done');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the done gate reads the frozen verdict, so host evidence outranks the review prose', () => {
+  // THIS IS THE ORDERING TEST. The verdict is measured before
+  // `enforceFinalReviewFloor()`; move that computation below the gate — where
+  // the metrics block and the scorecard live — and the gate falls back to a
+  // live prose census, reads `self`, and refuses this session.
+  const dir = tmp('forge-review-floor-evidence-');
+  const configDir = tmp('forge-review-floor-evidence-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-floor-evidence');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-floor', createdAt);
+    writeReviewerSidecars(configDir, 'host-floor', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-floor-evidence');
+    writeFinalReview(sessionDir, SELF_PROSE);
+    assert.equal(reviewCensus(sessionDir).finalReview, 'self', 'fixture: prose alone says self');
+
+    runSetPhase(dir, ['done'], {
+      CLAUDE_CODE_SESSION_ID: 'host-floor',
+      CLAUDE_CONFIG_DIR: configDir,
+    });
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.equal(session.reviewVerdict.evidence, 'host', 'the gate judged on measurement');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('the done gate does not refuse a high-risk change when host evidence is unavailable', () => {
+  // The single most important test in this group. 0.3.24 shipped a gate that
+  // refused unless independence was positively claimed, and it blocked correct
+  // work on sessions whose independent reviewer had genuinely run. A host that
+  // writes no sidecars — Cursor, Codex, a plain shell, a pruned transcript —
+  // must land on exactly the behaviour of the release before this change.
+  const dir = tmp('forge-review-floor-blind-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-floor-blind');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+
+    // runSetPhase strips CLAUDE_CODE_SESSION_ID and CLAUDE_CONFIG_DIR, so this
+    // child genuinely has no host to read, on any machine.
+    runSetPhase(dir, ['done']);
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.equal(
+      session.reviewVerdict.evidence,
+      'inferred',
+      'nothing could be measured — so this proves the *fallback* did not refuse',
+    );
+    assert.equal(session.reviewVerdict.final, 'independent');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the done gate refuses a high-risk change the host records no final reviewer for', () => {
+  const dir = tmp('forge-review-floor-self-');
+  const configDir = tmp('forge-review-floor-self-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-floor-self');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-floor-self', createdAt);
+    // The convention is in use here — a prescribed dispatch exists — and none
+    // of them is the final reviewer. That is the host's one genuine negative.
+    writeReviewerSidecars(configDir, 'host-floor-self', createdAt, {
+      g1: { description: 'forge-review group-01' },
+    }, 'sess-floor-self');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    assert.equal(
+      reviewCensus(sessionDir).finalReview,
+      'independent',
+      'fixture: prose alone says independent',
+    );
+
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-floor-self', CLAUDE_CONFIG_DIR: configDir };
+    assert.throws(() => runSetPhase(dir, ['done'], env), /self-authored/);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'plan');
+
+    // The recorded refusal is still the operator's escape hatch, and it is not
+    // applied on their behalf by a stopped or missing dispatch.
+    runSetPhase(dir, ['done', '--final-review-waived', 'reviewer declined — cost'], env);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.equal(session.reviewVerdict.final, 'self');
+    assert.equal(session.reviewVerdict.evidence, 'host');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a refused transition persists nothing — not the phase, and not the verdict it measured', () => {
+  // Two properties in one, both load-bearing and neither previously named.
+  //
+  // THE COMMONEST FROZEN SHAPE. `{final: null, evidence: 'none'}` is what a
+  // session with no final review measures at the transition — 12 of the 20
+  // real sessions behind this change — and it must refuse a high-risk change
+  // even when the host positively recorded a reviewer dispatch, because the
+  // report it was supposed to produce is not on disk. Evidence of a dispatch
+  // is not a review.
+  //
+  // NOTHING IS WRITTEN ON A REFUSAL, because the gate exits before
+  // `saveSession`. That is what keeps F27 — a verdict built on a partially
+  // readable binding — from being pinned to the session for good: a refused
+  // pass leaves the session exactly as it was, so the next one measures again.
+  // Move `saveSession` above the gates and that wrong positive becomes
+  // permanent.
+  const dir = tmp('forge-refuse-nosave-');
+  const configDir = tmp('forge-refuse-nosave-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-refuse-nosave');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-refuse', createdAt);
+    writeReviewerSidecars(configDir, 'host-refuse', createdAt, {
+      r1: { description: 'forge-review final' },
+    }, 'sess-refuse-nosave');
+    assert.equal(
+      reviewCensus(sessionDir).finalReview,
+      null,
+      'fixture: a dispatch was recorded but no review file exists to judge',
+    );
+
+    assert.throws(
+      () =>
+        runSetPhase(dir, ['done'], {
+          CLAUDE_CODE_SESSION_ID: 'host-refuse',
+          CLAUDE_CONFIG_DIR: configDir,
+        }),
+      /final review is missing or self-authored/,
+    );
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'plan', 'the transition did not happen');
+    assert.equal(session.reviewVerdict, undefined, 'and nothing it measured was written down');
+    assert.equal(
+      fs.existsSync(path.join(dir, '.forge', 'sessions.jsonl')),
+      false,
+      'no durable line either — a refused session has no verdict to record',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a stopped dispatch is reported at the gate, never turned into a refusal', () => {
+  // The spec's "no waiver is applied on the session's behalf" has a mirror the
+  // census, the freeze and the digest cannot pin: the *gate* must not read
+  // `stoppedByOperator` either. A stop is a fact the host recorded, not the
+  // verdict's cause — and the measured case is a stopped run followed by a
+  // completed re-run of the same work, where a reviewer did finish.
+  const dir = tmp('forge-floor-stopped-');
+  const configDir = tmp('forge-floor-stopped-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-floor-stopped');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-floor-stop', createdAt);
+    writeReviewerSidecars(configDir, 'host-floor-stop', createdAt, {
+      r1: { description: 'forge-review final', stoppedByUser: true },
+      r2: { description: 'forge-review final' },
+    }, 'sess-floor-stopped');
+    // Prose deliberately says the coordinator wrote it: the verdict must come
+    // from the two dispatches, one stopped and one completed.
+    writeFinalReview(sessionDir, SELF_PROSE);
+
+    runSetPhase(dir, ['done'], {
+      CLAUDE_CODE_SESSION_ID: 'host-floor-stop',
+      CLAUDE_CONFIG_DIR: configDir,
+    });
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done', 'a reviewer did finish — the stop is not a refusal');
+    assert.deepEqual(session.reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: true,
+    });
+    assert.equal(session.finalReviewWaived, undefined, 'and no waiver was applied for them');
+    const { reviews } = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(reviews.final, 'independent');
+    assert.equal(reviews.stoppedByOperator, true, 'the fact is still reported');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
   }
 });
 

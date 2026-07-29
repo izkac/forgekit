@@ -1,0 +1,17 @@
+{
+  "change": "review-authorship-evidence",
+  "notApplicable": null,
+  "steps": [
+    { "name": "boot", "cmd": "node scripts/e2e/harness-portability.mjs boot" },
+    {
+      "name": "review-evidence-decides",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-evidence-decides",
+      "expect": "REVIEW final=independent evidence=host prose=self-check"
+    },
+    {
+      "name": "review-evidence-survives",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-evidence-survives",
+      "expect": "DIGEST final=independent evidence=host afterPrune=unchanged"
+    }
+  ]
+}

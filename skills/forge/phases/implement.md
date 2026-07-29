@@ -16,7 +16,81 @@ On test failures or unexpected behavior, use [../skills/systematic-debugging/SKI
 | `per-group` | When the task closes a `tasks.md` group (`##` section — OpenSpec or specs engine), or immediately if the task is high-risk (`standard`) |
 | `high-risk-only` / `never` | Only when hard-floor high-risk |
 
-**Head every review file with who wrote it.** A dispatched reviewer names its resolved model (`Reviewer: claude-opus-5 (task-reviewer)`); a review you wrote yourself must say so in words `forge score` recognises — **`self-check`**, `self-audit`, `self-review` or `APPROVED (pace self-check)`. The census infers independence when it finds no such declaration, so an unrecognised phrasing is scored as an outside reader you never had, and the money/auth done gate is decided on the same signal. Declaring honestly is the whole cost.
+**Dispatch the final reviewer with the description `forge review-label final`
+prints** — exactly that, nothing before or after. Run the command; do not type
+the string. That dispatch happens in [review.md](./review.md), not here; the
+rule is repeated in both files because forgetting it is what refuses a change. A
+group reviewer may carry `forge review-label <group-dir>`, but that is optional
+and feeds no number; see the end of this section before you decide to use it.
+The host records the description against the subagent it actually ran, and
+`forge phase done` reads that record rather than the **final** review file's
+wording.
+
+The label carries the **session id**, and that is the load-bearing part. Without
+it the join was "a review dispatch somewhere in this conversation while this
+session was open" — and one Claude Code conversation routinely hosts several
+Forge sessions, so a neighbour's reviewer was indistinguishable from yours.
+Three review rounds each found a fresh way for that to pass a self-written
+review through the money/auth floor. A dispatch still described in the old
+two-word form is not counted for anyone: Forge reports that it cannot tell, and
+falls back to the review file's wording. It is the one field here you cannot fabricate by
+writing prose: a record exists only if a subagent really ran and burnt tokens.
+It proves a *dispatch*, not a *review* — a throwaway subagent carrying the label
+produces the same record — so this is a check on the honest, not a defence
+against the deliberate.
+
+The match is **exact** for a reason. `forge-review implement group 1` and
+`talk about forge-review implementation details` both matched an earlier, looser
+rule, so an implementer dispatch and a sentence of prose each manufactured
+evidence of a review that never happened. This is also why the command exists:
+a hand-typed label is a silent miss, and a silent miss at this gate refuses
+correct work.
+
+**Labelling a group reviewer arms a rule.** An earlier version of this paragraph
+claimed a mislabelled dispatch "falls back to the file's wording — the safe
+direction".
+That is only true while **no** dispatch of yours carries a label. The moment one
+does — and labelling your group reviews is exactly that — Forge treats the
+convention as in use for this session, so a missing `final` label reads as
+*"no outside reader"* rather than *"not adopted"*, the wording is not consulted,
+and `forge phase done` refuses a high-risk change whose independent review
+exists.
+
+That was reproduced against this very change's session, which had labelled eight
+group reviews and no final one. **Partial adoption is worse than none.** The
+final reviewer is dispatched from [review.md](./review.md), which carries the
+same rule as a hard gate.
+
+**Head every review file with who wrote it as well.** A dispatched reviewer names
+its resolved model (`Reviewer: claude-opus-5 (task-reviewer)`); a review you wrote
+yourself must declare it in one of the phrases `forge score` recognises, and the
+list is **closed**: `self-check`, `self-review`, `self-audit`, `self-authored`,
+`Reviewer: coordinator`, `reviewed by the coordinator`, `APPROVED (pace …)`,
+`SKIPPED (pace …)`.
+Describing it in your own words — *"I wrote this myself, no subagent ran"* —
+scores as an outside reader you never had.
+
+*Head* is literal too: put the phrase in the **opening two paragraphs**
+(blank-line separated, any length). Below that only a line beginning `Reviewer:`
+is reliably read, and it still has to carry one of the phrases — `Reviewer:
+coordinator` works anywhere in the file, `Reviewed by: coordinator` does not.
+
+**For the files this phase writes — `task-review.md` and `group-review.md` — that
+wording is not a fallback. It is the whole answer, always.** Host evidence is
+scoped to the *final* review only, so a group review is classified from its words
+even when the session has full host evidence including that group's own dispatch.
+The census infers independence from the absence of a declaration, so an
+unrecognised phrasing is scored as an outside reader you never had — and lands
+permanently in `sessions.jsonl` and the fleet totals.
+
+**Label the final reviewer. Group labels are optional and buy nothing.**
+Measured: identical sessions with and without a labelled group reviewer produce
+a verdict, score and digest line identical in every field that does not vary with
+wall clock or path — `units` is read for `final` and nothing else. What a group label *does* do is tell Forge the convention is in
+use, which arms the rule above: label a group and forget the final reviewer and
+a high-risk change is refused. So the safe orders are *label the final reviewer*
+(group labels then harmless) or *label nothing*. "Label everything" is only safe
+while you never forget the one that counts, and its failure is silent.
 
 When skipping the reviewer, still write `task-review.md` with `Reviewer: coordinator — APPROVED (pace self-check)` and keep tier-2 evidence mandatory for behavior changes. For `per-group` reviews, cover all tasks in that section in one reviewer pass; save as `group-review.md` next to the group’s tasks (or under `.forge/sessions/<id>/tasks/group-<nn>-<slug>/group-review.md`). Prefer `--tier fast` when `models.bias` is `prefer-fast` and the task is mechanical. Cap fix→re-review loops at `review.maxRounds`.
 

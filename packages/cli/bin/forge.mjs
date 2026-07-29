@@ -43,6 +43,7 @@ const COMMANDS = {
   brief: { script: 'brief-cli.mjs' },
   finding: { script: 'findings-cli.mjs', aliases: ['findings'] },
   metrics: { script: 'metrics-cli.mjs' },
+  'review-label': { script: 'review-label-cli.mjs' },
   analyze: { script: 'analyze-cli.mjs', aliases: ['analyse'] },
 };
 

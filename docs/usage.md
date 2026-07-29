@@ -644,11 +644,68 @@ reviews across task groups, whether the final review is independent or
 self-authored, and whether any round **rejected** work before approving (a
 review that sent work back demonstrably was not a rubber stamp).
 
-A review is read as independent unless its opening paragraphs or a `Reviewer:`
-line declare it a self-check. That is an inference from absence, and it is known
-to over-credit — a review file that says nothing about who wrote it counts as an
-outside reader it may not have had (finding F12). Head your review files with
-who wrote them.
+**Authorship is measured, not read, wherever the host recorded it.** Dispatch
+reviewers with the description `forge review-label <unit>` prints — exactly
+that, nothing before or after:
+
+```bash
+forge review-label final       # → forge-review final <session-id>
+forge review-label group-03    # → forge-review group-03 <session-id>
+```
+
+Claude Code then writes a record of the subagent it actually ran. The trailing
+session id is what makes that record attributable: one Claude Code conversation
+routinely hosts several Forge sessions, and without it a neighbour's reviewer
+is indistinguishable from this session's own. A dispatch described in the older
+two-word form is counted for nobody — Forge reports that it cannot tell, and
+reads the review file's wording instead.
+
+**Label the final reviewer. Group labels are optional and buy nothing** —
+measured, a session's verdict, score and digest come out identical in every field
+(bar wall clock and paths) with and without them, because `final` is the only
+unit that decides anything. What a group label *does* do is tell Forge the
+convention is in use: once *any* dispatch in a session carries a label, a missing
+`final` reads as "no outside reader" rather than "not adopted". On a **high-risk**
+change that refuses at `forge phase done`; on any other it records `{self, host}`
+in the durable digest and costs a scorecard point for a session that did get an
+independent reviewer.
+
+So the safe orders are *label the final reviewer* (group labels then harmless) or
+*label nothing*. "Label everything" is only safe while you never forget the one
+that counts, and its failure is silent. Where a record exists `forge phase done`
+reads it, and no wording in the review file can change the verdict. A record
+cannot be fabricated without really dispatching a **subagent** — and note Forge
+does not yet check that the subagent reviewed anything, so the record proves a
+dispatch, not a review.
+
+Every verdict carries a grade saying how it was reached:
+
+| grade | meaning |
+|-------|---------|
+| `host` | decided from the host's record of a dispatch **this session labelled**. One caveat, and it is real: it is **not** a promise a matching dispatch was found — a `host` grade with no match is the verdict "no outside reader ran", and that is what refuses at the gate. It is no longer a time-window guess: earlier versions matched dispatches by when they ran, so a session sharing a Claude Code conversation with another could be credited with that session's reviewer. The session id in the description ended that. |
+| `inferred` | read from the review file's wording — either no host record survives, or none of this session's dispatches carries a label, so the convention is not in use here |
+| `none` | there is no final review to judge |
+
+The verdict is **frozen** when the session finishes, because transcripts are
+pruned within days; it lands in `session.json` and in the `sessions.jsonl`
+digest, so it outlives its own evidence.
+
+On the `inferred` path — Cursor, Codex, a pruned transcript, or a repo that has
+not adopted the description — a review is read as independent unless its opening
+paragraphs or a `Reviewer:` line declare it a self-check. That is an inference
+from absence and is known to over-credit (finding F12), which is why absence of
+host evidence **never refuses work**: it falls back, it does not fail closed.
+
+**So head your review files with who wrote them, in one of the phrases Forge
+recognises — the list is closed:** `self-check`, `self-review`, `self-audit`,
+`self-authored`, `Reviewer: coordinator`, `reviewed by the coordinator`,
+`APPROVED (pace …)`, `SKIPPED (pace …)`. Put it in the opening two paragraphs; below that only a line
+beginning `Reviewer:` is reliably read, and it still has to carry one of the
+phrases. Saying it in your own words, or further down the file, reads as an
+outside reader you did not have.
+
+`forge fleet report` will not sum verdicts across grades without saying so — a
+measured `independent` and a guessed one are not the same fact.
 
 **Durable ledgers** — the session dir is deleted at cleanup, so `phase done`
 also appends:

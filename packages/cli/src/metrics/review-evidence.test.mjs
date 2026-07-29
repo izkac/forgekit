@@ -1,0 +1,1061 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
+
+import { readReviewerSidecars, reviewEvidence } from './review-evidence.mjs';
+
+function tmp(prefix) {
+  return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
+}
+
+/** A `usage` object in the host's own field names. */
+function usage({ input = 0, output = 0, cacheRead = 0, cacheCreate = 0 } = {}) {
+  return {
+    input_tokens: input,
+    cache_creation_input_tokens: cacheCreate,
+    cache_read_input_tokens: cacheRead,
+    output_tokens: output,
+  };
+}
+
+/** One assistant transcript line — i.e. one content block of one reply. */
+function assistantLine({ requestId, at, model = 'claude-opus-5', tokens = {} } = {}) {
+  return {
+    type: 'assistant',
+    requestId,
+    timestamp: at,
+    isSidechain: true,
+    message: { id: `msg_${requestId}`, model, content: [{ type: 'text' }], usage: usage(tokens) },
+  };
+}
+
+function jsonl(lines) {
+  return lines.map((line) => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n');
+}
+
+/** A meta in the host's own shape; `stoppedByUser` is absent unless asked for. */
+function meta({ description, stoppedByUser } = {}) {
+  const out = {
+    agentType: 'general-purpose',
+    description,
+    toolUseId: 'toolu_017uFdNuuRF9FFhJk8oz15Gr',
+    spawnDepth: 1,
+    model: 'opus',
+  };
+  if (stoppedByUser !== undefined) out.stoppedByUser = stoppedByUser;
+  return out;
+}
+
+/**
+ * Lay out `agent-<id>.meta.json` / `agent-<id>.jsonl` pairs in a fresh dir,
+ * exactly as the host writes them. Omit either half to model a killed or
+ * pruned dispatch.
+ */
+function plantSidecars(agents, dir = tmp('forge-review-evidence-')) {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [agentId, { meta: agentMeta, lines }] of Object.entries(agents)) {
+    if (agentMeta !== undefined) {
+      fs.writeFileSync(
+        path.join(dir, `agent-${agentId}.meta.json`),
+        typeof agentMeta === 'string' ? agentMeta : JSON.stringify(agentMeta),
+      );
+    }
+    if (lines !== undefined) {
+      fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), jsonl(lines));
+    }
+  }
+  return dir;
+}
+
+test('readReviewerSidecars returns one record per dispatch carrying the prescribed token', () => {
+  const dir = plantSidecars({
+    a1: {
+      meta: meta({ description: 'forge-review final' }),
+      lines: [assistantLine({ requestId: 'req_1', at: '2026-07-28T10:00:00.000Z' })],
+    },
+  });
+
+  const records = readReviewerSidecars(dir);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].agentId, 'a1');
+  assert.equal(records[0].unit, 'final');
+});
+
+test('readReviewerSidecars counts requests, not transcript lines', () => {
+  // `req_1` is restated across two lines — one content block each — exactly as
+  // the host writes a reply that thinks and then speaks. Counting lines would
+  // report 3; the dedupe `usageByRequest` owns reports 2.
+  const lines = [
+    assistantLine({ requestId: 'req_1', at: '2026-07-28T10:00:00.000Z', tokens: { output: 4 } }),
+    assistantLine({ requestId: 'req_1', at: '2026-07-28T10:00:01.000Z', tokens: { output: 131 } }),
+    assistantLine({ requestId: 'req_2', at: '2026-07-28T10:00:02.000Z', tokens: { output: 12 } }),
+  ];
+  const expected = new Set(lines.map((line) => line.requestId)).size;
+  // The fixture only discriminates if the two counts genuinely differ.
+  assert.notEqual(expected, lines.length);
+
+  const dir = plantSidecars({ a1: { meta: meta({ description: 'forge-review final' }), lines } });
+
+  assert.equal(readReviewerSidecars(dir)[0].requests, expected);
+});
+
+test('readReviewerSidecars carries the host record of an operator stopping a dispatch', () => {
+  // Measured on this machine (corpus count lives in review-census.mjs): `stoppedByUser`
+  // is written only as literal `true`, on 5 of them, and is absent — not
+  // `false` — on every other.
+  const dir = plantSidecars({
+    a1: {
+      meta: meta({ description: 'forge-review final', stoppedByUser: true }),
+      lines: [assistantLine({ requestId: 'req_1', at: '2026-07-28T10:00:00.000Z' })],
+    },
+    a2: {
+      meta: meta({ description: 'forge-review group-03-collector' }),
+      lines: [assistantLine({ requestId: 'req_2', at: '2026-07-28T10:00:00.000Z' })],
+    },
+  });
+
+  const byId = Object.fromEntries(readReviewerSidecars(dir).map((r) => [r.agentId, r]));
+  assert.equal(byId.a1.stoppedByUser, true);
+  // Absent must read as false, and as a boolean — not `undefined`.
+  assert.equal(byId.a2.stoppedByUser, false);
+});
+
+test('readReviewerSidecars keeps a stopped dispatch that never wrote a transcript', () => {
+  // A pruned `.jsonl` beside a surviving meta. NOT what a declined dispatch
+  // looks like — an earlier version of this comment claimed that and it is
+  // refuted: measured over every sidecar meta on this machine
+  // (2026-07-28), 0 lack a transcript, and all five carrying `stoppedByUser`
+  // have transcripts of 49-423 lines, because an operator stops a dispatch
+  // after it has started.
+  //
+  // The record is kept regardless: dropping it would report "no reviewer was
+  // dispatched" for a reviewer that demonstrably was — the collapse of absence
+  // into a negative that this change exists to stop. `reviewEvidence` cannot
+  // place it in a window and so reports unavailable; this reader has no window
+  // to judge it against and so reports what it found.
+  const dir = plantSidecars({
+    a1: { meta: meta({ description: 'forge-review final', stoppedByUser: true }) },
+  });
+
+  const records = readReviewerSidecars(dir);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].unit, 'final');
+  assert.equal(records[0].stoppedByUser, true);
+  assert.equal(records[0].requests, 0);
+  assert.equal(records[0].at, null);
+});
+
+test('readReviewerSidecars stamps a dispatch with its earliest parsable line', () => {
+  const lines = [
+    assistantLine({ requestId: 'req_2', at: '2026-07-28T10:05:00.000Z' }),
+    { type: 'user', timestamp: 'not-a-date', message: { content: [] } },
+    // Earliest, and neither first in the file nor an assistant line: a
+    // first-line-wins or assistant-only reader lands on a later stamp.
+    { type: 'user', timestamp: '2026-07-28T09:59:30.000Z', message: { content: [] } },
+    assistantLine({ requestId: 'req_1', at: '2026-07-28T10:00:00.000Z' }),
+    { type: 'summary' },
+  ];
+  const expected = lines
+    .map((line) => line.timestamp)
+    .filter((at) => typeof at === 'string' && !Number.isNaN(Date.parse(at)))
+    .reduce((earliest, at) => (Date.parse(at) < Date.parse(earliest) ? at : earliest));
+  assert.notEqual(expected, lines[0].timestamp);
+
+  const dir = plantSidecars({ a1: { meta: meta({ description: 'forge-review final' }), lines } });
+
+  assert.equal(readReviewerSidecars(dir)[0].at, expected);
+});
+
+test('readReviewerSidecars applies an optional line filter before counting', () => {
+  const lines = [
+    assistantLine({ requestId: 'req_1', at: '2026-07-28T09:00:00.000Z' }),
+    assistantLine({ requestId: 'req_2', at: '2026-07-28T11:00:00.000Z' }),
+    assistantLine({ requestId: 'req_3', at: '2026-07-28T12:00:00.000Z' }),
+  ];
+  const cutoff = Date.parse('2026-07-28T10:00:00.000Z');
+  const keep = (line) => Date.parse(line.timestamp) >= cutoff;
+  const kept = lines.filter(keep);
+  const expected = new Set(kept.map((line) => line.requestId)).size;
+  // The filter only proves anything if it actually discards something.
+  assert.notEqual(expected, new Set(lines.map((line) => line.requestId)).size);
+
+  const dir = plantSidecars({ a1: { meta: meta({ description: 'forge-review final' }), lines } });
+
+  const record = readReviewerSidecars(dir, { filter: keep })[0];
+  assert.equal(record.requests, expected);
+  assert.equal(record.at, kept[0].timestamp);
+});
+
+test('readReviewerSidecars keeps a record whose every line the filter discards', () => {
+  // Same contract as `readSubagents`: a dispatch that survives the filter with
+  // nothing left is still a dispatch, reported with zero counts.
+  const dir = plantSidecars({
+    a1: {
+      meta: meta({ description: 'forge-review final' }),
+      lines: [assistantLine({ requestId: 'req_1', at: '2026-07-28T09:00:00.000Z' })],
+    },
+  });
+
+  const records = readReviewerSidecars(dir, { filter: () => false });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].requests, 0);
+  assert.equal(records[0].at, null);
+});
+
+test('readReviewerSidecars ignores a dispatch whose description carries no prescribed token', () => {
+  // Every one of these is a plausible real review dispatch written by hand.
+  // None is the prescribed token, so none is evidence: this reader answers
+  // "was a reviewer dispatched for unit X", and a description it cannot parse
+  // a unit out of cannot answer that question for any unit.
+  const adHoc = [
+    'Group 2 review: transcript reader',
+    'Adversarial review of group 7',
+    'Final review of phase-2a change',
+    'forge-reviewer for the final phase',
+    'review',
+    // Measured over-credits, both from this change's own session: an
+    // *implementer* dispatch described `forge-review implement group 1`
+    // produced a review record under substring matching, and the prose below
+    // yielded a unit of `implementation`. The token is now matched exactly.
+    'forge-review implement group 1',
+    'talk about forge-review implementation details',
+    'forge-review final, then group 7',
+    // Trailing text, killed by the `$` anchor...
+    'Dispatch forge-review final now',
+    // ...and leading text, killed by the `^` anchor. Both edges are pinned.
+    'Please run forge-review final',
+  ];
+  const agents = {};
+  for (const [index, description] of adHoc.entries()) {
+    agents[`a${index}`] = {
+      meta: meta({ description }),
+      lines: [assistantLine({ requestId: `req_${index}`, at: '2026-07-28T10:00:00.000Z' })],
+    };
+  }
+
+  assert.deepEqual(readReviewerSidecars(plantSidecars(agents)), []);
+});
+
+test('readReviewerSidecars matches the token case-insensitively and normalises the unit', () => {
+  const dir = plantSidecars({
+    a1: { meta: meta({ description: '  FORGE-REVIEW Group-03-Collector  ' }) },
+  });
+
+  const records = readReviewerSidecars(dir);
+  assert.equal(records.length, 1);
+  // Lower-cased, or a caller looking up `units['group-03-collector']` reads
+  // "no reviewer ran" off a reviewer that did. Surrounding whitespace is
+  // trimmed, so a hand-typed description with a trailing newline still counts.
+  assert.equal(records[0].unit, 'group-03-collector');
+});
+
+test('readReviewerSidecars refuses a unit longer than a prescribed unit can be', () => {
+  // The unit is persisted, so its length is bounded. Past the cap the
+  // description is not a prescribed dispatch at all, and falls back to prose
+  // rather than writing an unbounded string into the digest.
+  const long = 'g'.repeat(200);
+  const dir = plantSidecars({
+    a1: { meta: meta({ description: `forge-review ${long}` }) },
+    a2: { meta: meta({ description: 'forge-review final' }) },
+  });
+
+  const records = readReviewerSidecars(dir);
+  assert.deepEqual(
+    records.map((record) => record.agentId),
+    ['a2'],
+  );
+  for (const record of records) assert.ok(record.unit.length <= 64);
+});
+
+test('readReviewerSidecars tolerates a malformed meta without losing its neighbours', () => {
+  const dir = plantSidecars({
+    a1: { meta: '{"agentType":"general-purpose","descrip', lines: [] },
+    a2: { meta: 'null' },
+    a3: { meta: '[1,2,3]' },
+    a4: {
+      meta: meta({ description: 'forge-review final' }),
+      lines: [assistantLine({ requestId: 'req_1', at: '2026-07-28T10:00:00.000Z' })],
+    },
+  });
+
+  // The broken metas carry no readable description, so they name no unit and
+  // yield no record — but they must not take a4 down with them.
+  const records = readReviewerSidecars(dir);
+  assert.deepEqual(
+    records.map((record) => record.agentId),
+    ['a4'],
+  );
+});
+
+test('readReviewerSidecars returns records sorted by agentId, not in filesystem order', () => {
+  // A contract guard, not a driver — the same caveat `readSubagents`' sort
+  // test carries, for the same reason. `readdirSync` returns these names
+  // already sorted on the filesystem this suite runs on, so this test cannot
+  // fail here even with the sort removed; verified by removing it. It pins the
+  // guarantee for filesystems that return hash or insertion order, where
+  // persisted evidence would otherwise churn between runs.
+  const ids = ['a90', 'a10', 'a50', 'a70', 'a30', 'a20'];
+  const agents = {};
+  for (const id of ids) agents[id] = { meta: meta({ description: 'forge-review final' }) };
+
+  assert.deepEqual(
+    readReviewerSidecars(plantSidecars(agents)).map((record) => record.agentId),
+    ['a10', 'a20', 'a30', 'a50', 'a70', 'a90'],
+  );
+});
+
+test('readReviewerSidecars returns [] for a directory it cannot read, instead of throwing', () => {
+  const missing = path.join(tmp('forge-review-evidence-'), 'nope', 'subagents');
+  const notADir = path.join(tmp('forge-review-evidence-'), 'file');
+  fs.writeFileSync(notADir, 'not a directory');
+
+  assert.deepEqual(readReviewerSidecars(missing), []);
+  assert.deepEqual(readReviewerSidecars(notADir), []);
+  assert.deepEqual(readReviewerSidecars(null), []);
+  assert.deepEqual(readReviewerSidecars(undefined), []);
+  assert.deepEqual(readReviewerSidecars(''), []);
+  assert.deepEqual(readReviewerSidecars(42), []);
+});
+
+test('readReviewerSidecars lets no description text reach its output', () => {
+  // Prescribing the description's *format* does not license storing its
+  // *text*. These records are persisted into a digest that outlives the
+  // session, and the description is free-form operator prose.
+  const dir = plantSidecars({
+    a1: {
+      meta: meta({ description: 'forge-review final', stoppedByUser: true }),
+      lines: [assistantLine({ requestId: 'req_1', at: '2026-07-28T10:00:00.000Z' })],
+    },
+    // A dispatch that is not a reviewer: its prose must not reach the output
+    // either, now or if the matching rule is ever loosened again.
+    a2: {
+      meta: meta({ description: 'rotate the PRIVATE-SECRET credential' }),
+      lines: [assistantLine({ requestId: 'req_2', at: '2026-07-28T10:00:00.000Z' })],
+    },
+  });
+
+  const serialised = JSON.stringify(readReviewerSidecars(dir));
+  assert.equal(serialised.includes('PRIVATE-SECRET'), false);
+  assert.equal(serialised.includes('rotate'), false);
+  assert.equal(serialised.includes('description'), false);
+  // The description of a *matching* dispatch is equally not stored: the unit
+  // crosses the boundary, the sentence it was cut from does not.
+  assert.equal(serialised.includes('forge-review'), false);
+  // The unit is the one string allowed across — and the fixture must actually
+  // have produced a record, or the assertions above are vacuous.
+  assert.equal(serialised.includes('final'), true);
+});
+
+// ---------------------------------------------------------------------------
+// reviewEvidence
+// ---------------------------------------------------------------------------
+
+/** The Forge session every fixture below dispatches as. */
+const DEMO_ID = '20260728T100000Z-demo-abc123';
+
+const HOST_ID = 'f8447a2f-eb56-41b8-8cc1-16606b862780';
+
+/** Plant a `~/.claude`-shaped tree and return its config dir. */
+function plantHost({ sessionId = HOST_ID, lines = null, subagents = null } = {}) {
+  const configDir = tmp('forge-review-evidence-host-');
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  fs.mkdirSync(project, { recursive: true });
+  if (lines !== null) fs.writeFileSync(path.join(project, `${sessionId}.jsonl`), jsonl(lines));
+  if (subagents !== null) plantSidecars(subagents, path.join(project, sessionId, 'subagents'));
+  return configDir;
+}
+
+/** A session bound to `HOST_ID`, created at `createdAt`. */
+function boundSession({ createdAt = '2026-07-28T10:00:00.000Z' } = {}) {
+  return {
+    id: '20260728T100000Z-demo-abc123',
+    createdAt,
+    host: { agent: 'claude-code', sessionIds: [HOST_ID], boundAt: createdAt },
+  };
+}
+
+/** The parent transcript only has to exist for the binding to resolve. */
+const PARENT = [assistantLine({ requestId: 'parent_1', at: '2026-07-28T10:00:00.000Z' })];
+
+/** Copy the prototype-less units table so it can be compared to a literal. */
+function plain(table) {
+  return { ...table };
+}
+
+test('reviewEvidence cannot tell when the session was never bound to a host session', () => {
+  const result = reviewEvidence({
+    session: { id: 's1', createdAt: '2026-07-28T10:00:00.000Z', host: null },
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir: tmp('forge-review-evidence-host-'),
+  });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /host session/i);
+  assert.deepEqual(plain(result.units), {});
+});
+
+test('reviewEvidence reports the units the host recorded a reviewer dispatch for', () => {
+  const reviewerLines = [
+    assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' }),
+    // Restated content block of the same reply — one request, two lines.
+    assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:01.000Z' }),
+    assistantLine({ requestId: 'rev_2', at: '2026-07-28T10:31:00.000Z' }),
+  ];
+  const expectedRequests = new Set(reviewerLines.map((line) => line.requestId)).size;
+  assert.notEqual(expectedRequests, reviewerLines.length);
+
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: { meta: meta({ description: `forge-review final ${DEMO_ID}` }), lines: reviewerLines },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  assert.deepEqual(plain(result.units), {
+    final: { dispatched: 1, stopped: 0, requests: expectedRequests },
+  });
+  // Available answers carry no excuse.
+  assert.equal('reason' in result, false);
+});
+
+test('reviewEvidence tells "no reviewer ran" apart from "I could not tell"', () => {
+  // The host recorded this session and its subagents; none of them was a
+  // reviewer. That is a verdict the census may act on. It must not look like
+  // the unavailable case, which must fall back to the prose rule instead.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: 'Implement Group 6: chip, composer, settings' }),
+        lines: [assistantLine({ requestId: 'imp_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const looked = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+  const couldNotLook = reviewEvidence({
+    session: { id: 's1', createdAt: '2026-07-28T10:00:00.000Z', host: null },
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(looked.available, true);
+  assert.deepEqual(plain(looked.units), {});
+  assert.equal('reason' in looked, false);
+
+  assert.equal(couldNotLook.available, false);
+  assert.equal(typeof couldNotLook.reason, 'string');
+  assert.ok(couldNotLook.reason.length > 0);
+
+  // The two answers agree on `units` and differ on everything that matters.
+  assert.deepEqual(plain(looked.units), plain(couldNotLook.units));
+  assert.notEqual(looked.available, couldNotLook.available);
+});
+
+test('reviewEvidence counts an operator-stopped dispatch against its unit', () => {
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}`, stoppedByUser: true }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.units.final.dispatched, 1);
+  assert.equal(result.units.final.stopped, 1);
+});
+
+test('reviewEvidence sums repeat dispatches for one unit', () => {
+  const subagents = {};
+  const perAgent = [1, 2, 3];
+  for (const [index, requests] of perAgent.entries()) {
+    subagents[`a${index}`] = {
+      meta: meta({ description: `forge-review final ${DEMO_ID}`, stoppedByUser: index === 0 ? true : undefined }),
+      lines: Array.from({ length: requests }, (_, n) =>
+        assistantLine({ requestId: `rev_${index}_${n}`, at: '2026-07-28T10:30:00.000Z' }),
+      ),
+    };
+  }
+  const expectedRequests = perAgent.reduce((sum, n) => sum + n, 0);
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir: plantHost({ lines: PARENT, subagents }),
+  });
+
+  assert.deepEqual(plain(result.units), {
+    final: { dispatched: perAgent.length, stopped: 1, requests: expectedRequests },
+  });
+});
+
+test('reviewEvidence gives the pruned-transcript and absent-sidecar cases distinct reasons', () => {
+  // Both are unavailable, but a caller reading the reason must be able to tell
+  // a pruned host transcript from a session that wrote no sidecars: matching
+  // both with one loose pattern let the whole `bound.length === 0` branch be
+  // deleted without a test noticing.
+  const pruned = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir: plantHost({ lines: null }),
+  });
+  const noSidecar = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir: plantHost({ lines: PARENT, subagents: null }),
+  });
+
+  assert.equal(pruned.available, false);
+  assert.match(pruned.reason, /no transcript on disk/i);
+  assert.equal(/no transcript on disk/i.test(noSidecar.reason), false);
+
+  assert.equal(noSidecar.available, false);
+  assert.match(noSidecar.reason, /no sidecar directory/i);
+  assert.equal(/no sidecar directory/i.test(pruned.reason), false);
+
+  assert.notEqual(pruned.reason, noSidecar.reason);
+});
+
+test('reviewEvidence cannot tell when the sidecar directory exists but cannot be read', () => {
+  // The defect this replaces: `readdirSync` failing was swallowed into `[]`,
+  // which is indistinguishable from an empty directory, so a reviewer that
+  // genuinely ran was reported as one that never was — and group 2 would then
+  // refuse the change at the gate.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+  const dir = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit', HOST_ID, 'subagents');
+  fs.chmodSync(dir, 0o000);
+  try {
+    // The fixture is only meaningful if the process genuinely cannot read it.
+    assert.throws(() => fs.readdirSync(dir), /EACCES/);
+
+    const result = reviewEvidence({
+      session: boundSession(),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(result.available, false);
+    assert.match(result.reason, /could not be read/i);
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
+});
+
+test('reviewEvidence cannot tell when a dispatch record in the window cannot be read', () => {
+  // One level finer than the directory case: the meta is there and unreadable,
+  // so we know a subagent ran and cannot know whether it was the reviewer.
+  // `readMeta` returning `{}` for unreadable and for absent alike is what made
+  // this read as "no reviewer was dispatched".
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+  const metaFile = path.join(
+    configDir,
+    'projects',
+    '-home-iztok-Projects-forgekit',
+    HOST_ID,
+    'subagents',
+    'agent-a1.meta.json',
+  );
+  fs.chmodSync(metaFile, 0o000);
+  try {
+    assert.throws(() => fs.readFileSync(metaFile, 'utf8'), /EACCES/);
+
+    const result = reviewEvidence({
+      session: boundSession(),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(result.available, false);
+    assert.match(result.reason, /could not be read/i);
+  } finally {
+    fs.chmodSync(metaFile, 0o644);
+  }
+});
+
+test('reviewEvidence cannot tell when a dispatch record in the window is malformed', () => {
+  // Same hole, reachable without a permission bit: a corrupt meta beside a
+  // real transcript is a subagent whose nature is unknowable.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: '{"agentType":"general-purpose","descrip',
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /could not be read/i);
+});
+
+test('reviewEvidence cannot tell when a transcript in the window has no dispatch record', () => {
+  // The mirror case: a subagent transcript whose meta is gone. We know a
+  // subagent ran in this window and cannot know what it was.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: { lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })] },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /could not be read/i);
+});
+
+test('reviewEvidence keys units by a bare table, so a unit named constructor is counted', () => {
+  // `constructor` is the inherited name a real unit can actually collide with:
+  // it is all-lowercase, so it survives the unit's normalisation, where
+  // `__proto__` and `toString` do not (a leading `_` is not a legal unit
+  // character and `toString` lower-cases to a harmless `tostring`). On an
+  // ordinary object `units[unit] ??= {...}` would find the inherited
+  // constructor, skip the assignment and add the counts to a shared function —
+  // the unit would vanish from the table entirely.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review constructor ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.deepEqual(Object.getOwnPropertyNames(result.units), ['constructor']);
+  assert.deepEqual(result.units.constructor, { dispatched: 1, stopped: 0, requests: 1 });
+  // The counts land on whatever `units.constructor` resolves to. On an
+  // ordinary object that is the `Object` constructor *function* — not
+  // `Object.prototype`, as an earlier comment here wrongly claimed — so this
+  // is the assertion that can actually fail, and `{}.dispatched` is not.
+  assert.equal(Object.dispatched, undefined);
+});
+
+test('reviewEvidence lets no description text reach its output', () => {
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+      a2: {
+        meta: meta({ description: 'rotate the PRIVATE-SECRET credential' }),
+        lines: [assistantLine({ requestId: 'imp_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  const serialised = JSON.stringify(result);
+  assert.equal(serialised.includes('PRIVATE-SECRET'), false);
+  assert.equal(serialised.includes('rotate'), false);
+  assert.equal(serialised.includes('description'), false);
+  assert.equal(serialised.includes('forge-review'), false);
+  assert.equal(serialised.includes('final'), true);
+});
+
+test('reviewEvidence degrades instead of throwing on junk input', () => {
+  for (const options of [undefined, null, 'nope', 42, {}, { session: 'nope' }]) {
+    const result = reviewEvidence(options);
+    assert.equal(result.available, false);
+    assert.equal(typeof result.reason, 'string');
+    assert.deepEqual(plain(result.units), {});
+  }
+});
+
+test('reviewEvidence degrades instead of throwing when reading the session itself throws', () => {
+  // The catch-all is the contract, not a formality: this runs inside
+  // `forge phase done` and an exception here would block a transition.
+  const session = {
+    createdAt: '2026-07-28T10:00:00.000Z',
+    get host() {
+      throw new Error('session object is booby-trapped');
+    },
+  };
+
+  const result = reviewEvidence({
+    session,
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir: tmp('forge-review-evidence-host-'),
+  });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /booby-trapped/);
+  assert.deepEqual(plain(result.units), {});
+});
+
+test('reviewEvidence cannot tell when a dispatch has no readable description', () => {
+  // The third and last site of the collapse. `unitOf` returns null both for
+  // "this description says it is not a review dispatch" and for "there is no
+  // description to read", and the second is a subagent visibly there but
+  // unidentifiable — a problem, not a negative.
+  //
+  // Unreachable on today's corpus: `description` is a non-empty string on
+  // every real meta. But it is an undocumented host field, and `host.mjs`
+  // states that host field shapes are not a contract. A release that renames
+  // or nests it would make every dispatch unidentifiable at once, and without
+  // this the gate would refuse every change with no reason to diagnose it.
+  const shapes = [
+    ['absent', { agentType: 'general-purpose', spawnDepth: 1 }],
+    ['null', { description: null }],
+    ['a number', { description: 42 }],
+    ['empty', { description: '' }],
+    ['whitespace', { description: '   ' }],
+    ['an object', { description: {} }],
+    ['an array', { description: [] }],
+  ];
+
+  for (const [label, agentMeta] of shapes) {
+    const configDir = plantHost({
+      lines: PARENT,
+      subagents: {
+        a1: {
+          meta: agentMeta,
+          lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+        },
+      },
+    });
+
+    const result = reviewEvidence({
+      session: boundSession(),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(result.available, false, `description ${label} should not be an answer`);
+    assert.match(result.reason, /description/i);
+    // Deliberately not asserting seen/prescribed here: on an unavailable answer
+    // they are placeholders, so `0` pins `unavailable()`'s literal rather than
+    // any tallying behaviour. A reviewer proved that by adding `seen += 99`
+    // before the return and watching the whole suite stay green. The tally is
+    // tested on available answers, where it means something.
+  }
+});
+
+test('reviewEvidence cannot tell when a meta parses to something that is not an object', () => {
+  // `null` and `[1,2,3]` parse cleanly and are not metadata. They reach
+  // `reviewEvidence` only through the scan's problem channel, which the
+  // `readReviewerSidecars` test for the same fixtures cannot see.
+  for (const raw of ['null', '[1,2,3]', '"a string"', '7']) {
+    const configDir = plantHost({
+      lines: PARENT,
+      subagents: {
+        a1: {
+          meta: raw,
+          lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+        },
+      },
+    });
+
+    const result = reviewEvidence({
+      session: boundSession(),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(result.available, false, `meta ${raw} should not be an answer`);
+    assert.match(result.reason, /could not be read/i);
+  }
+});
+
+test('reviewEvidence tells "the convention is not in use" from "no reviewer ran"', () => {
+  // The distinction task 2.1b consumes. Both are `available: true` with no
+  // units, and conflating them is what would have made the gate refuse
+  // essentially every session: on the real corpus plenty of dispatches are
+  // review-shaped and almost none carries the prescribed label, so
+  // `prescribed === 0` is overwhelmingly "nobody has adopted the convention",
+  // not "nobody reviewed".
+  const conventionUnused = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir: plantHost({
+      lines: PARENT,
+      subagents: {
+        a1: {
+          meta: meta({ description: 'Group 1 review: host binding' }),
+          lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+        },
+        a2: {
+          meta: meta({ description: 'Independent review of the cap stack' }),
+          lines: [assistantLine({ requestId: 'rev_2', at: '2026-07-28T10:31:00.000Z' })],
+        },
+      },
+    }),
+  });
+
+  const nothingRan = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir: plantHost({ lines: PARENT, subagents: {} }),
+  });
+
+  // Identical on every field the round-1 contract had...
+  assert.equal(conventionUnused.available, true);
+  assert.equal(nothingRan.available, true);
+  assert.deepEqual(plain(conventionUnused.units), plain(nothingRan.units));
+
+  // ...and distinguishable only by the new pair.
+  assert.equal(conventionUnused.seen, 2);
+  assert.equal(conventionUnused.prescribed, 0);
+  assert.equal(nothingRan.seen, 0);
+  assert.equal(nothingRan.prescribed, 0);
+  assert.notEqual(conventionUnused.seen, nothingRan.seen);
+});
+
+test('reviewEvidence counts prescribed dispatches in both tallies', () => {
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+      a2: {
+        meta: meta({ description: 'Implement Group 6: chip, composer, settings' }),
+        lines: [assistantLine({ requestId: 'imp_1', at: '2026-07-28T10:31:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  // A prescribed dispatch is a dispatch: it counts in `seen` too, or `seen`
+  // would not be "every identifiable dispatch".
+  assert.equal(result.seen, 2);
+  assert.equal(result.prescribed, 1);
+  assert.equal(result.units.final.dispatched, result.prescribed);
+});
+
+test('an unplaceable unlabelled dispatch still counts as seen', () => {
+  // Reversed after the final review (I3). This case originally asserted
+  // `seen: 0`, reasoning that an unplaceable dispatch must not inflate `seen`
+  // and send to prose a session that could have been judged on evidence. That
+  // weighs the wrong two outcomes against each other: the cost of counting it
+  // is losing a *grade*, and the cost of dropping it is `seen === 0`, which
+  // task 2.1b reads as "nothing ran at all" and which **refuses the work** at
+  // the money/auth gate. A pruned sidecar transcript is the ordinary trigger.
+  //
+  // It is also the module's own rule applied to its last unguarded branch: a
+  // dispatch we cannot place is still a dispatch that demonstrably ran, and
+  // "I could not place it" is not "it did not happen". Twelve lines below, a
+  // *prescribed* record with no timestamp already returned unavailable rather
+  // than pretending it was absent; this branch silently did the opposite.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: { a1: { meta: meta({ description: 'ordinary implementer work' }), lines: [] } },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(result.available, true, 'an unlabelled dispatch is not a reason to give up');
+  assert.equal(result.seen, 1, 'it ran; we just cannot say when');
+  assert.equal(result.prescribed, 0);
+  // `seen > 0, prescribed === 0` is the adoption gate's "convention not in use"
+  // row, so the census falls back to prose — the side that cannot refuse work.
+  assert.deepEqual(plain(result.units), {});
+});
+
+// ---------------------------------------------------------------------------
+// Attribution by name (F31 / C1, closed structurally)
+//
+// A dispatch record names the Forge session that made it, so crediting one is
+// an equality test. Three review rounds each found a fresh way for the previous
+// design — "a review dispatch somewhere in this host conversation while this
+// session was open" — to credit a neighbour's reviewer to a session whose own
+// review file said the coordinator wrote it: a window a later session's
+// dispatch still landed inside, a `forge cleanup` that erased the neighbour's
+// `session.json`, and a ledger line predating the field that recorded which
+// conversation a session ran in. All three were the money/auth gate passing on
+// someone else's evidence, and all three are gone with the inference.
+// ---------------------------------------------------------------------------
+
+test("a neighbour's reviewer in the same conversation is not this session's", () => {
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: 'forge-review final 20260728T113000Z-neighbour-def456' }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T11:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({ session: boundSession(), configDir });
+
+  // Available and measured: we looked, and nothing here was dispatched for us.
+  assert.equal(result.available, true);
+  assert.deepEqual(plain(result.units), {}, "a neighbour's reviewer must not appear in our units");
+  assert.equal(result.prescribed, 0, 'nothing was dispatched for this session');
+  // It still counts as a dispatch that happened, which is what stops the census
+  // reading this as "nothing ran at all" and refusing the work.
+  assert.equal(result.seen, 1);
+});
+
+test('the same dispatch counts when it names this session', () => {
+  // The discriminating half of the case above: identical fixture, one string
+  // different. Without this the test above would pass against a reader that
+  // credits nobody.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T11:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({ session: boundSession(), configDir });
+
+  assert.equal(result.available, true);
+  assert.deepEqual(plain(result.units), { final: { dispatched: 1, stopped: 0, requests: 1 } });
+  assert.equal(result.prescribed, 1);
+});
+
+test('a dispatch outside the old window still counts when it names this session', () => {
+  // The window is gone, and this pins that it is gone. A reviewer dispatched
+  // hours before this session was created — a clock skew, a resumed
+  // conversation — used to be discarded as "provably somebody else's", which
+  // meant a session whose reviewer really ran read as `self` and refused.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-27T03:00:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession({ createdAt: '2026-07-28T10:00:00.000Z' }),
+    configDir,
+  });
+
+  assert.deepEqual(plain(result.units), { final: { dispatched: 1, stopped: 0, requests: 1 } });
+});
+
+test('a review dispatch naming no session is unattributable, not absent', () => {
+  // The older two-word form. It cannot be credited to this session, and it
+  // cannot be dismissed either — it may well be ours. Both resolutions are
+  // defects this module has already shipped once each, so the answer is that we
+  // cannot tell, and the census reads the prose instead.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: 'forge-review final' }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({ session: boundSession(), configDir });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /names no Forge session/i);
+  assert.deepEqual(plain(result.units), {});
+});
+
+test('reviewEvidence cannot match a dispatch to a session with no id', () => {
+  const configDir = plantHost({ lines: PARENT, subagents: {} });
+
+  const result = reviewEvidence({
+    session: { createdAt: '2026-07-28T10:00:00.000Z', host: { sessionIds: [HOST_ID] } },
+    configDir,
+  });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /no id/i);
+});
+
+test('an unreadable dispatch is unavailability wherever it sits', () => {
+  // Formerly one whose transcript placed it outside the window was skipped as
+  // provably a neighbour's. With no window there is nothing to prove that with,
+  // and the meta we cannot read may be this session's own final reviewer —
+  // which, once any of our dispatches is on record, refuses the change.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review group-01 ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+      a2: { meta: '{ not json', lines: [assistantLine({ requestId: 'x', at: '2026-07-25T01:00:00.000Z' })] },
+    },
+  });
+
+  const result = reviewEvidence({ session: boundSession(), configDir });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /cannot tell whether it was this session's reviewer/i);
+});

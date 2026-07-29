@@ -22,6 +22,14 @@
  *                      forge metrics collect
  *   telemetry-analyze  forge phase done → digest → forge analyze --json
  *
+ * Review-authorship-evidence loop (specs/changes/review-authorship-evidence/
+ * e2e.json), also layering on `boot`:
+ *   review-evidence-decides   a review file that says "self-check" beside a host
+ *                             record of a real reviewer → independent, on host
+ *                             evidence, past the money/auth done gate
+ *   review-evidence-survives  delete the transcript; the recorded verdict does
+ *                             not move
+ *
  * `all` deliberately stays the harness-setup-probe rig's own five phases: it is
  * that change's recorded probe and its verdict must keep meaning what it meant.
  */
@@ -104,6 +112,12 @@ function writeLoop(dir, ok) {
       steps: [{ name: 'smoke', cmd: `node ${JSON.stringify(probe.replace(/\\/g, '/'))}` }],
     })}\n`,
   );
+}
+
+/** Last `n` lines — the runner reports only a 30-line tail, and a long context
+ *  silently pushes the assertion message out of it. */
+function tail(text, n) {
+  return String(text ?? '').split('\n').slice(-n).join('\n');
 }
 
 function fail(message, context) {
@@ -191,6 +205,185 @@ function plantTranscripts(at) {
   );
 }
 
+/* ---------- review-authorship-evidence fixture ---------- */
+
+const REVIEW_HOST_ID = 'e2e0revw-0000-1111-2222-666677778888';
+/** Kept apart from HOST_CFG so the two loops cannot borrow each other's record. */
+const REVIEW_HOST_CFG = path.join(SCRATCH, '.claude-review-host');
+const REVIEW_PROJECT_DIR = '-scratch-review-project';
+/** A host config dir with no transcripts at all, for the prose-only control. */
+const EMPTY_HOST_CFG = path.join(SCRATCH, '.claude-empty-host');
+/** The project the control runs in: same review file, no host record. */
+const PROSE_PROJECT = `${SCRATCH}-prose`;
+/**
+ * Exactly what a final-review dispatch is prescribed to be described as.
+ *
+ * The trailing session id is what makes the record attributable: without it the
+ * join is "a review dispatch somewhere in this host conversation", and one
+ * Claude Code conversation routinely hosts several Forge sessions. `s1` is the
+ * session `makeProject` creates.
+ */
+const FINAL_REVIEW_DISPATCH = 'forge-review final s1';
+
+/**
+ * The whole point of this loop, in one string.
+ *
+ * It must read as a SELF-CHECK to the prose rule — that is what makes the host
+ * record outranking it mean anything. `review-evidence-decides` proves that by
+ * running the identical bytes through a project with no host record and
+ * requiring `self`; if this text ever drifts to something the prose rule would
+ * also call `independent`, the control goes red and says so, rather than the
+ * loop passing for the wrong reason.
+ *
+ * The heading is the phrasing Forge's own skill prescribes for a self-written
+ * review, and the body says in plain English that no reviewer was dispatched.
+ */
+const SELF_CHECK_REVIEW = `# Final review
+
+**Reviewer:** coordinator — self-check
+
+No reviewer subagent was dispatched for this change; I read back my own diff
+and convinced myself it was fine. Everything below is my own assessment of my
+own work.
+
+## Verdict
+
+APPROVED.
+`;
+
+/** A change the money/auth floor applies to, so the done gate actually runs. */
+const HIGH_RISK_PROPOSAL = `# Proposal — scratch fixture
+
+Adds a payment authorization step to the checkout flow. This change therefore
+touches money and auth, which is what puts it behind the hard floor in
+\`forge phase done\`.
+`;
+
+/**
+ * Layer the review fixture onto an existing scratch project — a high-risk
+ * change, a finishable session and a self-check final review.
+ *
+ * Layered rather than built, so `boot` stays the loop's first step and means
+ * something, exactly as `telemetry-collect` layers on it.
+ *
+ * `hostId` is the only difference between the two projects this phase builds:
+ * with it, the host has a dispatch record to answer from; without it, nothing
+ * but the prose can decide. Everything else — the review file above all — is
+ * written from the same constants in both.
+ *
+ * @param {string} dir
+ * @param {{ createdAt: string, hostId?: string }} options
+ */
+function layerReviewFixture(dir, options) {
+  const changeDir = path.join(dir, 'specs', 'changes', 'my-change');
+  fs.mkdirSync(changeDir, { recursive: true });
+  fs.writeFileSync(path.join(changeDir, 'proposal.md'), HIGH_RISK_PROPOSAL, 'utf8');
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), '## Group 1\n\n- [x] 1.1 wire it\n', 'utf8');
+  // notApplicable, so the integrity gate does not also demand an executed e2e
+  // loop *inside* the fixture project — this loop is the one being executed.
+  fs.writeFileSync(
+    path.join(changeDir, 'spine.json'),
+    `${JSON.stringify(
+      { change: 'my-change', notApplicable: 'scratch fixture — nothing is wired', rows: [] },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+
+  const sessionDir = path.join(dir, '.forge', 'sessions', 's1');
+  fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'reviews', 'final-review.md'), SELF_CHECK_REVIEW, 'utf8');
+  fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify\n\nAll checks green.\n', 'utf8');
+
+  const sessionFile = path.join(sessionDir, 'session.json');
+  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  session.createdAt = options.createdAt;
+  session.updatedAt = options.createdAt;
+  session.phase = 'implement';
+  session.tasksTotal = 1;
+  session.tasksComplete = 1;
+  session.phaseHistory = [{ phase: 'implement', at: options.createdAt }];
+  if (options.hostId) {
+    session.host = { agent: 'claude-code', sessionIds: [options.hostId], boundAt: options.createdAt };
+  } else {
+    delete session.host;
+  }
+  fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+  return { dir, sessionDir, changeDir };
+}
+
+/**
+ * A host record of one final-review subagent that genuinely ran: the sidecar
+ * meta describing it as `forge-review final <session-id>` — the session id is
+ * what attributes the record, so no transcript timestamp has to place it.
+ *
+ * The main transcript beside it is not decoration — `findTranscripts` locates a
+ * sidecar directory by finding `<hostId>.jsonl` first, so without it there is
+ * no dispatch record to read at all.
+ *
+ * @param {string} at ISO timestamp inside `[session.createdAt, now]`
+ */
+function plantReviewerDispatch(at) {
+  const projectDir = path.join(REVIEW_HOST_CFG, 'projects', REVIEW_PROJECT_DIR);
+  const sidecarDir = path.join(projectDir, REVIEW_HOST_ID, 'subagents');
+  fs.rmSync(REVIEW_HOST_CFG, { recursive: true, force: true });
+  fs.mkdirSync(sidecarDir, { recursive: true });
+
+  fs.writeFileSync(
+    path.join(projectDir, `${REVIEW_HOST_ID}.jsonl`),
+    `${assistantLine('req_coord0', 0, at, false)}\n`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(sidecarDir, 'agent-rv1.jsonl'),
+    `${[assistantLine('req_rv0', 0, at, true), assistantLine('req_rv1', 0, at, true)].join('\n')}\n`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(sidecarDir, 'agent-rv1.meta.json'),
+    `${JSON.stringify({
+      agentType: 'general-purpose',
+      description: FINAL_REVIEW_DISPATCH,
+      toolUseId: 'toolu_dispatch_review',
+      spawnDepth: 1,
+      model: 'opus',
+    })}\n`,
+    'utf8',
+  );
+}
+
+/** An empty host config dir — "no record", as distinct from "a record of none". */
+function plantNoHostRecord() {
+  fs.rmSync(EMPTY_HOST_CFG, { recursive: true, force: true });
+  fs.mkdirSync(path.join(EMPTY_HOST_CFG, 'projects'), { recursive: true });
+}
+
+/**
+ * The last `.forge/sessions.jsonl` line, parsed — the durable record that
+ * outlives both the session directory and the host transcript.
+ *
+ * @param {string} file
+ * @returns {Record<string, any> | null}
+ */
+function lastDigest(file) {
+  try {
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim());
+    return lines.length ? JSON.parse(lines.at(-1)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The frozen verdict on a scratch session, or null. */
+function frozenVerdictOf(sessionDir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8')).reviewVerdict ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const phase = process.argv[2];
 
 // `all` is the harness's own probe: it must prove THIS rig, self-contained, with
@@ -215,6 +408,10 @@ if (phase === 'all') {
 }
 
 if (phase === 'boot') {
+  // The review loop's control project is a *sibling* of SCRATCH, so the rmSync
+  // inside makeProject does not reach it. Clear it here or it outlives every
+  // documented `rm -rf $SCRATCH`.
+  fs.rmSync(PROSE_PROJECT, { recursive: true, force: true });
   makeProject(SCRATCH);
   process.stdout.write(`SCRATCH PROJECT READY ${SCRATCH}\n`);
 } else if (phase === 'record') {
@@ -384,9 +581,192 @@ if (phase === 'boot') {
   process.stdout.write(
     `ANALYZE coverage=${sessionsWithMetrics}/${sessionsTotal} models=${models.sort().join(',')}\n`,
   );
+} else if (phase === 'review-evidence-decides') {
+  // EVIDENCE OUTRANKS PROSE. Two projects, one review file, byte for byte. One
+  // has a host record of a real final reviewer and one has nothing but the
+  // file; the verdicts must come out opposite.
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  const at = new Date(Date.now() - 60_000).toISOString();
+
+  // --- the control, and it runs FIRST on purpose ------------------------
+  // If this fixture's prose would read as `independent` anyway, the evidence
+  // half proves nothing at all — it would pass whether or not the host record
+  // decided anything. So measure the prose-only reading before measuring
+  // anything else, through the shipped binary rather than by importing the
+  // classifier, because the claim is about what an operator's forge does.
+  makeProject(PROSE_PROJECT);
+  const control = layerReviewFixture(PROSE_PROJECT, { createdAt });
+  plantNoHostRecord();
+
+  // The gate's own answer to this prose: a high-risk change whose only reader
+  // was its author is refused. Same file that passes below.
+  const refused = forge(PROSE_PROJECT, ['phase', 'done'], { CLAUDE_CONFIG_DIR: EMPTY_HOST_CFG });
+  if (refused.code === 0) {
+    fail(
+      'the money/auth done gate ACCEPTED the prose-only fixture — its review file does not read as ' +
+        'a self-check, so nothing below proves that evidence outranks prose',
+      // Trimmed on purpose. `runE2eSteps` reports only the last 30 lines, and
+      // `fail()` prints its message before its context — a passing `phase done`
+      // emits the whole session JSON, which pushes the assertion off the top and
+      // the operator sees no message at all. Reproduced by an independent
+      // reviewer against two separate breaks.
+      tail(refused.out, 8),
+    );
+  }
+  if (!refused.out.includes('self-authored')) {
+    fail('the gate refused the control for some other reason than a self-authored review', refused.out);
+  }
+
+  // Same run again with the refusal recorded, so the transition completes and
+  // the prose-only verdict is written down where it can be read back.
+  const waived = forge(
+    PROSE_PROJECT,
+    ['phase', 'done', '--final-review-waived', 'e2e control: measuring the prose-only reading'],
+    { CLAUDE_CONFIG_DIR: EMPTY_HOST_CFG },
+  );
+  if (waived.code !== 0) fail(`control forge phase done exited ${waived.code}`, waived.out);
+  const prose = frozenVerdictOf(control.sessionDir);
+  if (!prose) fail('no verdict was frozen onto the control session', waived.out);
+  if (prose.final !== 'self' || prose.evidence !== 'inferred') {
+    fail(
+      `THE CONTROL IS THE TEST: read as prose alone this review file gives ` +
+        `${prose.final}/${prose.evidence}, not self/inferred. A fixture whose prose already reads as ` +
+        'independent makes the evidence half below pass for free.',
+      SELF_CHECK_REVIEW,
+    );
+  }
+
+  // --- the same file, with a host record beside it ----------------------
+  const fixture = layerReviewFixture(SCRATCH, { createdAt, hostId: REVIEW_HOST_ID });
+  plantReviewerDispatch(at);
+  const same =
+    fs.readFileSync(path.join(fixture.sessionDir, 'reviews', 'final-review.md'), 'utf8') ===
+    fs.readFileSync(path.join(control.sessionDir, 'reviews', 'final-review.md'), 'utf8');
+  if (!same) {
+    fail('the two projects no longer share one review file — the control says nothing about this one');
+  }
+
+  // No --allow-incomplete and no waiver: this is the real money/auth gate, on
+  // a high-risk change whose review file says its author reviewed it.
+  const done = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (done.code !== 0) {
+    fail(
+      'forge phase done refused a change whose host recorded a real final reviewer — the review ' +
+        "file's prose was consulted after all",
+      done.out,
+    );
+  }
+  const verdict = frozenVerdictOf(fixture.sessionDir);
+  if (!verdict) fail('no verdict was frozen onto the session', done.out);
+  if (verdict.evidence !== 'host') {
+    fail(`verdict graded ${verdict.evidence}, expected host — the dispatch record did not decide`, done.out);
+  }
+  if (verdict.final !== 'independent') {
+    fail(`verdict ${verdict.final} on host evidence, expected independent`, done.out);
+  }
+  // Deliberately not asserting `stoppedByOperator` here. This fixture's meta
+  // carries no `stoppedByUser`, so the flag is false by construction and the
+  // assertion could never fail — hard-coding it in `review-census.mjs` left the
+  // whole loop green. The declined-dispatch rule is covered by unit tests; it
+  // has no step in this contract, and pretending otherwise is worse than the gap.
+
+  // Derived, never spelled out: if an assertion above is ever loosened, the
+  // gate's `expect` still catches the wrong answer at this line.
+  process.stdout.write(
+    `REVIEW final=${verdict.final} evidence=${verdict.evidence} ` +
+      `prose=${prose.final === 'self' ? 'self-check' : prose.final}\n`,
+  );
+} else if (phase === 'review-evidence-survives') {
+  // THE VERDICT OUTLIVES ITS EVIDENCE. The host prunes transcripts in days; the
+  // durable digest is forever. Delete the record that decided, then make forge
+  // re-derive everything that reads the verdict and prove nothing moved.
+  const sessionDir = path.join(SCRATCH, '.forge', 'sessions', 's1');
+  const digestFile = path.join(SCRATCH, '.forge', 'sessions.jsonl');
+  const before = lastDigest(digestFile);
+  if (!before) fail('no durable digest line — run review-evidence-decides first', digestFile);
+  if (before.reviews?.final !== 'independent' || before.reviews?.evidence !== 'host') {
+    // Only the reviews block: the whole digest entry is long enough to push
+    // this message out of the runner's 30-line tail.
+    fail(
+      'the digest did not carry the measured verdict into this phase',
+      JSON.stringify(before.reviews),
+    );
+  }
+  if (typeof before.reviews?.rule !== 'number') {
+    fail('the digest does not record which classifier judged it', JSON.stringify(before, null, 2));
+  }
+
+  const transcript = path.join(
+    REVIEW_HOST_CFG,
+    'projects',
+    REVIEW_PROJECT_DIR,
+    `${REVIEW_HOST_ID}.jsonl`,
+  );
+  if (!fs.existsSync(transcript)) fail('the host transcript was already gone before the prune', transcript);
+  fs.rmSync(REVIEW_HOST_CFG, { recursive: true, force: true });
+  if (fs.existsSync(transcript)) fail('the prune did not remove the host transcript', transcript);
+  process.stdout.write(`PRUNED ${REVIEW_HOST_CFG}\n`);
+
+  // 1. the gate. A second `forge phase done` now measures nothing, and must
+  //    keep the answer it already has rather than falling back to the prose —
+  //    which, per the control in the previous phase, says self-check.
+  const again = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (again.code !== 0) {
+    fail(
+      'the money/auth gate refused a session whose evidence has been pruned — the verdict did not ' +
+        'outlive it, and an operator would be asked to re-dispatch a reviewer that already ran',
+      again.out,
+    );
+  }
+  if (!again.out.includes('Kept the review verdict')) {
+    fail('forge re-measured instead of keeping the frozen verdict', again.out);
+  }
+  // And it must still say so on disk: a pass that keeps the gate open but
+  // degrades the stored verdict would strand every later reader.
+  const kept = frozenVerdictOf(sessionDir);
+  if (kept?.final !== 'independent' || kept?.evidence !== 'host') {
+    fail('the verdict frozen on the session degraded once its evidence was pruned', JSON.stringify(kept));
+  }
+
+  // 2. the durable line. Delete it outright so `forge score --write` has to
+  //    build it again from nothing, with no transcript left anywhere on disk.
+  fs.rmSync(digestFile, { force: true });
+  const scored = forge(SCRATCH, ['score', '--write'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  /** @type {Record<string, any>} */
+  let card;
+  try {
+    card = JSON.parse(scored.stdout);
+  } catch {
+    fail(`forge score printed no scorecard (exit ${scored.code})`, scored.out);
+  }
+  const after = lastDigest(digestFile);
+  if (!after) fail('forge score --write did not re-derive the durable digest line', scored.out);
+
+  // 3. the scorecard. Its 29-point money/auth cap reads the same verdict, and
+  //    a live prose census here would both flip the note and apply the cap.
+  const reviews = (card.checks ?? []).find((c) => c?.id === 'reviews');
+  const notes = (reviews?.notes ?? []).join(' | ');
+  if (!notes.includes('independent final review')) {
+    fail('the scorecard fell back to the review file once the evidence was gone', notes);
+  }
+  const cap = (card.caps ?? []).find((c) => String(c).includes('self-authored'));
+  if (cap) fail('the high-risk cap was applied to an independently reviewed session', String(cap));
+
+  const unchanged = JSON.stringify(after.reviews) === JSON.stringify(before.reviews);
+  process.stdout.write(
+    `DIGEST final=${after.reviews?.final} evidence=${after.reviews?.evidence} ` +
+      `afterPrune=${unchanged ? 'unchanged' : 'changed'}\n`,
+  );
+  if (!unchanged) {
+    fail(
+      'the durable verdict moved once its evidence was pruned',
+      `before ${JSON.stringify(before.reviews)}\nafter  ${JSON.stringify(after.reviews)}`,
+    );
+  }
 } else {
   process.stderr.write(
-    'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|telemetry-analyze\n',
+    'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
+      'telemetry-analyze|review-evidence-decides|review-evidence-survives\n',
   );
   process.exit(1);
 }

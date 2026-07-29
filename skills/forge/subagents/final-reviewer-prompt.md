@@ -52,7 +52,9 @@ would they pass against a stubbed handler? If yes, they prove nothing.
 
 Open with `Reviewer: <your model> (<this prompt's role>)` — e.g. `Reviewer: claude-opus-5 (task-reviewer)`. The coordinator saves your report verbatim and `forge score` reads it, so this line is how a dispatched review is told apart from one the coordinator wrote. Do not write it if you are not a dispatched reviewer.
 
-Only your opening lines and this attribution are scanned for authorship, so discuss the coordinator's self-checks freely in the body — that is your job. Just keep `self-check` / `self-audit` / `self-review` / `self-authored` out of this line and out of your opening two paragraphs, where they mark the report as the author's own. If you quote another review's `Reviewer:` header, put it in a fenced block or a `>` blockquote — an unquoted copy of someone else's attribution reads as yours.
+Write this line as if it decides. When the coordinator dispatched you with the description exactly `forge-review final <session-id>` — what `forge review-label final` prints — the host recorded it and `forge score` reads that record instead of your prose. Otherwise your wording usually decides — **but not always**: if this session labelled its *group* reviewers and not you, Forge reads that as "no outside reader", your words are never consulted, and `forge phase done` refuses a high-risk change. If you can see that has happened, say so in your report; it is a real finding about the session, not a detail.
+
+Only your opening lines and this attribution are scanned, so discuss the coordinator's self-checks freely in the body — that is your job. Just keep `self-check` / `self-audit` / `self-review` / `self-authored` out of this line and out of your opening two paragraphs, where they mark the report as the author's own. If you quote another review's `Reviewer:` header, put it in a fenced block or a `>` blockquote — an unquoted copy of someone else's attribution reads as yours.
 
 ## Verdict
 

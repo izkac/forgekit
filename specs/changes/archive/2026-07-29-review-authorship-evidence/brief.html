@@ -1,0 +1,130 @@
+<!-- forge-brief-specs-hash:ea7f259d0c80b221 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Review authorship is measured, not read</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root { --ink:#1a1a1a; --dim:#5a5a5a; --line:#e3e3e3; --bad:#b3261e; --good:#1b5e20; --box:#f7f7f5; }
+  body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: var(--ink); max-width: 46rem; margin: 3rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.65rem; line-height: 1.25; margin-bottom: .3rem; }
+  h2 { font-size: 1.12rem; margin-top: 2.4rem; border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
+  .sub { color: var(--dim); margin-top: 0; }
+  code { background: var(--box); padding: .1rem .3rem; border-radius: 3px; font-size: .89em; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; }
+  .callout { background: var(--box); border-left: 3px solid var(--dim); padding: .85rem 1rem; margin: 1.2rem 0; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .good { color: var(--good); font-weight: 600; }
+  ul { padding-left: 1.15rem; }
+  li { margin: .35rem 0; }
+  .mermaid { margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Review authorship is measured, not read</h1>
+<p class="sub">Operator brief · change <code>review-authorship-evidence</code> · pace <strong>thorough</strong></p>
+
+<h2>TL;DR</h2>
+<ul>
+  <li>Forge decides "was this review written by an independent reviewer, or by the agent reviewing its own work?" by <strong>reading the review file's wording</strong> — text written by the party being judged.</li>
+  <li>That rule was rewritten <strong>five times in one day</strong> and was wrong every time. Twice it was wrong at the gate that protects money and auth changes: once it <em>blocked</em> correct work, once it <em>let through</em> a session that said in plain English its reviewer had been declined.</li>
+  <li>This change stops asking the file and starts checking whether a reviewer <strong>actually ran</strong> — using the record Claude Code itself writes for every subagent, which cannot be faked without really dispatching one.</li>
+  <li>When that record is missing (Cursor, Codex, an old session), Forge behaves exactly as it does today. <strong>It never refuses work for lack of evidence.</strong></li>
+</ul>
+
+<h2>What you'll get</h2>
+<table>
+  <tr><th>Today</th><th>After</th></tr>
+  <tr>
+    <td>A review headed <code>Reviewed:</code> counts as a self-check, and <code>forge phase done</code> refuses a session that <em>did</em> get an independent review.</td>
+    <td>The dispatch record says a reviewer ran. The verdict follows the record, whatever the file says.</td>
+  </tr>
+  <tr>
+    <td>A review saying "a reviewer was dispatched and <strong>declined by the operator</strong>" counted as independent and passed the money/auth gate.</td>
+    <td>No dispatch record → self-check. If the operator <em>stopped</em> a dispatch, Forge says so and points at the proper waiver.</td>
+  </tr>
+  <tr>
+    <td>Rewording a heading changes your grade by up to 29 points.</td>
+    <td>Wording changes nothing where evidence exists.</td>
+  </tr>
+</table>
+
+<h2>How it works</h2>
+
+<div class="mermaid">
+flowchart TD
+    A["forge phase done"] --> B{"Did the host record<br/>a reviewer dispatch?"}
+    B -- "yes, it ran" --> C["independent<br/>evidence: host"]
+    B -- "yes, operator stopped it" --> D["self + 'dispatch stopped'<br/>evidence: host"]
+    B -- "no dispatch found" --> E["self<br/>evidence: host"]
+    B -- "no host record at all" --> F["read the wording, as today<br/>evidence: inferred"]
+    C --> G["Freeze verdict into the session<br/>and the durable digest"]
+    D --> G
+    E --> G
+    F --> G
+    G --> H["Gate · scorecard cap · fleet report"]
+</div>
+
+<p>Claude Code writes a small file for every subagent it runs, including a
+<em>description</em> the coordinator types at dispatch time. Forge will prescribe
+that description (<code>forge-review final &lt;session-id&gt;</code>, printed by
+<code>forge review-label final</code>), which turns it into a reliable join
+between "a reviewer ran" and "this is the review". The session id is what makes
+the record <em>this</em> session's: one Claude Code conversation routinely hosts
+several Forge sessions, and without it a neighbour's reviewer is
+indistinguishable from your own. Measured: that field is
+present on <strong>383 of 383</strong> such records on this machine, and already
+matches all four review artifacts on the most recent real session.</p>
+
+<div class="callout">
+  <strong>Why not just have the agent record it?</strong> That was the first design.
+  It was rejected on measurement: the equivalent existing command,
+  <code>forge evidence</code>, is actually run for only about <strong>half</strong> of the
+  files it exists to produce. A gate that depends on an agent remembering a command
+  fails more often than the bug it replaces.
+</div>
+
+<h2>What changes for you</h2>
+<ul>
+  <li><strong>Nothing you have to do.</strong> No new command. The change is to a field the agent already fills in when dispatching a reviewer.</li>
+  <li><strong>Scores may move</strong> for sessions where the wording and the reality disagreed — in both directions, toward the truth.</li>
+  <li><strong>Cursor and Codex are unaffected</strong>, because they write no such records. They keep today's behaviour permanently.</li>
+</ul>
+
+<h2>Risks — stated plainly</h2>
+<ul>
+  <li><span class="bad">This touches a gate that has been wrong five times.</span> That is why pace is <strong>thorough</strong>: review after every task group, plus an independent review of the whole change. Not optional here.</li>
+  <li><span class="bad">Corrected after you approved this brief.</span> It said a reviewer dispatched with the wrong description "falls back to wording… under-credits rather than over-credits". <strong>That was wrong.</strong> Measured afterwards: of 388 real dispatch records on this machine, 123 are reviews and <strong>1</strong> carries the prescribed label — so the original rule would have declared nearly every existing session self-reviewed and refused it at the gate. Forge now detects whether the convention is in use at all, and falls back to wording when it plainly isn't. One extra task (2.1b), 13 instead of 12.</li>
+  <li><strong>Adoption is still gradual.</strong> The label is a convention, not an enforcement, so the wording path stays alive indefinitely.</li>
+  <li><strong>Evidence expires.</strong> Transcripts are pruned within days; one-day-old sessions on this machine already have none. So the verdict is <em>frozen</em> when the session finishes rather than recomputed later.</li>
+  <li><span class="bad">Freezing can preserve a wrong verdict.</span> If the evidence was misjoined, re-running won't correct it. Mitigated by recording <em>how</em> the verdict was reached alongside it.</li>
+</ul>
+
+<h2>Out of scope — deliberately</h2>
+<p>Five other known findings are <strong>not</strong> fixed here, and saying otherwise
+would repeat the mistake this change exists to correct:</p>
+<ul>
+  <li>Per-group review counts stay on wording. They're worth about 2 points; the final review is worth 29 plus the gate.</li>
+  <li><strong>F18 / F19</strong> — the known escapes in the wording rule <span class="bad">survive</span>, because that rule is still the fallback for hosts without records.</li>
+  <li>F11 (the word "contract" over-triggering), F13 (review depth barely affects the grade), F16, F14.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What lands</th></tr>
+  <tr><td>1 · Read the evidence</td><td>Reader for the host's subagent records, matched to this session by the id in the dispatch description. Identifiers and counts only — never the description text.</td></tr>
+  <tr><td>2 · Decide with it</td><td>Evidence outranks wording. An explicit grade: <code>host</code>, <code>recorded</code>, <code>inferred</code>, <code>none</code>.</td></tr>
+  <tr><td>3 · Freeze it</td><td>Verdict written into the session and the durable ledger at finish, so it outlives the transcript.</td></tr>
+  <tr><td>4 · Make it reachable</td><td>Prescribe the dispatch description in the skill; document the new fields.</td></tr>
+  <tr><td>5 · Product loop</td><td>Executable test: evidence that contradicts the wording wins, and the frozen verdict survives deleting the transcript.</td></tr>
+</table>
+
+<script>mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
+</body>
+</html>

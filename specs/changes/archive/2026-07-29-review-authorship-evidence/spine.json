@@ -1,0 +1,33 @@
+{
+  "change": "review-authorship-evidence",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence \u2014 read host sidecars",
+      "library": "packages/cli/src/metrics/review-evidence.mjs (readReviewerSidecars, reviewEvidence)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs freezeReviewVerdict() on phase finish|done, before enforceFinalReviewFloor(); records attributed by the session id in the dispatch description (packages/cli/src/review-label.mjs prints it)",
+      "writes": "N/A \u2014 returns records; persistence belongs to the freeze row",
+      "reads": "<configDir>/projects/*/<hostSessionId>/subagents/agent-*.meta.json for the session's bound host sessions",
+      "uiConsumer": "reviewCensus verdict \u2192 forge phase done gate, forge score cap, forge fleet report",
+      "evidence": "packages/cli/src/metrics/review-evidence.test.mjs + set-phase.test.mjs (host evidence outranks the review prose) + e2e step review-evidence-decides"
+    },
+    {
+      "capability": "review-evidence \u2014 decide authorship from it",
+      "library": "packages/cli/src/review-census.mjs (evidence precedence host > recorded > inferred)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs enforceFinalReviewFloor() (done gate), packages/cli/src/score.mjs scoreSession (review depth + high-risk cap)",
+      "writes": "N/A \u2014 the verdict is persisted by the freeze row",
+      "reads": "the frozen session.reviewVerdict when present; host evidence at the transition; the review file's prose only as fallback",
+      "uiConsumer": "forge phase done refusal text, scorecard caps, forge fleet report",
+      "evidence": "packages/cli/src/review-census.test.mjs + set-phase.test.mjs (the gate does not refuse when evidence is unavailable) + score.test.mjs (the cap agrees with the gate) + e2e step review-evidence-decides"
+    },
+    {
+      "capability": "review-evidence \u2014 freeze the verdict",
+      "library": "packages/cli/src/review-verdict.mjs (frozenReviewVerdict), packages/cli/src/ledger.mjs (appendSessionDigest)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs freezeReviewVerdict() writes it; score.mjs writeSessionScorecard \u2192 ledger.mjs appendSessionDigest carries it into the durable ledger",
+      "writes": "session.json \u2192 reviewVerdict{final,evidence,stoppedByOperator}; .forge/sessions.jsonl \u2192 reviews.{final,evidence,rule}",
+      "reads": "the evidence computed once at transition time; never recomputed once frozen on host grade",
+      "uiConsumer": "forge fleet report (mixed authorship evidence warning) and forge analyze after the host transcript is pruned",
+      "evidence": "packages/cli/src/ledger.test.mjs + set-phase.test.mjs (the verdict survives the host pruning the transcript) + fleet-report.test.mjs (a missing grade is unknown, never a grade) + e2e step review-evidence-survives"
+    }
+  ]
+}
