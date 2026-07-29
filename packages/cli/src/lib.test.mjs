@@ -530,3 +530,110 @@ test('the addressable key is the directory name, not the declared id', () => {
   const out = JSON.parse(r.stdout);
   assert.equal(out.sessionId, 'dirname-a', 'addressed by the directory, which is what exists');
 });
+
+test('forge cleanup --session scopes the run and honours --include-unfinished', () => {
+  // Three defects in one flag, all found post-publish:
+  //   * `--include-unfinished --session <id>` — the remedy the tool itself
+  //     prints — silently no-opped when the pointer named that session: exit 0,
+  //     empty `removed`, no message.
+  //   * `--session` was unvalidated, so a typo was a silent no-op too.
+  //   * `--session` scoped nothing, so `forge cleanup --session A` deleted an
+  //     unrelated finished session C the operator never named.
+  const root = tmp('forge-cleanup-scope-');
+  const old = new Date(Date.now() - 30 * 864e5).toISOString();
+  const plant = (id, phase, work) => {
+    const dir = path.join(root, '.forge', 'sessions', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      `${JSON.stringify({ id, slug: id, phase, createdAt: old, updatedAt: old })}\n`,
+    );
+    if (work) fs.writeFileSync(path.join(dir, 'verify-evidence.md'), 'work\n');
+    return dir;
+  };
+  const mine = plant('mine', 'implement', true);
+  const unnamed = plant('unnamed-finished', 'done', false);
+  fs.writeFileSync(
+    path.join(root, '.forge', 'active.json'),
+    `${JSON.stringify({ sessionId: 'mine' })}\n`,
+  );
+  const cleanup = path.join(path.dirname(SESSION_STATUS), 'cleanup-sessions.mjs');
+  const run = (...args) =>
+    spawnSync(process.execPath, [cleanup, ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-scope-fleet-'), 's') },
+    });
+
+  const typo = run('--session', 'no-such-session');
+  assert.notEqual(typo.status, 0, 'a typo must not be a silent no-op');
+  assert.match(typo.stderr, /No such session/);
+
+  // Scoped: the session named is considered, and nothing else is touched.
+  const scoped = run('--session', 'mine', '--include-unfinished');
+  assert.equal(scoped.status, 0, scoped.stderr);
+  assert.equal(fs.existsSync(mine), false, 'the named session is removed as asked');
+  assert.equal(
+    fs.existsSync(unnamed),
+    true,
+    'a session the operator never named must not be swept alongside it',
+  );
+});
+
+test('forge phase skipped is gated like the other terminal phases', () => {
+  // Found post-publish. `skipped` looks harmless and is terminal: the session
+  // leaves `unfinishedSessions()`' view so nothing warns about it again, and it
+  // writes no digest line because the scorecard is gated on done|finish. A
+  // later transition moves the pointer off it and the next bare `forge cleanup`
+  // takes it — reviews, evidence and all. `/forge:skip`'s template runs the
+  // bare command.
+  const root = tmp('forge-skipped-gate-');
+  const plant = (id) => {
+    const dir = path.join(root, '.forge', 'sessions', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      `${JSON.stringify({ id, slug: id, phase: 'implement' })}\n`,
+    );
+  };
+  plant('sess-a');
+  plant('sess-b');
+  fs.writeFileSync(
+    path.join(root, '.forge', 'active.json'),
+    `${JSON.stringify({ sessionId: 'sess-a' })}\n`,
+  );
+
+  const setPhase = path.join(path.dirname(SESSION_STATUS), 'set-phase.mjs');
+  const r = spawnSync(process.execPath, [setPhase, 'skipped'], { cwd: root, encoding: 'utf8' });
+  assert.notEqual(r.status, 0, 'marking the wrong session terminal is not undone by re-running');
+  assert.match(r.stderr, /Refusing to guess/);
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(root, '.forge', 'sessions', 'sess-a', 'session.json'), 'utf8')).phase,
+    'implement',
+    'and nothing moved',
+  );
+});
+
+test('a fleet inbox note is not work the session did', () => {
+  // `forge new` plants a note in every *other* open session, so counting
+  // `inbox/` as work made an abandoned session permanently unclearable — the
+  // "gate refuses forever" failure restored through a side door.
+  const root = tmp('forge-inbox-work-');
+  const old = new Date(Date.now() - 40 * 864e5).toISOString();
+  const dir = path.join(root, '.forge', 'sessions', 'abandoned');
+  fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'session.json'),
+    `${JSON.stringify({ id: 'abandoned', slug: 'x', phase: 'implement', createdAt: old, updatedAt: old })}\n`,
+  );
+  fs.writeFileSync(path.join(dir, 'status.json'), '{}\n');
+  fs.writeFileSync(path.join(dir, 'inbox', '20260729-note.md'), 'another session said hello\n');
+
+  const cleanup = path.join(path.dirname(SESSION_STATUS), 'cleanup-sessions.mjs');
+  spawnSync(process.execPath, [cleanup], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-inbox-fleet-'), 's') },
+  });
+  assert.equal(fs.existsSync(dir), false, 'an inbox note must not make a session unclearable');
+});

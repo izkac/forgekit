@@ -101,13 +101,23 @@ for (let i = 1; i < args.length; i += 1) {
 }
 
 /**
- * The phases that write a permanent record: the scorecard, the `sessions.jsonl`
- * digest, and the money/auth review verdict. Acting on the wrong session here
- * cannot be undone by re-running — it scores and files the wrong change, and
- * the right one never reaches the final-review floor at all. Everywhere else a
- * wrong guess costs a re-run, so everywhere else warns instead of refusing.
+ * The phases whose damage a re-run does not undo.
+ *
+ * `done` and `finish` write the scorecard, the `sessions.jsonl` digest and the
+ * money/auth verdict: acting on the wrong session scores and files the wrong
+ * change, and the right one never reaches the final-review floor at all.
+ *
+ * `skipped` looks harmless and is not. It is *terminal*, so the session leaves
+ * `unfinishedSessions()`' view — nothing warns about it again — and it writes no
+ * digest line, because the scorecard is gated on `done|finish`. A later
+ * transition on any other session moves the pointer off it, and the next bare
+ * `forge cleanup` then removes it: reviews, evidence and all, with no durable
+ * record that it ever existed. `/forge:skip`'s own template runs the bare
+ * command. Re-running does not undo that; nothing does.
+ *
+ * Everywhere else a wrong guess costs a re-run, so everywhere else warns.
  */
-const GATE_PHASES = new Set(['done', 'finish']);
+const GATE_PHASES = new Set(['done', 'finish', 'skipped']);
 
 // One decision point for which session this acts on, and one implementation of
 // what ambiguity costs — `resolveSessionOrExit`. An earlier version of this

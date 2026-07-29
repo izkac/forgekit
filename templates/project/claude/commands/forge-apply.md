@@ -14,7 +14,7 @@ Read the Forge skill (`~/.claude/skills/forge/SKILL.md`) and `~/.claude/skills/f
 ## 0. Forge session
 
 1. Announce: "Using Forge apply."
-2. Resume `.forge/active.json` or bootstrap: `forge new <slug>`
+2. Resume with `forge status` (it resolves the session and says so when more than one is open) or bootstrap: `forge new <slug>`
 3. Set phase (use the project's engine as plan-type):
    ```bash
    forge phase implement --plan-type openspec|specs --openspec "<change>"

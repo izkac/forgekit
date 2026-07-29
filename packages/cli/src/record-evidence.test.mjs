@@ -110,6 +110,9 @@ test('writes the canonical template into the active session task dir', () => {
       [
         '# Test evidence — Task 03-record-evidence',
         '',
+        // Which session recorded it, so a re-run can tell its own earlier
+        // evidence from a neighbour's rather than refusing every overwrite.
+        '- **Session:** sess-a',
         `- **Tier:** ${DEFAULT_TIER}`,
         '- **Command:** `node --test "*.test.mjs"`',
         '- **Exit code:** 0',
@@ -254,6 +257,49 @@ test('--forge-dir overrides the .forge root', () => {
     const result = runRecordEvidence(makeOpts({ forgeDir: 'custom-forge' }), dir, FIXED_NOW);
     assert.equal(result.exitCode, 0, result.message);
     assert.ok(fs.existsSync(evidencePath(customRoot, 'sess-c', '03-record-evidence')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a re-run updates its own evidence, and will not touch another session’s', () => {
+  // Post-publish. The overwrite guard keyed on `sessionAmbiguous` — a property
+  // of the *project*, not of the resolution — so every re-run of
+  // `implement.md`'s bare command exited 1 in any two-session project, freezing
+  // whatever ran first, failing or not. It printed "recording against A"
+  // immediately before refusing to.
+  //
+  // The question is whose evidence is already there. That is now written into
+  // the file, so a re-run can tell.
+  const dir = tmp('forge-evidence-owner-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    // A second open session is what makes the resolution a guess.
+    fs.mkdirSync(path.join(forgeDir, 'sessions', 'sess-b', 'tasks'), { recursive: true });
+    fs.writeFileSync(
+      path.join(forgeDir, 'sessions', 'sess-b', 'session.json'),
+      `${JSON.stringify({ id: 'sess-b', slug: 'b', phase: 'implement' })}\n`,
+    );
+    fs.writeFileSync(
+      path.join(forgeDir, 'sessions', 'sess-a', 'session.json'),
+      `${JSON.stringify({ id: 'sess-a', slug: 'a', phase: 'implement' })}\n`,
+    );
+
+    const first = runRecordEvidence(makeOpts({ summary: 'first, failing', exit: 1, allowFail: true }), dir, FIXED_NOW);
+    assert.equal(first.exitCode, 0, first.message);
+
+    // Re-running against the same session must update it.
+    const second = runRecordEvidence(makeOpts({ summary: 'second, passing' }), dir, FIXED_NOW);
+    assert.equal(second.exitCode, 0, `a re-run of your own evidence must not be refused:\n${second.message}`);
+    const file = evidencePath(forgeDir, 'sess-a', '03-record-evidence');
+    assert.match(fs.readFileSync(file, 'utf8'), /second, passing/);
+
+    // Evidence that belongs to another session is still protected.
+    fs.writeFileSync(file, '# Test evidence\n- **Session:** sess-b\n- **Summary:** theirs\n');
+    const clobber = runRecordEvidence(makeOpts({ summary: 'mine' }), dir, FIXED_NOW);
+    assert.equal(clobber.exitCode, 1, 'another session’s evidence must not be overwritten on a guess');
+    assert.match(fs.readFileSync(file, 'utf8'), /theirs/);
+    assert.match(clobber.message, /sess-b/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -33,9 +33,19 @@ const includeActive = args.has('--include-active');
  * ninety-day abandoned one, purely because the pointer named the abandoned one.
  */
 const includeUnfinished = args.has('--include-unfinished');
-/** The session `--include-unfinished` is allowed to remove, and only that one. */
+/**
+ * `--session <id>` scopes the whole run to one session — in every other Forge
+ * command that flag selects what to act *on*, and it meant nothing here, so
+ * `forge cleanup --session A` happily deleted an unrelated finished session the
+ * operator never named. It also gates `--include-unfinished`.
+ */
 const argv = process.argv.slice(2);
 const onlySession = argv.includes('--session') ? argv[argv.indexOf('--session') + 1] : null;
+if (onlySession !== null && !fs.existsSync(path.join(SESSIONS_DIR, onlySession, 'session.json'))) {
+  // A typo used to be a silent no-op: exit 0, nothing removed, no message.
+  process.stderr.write(`No such session: ${onlySession}\n`);
+  process.exit(1);
+}
 if (includeUnfinished && !onlySession) {
   process.stderr.write(
     'Refusing to sweep unfinished sessions across the whole project.\n' +
@@ -105,6 +115,11 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
   // So: any *file* anywhere under the session dir that is not one of Forge's
   // own bookkeeping records. Empty scaffold directories contain none.
   const SCAFFOLD = new Set(['session.json', 'status.json']);
+  // `forge new` plants a fleet note in every *other* open session, so an
+  // `inbox/` is something another session did to this one — not work anybody
+  // did in it. Counting it made an abandoned session permanently unclearable,
+  // which is the "gate refuses forever" failure restored through a side door.
+  const SCAFFOLD_DIRS = new Set(['inbox']);
   const holdsWork = (root) => {
     /** @type {string[]} */
     const stack = [root];
@@ -118,16 +133,26 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
         return true; // cannot tell what is inside — do not delete it
       }
       for (const e of entries) {
-        if (e.isDirectory()) stack.push(path.join(at, e.name));
+        if (e.isDirectory()) {
+          if (!(at === root && SCAFFOLD_DIRS.has(e.name))) stack.push(path.join(at, e.name));
+        }
         else if (!(at === root && SCAFFOLD.has(e.name))) return true;
       }
     }
     return false;
   };
   const hasWork = !isDone && holdsWork(dir);
-  const unfinishedAndProtected = hasWork && !(includeUnfinished && sessionId === onlySession);
+  // Named explicitly, `--include-unfinished` means it: the operator typed this
+  // session's id after a flag that says it deletes work. Before, the pointer's
+  // own protection still applied — so the printed remedy silently no-opped on
+  // exactly the session it exists for, exit 0 and an empty `removed` list.
+  const namedForRemoval = includeUnfinished && sessionId === onlySession;
+  const unfinishedAndProtected = hasWork && !namedForRemoval;
   const shouldRemove =
-    (tooOld || isDone) && !unfinishedAndProtected && (!isActive || includeActive);
+    (onlySession === null || sessionId === onlySession) &&
+    (tooOld || isDone) &&
+    !unfinishedAndProtected &&
+    (!isActive || includeActive || namedForRemoval);
 
   if (shouldRemove) {
     if (!dryRun) {

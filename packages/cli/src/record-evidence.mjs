@@ -68,10 +68,15 @@ export function parseArgs(argv) {
  * @param {{ task: string, tier: string, command: string, exit: number, summary: string, runAt: string }} fields
  * @returns {string}
  */
-export function buildEvidence({ task, tier, command, exit, summary, runAt }) {
+export function buildEvidence({ task, tier, command, exit, summary, runAt, session }) {
   return [
     `# Test evidence — Task ${task}`,
     '',
+    // Which session recorded it. Without this, a re-run cannot tell its own
+    // earlier evidence from a neighbour's, so the guard against clobbering
+    // somebody else's run had to refuse *every* overwrite in a project with two
+    // sessions open — freezing whatever ran first, failing or not.
+    ...(session ? [`- **Session:** ${session}`] : []),
     `- **Tier:** ${tier}`,
     `- **Command:** \`${command}\``,
     `- **Exit code:** ${exit}`,
@@ -193,22 +198,37 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
   // gitignored, `score.mjs` reads it into the evidence ratio, and that lands in
   // the durable ledger — so a guessed session that clobbers an existing
   // `test-evidence.md` destroys a record and moves another change's score.
-  // Writing a *new* file on a guess is a stray file; replacing one is not, so
-  // only that case refuses.
+  //
+  // The question is whose evidence is already there, not how many sessions the
+  // project happens to have open. Keying on the latter refused every re-run of
+  // `implement.md`'s bare command in a two-session project — freezing the first
+  // run's evidence, failing or not, and printing "recording against A"
+  // immediately before refusing to.
   if (sessionAmbiguous && fs.existsSync(filePath)) {
-    return {
-      exitCode: 1,
-      message:
-        `Refusing to overwrite existing evidence for task ${opts.task} in session ${sessionId} ` +
-        'while more than one session is unfinished.\n' +
-        'Pass --session <id> to say which one this run belongs to.',
-    };
+    let owner = null;
+    try {
+      owner = /^- \*\*Session:\*\* (.+)$/m.exec(fs.readFileSync(filePath, 'utf8'))?.[1] ?? null;
+    } catch {
+      owner = null;
+    }
+    // `null` is evidence written before this field existed: unattributable, and
+    // this is the one branch where guessing wrong destroys a record.
+    if (owner !== sessionId) {
+      return {
+        exitCode: 1,
+        message:
+          `Refusing to overwrite evidence for task ${opts.task} that ${owner ? `belongs to session ${owner}` : 'names no session'}, ` +
+          `while more than one session is unfinished and this run resolved to ${sessionId}.\n` +
+          'Pass --session <id> to say which one this run belongs to.',
+      };
+    }
   }
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
     filePath,
     buildEvidence({
       task: opts.task,
+      session: sessionId,
       tier: opts.tier ?? DEFAULT_TIER,
       command: opts.command,
       exit: testExit,

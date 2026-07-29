@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.31 — 2026-07-29
+
+### Follow-ups from 0.3.30's post-publish review
+
+- **`forge phase skipped` refuses on an ambiguous session**, like `done` and
+  `finish`. It looks harmless and is terminal: the session leaves the resolver's
+  view so nothing warns about it again, it writes no digest line because the
+  scorecard is gated on `done|finish`, and the next bare `forge cleanup` takes
+  it — reviews, evidence and all. `/forge:skip`'s own template runs the bare
+  command.
+- **`forge evidence` no longer refuses to update its own evidence.** The guard
+  keyed on whether the *project* had two sessions open rather than on whose
+  evidence was already there, so every re-run of the bare command exited 1 and
+  froze whatever ran first, failing or not. Evidence files now record the
+  session that wrote them, so a re-run can tell its own from a neighbour's — and
+  a neighbour's is still protected.
+- **`forge cleanup --session <id>` now means what it means everywhere else.** It
+  scopes the run to that session; it was previously ignored, so
+  `forge cleanup --session A` could delete an unrelated finished session nobody
+  named. A typo is an error rather than a silent no-op, and
+  `--include-unfinished --session <id>` removes the session named even when the
+  pointer protects it — which is the case the printed remedy exists for, and it
+  silently did nothing.
+- **A fleet inbox note is not work.** `forge new` plants one in every other open
+  session, so counting `inbox/` as work made abandoned sessions permanently
+  unclearable — the "gate refuses forever" failure through a side door.
+- Four installed command templates still said *"Resume from `.forge/active.json`"*,
+  which routes around the resolver entirely; they now use `forge status`.
+
 ## 0.3.30 — 2026-07-29
 
 ### Forge commands no longer disagree about which session they are acting on
@@ -46,8 +75,8 @@ the pointer named — and `finish.md` runs `forge cleanup` on the line after
 The line is not finished-versus-unfinished, since retention exists to clear
 abandoned sessions and those are unfinished by definition. It is whether the
 directory holds anything beyond Forge's own bookkeeping. Scaffolding still ages
-out. `--include-unfinished` deletes work, so it now requires `--session <id>`
-and refuses to sweep a project.
+out. `--include-unfinished` deletes work, so it requires `--session <id>`, which
+also scopes the whole run to that one session.
 
 ### Smaller
 

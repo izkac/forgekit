@@ -740,8 +740,9 @@ $ forge phase verify
   evidence for a session it only guessed at — that file feeds the scorecard and
   the durable ledger, and it is not in git.
 - **`forge cleanup`** never ages out a session that holds work; scaffolding
-  still ages out. `--include-unfinished` deletes work, so it requires
-  `--session <id>` and will not sweep a project.
+  still ages out. `--include-unfinished` deletes work, so it requires `--session <id>`, which
+  also scopes the run to that session — and names it even against the pointer's
+  own protection, since you typed it after a flag that says it deletes work.
 - `forge phase` marks the session it transitioned as active, so the pointer
   follows your work. Not on a *refused* transition, and never on
   `done`/`skipped` — finished work must not capture your status line.
