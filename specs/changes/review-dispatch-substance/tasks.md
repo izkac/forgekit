@@ -32,7 +32,7 @@
       the corpus (24 dispatches, min 15 / median 55 / max 173, 2026-07-30) and
       the rule that it is re-measured before it moves. Verify:
       `node --test packages/cli/src/review-census.test.mjs`.
-- [ ] 2.3 Guard the shape, in the same file: a bucket whose `maxRequests` is
+- [x] 2.3 Guard the shape, in the same file: a bucket whose `maxRequests` is
       absent or not a number returns `null` (prose), never zero — the same
       "present and unreadable is not absent" rule the existing `dispatched` /
       `stopped` guard states. This is the path persisted evidence written before
@@ -46,7 +46,7 @@
       floor is removed. Line 620 (`dispatched: 2, stopped: 1, requests: 61`) is
       the one to watch — it is the stopped-beside-completed pair, where the value
       chosen decides whether the test still means anything.
-- [ ] 2.4 The two evasions, as their own cases — **both shapes are required**,
+- [x] 2.4 The two evasions, as their own cases — **both shapes are required**,
       because until they land nothing pins the production code's choice of
       `maxRequests` over `requests` (with one dispatch the two are identically
       equal, so the substitution survives every test written so far): ten
@@ -56,7 +56,7 @@
       live one — the case the census comment argues for and the one currently
       unproven). Each must be shown to fail against a `bucket.requests`
       substitution. Verify: same command.
-- [ ] 2.5 A reviewer that genuinely ran is untouched: 55 requests beside a review
+- [x] 2.5 A reviewer that genuinely ran is untouched: 55 requests beside a review
       file whose prose reads like a self-check still censuses `independent` on
       `host`. Verify: same command, plus
       `node --test packages/cli/src/set-phase.test.mjs` — the money/auth gate

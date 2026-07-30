@@ -301,8 +301,16 @@ test('the real corpus case that forced the revert', () => {
  * produces. Pass them explicitly only when the point of the test *is* that they
  * differ from the units (the adoption gate below).
  *
+ * `maxRequests` is not optional here even though it reads like a detail: it is
+ * the count the floor is applied to, and a bucket without one is a bucket
+ * `reviewEvidence` has never emitted. Leaving it off is how a dozen fixtures in
+ * this file came to describe a shape the reader cannot produce — seven of them
+ * asserting a host verdict on it, which they only ever got because
+ * `undefined < FINAL_REVIEW_REQUEST_FLOOR` is `false`. The deliberately
+ * malformed buckets below are the exception and say so.
+ *
  * @param {{ units?: Record<string, {dispatched: number, stopped: number, requests: number,
- *     maxRequests?: number}>,
+ *     maxRequests: number}>,
  *   seen?: number, prescribed?: number, available?: boolean, reason?: string }} [spec]
  */
 function evidence(spec = {}) {
@@ -329,7 +337,9 @@ test('host evidence decides the final review and the prose is not consulted', ()
   assert.equal(reviewCensus(dispatched).finalReview, 'self', 'fixture: prose alone says self');
 
   const measured = reviewCensus(dispatched, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: 12, maxRequests: 12 } },
+    }),
   });
   assert.equal(measured.finalReview, 'independent');
   assert.equal(measured.finalReviewEvidence, 'host');
@@ -369,7 +379,9 @@ test('no final review file is evidence none, whatever the host recorded', () => 
   // grade says there was nothing to grade rather than claiming a host reading.
   const dir = sessionWith({ '01-a/group-review.md': 'APPROVED\n' });
   const census = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: 12, maxRequests: 12 } },
+    }),
   });
   assert.equal(census.finalReview, null, 'absent is not the same as self');
   assert.equal(census.finalReviewEvidence, 'none');
@@ -393,7 +405,9 @@ test('the adoption gate reads four states, and only two of them are a host verdi
 
   // 1. prescribed > 0 and the unit is present — follow the unit.
   const followed = reviewCensus(selfProse, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: 12, maxRequests: 12 } },
+    }),
   });
   assert.equal(followed.finalReview, 'independent');
   assert.equal(followed.finalReviewEvidence, 'host');
@@ -450,7 +464,7 @@ test('an unavailable reading never refuses on the grounds of absence alone', () 
     // is here to pin the ORDER of the reads — the flag before the table.
     evidence({
       available: false,
-      units: { final: { dispatched: 1, stopped: 1, requests: 3 } },
+      units: { final: { dispatched: 1, stopped: 1, requests: 3, maxRequests: 0 } },
       reason: 'placeholders are not measurements',
     }),
     // `available` must be exactly `true`, not merely truthy and not merely
@@ -510,6 +524,25 @@ test('a final bucket that cannot be read is not a reviewer that did not run', ()
     { dispatched: 1, stopped: '1' }, // an unreadable STOP is equally unreadable
     { stopped: 1 },
     {},
+    // AND AN UNREADABLE SUBSTANCE COUNT. This is the shape every bucket
+    // persisted before the floor existed has: two readable tallies and no
+    // `maxRequests` at all. `undefined < FINAL_REVIEW_REQUEST_FLOOR` is `false`,
+    // so without this guard such a bucket sails past the floor and grades
+    // `independent` on `host` — a missing measurement read as "large enough",
+    // which is the absence-into-a-positive collapse the module argues against
+    // everywhere else.
+    { dispatched: 1, stopped: 0, requests: 12 },
+    { dispatched: 1, stopped: 0, requests: 12, maxRequests: '12' },
+    // `null` is what a JSON round-trip makes of a count that was not finite, so
+    // it is the shape 3.2 can actually hand back. It is the mild one — `null <
+    // 5` is true, so it fell to prose even before the guard — and it is listed
+    // for the shape rather than for the mutant.
+    { dispatched: 2, stopped: 0, requests: 46, maxRequests: null },
+    // Unreadable before the stop is read, not after: a stopped-only bucket
+    // whose substance count is junk is a bucket this reader never emitted, and
+    // answering `self` from two of its three fields is deciding on a shape we
+    // cannot vouch for. Prose is the side that cannot refuse correct work.
+    { dispatched: 1, stopped: 1, requests: 40, maxRequests: '0' },
   ]) {
     const census = reviewCensus(dir, {
       evidence: evidence({ units: { final: bucket }, seen: 2, prescribed: 2 }),
@@ -520,7 +553,11 @@ test('a final bucket that cannot be read is not a reviewer that did not run', ()
   // The boundary of that guard: a bucket whose numbers ARE readable still
   // decides, including the zero the producer never writes.
   const zero = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 0, stopped: 0, requests: 0 } }, seen: 2, prescribed: 2 }),
+    evidence: evidence({
+      units: { final: { dispatched: 0, stopped: 0, requests: 0, maxRequests: 0 } },
+      seen: 2,
+      prescribed: 2,
+    }),
   });
   assert.equal(zero.finalReview, 'self');
   assert.equal(zero.finalReviewEvidence, 'host');
@@ -537,7 +574,12 @@ test('a declined reviewer is surfaced even when it wrote no review file', () => 
   assert.equal(fs.existsSync(path.join(dir, 'reviews', 'final-review.md')), false, 'fixture: no file');
 
   const census = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 1, requests: 40 } } }),
+    evidence: evidence({
+      // Every dispatch stopped, so the collector's own rule reports no
+      // substance at all: a stopped record never contributes its requests to
+      // the maximum, however many it burnt on its way to being killed.
+      units: { final: { dispatched: 1, stopped: 1, requests: 40, maxRequests: 0 } },
+    }),
   });
   assert.equal(census.stoppedByOperator, true, 'the fact is the host record, not the file');
   assert.equal(census.finalReview, null, 'no file is still no review');
@@ -546,7 +588,9 @@ test('a declined reviewer is surfaced even when it wrote no review file', () => 
 
   // Not stopped, no file: the flag stays false because nothing was stopped.
   const quiet = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 40 } } }),
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: 40, maxRequests: 40 } },
+    }),
   });
   assert.equal(quiet.stoppedByOperator, false);
 });
@@ -570,7 +614,9 @@ test('host evidence never reaches the per-group counts', () => {
   assert.equal(bare.finalReview, 'self', 'fixture: prose alone says the final review is self');
 
   const census = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 12 } } }),
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: 12, maxRequests: 12 } },
+    }),
   });
   assert.equal(census.finalReview, 'independent', 'the final verdict does follow the host');
   assert.equal(census.total, bare.total);
@@ -589,7 +635,12 @@ test('a stopped dispatch is reported, and no waiver is applied on the operator b
   const before = fs.readFileSync(sessionFile, 'utf8');
 
   const declined = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 1, requests: 40 } } }),
+    evidence: evidence({
+      // Every dispatch stopped, so the collector's own rule reports no
+      // substance at all: a stopped record never contributes its requests to
+      // the maximum, however many it burnt on its way to being killed.
+      units: { final: { dispatched: 1, stopped: 1, requests: 40, maxRequests: 0 } },
+    }),
   });
   assert.equal(declined.finalReview, 'self');
   assert.equal(declined.finalReviewEvidence, 'host');
@@ -601,7 +652,9 @@ test('a stopped dispatch is reported, and no waiver is applied on the operator b
   assert.equal(fs.readFileSync(sessionFile, 'utf8'), before, 'the census wrote to the session');
 
   const finished = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 40 } } }),
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: 40, maxRequests: 40 } },
+    }),
   });
   assert.equal(finished.stoppedByOperator, false, 'nothing was stopped');
 });
@@ -617,7 +670,18 @@ test('a stopped dispatch followed by a completed one is independent, stop still 
   assert.equal(reviewCensus(dir).finalReview, 'self', 'fixture: prose alone says self');
 
   const retried = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 2, stopped: 1, requests: 61 } } }),
+    evidence: evidence({
+      // THE 61 DECOMPOSES, and how it decomposes is the whole test. A killed
+      // run that had made 1 request, then a re-run that made 60: `requests` is
+      // the pair's sum and `maxRequests` is the completed dispatch's own count,
+      // because the collector never lets a stopped record contribute a maximum.
+      // 60 is deliberately well clear of the floor — the re-run is the reviewer
+      // that did the work, and this test exists to prove the verdict follows
+      // it. Putting a below-floor number here would turn this into the
+      // stopped-vouches-for-a-token case below and delete the only coverage
+      // there is of the stopped-beside-completed branch reaching `independent`.
+      units: { final: { dispatched: 2, stopped: 1, requests: 61, maxRequests: 60 } },
+    }),
   });
   assert.equal(retried.finalReview, 'independent');
   assert.equal(retried.finalReviewEvidence, 'host');
@@ -625,7 +689,9 @@ test('a stopped dispatch followed by a completed one is independent, stop still 
 
   // Both stopped is the other edge: no reviewer finished.
   const bothStopped = reviewCensus(dir, {
-    evidence: evidence({ units: { final: { dispatched: 2, stopped: 2, requests: 8 } } }),
+    evidence: evidence({
+      units: { final: { dispatched: 2, stopped: 2, requests: 8, maxRequests: 0 } },
+    }),
   });
   assert.equal(bothStopped.finalReview, 'self');
   assert.equal(bothStopped.stoppedByOperator, true);
@@ -665,6 +731,105 @@ test('a token dispatch does not certify the review — the prose answers instead
   assert.deepEqual(forged, bare, 'exactly what the prose rule alone returns');
 });
 
+test('ten token dispatches are not one review — the floor reads the busiest, not the sum', () => {
+  // THE FIRST EVASION, and the reason the floor is applied to `maxRequests`.
+  // Dispatching a subagent is cheap, so the cheapest way past a floor read off
+  // `requests` is ten stubs instead of one: the sum clears any threshold while
+  // no single dispatch read anything. A sum can be assembled out of pieces that
+  // each reviewed nothing; a maximum cannot — some ONE dispatch has to have
+  // done the work.
+  //
+  // THIS IS ALSO THE ONLY SHAPE THAT CAN TELL THE TWO FIELDS APART. With one
+  // unstopped dispatch `requests === maxRequests` identically, so substituting
+  // `bucket.requests` into the floor passed every other test in this file —
+  // measured, not assumed, before this test was written. It needs
+  // `requests >= floor > maxRequests`, which needs more than one dispatch.
+  const tokens = Array.from({ length: 10 }, () => 1); // ten dispatches, one request each
+  const unit = {
+    dispatched: tokens.length,
+    stopped: 0,
+    requests: tokens.reduce((sum, n) => sum + n, 0),
+    maxRequests: Math.max(...tokens),
+  };
+  // Read off the fixture rather than typed beside it. A hand-written expected
+  // number that stops straddling the floor leaves a test that passes and has
+  // stopped testing; these three say so out loud instead.
+  assert.ok(unit.stopped < unit.dispatched, 'fixture: reaches the independent branch at all');
+  assert.ok(
+    unit.requests >= FINAL_REVIEW_REQUEST_FLOOR,
+    `fixture: the sum clears the floor (${unit.requests})`,
+  );
+  assert.ok(
+    unit.maxRequests < FINAL_REVIEW_REQUEST_FLOOR,
+    `fixture: no single dispatch does (${unit.maxRequests})`,
+  );
+
+  const dir = sessionWith(
+    {},
+    '# Final review\n\n' +
+      '**Reviewer:** the coordinator. Ten stub dispatches, none of which read the\n' +
+      'change.\n\n' +
+      '**Verdict: APPROVED**\n',
+  );
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  const swarm = reviewCensus(dir, { evidence: evidence({ units: { final: unit } }) });
+  assert.equal(swarm.finalReview, 'self');
+  assert.equal(swarm.finalReviewEvidence, 'inferred', 'the host has no answer to give');
+  assert.deepEqual(swarm, bare, 'exactly what the prose rule alone returns');
+});
+
+test('a stopped dispatch cannot vouch for the token one beside it', () => {
+  // THE SECOND EVASION, argued for in the census comment and unproven until
+  // now. The grade here is `stopped < dispatched`, so this unit does reach the
+  // `independent` branch — a reviewer ran to completion, as far as the grade
+  // can see. What ran was one request. The substance came from the dispatch the
+  // operator KILLED, and a floor that counted it would let a review the operator
+  // declined certify the stub that replaced it. `maxRequests` excludes stopped
+  // records for exactly this pair, and `requests` does not.
+  const dispatches = [
+    // Big enough to clear the floor on its own several times over, and stopped.
+    { requests: FINAL_REVIEW_REQUEST_FLOOR * 12, stopped: true },
+    { requests: 1, stopped: false },
+  ];
+  const unit = {
+    dispatched: dispatches.length,
+    stopped: dispatches.filter((d) => d.stopped).length,
+    requests: dispatches.reduce((sum, d) => sum + d.requests, 0),
+    // The collector's own rule, restated here so the fixture is derived and not
+    // declared: a stopped record never contributes to the maximum.
+    maxRequests: dispatches.reduce((max, d) => (d.stopped ? max : Math.max(max, d.requests)), 0),
+  };
+  assert.ok(
+    unit.stopped < unit.dispatched,
+    'fixture: grades independent, so the FLOOR is what has to stop it',
+  );
+  assert.ok(
+    unit.requests >= FINAL_REVIEW_REQUEST_FLOOR,
+    `fixture: the pair together clears the floor (${unit.requests})`,
+  );
+  assert.ok(
+    unit.maxRequests < FINAL_REVIEW_REQUEST_FLOOR,
+    `fixture: the dispatch that actually RAN does not (${unit.maxRequests})`,
+  );
+
+  const dir = sessionWith(
+    {},
+    '# Final review\n\n' +
+      '**Reviewer:** the coordinator. The dispatched reviewer was declined; the\n' +
+      'second dispatch is a stub that read nothing.\n\n' +
+      '**Verdict: APPROVED**\n',
+  );
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  const vouched = reviewCensus(dir, { evidence: evidence({ units: { final: unit } }) });
+  assert.equal(vouched.finalReview, 'self');
+  assert.equal(vouched.finalReviewEvidence, 'inferred', 'the host has no answer to give');
+  assert.deepEqual(vouched, bare, 'exactly what the prose rule alone returns');
+});
+
 test('the floor is a boundary — a dispatch that meets it still certifies the review', () => {
   // Both edges, read off the constant rather than typed as a number: a count AT
   // the floor is enough, one below it is not. Nothing else in this file
@@ -685,6 +850,54 @@ test('the floor is a boundary — a dispatch that meets it still certifies the r
 
   const under = reviewCensus(dir, { evidence: evidence(unit(FINAL_REVIEW_REQUEST_FLOOR - 1)) });
   assert.deepEqual(under, bare, 'one request short and there is no host answer at all');
+});
+
+test('THE CONTROL — a real review still outranks self-check prose, at every observed size', () => {
+  // THIS IS THE TEST THAT GOES RED IF THE FLOOR STARTS EATING REAL WORK, and
+  // that is the direction this module has been reverted for twice: 0.3.24's
+  // fail-closed attribution rule and the `contract` narrowing both refused
+  // sessions whose independent review already existed, at the money/auth done
+  // gate. Every other floor test in this file asks whether a forgery is
+  // stopped. Only this one asks whether genuine work still gets through, and it
+  // is the more expensive question to get wrong: a flattered score costs a
+  // number, a refused transition costs the operator their work.
+  //
+  // The counts are the measured corpus behind the constant — all 24
+  // `forge-review` dispatches on this machine, 2026-07-30: minimum 15 requests,
+  // median 55, maximum 173, none below 15. The minimum is the one that matters;
+  // it is the smallest real review anyone has run here, and it is the first
+  // thing a raised floor would decline. If a future change moves the floor
+  // above it, this test says so before the gate does.
+  //
+  // The prose is a self-check, so nothing here can pass by falling through to
+  // it: the host verdict and the prose verdict disagree in every row.
+  const observed = { minimum: 15, median: 55, maximum: 173 };
+  const dir = sessionWith(
+    {},
+    '# Final review\n\n' +
+      'Reviewer: coordinator — self-check of the whole change.\n\n' +
+      '**Verdict: APPROVED**\n',
+  );
+  assert.equal(reviewCensus(dir).finalReview, 'self', 'fixture: prose alone says self');
+
+  for (const [name, requests] of Object.entries(observed)) {
+    assert.ok(
+      requests > FINAL_REVIEW_REQUEST_FLOOR,
+      `the floor has risen past the corpus ${name} of ${requests} — re-measure it (F11)`,
+    );
+    const real = reviewCensus(dir, {
+      evidence: evidence({
+        units: { final: { dispatched: 1, stopped: 0, requests, maxRequests: requests } },
+      }),
+    });
+    assert.equal(
+      real.finalReview,
+      'independent',
+      `corpus ${name}: ${requests} requests is a review and must still certify`,
+    );
+    assert.equal(real.finalReviewEvidence, 'host', `corpus ${name}: must stay a host reading`);
+    assert.equal(real.stoppedByOperator, false, `corpus ${name}: nothing was stopped`);
+  }
 });
 
 test("the operator's refusal outranks the floor — a stopped-only unit is still self", () => {

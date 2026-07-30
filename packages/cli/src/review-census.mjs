@@ -288,15 +288,27 @@ function hostFinalReview(evidence) {
   // says a dispatch happened and refuses to say what it was; reading it as zero
   // dispatches would answer `self` on `host` grade, which is a confident
   // refusal at the money/auth gate built on an absence. `reviewEvidence` writes
-  // both counts on every bucket it creates, so a bucket missing either is not
-  // its output — and 3.2 round-trips this through JSON, where the shape stops
-  // being ours. Falls back to prose, the side that cannot refuse correct work.
+  // all three counts on every bucket it creates, so a bucket missing any of
+  // them is not its output — and 3.2 round-trips this through JSON, where the
+  // shape stops being ours. Falls back to prose, the side that cannot refuse
+  // correct work.
+  //
+  // `maxRequests` IS ONE OF THE THREE, and it is the one that had to be added:
+  // every bucket persisted before the floor existed carries the other two and
+  // not it, and `undefined < FINAL_REVIEW_REQUEST_FLOOR` is `false`, so such a
+  // bucket sailed past the floor and graded `independent`. Reading a missing
+  // measurement as "large enough" is this module's own collapse run backwards.
+  // Checked here rather than beside the floor so it is read before the stop is:
+  // answering `self` off two fields of a bucket whose third says it is not ours
+  // is still deciding on a shape we cannot vouch for, and the answer it would
+  // give is the one that refuses at the gate.
   if (
     typeof bucket !== 'object' ||
     bucket === null ||
     Array.isArray(bucket) ||
     typeof bucket.dispatched !== 'number' ||
-    typeof bucket.stopped !== 'number'
+    typeof bucket.stopped !== 'number' ||
+    typeof bucket.maxRequests !== 'number'
   ) {
     return null;
   }
