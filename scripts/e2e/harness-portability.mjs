@@ -33,6 +33,23 @@
  *   review-evidence-survives  delete the transcript; the recorded verdict does
  *                             not move
  *
+ * Review-freeze-qualifier loop (specs/changes/review-freeze-qualifier/e2e.json),
+ * also layering on `boot`, and on the same review fixture as the loop above:
+ *   review-evidence-pruned-record  a below-floor unstopped `final` dispatch
+ *                             (prose reading independent, so `finish` freezes
+ *                             independent/inferred with the unit on record),
+ *                             then the `subagents/` directory is emptied —
+ *                             files deleted, directory kept — which is the one
+ *                             shape `hostFinalReview` cannot tell apart from
+ *                             "nothing was ever dispatched": the host stays
+ *                             readable and answers self/host, the one genuine
+ *                             negative that function produces. `done` must
+ *                             keep the frozen verdict rather than let that
+ *                             negative overwrite it and refuse permanently
+ *                             (F49/F52) — the shape `review-evidence-survives`
+ *                             does not cover, because deleting the whole host
+ *                             config makes the host unavailable instead.
+ *
  * `all` deliberately stays the harness-setup-probe rig's own five phases: it is
  * that change's recorded probe and its verdict must keep meaning what it meant.
  */
@@ -269,6 +286,20 @@ own work.
 
 APPROVED.
 `;
+
+/**
+ * The opposite fixture: prose that reads INDEPENDENT to the census's own prose
+ * rule, for `review-evidence-pruned-record` — every other review-evidence phase
+ * needs `SELF_CHECK_REVIEW` because they measure the host record outranking a
+ * self-check; this one needs the frozen verdict to already be `independent`
+ * before the prune, or a re-graded `self`/`host` reading would refuse for the
+ * ordinary reason (an unreviewed high-risk change) and prove nothing about the
+ * keep rule. Byte-for-byte the fixture `set-phase.test.mjs` calls
+ * `INDEPENDENT_PROSE`: a `**Verdict:**` line and a named outside reviewer, no
+ * `Reviewer:`-prefixed attribution line and no self-review/self-check/self-audit
+ * phrase, so `review-census.mjs`'s `SELF_REVIEW_RE` does not match it.
+ */
+const INDEPENDENT_REVIEW = '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n';
 
 /** A change the money/auth floor applies to, so the done gate actually runs. */
 const HIGH_RISK_PROPOSAL = `# Proposal — scratch fixture
@@ -888,6 +919,155 @@ if (phase === 'boot') {
       `before ${JSON.stringify(before.reviews)}\nafter  ${JSON.stringify(after.reviews)}`,
     );
   }
+} else if (phase === 'review-evidence-pruned-record') {
+  // THE MOST DANGEROUS SHAPE THIS FLOOR CREATES — more dangerous than the
+  // sibling above. `review-evidence-survives` deletes the whole host config, so
+  // the host has no record at all and `reviewEvidence` answers `unavailable`;
+  // the census then falls back to prose, which is safe by construction. This
+  // step empties only the `subagents/` directory — deletes its files, KEEPS the
+  // directory — which leaves the host perfectly readable and gives
+  // `hostFinalReview` `seen === 0`, the one shape it cannot tell apart from "no
+  // reviewer was ever dispatched". It answers with the one genuine negative in
+  // that function: self/host. Before the keep rule read `unitOnRecord`
+  // (F49/F52), that negative silently overwrote a frozen independent/inferred
+  // verdict and the money/auth gate refused a change that really was
+  // independently reviewed — permanently, because `saveSession` never runs
+  // after `enforceFinalReviewFloor`'s `process.exit(1)`.
+  //
+  // The fixture has to straddle the floor exactly the way `review-evidence-
+  // substance` does, guarded the same way for the same reason: nothing else in
+  // this step would notice a floor lowered to 1, and the failure would then
+  // read as a product regression instead of a fixture that stopped describing
+  // a below-floor dispatch.
+  if (TOKEN_DISPATCH_REQUESTS >= FINAL_REVIEW_REQUEST_FLOOR) {
+    fail(
+      `this step plants a ${TOKEN_DISPATCH_REQUESTS}-request dispatch, which a floor of ` +
+        `${FINAL_REVIEW_REQUEST_FLOOR} accepts — the fixture no longer straddles the floor`,
+    );
+  }
+
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  const at = new Date(Date.now() - 60_000).toISOString();
+
+  // Prose has to read INDEPENDENT here — the opposite of every other
+  // review-evidence phase's fixture. `SELF_CHECK_REVIEW` would make the keep
+  // rule's effect invisible: a re-graded self/host verdict would then refuse
+  // for the ordinary reason (an unreviewed high-risk change), not because a
+  // real reviewer's record was pruned.
+  const fixture = layerReviewFixture(SCRATCH, { createdAt, hostId: REVIEW_HOST_ID });
+  fs.writeFileSync(path.join(fixture.sessionDir, 'reviews', 'final-review.md'), INDEPENDENT_REVIEW, 'utf8');
+  plantReviewerDispatch(at, TOKEN_DISPATCH_REQUESTS);
+
+  // `finish` runs the identical freeze and the identical money/auth floor as
+  // `done` (`freezeReviewVerdict`/`enforceFinalReviewFloor` in `set-phase.mjs`
+  // both act on `phase !== 'done' && phase !== 'finish'`), so the below-floor
+  // dispatch routes to prose here too — and independent prose clears the gate
+  // outright, no waiver needed. That is exactly the spec's GIVEN: "one
+  // unstopped final-review dispatch below the request floor, so the verdict
+  // freezes as independent on inferred evidence with the unit on record".
+  const finished = forge(SCRATCH, ['phase', 'finish'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (finished.code !== 0) {
+    fail(
+      'forge phase finish refused a change whose review file reads independent and whose tasks/' +
+        'evidence/spine are all in place — the fixture does not describe what this step needs',
+      tail(finished.out, 20),
+    );
+  }
+
+  // THIS IS WHAT THE LATER ASSERTIONS DEPEND ON. If `finish` did not freeze
+  // exactly independent/inferred with the unit on record, the prune below
+  // proves nothing — there would be no protected verdict for it to threaten.
+  const frozen = frozenVerdictOf(fixture.sessionDir);
+  if (!frozen) fail('no verdict was frozen at finish', tail(finished.out, 20));
+  if (frozen.final !== 'independent' || frozen.evidence !== 'inferred') {
+    fail(
+      `finish froze ${frozen.final}/${frozen.evidence}, expected independent/inferred — either the ` +
+        'prose did not read independent or the below-floor dispatch was graded host instead of ' +
+        'routed to prose, and the rest of this step would be measuring the wrong thing',
+      JSON.stringify(frozen),
+    );
+  }
+  if (frozen.unitOnRecord !== true) {
+    fail(
+      'finish froze a verdict whose unitOnRecord is not true — the below-floor dispatch was still ON ' +
+        'the host record at finish, so unitOnRecord has to be true for the prune below to be a real ' +
+        'test of the keep rule rather than a case it was never asked to cover',
+      JSON.stringify(frozen),
+    );
+  }
+
+  // THE PRUNE. Delete the sidecar FILES, keep the DIRECTORY — the distinction
+  // `review-evidence-survives` does not need to make, because it removes the
+  // whole host config. Asserted both before and after, as that phase asserts
+  // the transcript's presence and absence: a prune that did not prune would
+  // turn this whole step into a tautology.
+  const sidecarDir = path.join(REVIEW_HOST_CFG, 'projects', REVIEW_PROJECT_DIR, REVIEW_HOST_ID, 'subagents');
+  const beforePrune = fs.readdirSync(sidecarDir);
+  if (beforePrune.length === 0) {
+    fail('the sidecar directory was already empty before the prune — nothing for this step to remove', sidecarDir);
+  }
+  for (const name of beforePrune) fs.rmSync(path.join(sidecarDir, name), { force: true });
+  const afterPrune = fs.readdirSync(sidecarDir);
+  if (afterPrune.length !== 0) {
+    fail('the prune left files behind — a partial prune would not manufacture seen === 0', afterPrune.join(', '));
+  }
+  if (!fs.existsSync(sidecarDir)) {
+    fail(
+      'the prune removed the directory itself, not just its files — that is review-evidence-survives\' ' +
+        'shape (host unavailable), not this one (host readable, answers "nothing was dispatched")',
+      sidecarDir,
+    );
+  }
+  process.stdout.write(`SIDECAR FILES PRUNED, DIRECTORY KEPT ${sidecarDir}\n`);
+
+  // THE GATE. No --allow-incomplete and no waiver: this is the real money/auth
+  // floor, on a high-risk change, with its final reviewer's dispatch record
+  // just pruned. If the keep rule regresses to `frozen.evidence === 'host'`
+  // alone (this task's negative control reverts exactly that line), this exits
+  // non-zero with the gate's own self-authored refusal — and permanently,
+  // because `saveSession` never runs after `process.exit(1)`. That is F49/F52
+  // recurring.
+  const done = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (done.code !== 0) {
+    fail(
+      'forge phase done refused a session whose final reviewer really ran, once its dispatch record ' +
+        'was pruned rather than the transcript deleted outright — this is F49/F52 recurring: the keep ' +
+        'rule stopped protecting a verdict frozen on inferred evidence',
+      tail(done.out, 30),
+    );
+  }
+
+  // THE VERDICT ON DISK, NOT MERELY A ZERO EXIT CODE. `done` can exit 0 for the
+  // wrong reason (the gate skipped because risk facts were unreadable, a fresh
+  // reading that happened to land on independent by coincidence); asserting the
+  // exact frozen value is what rules those out.
+  const kept = frozenVerdictOf(fixture.sessionDir);
+  if (kept?.final !== 'independent' || kept?.evidence !== 'inferred') {
+    fail(
+      `the verdict on disk after done is ${kept?.final}/${kept?.evidence}, not the frozen ` +
+        'independent/inferred — done passed for some reason other than keeping the measured verdict',
+      JSON.stringify(kept),
+    );
+  }
+  // AND THE GATE'S OWN SAY-SO. A `done` that passes for some other reason —
+  // the floor skipped outright, the risk facts unreadable — must not be able to
+  // satisfy this step merely by exiting 0 with the right value already on disk
+  // from `finish`; the keep-rule note is what proves this *pass* is what kept it.
+  if (!done.out.includes('Kept the review verdict')) {
+    fail(
+      'forge phase done did not print that it kept the review verdict already measured for this ' +
+        'session — a done that passes for a different reason must not satisfy this step',
+      tail(done.out, 20),
+    );
+  }
+
+  // Derived, never spelled out: every field below is read back from the
+  // session and the gate's own exit code, not asserted as a literal — a
+  // hardcoded line here would keep printing this after the product broke.
+  process.stdout.write(
+    `PRUNED verdict=${kept.final}/${kept.evidence} gate=${done.code === 0 ? 'passed' : 'refused'} ` +
+      `kept=${done.out.includes('Kept the review verdict') ? 'yes' : 'no'}\n`,
+  );
 } else if (phase === 'session-ambiguity') {
   // THE REGRESSION THAT MUST NEVER COME BACK. `.forge/active.json` is written by
   // `forge new` alone, so "active" means *most recently created*. Before this
@@ -964,7 +1144,7 @@ if (phase === 'boot') {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
-      'review-evidence-survives|session-ambiguity\n',
+      'review-evidence-survives|review-evidence-pruned-record|session-ambiguity\n',
   );
   process.exit(1);
 }

@@ -182,25 +182,32 @@ function writeHostTranscript(configDir, hostId, at) {
  * it in time. `at` has to sit inside `[session.createdAt, now]`, or the
  * dispatch belongs to some other Forge session sharing the host session.
  *
- * EVERY DISPATCH PLANTED HERE MADE `FINAL_REVIEW_REQUEST_FLOOR` REQUESTS —
- * imported, never typed as a number, so a fixture cannot drift below a floor
- * that moves. One line per dispatch was the earlier shape, and it describes a
- * subagent that was spawned and did nothing: `review-census.mjs` now reads such
- * a dispatch as no answer at all, which is the right reading of it and the
- * wrong scenario for a test named for a reviewer that ran.
+ * EVERY DISPATCH PLANTED HERE MADE `FINAL_REVIEW_REQUEST_FLOOR` REQUESTS BY
+ * DEFAULT — imported, never typed as a number, so a fixture cannot drift below
+ * a floor that moves. One line per dispatch was the earlier shape, and it
+ * describes a subagent that was spawned and did nothing: `review-census.mjs`
+ * now reads such a dispatch as no answer at all, which is the right reading of
+ * it and the wrong scenario for a test named for a reviewer that ran.
  *
- * The count is the floor exactly, not a comfortable multiple of it, so these
- * fixtures sit on the boundary and any tightening of the floor turns them red
- * rather than passing unnoticed. Stopped dispatches get the same count as
- * unstopped ones: `maxRequests` ignores them by design, and a fixture that gave
- * the stopped dispatch the bigger number would quietly describe an
- * operator-killed run vouching for a token one beside it — a different scenario
- * from any of the ones these tests are named for.
+ * The default count is the floor exactly, not a comfortable multiple of it, so
+ * these fixtures sit on the boundary and any tightening of the floor turns them
+ * red rather than passing unnoticed. Stopped dispatches get the same count as
+ * unstopped ones by default: `maxRequests` ignores them by design, and a
+ * fixture that gave the stopped dispatch the bigger number would quietly
+ * describe an operator-killed run vouching for a token one beside it — a
+ * different scenario from any of the ones these tests are named for.
+ *
+ * `requests` is the one escape from the default, for a fixture that needs a
+ * dispatch *below* the floor — the "on record but not substantial enough to
+ * certify" scenario. It is still never a typed literal at the call site: a
+ * caller passes `FINAL_REVIEW_REQUEST_FLOOR - 1` (or some other expression
+ * relative to the imported constant), the same discipline the default enforces
+ * here, so a below-floor fixture stays below floor if the floor is ever moved.
  *
  * @param {string} configDir
  * @param {string} hostId
  * @param {string} at
- * @param {Record<string, { description: string, stoppedByUser?: boolean }>} agents
+ * @param {Record<string, { description: string, stoppedByUser?: boolean, requests?: number }>} agents
  * @param {string} [forgeSessionId] completes a bare `forge-review <unit>` into
  *   the prescribed `forge-review <unit> <forge-session-id>`, which is what makes
  *   a dispatch record attributable to one Forge session rather than to whatever
@@ -210,7 +217,7 @@ function writeHostTranscript(configDir, hostId, at) {
 function writeReviewerSidecars(configDir, hostId, at, agents, forgeSessionId) {
   const dir = path.join(configDir, 'projects', '-scratch', hostId, 'subagents');
   fs.mkdirSync(dir, { recursive: true });
-  for (const [agentId, { description, stoppedByUser }] of Object.entries(agents)) {
+  for (const [agentId, { description, stoppedByUser, requests }] of Object.entries(agents)) {
     const named =
       forgeSessionId && /^forge-review\s+\S+$/.test(description)
         ? `${description} ${forgeSessionId}`
@@ -218,7 +225,8 @@ function writeReviewerSidecars(configDir, hostId, at, agents, forgeSessionId) {
     const meta = { agentType: 'general-purpose', description: named, model: 'opus' };
     if (stoppedByUser !== undefined) meta.stoppedByUser = stoppedByUser;
     fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(meta), 'utf8');
-    const lines = Array.from({ length: FINAL_REVIEW_REQUEST_FLOOR }, (_, i) => ({
+    const count = requests ?? FINAL_REVIEW_REQUEST_FLOOR;
+    const lines = Array.from({ length: count }, (_, i) => ({
       type: 'assistant',
       requestId: `req_${agentId}_${i}`,
       timestamp: at,
@@ -493,6 +501,200 @@ test('a measured independent verdict survives its dispatch record being pruned',
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a frozen verdict with no unit ever on record still refreshes and refuses — the discriminator', () => {
+  // F49/F52. This is what separates "read `unitOnRecord`" from the simpler,
+  // wrong fix this design rejected: "protect every frozen `independent`". The
+  // two rules agree on every other test in this file and disagree only here.
+  //
+  // `finish` freezes `independent`/`inferred` with NO host bound at all, so
+  // `unitOnRecord` freezes `false` — there was never a unit on record to see,
+  // not merely one that later went missing. `done` then binds a host that
+  // genuinely dispatched nothing (`seen === 0`), which grades `self`/`host` —
+  // the one genuine negative `hostFinalReview` produces. Absence where an
+  // earlier pass had no record either is a real finding, not a pruned one, and
+  // the verdict MUST be replaced and the gate MUST refuse.
+  //
+  // Under the correct rule, `frozen.unitOnRecord` is `false`, so `measured` is
+  // `false` and the fresh `self`/`host` negative overwrites — refuses, as
+  // required. Under "protect every frozen independent", `measured` would be
+  // `true` from `frozen.final === 'independent'` alone, `sawTheUnit` at `done`
+  // is `false` (nothing dispatched), and the stale `independent` would be kept
+  // — silently passing a session with no independent review at all. Twin of
+  // "a below-floor final dispatch on record survives its sidecar being pruned"
+  // below: same shape, and the only fixture difference is whether a `final`
+  // unit was ever on record at `finish`.
+  const dir = tmp('forge-verdict-discriminator-');
+  const configDir = tmp('forge-verdict-discriminator-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-discriminator');
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+
+    // No host env at all: nothing is bound, so nothing could have been on
+    // record, and the prose alone decides `independent`/`inferred`.
+    runSetPhase(dir, ['finish']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'inferred',
+      stoppedByOperator: false,
+      unitOnRecord: false,
+    });
+
+    // A host is bound for the first time at `done`, and it genuinely
+    // dispatched nothing: the sidecar directory exists and scans clean.
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-discriminator', createdAt);
+    writeReviewerSidecars(configDir, 'host-discriminator', createdAt, {});
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-discriminator', CLAUDE_CONFIG_DIR: configDir };
+
+    assert.throws(
+      () => runSetPhase(dir, ['done'], env),
+      /self-authored/,
+      'no unit was ever on record — a fresh nothing-dispatched reading must still refuse',
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase,
+      'finish',
+      'the refused transition must not persist',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a below-floor final dispatch on record survives its sidecar being pruned — F49/F52', () => {
+  // F49/F52, the reproduction. `finish` grades `independent`/`inferred` here
+  // for a different reason than the discriminator above: a genuine, unstopped
+  // `final` dispatch IS on record, but it made fewer than
+  // `FINAL_REVIEW_REQUEST_FLOOR` requests, so `hostFinalReview` answers `null`
+  // — "the host cannot certify this" — and the census falls back to the review
+  // file's prose. `unitOnRecord` freezes `true` regardless: the dispatch is in
+  // `evidence.units.final`, it simply did not carry enough substance to
+  // certify the review on its own. `inferred`-with-the-unit-on-record and "no
+  // unit was ever on record" (the discriminator above) are different facts,
+  // and the old rule — `frozen?.evidence === 'host'` — conflated them by
+  // protecting neither.
+  //
+  // The host then prunes the sidecar directory overnight — files gone, the
+  // directory itself left behind, which is what real pruning looks like and
+  // what makes `seen === 0` at `done`. `seen === 0` grades `self`/`host` —
+  // "nothing was dispatched" — the one genuine negative `hostFinalReview`
+  // produces. Today the frozen verdict is graded `inferred`, so the old
+  // `measured` conjunct is false, the negative overwrites it, and
+  // `enforceFinalReviewFloor` refuses `done` on a change that was
+  // independently reviewed — permanently, because `saveSession` runs after the
+  // gate's `process.exit(1)` and every retry repeats the same refusal.
+  const dir = tmp('forge-verdict-below-floor-');
+  const configDir = tmp('forge-verdict-below-floor-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-below-floor');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-below-floor', createdAt);
+    writeReviewerSidecars(
+      configDir,
+      'host-below-floor',
+      createdAt,
+      { r1: { description: 'forge-review final', requests: FINAL_REVIEW_REQUEST_FLOOR - 1 } },
+      'sess-below-floor',
+    );
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-below-floor', CLAUDE_CONFIG_DIR: configDir };
+
+    runSetPhase(dir, ['finish'], env);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'inferred',
+      stoppedByOperator: false,
+      // r1's `forge-review final` dispatch is on record at `finish` — just
+      // below the floor, so the host cannot certify it and the prose decides.
+      unitOnRecord: true,
+    });
+
+    // The host prunes the sidecars: the directory survives, reads cleanly,
+    // and is simply empty — exactly `seen === 0`.
+    const sidecars = path.join(configDir, 'projects', '-scratch', 'host-below-floor', 'subagents');
+    for (const name of fs.readdirSync(sidecars)) fs.rmSync(path.join(sidecars, name));
+
+    runSetPhase(dir, ['done'], env);
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(
+      after.phase,
+      'done',
+      'the transition must not be refused on a review that really happened',
+    );
+    assert.deepEqual(after.reviewVerdict, {
+      final: 'independent',
+      evidence: 'inferred',
+      stoppedByOperator: false,
+      unitOnRecord: true,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a pre-existing independent/host verdict with no unitOnRecord key is still protected — the compatibility arm', () => {
+  // The `??` fallback exists for exactly one population: verdicts frozen before
+  // this field existed, which have no `unitOnRecord` key at all. Since 1.3
+  // `set-phase.mjs` always writes the key, so nothing in this suite freezes
+  // that shape by running the binary — this test hand-writes it directly onto
+  // `session.json`, the only way a pre-existing verdict actually looks, and
+  // proves the fallback keeps behaving exactly as `frozen.evidence === 'host'`
+  // did before this change.
+  const dir = tmp('forge-verdict-legacy-host-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-legacy-host');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.reviewVerdict = { final: 'independent', evidence: 'host', stoppedByOperator: false };
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    // No host is bound this pass, so an unprotected reading falls back to the
+    // review file's prose alone — and that prose reads self.
+    writeFinalReview(sessionDir, SELF_PROSE);
+
+    runSetPhase(dir, ['done']);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(
+      after.phase,
+      'done',
+      'a legacy host-graded verdict must protect the transition exactly as it did before this field existed',
+    );
+    assert.deepEqual(after.reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pre-existing independent/inferred verdict with no unitOnRecord key still refreshes — the compatibility arm', () => {
+  // Twin of the test above: the same legacy shape, but `evidence: 'inferred'`,
+  // which the fallback must still fail to protect — precisely because
+  // `frozen.evidence === 'host'` was false for this grade before this field
+  // existed, and absent `unitOnRecord` must fall back to that same answer, not
+  // to "protect it anyway".
+  const dir = tmp('forge-verdict-legacy-inferred-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-legacy-inferred');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.reviewVerdict = { final: 'independent', evidence: 'inferred', stoppedByOperator: false };
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    writeFinalReview(sessionDir, SELF_PROSE);
+
+    assert.throws(
+      () => runSetPhase(dir, ['done']),
+      /self-authored/,
+      'a legacy inferred verdict must refresh, exactly as it did before this field existed',
+    );
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'plan');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

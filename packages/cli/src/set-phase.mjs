@@ -372,10 +372,9 @@ function enforceFinalReviewFloor() {
  * `next` ALSO CARRIES `unitOnRecord` — whether *this* pass saw the deciding
  * (`final`) unit in the host's dispatch record, the same fact the keep rule
  * below computes as `sawTheUnit`. It is frozen here (F49/F52) so a later pass
- * can eventually ask the verdict instead of inferring the answer from its own
- * evidence grade, which is what let a pruned dispatch record read identically
- * to one that never existed. Not read by anything yet — see the comment above
- * the keep rule below.
+ * asks the verdict what the earlier pass saw, instead of inferring it from its
+ * own evidence grade — the inference that let a pruned dispatch record read
+ * identically to one that never existed. The keep rule below reads it.
  *
  * Advisory, exactly like the metrics block below: telemetry may cost a session
  * its measurement, never its transition.
@@ -388,9 +387,9 @@ function freezeReviewVerdict() {
     // Whether *this pass* saw the deciding (`final`) unit in the host's
     // dispatch record — computed once here and written onto `next` below as
     // `unitOnRecord`, so the fact persisted on the verdict and the fact the
-    // keep rule below reasons about can never drift apart. Not yet read by
-    // that keep rule (see the comment above it) — it is written now so a
-    // verdict frozen after this change carries it, in preparation for that.
+    // keep rule below reasons about can never drift apart. The keep rule reads
+    // it back off the *frozen* verdict on the next pass, as `unitOnRecord`;
+    // this binding is that same fact for *this* pass. See the block above it.
     const sawTheUnit =
       evidence.available && !!evidence.units && Object.hasOwn(evidence.units, 'final');
     const next = {
@@ -458,13 +457,30 @@ function freezeReviewVerdict() {
     // A frozen `self` or `none` still refreshes freely, which is what the
     // asymmetry was for — a stale negative can never strand a session.
     //
-    // NOT YET READ HERE. `sawTheUnit` above is exactly this axis and is now
-    // persisted on the verdict as `unitOnRecord`, but the condition below still
-    // asks the older, narrower question (`frozen?.evidence === 'host'`) instead
-    // of `frozen?.unitOnRecord`. That rewiring is a separate task — this one
-    // only makes the fact available to freeze so the two can never be computed
-    // twice and disagree.
-    const measured = frozen?.final === 'independent' && frozen?.evidence === 'host';
+    // READS THE RECORDED FACT, NOT A PROXY FOR IT. `unitOnRecord` is
+    // `sawTheUnit` from the pass that froze `frozen`, persisted rather than
+    // recomputed: in a single pass the two readings are byte-identical
+    // (`evidence === 'host'` and "the deciding unit was on record" agree
+    // whenever both are knowable), so nothing here could tell them apart until
+    // a *second* pass compares what it now sees against what an earlier pass
+    // saw. `frozen.unitOnRecord` is exactly that carried-forward fact.
+    // `frozen.evidence === 'host'` after the `??` is not a second policy —
+    // `final === 'independent'` on `host` grade is only reachable from a
+    // present bucket, so a host-graded independent verdict always had the
+    // unit on record, and the new field subsumes the old test rather than
+    // contradicting it. Absent (`undefined`) takes that old test because it
+    // means "frozen before this field existed" — never "no unit was on
+    // record" — and every verdict frozen before this change must keep
+    // exactly the behaviour it had.
+    //
+    // DO NOT REORDER THE CONJUNCTS. `frozen` may be `null`, and only the first
+    // test guards it: `null?.final === 'independent'` is `false`, so the two
+    // unguarded reads after `&&` are never reached. Move them ahead of it and
+    // they raise — into `freezeReviewVerdict`'s `try`, which keeps the
+    // transition but silently loses the freeze on a high-risk path and leaves
+    // the gate to take its fail-open warning branch.
+    const measured =
+      frozen?.final === 'independent' && (frozen.unitOnRecord ?? frozen.evidence === 'host');
     const remeasured = next.final === 'independent' && next.evidence === 'host';
     if (measured && !remeasured && !sawTheUnit) {
       process.stderr.write(

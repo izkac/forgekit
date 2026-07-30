@@ -400,7 +400,18 @@ test('the digest records the frozen verdict, not a fresh reading of the review f
   // hand the verdict back to the party being judged.
   const root = tmp('forge-ledger-frozen-');
   const { sessionDir, session } = makeSession(root, 's1', {
-    reviewVerdict: { final: 'independent', evidence: 'host', stoppedByOperator: false },
+    reviewVerdict: {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+      // A session this product actually froze: `independent`/`host` is only
+      // reachable from a bucket that exists (`hostFinalReview` in
+      // review-census.mjs returns `self` whenever `units.final` is
+      // `undefined`), so the deciding unit was necessarily on record.
+      // `{independent, host, unitOnRecord: false}` describes a session that
+      // cannot exist.
+      unitOnRecord: true,
+    },
   });
   writeFinalReview(sessionDir, SELF_PROSE);
 
@@ -421,7 +432,17 @@ test('a declined reviewer is reported in the record that outlives the session', 
   // any other grade it is a placeholder, exactly as `reviewCensus` documents.
   const root = tmp('forge-ledger-frozen-stopped-');
   const { sessionDir, session } = makeSession(root, 's1', {
-    reviewVerdict: { final: 'self', evidence: 'host', stoppedByOperator: true },
+    reviewVerdict: {
+      final: 'self',
+      evidence: 'host',
+      stoppedByOperator: true,
+      // A session this product froze: `stoppedByOperator: true` on `host`
+      // grade only comes from `hostFinalReview`'s `bucket.stopped >=
+      // bucket.dispatched` branch (the undefined-bucket branch always answers
+      // `stoppedByOperator: false`), so a bucket existed — the `final`
+      // dispatch was on record, it simply did not finish.
+      unitOnRecord: true,
+    },
   });
   appendSessionDigest({ cwd: root, sessionDir, session, card: null });
   const { reviews } = digestOf(root);
@@ -433,7 +454,17 @@ test('a declined reviewer is reported in the record that outlives the session', 
   // above cannot tell a carried flag from a hard-coded one.
   const quiet = tmp('forge-ledger-frozen-unstopped-');
   const pair = makeSession(quiet, 's1', {
-    reviewVerdict: { final: 'self', evidence: 'host', stoppedByOperator: false },
+    reviewVerdict: {
+      final: 'self',
+      evidence: 'host',
+      stoppedByOperator: false,
+      // A session this product froze, of the other kind: `self`/`host` with
+      // `stoppedByOperator: false` is only reachable through the
+      // undefined-bucket branch (the stopped branch never reports `false`
+      // once a bucket exists and is stopped) — no `final` dispatch was ever
+      // on record.
+      unitOnRecord: false,
+    },
   });
   appendSessionDigest({ cwd: quiet, sessionDir: pair.sessionDir, session: pair.session, card: null });
   assert.equal(digestOf(quiet).reviews.stoppedByOperator, false);
@@ -447,6 +478,11 @@ test('a frozen "there is no final review" is not re-read from a file that appear
   // and reports a review the session did not have when it was measured.
   const root = tmp('forge-ledger-frozen-none-');
   const { sessionDir, session } = makeSession(root, 's1', {
+    // Deliberately three-field: a legacy session, frozen before `unitOnRecord`
+    // existed. `{null, none}` does not discriminate which host state produced
+    // it (no review file exists regardless of what, if anything, was
+    // dispatched), so this stands in for the compatibility population rather
+    // than for a coherently-derived post-change one.
     reviewVerdict: { final: null, evidence: 'none', stoppedByOperator: false },
   });
   writeFinalReview(sessionDir, INDEPENDENT_PROSE);

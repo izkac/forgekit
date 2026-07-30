@@ -320,7 +320,16 @@ test('the high-risk cap and the review points both follow the frozen verdict', (
       sessionDir,
       session: {
         ...session,
-        reviewVerdict: { final: 'independent', evidence: 'host', stoppedByOperator: false },
+        reviewVerdict: {
+          final: 'independent',
+          evidence: 'host',
+          stoppedByOperator: false,
+          // A session this product froze: `independent`/`host` is reachable
+          // only from a bucket that exists (review-census.mjs's
+          // `hostFinalReview` answers `self` whenever `units.final` is
+          // absent), so the deciding unit was necessarily on record.
+          unitOnRecord: true,
+        },
       },
     });
     assert.equal(
@@ -342,7 +351,16 @@ test('the high-risk cap and the review points both follow the frozen verdict', (
       sessionDir,
       session: {
         ...session,
-        reviewVerdict: { final: 'self', evidence: 'host', stoppedByOperator: false },
+        reviewVerdict: {
+          final: 'self',
+          evidence: 'host',
+          stoppedByOperator: false,
+          // A session this product froze: `self`/`host`/`stoppedByOperator:
+          // false` is only reachable through the undefined-bucket branch of
+          // `hostFinalReview` (the stopped branch never answers `false` once
+          // a bucket exists) — no `final` dispatch was ever on record.
+          unitOnRecord: false,
+        },
       },
     });
     assert.ok(refuted.score <= 69, `expected a cap at C, got ${refuted.score}`);
@@ -383,7 +401,18 @@ test('a frozen verdict read from prose is honoured too, not only a measured one'
       sessionDir,
       session: {
         ...session,
-        reviewVerdict: { final: 'independent', evidence: 'inferred', stoppedByOperator: false },
+        reviewVerdict: {
+          final: 'independent',
+          evidence: 'inferred',
+          stoppedByOperator: false,
+          // A session this product froze. `inferred` alone does not pin
+          // `unitOnRecord` the way `host` does — it is reachable both with a
+          // below-floor `final` dispatch on record and with no host bound at
+          // all — so this fixture chooses the ordinary shape: no host was
+          // ever bound at the freezing pass, so the deciding unit was never
+          // on record and the prose alone decided.
+          unitOnRecord: false,
+        },
       },
     });
     assert.equal(
@@ -421,6 +450,10 @@ test('a frozen "there is no final review" keeps the cap on, whatever turned up a
       sessionDir,
       session: {
         ...session,
+        // Deliberately three-field: a legacy session, frozen before
+        // `unitOnRecord` existed. `{null, none}` does not discriminate which
+        // host state produced it, so it stands in for the compatibility
+        // population rather than a coherently-derived post-change one.
         reviewVerdict: { final: null, evidence: 'none', stoppedByOperator: false },
       },
     });
