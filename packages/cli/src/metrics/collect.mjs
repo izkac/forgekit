@@ -255,7 +255,33 @@ export function collectMetrics(options) {
       );
     }
 
-    const bound = findTranscripts(sessionIds, { configDir: opts.configDir, env: opts.env });
+    const { found: bound, unreadable } = findTranscripts(sessionIds, {
+      configDir: opts.configDir,
+      env: opts.env,
+    });
+    // `unreadable` entries land in the document as `unread`, which must let a
+    // reader tell apart the two cases the spec calls out: "this session's
+    // totals are in but under-detailed" (its sidecar was blocked, its
+    // transcript was not) from "this session is missing entirely" (nothing of
+    // it could be located). A bare id cannot say which happened — `counted`
+    // is meant to.
+    //
+    // It cannot be inferred from `found` membership: `found` only means
+    // `fs.statSync(transcript).isFile()` succeeded (host.mjs's own docs say
+    // "located", never "readable"), and a file with its read bit stripped —
+    // `chmod 000` on the transcript itself, directory untouched — still
+    // passes that stat. `readJsonl` then swallows the resulting EACCES into
+    // `[]`, indistinguishable from a transcript that is readable and simply
+    // empty. So `counted` has to be settled by an actual read, done once per
+    // id that lands in `unreadable` (the only ids `unread` ever reports on —
+    // reading every other bound transcript twice to answer a question nobody
+    // asked would cost real time on the sessions that need it least).
+    // `readJsonl`'s blanket swallow is filed as F56; this is a narrow,
+    // local check, not that deeper fix.
+    const flaggedIds = new Set(unreadable.map((entry) => entry.sessionId));
+    /** @type {Set<string>} ids in `flaggedIds` whose transcript content was
+     * actually read, as opposed to merely located. */
+    const readSucceeded = new Set();
     if (bound.length === 0) {
       return degraded(
         collectedAt,
@@ -293,7 +319,18 @@ export function collectMetrics(options) {
     let rawLineCount = 0;
     /** @type {Record<string, any>[]} */
     const parentLines = [];
-    for (const { transcript } of bound) {
+    for (const { sessionId, transcript } of bound) {
+      if (flaggedIds.has(sessionId)) {
+        // Only this id's own read outcome decides its `counted` flag below —
+        // a genuinely empty, readable file must not read as a failure.
+        try {
+          fs.readFileSync(transcript, 'utf8');
+          readSucceeded.add(sessionId);
+        } catch {
+          // Left out of `readSucceeded`: this is the file-content EACCES the
+          // stat that produced `found` could not see.
+        }
+      }
       for (const line of readJsonl(transcript)) {
         rawLineCount += 1;
         if (inWindow(line)) parentLines.push(line);
@@ -368,6 +405,17 @@ export function collectMetrics(options) {
         // in the sidecar directory — that directory belongs to the host session
         // and holds every Forge session's dispatches.
         sidecars: subagents.length,
+        // Absent, not `[]`, when every bound id was fully readable — the same
+        // reason the rest of `source` carries no other empty markers: an empty
+        // array on a clean document makes a reader wonder what it meant.
+        ...(unreadable.length > 0
+          ? {
+              unread: unreadable.map(({ sessionId }) => ({
+                sessionId,
+                counted: readSucceeded.has(sessionId),
+              })),
+            }
+          : {}),
       },
       window: { from: session.createdAt, to: collectedAt },
       requests: total.requests,

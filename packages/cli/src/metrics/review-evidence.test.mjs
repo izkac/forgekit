@@ -357,9 +357,18 @@ const DEMO_ID = '20260728T100000Z-demo-abc123';
 
 const HOST_ID = 'f8447a2f-eb56-41b8-8cc1-16606b862780';
 
-/** Plant a `~/.claude`-shaped tree and return its config dir. */
-function plantHost({ sessionId = HOST_ID, lines = null, subagents = null } = {}) {
-  const configDir = tmp('forge-review-evidence-host-');
+/**
+ * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
+ * (the value this same function returned) to plant a second host session
+ * beside the first, rather than into a fresh tree of its own — a session
+ * bound to several host ids has them all under one project directory.
+ */
+function plantHost({
+  sessionId = HOST_ID,
+  lines = null,
+  subagents = null,
+  configDir = tmp('forge-review-evidence-host-'),
+} = {}) {
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   fs.mkdirSync(project, { recursive: true });
   if (lines !== null) fs.writeFileSync(path.join(project, `${sessionId}.jsonl`), jsonl(lines));
@@ -367,12 +376,12 @@ function plantHost({ sessionId = HOST_ID, lines = null, subagents = null } = {})
   return configDir;
 }
 
-/** A session bound to `HOST_ID`, created at `createdAt`. */
-function boundSession({ createdAt = '2026-07-28T10:00:00.000Z' } = {}) {
+/** A session bound to one or more host ids, created at `createdAt`. */
+function boundSession({ createdAt = '2026-07-28T10:00:00.000Z', sessionIds = [HOST_ID] } = {}) {
   return {
     id: '20260728T100000Z-demo-abc123',
     createdAt,
-    host: { agent: 'claude-code', sessionIds: [HOST_ID], boundAt: createdAt },
+    host: { agent: 'claude-code', sessionIds, boundAt: createdAt },
   };
 }
 
@@ -737,6 +746,163 @@ test('reviewEvidence cannot tell when the sidecar directory exists but cannot be
     assert.match(result.reason, /could not be read/i);
   } finally {
     fs.chmodSync(dir, 0o755);
+  }
+});
+
+test('reviewEvidence answers from the surviving half when a bound session has no transcript at all', () => {
+  // A DELIBERATE LIMIT, PINNED IN THE PERMISSIVE DIRECTION — not a behaviour
+  // this change adds. Spec scenario "A transcript that was pruned, not
+  // blocked": a session bound to two host sessions where the *older*
+  // transcript is simply absent from disk (pruned, not blocked — no `chmod`
+  // anywhere in this fixture) still answers confidently from the surviving
+  // newer one, and a reviewer that ran in the pruned half stays invisible.
+  //
+  // That is intentional. The over-cautious alternative — refusing whenever
+  // `bound.length < sessionIds.length` — is exactly what an audit inserted
+  // into `reviewEvidence` and watched the entire suite stay green, because
+  // nothing pinned this limit before this test. Rejected because it would make
+  // *every* resumed session unavailable the moment its older transcript ages
+  // out of the host's retention window, which is a matter of days. The real
+  // fix is a dispatch-time stamp written into the review artefact itself —
+  // read from the artefact this module verifies, not reconstructed from a
+  // transcript that may no longer be on disk — tracked as F12 and not built.
+  const ABSENT_ID = '00000000-1111-2222-3333-444444444444';
+
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
+      },
+    },
+  });
+  // ABSENT_ID has no `.jsonl` anywhere under `projects/` — not chmod'd,
+  // genuinely never written. `findTranscripts` omits it from both `found` and
+  // `unreadable`: the ordinary ENOENT case, not a blocked read.
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [ABSENT_ID, HOST_ID] }),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  // Both assertions matter: `available` alone would still pass if the
+  // surviving half stopped being read properly. Measured — a mutation that
+  // returns `available: true` with empty `units` is caught by the second and
+  // not the first. `?.` so that mutation reddens with a readable diff rather
+  // than a TypeError from reading `dispatched` of undefined.
+  assert.equal(result.available, true);
+  assert.equal(result.units.final?.dispatched, 1);
+});
+
+test('reviewEvidence cannot tell when the sidecar path exists and is not a directory', () => {
+  // The same not-a-directory arm host.test.mjs pins at `findTranscripts` level
+  // ("findTranscripts reports a sidecar path that exists but is not a
+  // directory as unreadable") — run here through `reviewEvidence`, the layer
+  // the spec's scenario actually names ("WHEN the census runs"). Safe today
+  // only because `reviewEvidence` treats every `unreadable` entry identically
+  // regardless of why it is unreadable — a property worth pinning rather than
+  // assuming, since the two arms of this scenario (blocked vs. not-a-directory)
+  // are produced by different branches in `host.mjs`.
+  const configDir = plantHost({ lines: PARENT, subagents: null });
+  const hostDir = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit', HOST_ID);
+  fs.mkdirSync(hostDir, { recursive: true });
+  fs.writeFileSync(path.join(hostDir, 'subagents'), 'not a directory');
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /not a directory/i);
+});
+
+test('reviewEvidence stays unavailable when only one of two bound host sessions can be searched', () => {
+  // THE HOLE THIS PINS, in the past tense it belongs in: `findTranscripts`'s
+  // sidecar `catch` used to be empty, so a sidecar dir that could not be
+  // *statted* came back as `sidecarDir: null` — byte-identical to a session
+  // that dispatched nothing — and the guard below it (`sidecarDirs.length ===
+  // 0`) only gave up when *every* bound id was unresolvable. With two bound
+  // ids where the first resolved, that first session alone answered
+  // `available: true`, and a reviewer that ran in the second was simply
+  // absent from `units`.
+  //
+  // `chmod 000` on the `subagents/` directory itself does not reproduce this:
+  // `statSync` on a `000` directory succeeds, because stat reads the entry in
+  // the parent (that is the fixture the test above this one uses, and it pins
+  // `readdirSync` throwing inside the scan — a different, already-fixed hole).
+  // What reproduces *this* hole is `chmod 000` on the host session directory
+  // one level up: the sibling transcript file still stats fine, so the id
+  // binds, but `statSync` on `subagents/` inside the now-unsearchable
+  // directory throws `EACCES` — which `findTranscripts` now reports in
+  // `unreadable` rather than discarding, and this test pins that it stays
+  // that way.
+  const SECOND_HOST_ID = '11111111-2222-3333-4444-555555555555';
+
+  // First host session: fully readable, and its one dispatch is a *group*
+  // review — not `final` — so this session alone can supply `prescribed > 0`
+  // but cannot supply the final reviewer. A buggy reader that stops at the
+  // first resolvable session reports `available: true` with `final` absent
+  // from `units`, which is exactly the false "no independent reviewer" the
+  // gate must not act on.
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review group-01 ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  // Second host session: the final reviewer ran here. Its session directory
+  // is about to be made unsearchable.
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a2: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
+      },
+    },
+  });
+
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const secondHostDir = path.join(project, SECOND_HOST_ID);
+  const secondSidecarPath = path.join(secondHostDir, 'subagents');
+  fs.chmodSync(secondHostDir, 0o000);
+  try {
+    // Prove the fixture is genuinely unreadable, and that the sibling
+    // transcript is not — or the assertion below would be passing for free.
+    assert.throws(() => fs.statSync(secondSidecarPath), /EACCES/);
+    assert.equal(fs.statSync(path.join(project, `${SECOND_HOST_ID}.jsonl`)).isFile(), true);
+
+    const result = reviewEvidence({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    // A binding that could only be read in part must not decide the gate: the
+    // reviewer dispatched in the unsearchable half must not be reported absent.
+    assert.equal(result.available, false);
+    // THE REASON NAMES THE HOST SESSION ID AND THE PATH — the spec's own
+    // closing line for this scenario, and the only diagnostic an operator gets
+    // when the gate stands aside. Unpinned before this: an audit replaced the
+    // whole detail string with a literal and the suite stayed green, because
+    // only `available === false` was ever asserted here. `SECOND_HOST_ID` is
+    // the fixture's own constant, not retyped from anywhere else.
+    assert.match(result.reason, new RegExp(SECOND_HOST_ID));
+    assert.match(result.reason, /subagents/);
+  } finally {
+    fs.chmodSync(secondHostDir, 0o755);
   }
 });
 

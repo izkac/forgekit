@@ -50,6 +50,24 @@
  *                             does not cover, because deleting the whole host
  *                             config makes the host unavailable instead.
  *
+ * Partial-binding-unreadable loop (specs/changes/partial-binding-unreadable/
+ * e2e.json), also layering on `boot`, and on the same review fixture:
+ *   review-evidence-partial-binding  a session bound to TWO host sessions, the
+ *                             first fully readable and carrying a prescribed
+ *                             non-`final` dispatch, the second carrying the
+ *                             prescribed `final` dispatch with its host
+ *                             session directory `chmod 000`. Before the fix,
+ *                             `reviewEvidence` answered confidently from the
+ *                             readable half — `final` absent from `units` —
+ *                             and the census read that as self/host, refusing
+ *                             a change whose review genuinely happened. After
+ *                             the fix the unreadable half makes the whole
+ *                             answer unavailable, prose decides, and the gate
+ *                             *accepts* on independent/inferred — the inverse
+ *                             of every sibling step above, and deliberately
+ *                             so: a refusal-shaped assertion would pass both
+ *                             before and after the fix.
+ *
  * `all` deliberately stays the harness-setup-probe rig's own five phases: it is
  * that change's recorded probe and its verdict must keep meaning what it meant.
  */
@@ -262,6 +280,25 @@ const PROSE_PROJECT = `${SCRATCH}-prose`;
 const FINAL_REVIEW_DISPATCH = 'forge-review final s1';
 
 /**
+ * A genuine reviewer dispatch that is not the *final* one — any unit other
+ * than `final` would do. Used by `review-evidence-partial-binding` to give
+ * the readable half of its split binding something real on record, so that
+ * half alone can supply `prescribed > 0` while still lacking the unit that
+ * actually decides the gate. Mirrors the `forge-review group-01 …` fixture
+ * `review-evidence.test.mjs` uses for the same reason one layer down.
+ */
+const IMPLEMENT_REVIEW_DISPATCH = 'forge-review implement s1';
+
+/**
+ * The second host session id in `review-evidence-partial-binding`'s split
+ * binding. Kept apart from `REVIEW_HOST_ID` so the two halves are two
+ * distinct, independently-permissioned directories on disk — the ordinary
+ * shape of a session resumed under a new host id, which `bindHost` appends
+ * rather than replaces.
+ */
+const REVIEW_HOST_ID_2 = 'e2e0revw-0000-1111-2222-aaaabbbbcccc';
+
+/**
  * The whole point of this loop, in one string.
  *
  * It must read as a SELF-CHECK to the prose rule — that is what makes the host
@@ -373,6 +410,32 @@ function layerReviewFixture(dir, options) {
 const TOKEN_DISPATCH_REQUESTS = 1;
 
 /**
+ * Best-effort recursive `chmod 0o755`, so a directory a previous run left at
+ * `000` cannot wedge a later one. Chmods each directory it visits BEFORE
+ * reading it — a directory has to be unlocked to be walked into at all — so a
+ * poisoned node anywhere in the tree is healed the moment the walk reaches
+ * it, not only when it is already readable enough to be found. Never throws:
+ * a missing path, a file passed by mistake, or a permission this process
+ * does not own are all left alone rather than raising out of a fixture setup
+ * step, and the `rmSync` right after this call in `plantReviewerDispatch`
+ * will complain clearly enough if something remains genuinely stuck.
+ *
+ * @param {string} dir
+ */
+function unlockTree(dir) {
+  let entries;
+  try {
+    fs.chmodSync(dir, 0o755);
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) unlockTree(path.join(dir, entry.name));
+  }
+}
+
+/**
  * A host record of one final-review subagent: the sidecar meta describing it as
  * `forge-review final <session-id>` — the session id is what attributes the
  * record, so no transcript timestamp has to place it.
@@ -386,17 +449,41 @@ const TOKEN_DISPATCH_REQUESTS = 1;
  * The lines carry distinct request ids because a request is what is counted —
  * one id restated across content blocks is still one request.
  *
+ * `options` is additive and every existing caller omits it, so the defaults
+ * below reproduce this function's original behaviour byte for byte: plant
+ * `FINAL_REVIEW_DISPATCH` under `REVIEW_HOST_ID`, after wiping the whole
+ * `REVIEW_HOST_CFG` first. `review-evidence-partial-binding` is the one
+ * caller that overrides them, to plant a *second*, differently-labelled host
+ * session beside the first rather than in place of it — `reset: false` skips
+ * the wipe, or the second call would erase the first half of its own fixture.
+ *
  * @param {string} at ISO timestamp inside `[session.createdAt, now]`
  * @param {number} requests distinct requests the dispatch made
+ * @param {{ hostId?: string, description?: string, reset?: boolean }} [options]
  */
-function plantReviewerDispatch(at, requests) {
+function plantReviewerDispatch(at, requests, options = {}) {
+  const hostId = options.hostId ?? REVIEW_HOST_ID;
+  const description = options.description ?? FINAL_REVIEW_DISPATCH;
+  const reset = options.reset ?? true;
   const projectDir = path.join(REVIEW_HOST_CFG, 'projects', REVIEW_PROJECT_DIR);
-  const sidecarDir = path.join(projectDir, REVIEW_HOST_ID, 'subagents');
-  fs.rmSync(REVIEW_HOST_CFG, { recursive: true, force: true });
+  const sidecarDir = path.join(projectDir, hostId, 'subagents');
+  // Self-healing, not merely defensive: `review-evidence-partial-binding`
+  // chmods a directory under here to `000`, and every restore it has is
+  // best-effort — an operator's Ctrl-C during that step's `forge phase done`
+  // is a real way for a `000` directory to survive into the next run. Without
+  // this, `rmSync` below hits it mid-walk with `EACCES: scandir` and every
+  // review-evidence step after it, not only this one's, is wedged until a
+  // human runs `chmod` by hand. `unlockTree` chmods every directory node
+  // before reading it, so a poisoned entry is unlocked the moment the walk
+  // reaches it rather than needing to already be readable to be found.
+  if (reset) {
+    unlockTree(REVIEW_HOST_CFG);
+    fs.rmSync(REVIEW_HOST_CFG, { recursive: true, force: true });
+  }
   fs.mkdirSync(sidecarDir, { recursive: true });
 
   fs.writeFileSync(
-    path.join(projectDir, `${REVIEW_HOST_ID}.jsonl`),
+    path.join(projectDir, `${hostId}.jsonl`),
     `${assistantLine('req_coord0', 0, at, false)}\n`,
     'utf8',
   );
@@ -407,13 +494,14 @@ function plantReviewerDispatch(at, requests) {
     path.join(sidecarDir, 'agent-rv1.meta.json'),
     `${JSON.stringify({
       agentType: 'general-purpose',
-      description: FINAL_REVIEW_DISPATCH,
+      description,
       toolUseId: 'toolu_dispatch_review',
       spawnDepth: 1,
       model: 'opus',
     })}\n`,
     'utf8',
   );
+  return { projectDir, sidecarDir, hostDir: path.join(projectDir, hostId) };
 }
 
 /** An empty host config dir — "no record", as distinct from "a record of none". */
@@ -1068,6 +1156,238 @@ if (phase === 'boot') {
     `PRUNED verdict=${kept.final}/${kept.evidence} gate=${done.code === 0 ? 'passed' : 'refused'} ` +
       `kept=${done.out.includes('Kept the review verdict') ? 'yes' : 'no'}\n`,
   );
+} else if (phase === 'review-evidence-partial-binding') {
+  // A BINDING READ IN PART MUST NOT DECIDE THE GATE. Before this fix,
+  // `reviewEvidence` answered confidently off whichever half of a two-session
+  // binding it could read: a session bound to two host sessions, one readable
+  // and one not, reported `available: true` with `final` simply absent from
+  // `units` — indistinguishable from "nobody dispatched a final reviewer" —
+  // and the census graded that self/host. The money/auth gate then refused a
+  // change whose final review genuinely happened, because the reviewer that
+  // ran was dispatched in the unreachable half.
+  //
+  // THIS STEP IS INVERTED relative to every review-evidence sibling above: it
+  // proves the gate now *accepts* something it used to refuse. A
+  // refusal-shaped assertion would pass unchanged before and after the fix —
+  // the acceptance is the only shape that tells the two apart.
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  const at1 = new Date(Date.now() - 90_000).toISOString();
+  const at2 = new Date(Date.now() - 60_000).toISOString();
+
+  // --- 1. the control, and it runs FIRST, exactly as review-evidence-decides'
+  // does and for the same reason. `INDEPENDENT_REVIEW` is the opposite prose
+  // of most other review-evidence steps' fixture (`SELF_CHECK_REVIEW`),
+  // because what this step measures is host evidence going UNAVAILABLE — so
+  // the fallback that has to decide is the prose reading independent on its
+  // own. If this fixture's prose read anything else by itself, the
+  // measurement below would pass regardless of whether the unreadable half
+  // ever decided anything.
+  makeProject(PROSE_PROJECT);
+  const control = layerReviewFixture(PROSE_PROJECT, { createdAt });
+  fs.writeFileSync(path.join(control.sessionDir, 'reviews', 'final-review.md'), INDEPENDENT_REVIEW, 'utf8');
+  plantNoHostRecord();
+
+  const controlDone = forge(PROSE_PROJECT, ['phase', 'done'], { CLAUDE_CONFIG_DIR: EMPTY_HOST_CFG });
+  if (controlDone.code !== 0) {
+    fail(
+      'THE CONTROL IS THE TEST: the money/auth done gate REFUSED the prose-only fixture — this review ' +
+        "file does not read independent on its own, so the measurement below would pass whether or not " +
+        'the unreadable half decided anything',
+      tail(controlDone.out, 8),
+    );
+  }
+  const prose = frozenVerdictOf(control.sessionDir);
+  if (!prose) fail('no verdict was frozen onto the control session', controlDone.out);
+  if (prose.final !== 'independent' || prose.evidence !== 'inferred') {
+    fail(
+      `read as prose alone this review file gives ${prose.final}/${prose.evidence}, not ` +
+        'independent/inferred — the measurement below would pass for the wrong reason',
+      INDEPENDENT_REVIEW,
+    );
+  }
+
+  // --- 2. the measurement: a session bound to TWO host sessions, the first
+  // fully readable and carrying a real dispatch for a unit that is not
+  // `final`, the second carrying the `final` dispatch with its host session
+  // directory made unsearchable. Exactly the shape `review-evidence.test.mjs`
+  // pins one layer down ("reviewEvidence stays unavailable when only one of
+  // two bound host sessions can be searched") — this step drives the same
+  // shape through the shipped binary instead of the module.
+  const fixture = layerReviewFixture(SCRATCH, { createdAt, hostId: REVIEW_HOST_ID });
+  fs.writeFileSync(path.join(fixture.sessionDir, 'reviews', 'final-review.md'), INDEPENDENT_REVIEW, 'utf8');
+
+  // `layerReviewFixture` only takes one hostId; bind the second by hand — the
+  // ordinary shape of a session resumed under a new host id, which `bindHost`
+  // appends rather than replaces.
+  const sessionFile = path.join(fixture.sessionDir, 'session.json');
+  const boundSession = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  boundSession.host.sessionIds.push(REVIEW_HOST_ID_2);
+  fs.writeFileSync(sessionFile, `${JSON.stringify(boundSession, null, 2)}\n`, 'utf8');
+
+  // First half: fully readable, a genuine dispatch for a unit the gate is not
+  // asking about. `reset: true` wipes REVIEW_HOST_CFG once, at the start of
+  // this fixture — the only reset in this step.
+  plantReviewerDispatch(at1, FINAL_REVIEW_REQUEST_FLOOR, {
+    hostId: REVIEW_HOST_ID,
+    description: IMPLEMENT_REVIEW_DISPATCH,
+    reset: true,
+  });
+  // Second half: the final reviewer, planted beside the first rather than in
+  // place of it (`reset: false`). Its request count clears
+  // FINAL_REVIEW_REQUEST_FLOOR — imported, not hard-coded, so this fixture
+  // moves with the floor rather than rotting under it, because assertion 3
+  // below needs this exact dispatch to grade `host` once it can be read.
+  // Consumed rather than recomputed: `hostDir`/`sidecarDir` come back off the
+  // same write this call just did, so there is exactly one spelling of this
+  // path in the step instead of two that could drift apart.
+  const { hostDir: hostDir2, sidecarDir: sidecarDir2 } = plantReviewerDispatch(at2, FINAL_REVIEW_REQUEST_FLOOR, {
+    hostId: REVIEW_HOST_ID_2,
+    description: FINAL_REVIEW_DISPATCH,
+    reset: false,
+  });
+
+  // A BACKSTOP, NOT A REPLACEMENT for the explicit restores below. Those cover
+  // every `fail()` in this step's own control flow; this covers what they
+  // cannot — an uncaught throw from a future edit to this block, or an
+  // operator interrupting the multi-second `forge phase done` call below with
+  // Ctrl-C. `process.exit()` skips `finally` (see the note below), but it
+  // still fires the `exit` event, and so does an ordinary interpreter exit —
+  // this is the one hook in Node that runs on both.
+  process.on('exit', () => {
+    try {
+      fs.chmodSync(hostDir2, 0o755);
+    } catch {
+      // Already restored, or the directory is gone — either is fine here.
+    }
+  });
+
+  // NOT a `try`/`finally`. `fail()` calls `process.exit()`, and `process.exit()`
+  // terminates before any pending `finally` runs — proven against this very
+  // file: `try { process.exit(1) } finally { console.log('x') }` prints
+  // nothing. A `finally` here would therefore leave `hostDir2` at `000`
+  // forever on the one path this step exists to exercise (a failing
+  // assertion), breaking every later step in the loop with a failure that
+  // reads as a product bug rather than housekeeping left undone here. So the
+  // mode is restored explicitly, as an ordinary statement, before every
+  // `fail()` call below rather than trusted to unwind on its own — and the
+  // `exit` listener above is the backstop for whatever this still misses.
+  fs.chmodSync(hostDir2, 0o000);
+
+  // Proves the fixture is genuinely unreadable, and that the sibling
+  // transcript is not. `chmod 000` on `subagents/` itself would not
+  // reproduce this hole — `statSync` on a `000` directory still succeeds,
+  // only `readdirSync` inside it fails, a different and already-fixed hole.
+  // What reproduces this one is `chmod 000` one level up: the transcript
+  // file stats fine, so the id binds, but `statSync` on `subagents/` inside
+  // the now-unsearchable directory throws `EACCES`.
+  let statErr = null;
+  try {
+    fs.statSync(sidecarDir2);
+  } catch (err) {
+    statErr = err;
+  }
+  if (!statErr || statErr.code !== 'EACCES') {
+    fs.chmodSync(hostDir2, 0o755);
+    fail(
+      'the chmod did not make the second host session directory unsearchable — this fixture is not ' +
+        'testing what it claims to',
+      `stat ${sidecarDir2}: ${statErr ? statErr.code : 'did not throw'}`,
+    );
+  }
+  if (!fs.statSync(path.join(hostDir2, '..', `${REVIEW_HOST_ID_2}.jsonl`)).isFile()) {
+    fs.chmodSync(hostDir2, 0o755);
+    fail('the sibling transcript is not readable either — this fixture no longer isolates the sidecar', hostDir2);
+  }
+
+  // No --allow-incomplete and no waiver: the real money/auth gate, on a
+  // high-risk change bound to a partly-unreadable pair of host sessions.
+  const done = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  // Restored the moment the gate has run, unconditionally — nothing below
+  // this line needs the directory blocked, and every `fail()` from here on
+  // must fire with the mode already sane.
+  fs.chmodSync(hostDir2, 0o755);
+  if (done.code !== 0) {
+    // Trimmed for the runner's 30-line tail, as every other review-evidence
+    // step's refusal-shaped assertion does: a passing `phase done` prints
+    // the whole session JSON and would push this message off the top.
+    fail(
+      'forge phase done refused a change whose final reviewer genuinely ran, once the host session ' +
+        "carrying that reviewer's record became unreadable — the readable half answered confidently " +
+        'instead of the whole binding standing aside for the prose',
+      tail(done.out, 8),
+    );
+  }
+  const verdict = frozenVerdictOf(fixture.sessionDir);
+  if (!verdict) fail('no verdict was frozen onto the session', tail(done.out, 8));
+  if (verdict.final !== 'independent') {
+    fail(`verdict ${verdict.final} on ${verdict.evidence} evidence, expected independent`, JSON.stringify(verdict));
+  }
+  // THE LOAD-BEARING HALF OF THIS STEP. `independent` alone is also produced
+  // by a fixture whose evidence never had anything to say; `inferred` is
+  // what proves the host *could not* answer rather than *chose* this answer.
+  // `host` here would mean the readable half decided on its own — the exact
+  // defect this step exists to catch.
+  if (verdict.evidence !== 'inferred') {
+    fail(
+      `verdict graded ${verdict.evidence}, expected inferred — the readable half answered on its own ` +
+        'instead of the whole binding standing aside for the prose',
+      JSON.stringify(verdict),
+    );
+  }
+
+  // --- 3. the counter-fixture — this is what makes the step mean something.
+  // Same session, same fixture; the only variable changed is readability,
+  // just restored above. Now the binding is fully readable end to end, the
+  // final dispatch in the second half is visible, and the verdict must come
+  // out `host`: proof that the second half genuinely carries the final
+  // reviewer and that readability alone decided the shape of assertion 2.
+  // Without this, a fixture whose second half was empty or misplanted would
+  // also produce `inferred`, for a trivial reason, and assertion 2 would
+  // prove nothing.
+  //
+  // Reruns the SAME session `forge phase done` already transitioned above —
+  // the move `review-evidence-survives` makes for the same reason — rather
+  // than a fresh one, and that is a considered choice, not an oversight.
+  // `freezeReviewVerdict` (set-phase.mjs) freezes `unitOnRecord` alongside
+  // the verdict: whether *that* pass actually saw the `final` unit on the
+  // host record. Assertion 2 above froze `unitOnRecord: false`, because the
+  // whole point of that pass is that the `final` unit could not be seen at
+  // all. The keep rule's `measured` test reads
+  // `frozen.final === 'independent' && (frozen.unitOnRecord ?? frozen.evidence === 'host')`
+  // — with `unitOnRecord` present and `false`, the `??` never falls through
+  // to the older `evidence === 'host'` test, so `measured` is `false` and
+  // this pass re-measures instead of keeping the stale `inferred` grade. A
+  // fresh session is not needed for that, and manufacturing one here would
+  // hide the exact case this field exists to distinguish from the F49/F52
+  // shape `review-evidence-pruned-record` covers, where the unit WAS on
+  // record and the keep rule must instead hold the line.
+  const reread = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (reread.code !== 0) {
+    fail(
+      'forge phase done refused the identical fixture once the second host session became readable ' +
+        'again — restoring readability must never turn an accepted change into a refused one',
+      tail(reread.out, 8),
+    );
+  }
+  const rereadVerdict = frozenVerdictOf(fixture.sessionDir);
+  if (!rereadVerdict) fail('no verdict was frozen onto the session on the reread pass', tail(reread.out, 8));
+  if (rereadVerdict.final !== 'independent') {
+    fail(`verdict ${rereadVerdict.final} on host evidence, expected independent`, JSON.stringify(rereadVerdict));
+  }
+  if (rereadVerdict.evidence !== 'host') {
+    fail(
+      `verdict graded ${rereadVerdict.evidence}, expected host once the binding was fully readable — ` +
+        "either the second half's dispatch does not genuinely carry the final reviewer, or the keep " +
+        'rule kept a stale grade it should have refreshed',
+      JSON.stringify(rereadVerdict),
+    );
+  }
+
+  // Derived, never spelled out beyond the one field the spec's own words fix:
+  // `binding=half-read` and `gate=accepted` name the shape this step proves,
+  // not a measurement, and `evidence` is read back from assertion 2's own
+  // verdict rather than hard-coded, so a regression there still shows up here.
+  process.stdout.write(`PARTIAL binding=half-read gate=accepted evidence=${verdict.evidence}\n`);
 } else if (phase === 'session-ambiguity') {
   // THE REGRESSION THAT MUST NEVER COME BACK. `.forge/active.json` is written by
   // `forge new` alone, so "active" means *most recently created*. Before this
@@ -1144,7 +1464,8 @@ if (phase === 'boot') {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
-      'review-evidence-survives|review-evidence-pruned-record|session-ambiguity\n',
+      'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
+      'session-ambiguity\n',
   );
   process.exit(1);
 }

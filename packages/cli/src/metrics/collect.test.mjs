@@ -57,13 +57,20 @@ function jsonl(lines) {
 }
 
 /**
- * Plant a `~/.claude`-shaped tree and return its config dir.
+ * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
+ * (the value this same function returned) to plant a second host session
+ * beside the first, rather than into a fresh tree of its own — a session
+ * bound to several host ids has them all under one project directory.
  *
  * `subagents` maps agent id → `{ meta, lines }`, exactly as the host lays them
  * out beside the parent transcript.
  */
-function plantHost({ sessionId = HOST_ID, lines = null, subagents = null } = {}) {
-  const configDir = tmp('forge-collect-');
+function plantHost({
+  sessionId = HOST_ID,
+  lines = null,
+  subagents = null,
+  configDir = tmp('forge-collect-'),
+} = {}) {
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   fs.mkdirSync(project, { recursive: true });
   if (lines !== null) fs.writeFileSync(path.join(project, `${sessionId}.jsonl`), jsonl(lines));
@@ -106,12 +113,16 @@ function plain(table) {
   return { ...table };
 }
 
-/** A session bound to `HOST_ID`, created at `createdAt`. */
-function boundSession({ createdAt = '2026-07-27T10:00:00.000Z', phaseHistory = [] } = {}) {
+/** A session bound to one or more host ids, created at `createdAt`. */
+function boundSession({
+  createdAt = '2026-07-27T10:00:00.000Z',
+  phaseHistory = [],
+  sessionIds = [HOST_ID],
+} = {}) {
   return {
     id: '20260727T100000Z-demo-abc123',
     createdAt,
-    host: { agent: 'claude-code', sessionIds: [HOST_ID], boundAt: createdAt },
+    host: { agent: 'claude-code', sessionIds, boundAt: createdAt },
     phaseHistory,
   };
 }
@@ -140,6 +151,249 @@ test('collectMetrics degrades when the bound transcript is not on disk', () => {
   assert.equal(doc.available, false);
   assert.match(doc.reason, /no transcript/i);
   assert.match(doc.reason, new RegExp(HOST_ID));
+});
+
+/* ---------- partial binding: one of several host sessions unreadable ---------- */
+
+const SECOND_HOST_ID = '11111111-2222-3333-4444-555555555555';
+
+test('collectMetrics still harvests both transcripts, but names the id, when one of two bound sessions has an unreadable sidecar', () => {
+  // "What it can" is per file, not per session (session-metrics/spec.md): an
+  // unreadable dispatch-record directory does not disqualify a transcript that
+  // reads fine right beside it. `chmod 000` on the *host session* directory —
+  // not `subagents/` itself — is what reproduces a genuine EACCES: stat on a
+  // `000` directory succeeds (it reads the parent's entry), but stat on a path
+  // *inside* it throws. That leaves the second session's transcript (a sibling
+  // file) readable while its sidecar is not, so the id lands in `found` *and*
+  // `unreadable` at once, and `collectMetrics` is the caller that keeps the
+  // readable half rather than refusing (per host.mjs's own docs on this case).
+  const r1 = { input: 10, output: 100, cacheRead: 1000, cacheCreate: 5 };
+  const r2 = { input: 900, output: 9000, cacheRead: 90000, cacheCreate: 90 };
+
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z', tokens: r1 })],
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })],
+    // An (empty) subagents directory, so there is a host session directory to
+    // chmod — a session that dispatched nothing has no such directory at all.
+    subagents: {},
+  });
+
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const secondHostDir = path.join(project, SECOND_HOST_ID);
+  fs.chmodSync(secondHostDir, 0o000);
+  try {
+    // Prove the fixture is genuinely unreadable where it matters, and that the
+    // sibling transcript is not — or the assertions below pass for free.
+    assert.throws(() => fs.statSync(path.join(secondHostDir, 'subagents')), /EACCES/);
+    assert.equal(fs.statSync(path.join(project, `${SECOND_HOST_ID}.jsonl`)).isFile(), true);
+
+    const doc = collectMetrics({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(doc.available, true);
+    // The totals were never the defect: both transcripts' lines are readable,
+    // so both are already counted today. Only the missing name is the bug.
+    assert.equal(doc.requests, 2);
+    assert.deepEqual(doc.tokens, sumTokens(r1, r2));
+    // Counted: its transcript is the sibling file that read fine, so its
+    // lines are already in the totals above — only its sidecar detail is
+    // lost. That is the distinction a bare id could not make.
+    assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: true }]);
+  } finally {
+    fs.chmodSync(secondHostDir, 0o755);
+  }
+});
+
+test('collectMetrics harvests only the readable session, and names the other as unread, when one of two bound sessions is wholly unreadable', () => {
+  // Distinct from the sidecar-only case above: here the second id's transcript
+  // itself cannot be *located* at all, so there is nothing of that session to
+  // fold in — this is the one case where totals genuinely come from the first
+  // session alone. `findTranscripts` globs every directory under `projects/`,
+  // not just the current one, so giving each host session its own project
+  // directory and `chmod 000`-ing the second reproduces it: a blocked project
+  // directory throws EACCES on every stat *inside* it, transcript included —
+  // unlike the host-session-directory chmod above, which only reaches the
+  // sidecar one level down.
+  const r1 = { input: 11, output: 111, cacheRead: 1111, cacheCreate: 1 };
+  // Deliberately large and distinct from r1: if the buggy code's blocked-id
+  // bookkeeping ever let this transcript's figures leak into the totals
+  // instead of promoting the id to `unreadable`, this is what would catch it.
+  const r2 = { input: 900, output: 9000, cacheRead: 90000, cacheCreate: 90 };
+
+  const configDir = tmp('forge-collect-');
+  const projectA = path.join(configDir, 'projects', 'project-a');
+  const projectB = path.join(configDir, 'projects', 'project-b');
+  fs.mkdirSync(projectA, { recursive: true });
+  fs.mkdirSync(projectB, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectA, `${HOST_ID}.jsonl`),
+    jsonl([assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z', tokens: r1 })]),
+  );
+  fs.writeFileSync(
+    path.join(projectB, `${SECOND_HOST_ID}.jsonl`),
+    jsonl([assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })]),
+  );
+
+  fs.chmodSync(projectB, 0o000);
+  try {
+    // Prove the fixture is genuinely unreadable where it matters, and that the
+    // other project directory is not — or the assertions below pass for free.
+    assert.throws(() => fs.statSync(path.join(projectB, `${SECOND_HOST_ID}.jsonl`)), /EACCES/);
+    assert.equal(fs.statSync(path.join(projectA, `${HOST_ID}.jsonl`)).isFile(), true);
+
+    const doc = collectMetrics({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(doc.available, true);
+    assert.equal(doc.requests, 1);
+    assert.deepEqual(doc.tokens, sumTokens(r1));
+    // Not counted: its transcript could not even be located, so nothing of it
+    // is in the totals above — the case a bare id would show identically to
+    // the sidecar-only miss above.
+    assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: false }]);
+  } finally {
+    fs.chmodSync(projectB, 0o755);
+  }
+});
+
+test('collectMetrics does not count a session whose transcript was located but could not actually be read', () => {
+  // `found` membership means only that `fs.statSync(transcript).isFile()`
+  // succeeded — host.mjs's own docs say "located", never "readable". `chmod
+  // 000` on the transcript *file itself* (directory untouched) proves the
+  // gap: stat needs only search permission on the parent directory, so
+  // `isFile()` still succeeds and the id still lands in `found`, but
+  // `readFileSync` on the file throws EACCES, so its lines never reach the
+  // totals. `readJsonl` swallows that into `[]`, indistinguishable from a
+  // transcript that is readable and genuinely empty — `counted` must not be
+  // fooled by that collapse. The sidecar directory is also blocked (as in
+  // the sidecar-only case above) purely so this id lands in `unreadable` and
+  // therefore appears in `doc.source.unread` at all; without it there would
+  // be nothing to assert `counted` on.
+  const r1 = { input: 10, output: 100, cacheRead: 1000, cacheCreate: 5 };
+  // Deliberately large and distinct from r1: if the second transcript's
+  // figures ever leaked into the totals despite the unreadable file, this is
+  // what would catch it.
+  const r2 = { input: 900, output: 9000, cacheRead: 90000, cacheCreate: 90 };
+
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z', tokens: r1 })],
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })],
+    // An (empty) subagents directory, so there is a host session directory to
+    // chmod, exactly as the sidecar-only case above needs one.
+    subagents: {},
+  });
+
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const secondHostDir = path.join(project, SECOND_HOST_ID);
+  const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
+  fs.chmodSync(secondHostDir, 0o000);
+  fs.chmodSync(secondTranscript, 0o000);
+  try {
+    // Prove both halves of the fixture are genuinely blocked where it
+    // matters — or the assertions below pass for free.
+    assert.throws(() => fs.statSync(path.join(secondHostDir, 'subagents')), /EACCES/);
+    assert.equal(fs.statSync(secondTranscript).isFile(), true, 'stat alone must still succeed');
+    assert.throws(() => fs.readFileSync(secondTranscript, 'utf8'), /EACCES/);
+
+    const doc = collectMetrics({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(doc.available, true);
+    // Only the first session's lines were actually readable.
+    assert.equal(doc.requests, 1);
+    assert.deepEqual(doc.tokens, sumTokens(r1));
+    assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: false }]);
+  } finally {
+    fs.chmodSync(secondHostDir, 0o755);
+    fs.chmodSync(secondTranscript, 0o644);
+  }
+});
+
+test('collectMetrics still counts a session whose transcript is readable but genuinely empty', () => {
+  // The companion case to the one above: `readJsonl` returns `[]` for both an
+  // unreadable file and an empty one, so `counted` must not conflate them —
+  // an empty read is a successful read, and this proves the fix does not
+  // over-correct into treating "nothing to parse" as a failure.
+  const r1 = { input: 10, output: 100, cacheRead: 1000, cacheCreate: 5 };
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z', tokens: r1 })],
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: [], // readable, and genuinely empty — not a read failure
+    subagents: {},
+  });
+
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const secondHostDir = path.join(project, SECOND_HOST_ID);
+  const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
+  fs.chmodSync(secondHostDir, 0o000);
+  try {
+    // Prove the fixture is genuinely empty-but-readable, not accidentally
+    // missing or blocked — or the assertion below passes for free.
+    assert.throws(() => fs.statSync(path.join(secondHostDir, 'subagents')), /EACCES/);
+    assert.equal(fs.readFileSync(secondTranscript, 'utf8'), '');
+
+    const doc = collectMetrics({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(doc.available, true);
+    assert.equal(doc.requests, 1);
+    assert.deepEqual(doc.tokens, sumTokens(r1));
+    assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: true }]);
+  } finally {
+    fs.chmodSync(secondHostDir, 0o755);
+  }
+});
+
+test('collectMetrics carries no unread ids, and totals as before, when every bound host session is readable', () => {
+  const r1 = { input: 10, output: 100, cacheRead: 1000, cacheCreate: 5 };
+  const r2 = { input: 20, output: 200, cacheRead: 2000, cacheCreate: 6 };
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z', tokens: r1 })],
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })],
+  });
+
+  const doc = collectMetrics({
+    session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+    now: () => new Date('2026-07-27T11:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(doc.available, true);
+  assert.equal(doc.requests, 2);
+  assert.deepEqual(doc.tokens, sumTokens(r1, r2));
+  // No noisy empty field on the all-readable path — absent, not `[]`.
+  assert.equal(doc.source.unread, undefined);
 });
 
 test('collectMetrics rolls a parent transcript up into a document', () => {

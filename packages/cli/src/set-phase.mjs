@@ -367,8 +367,11 @@ function enforceFinalReviewFloor() {
  *
  * NOT A CLAIM THAT THE MEASUREMENT IS COMPLETE. `reviewEvidence` answers from
  * whatever bound host sessions it can read, and a session bound to two whose
- * second sidecar directory is unreadable still answers confidently from the
- * first (F27, owned by `host.mjs`). This freezes what was measured, no more.
+ * older transcript has since been pruned from disk still answers confidently
+ * from the surviving newer one — a reviewer that ran in the pruned half stays
+ * invisible (the residual is F12, not yet built; an *unreadable* second
+ * binding is F27, owned by `host.mjs`, and is refused rather than answered).
+ * This freezes what was measured, no more.
  *
  * `next` ALSO CARRIES `unitOnRecord` — whether *this* pass saw the deciding
  * (`final`) unit in the host's dispatch record, the same fact the keep rule
@@ -548,11 +551,14 @@ if (phase === 'done' || phase === 'finish') {
 // LAST, AND THAT IS LOAD-BEARING. Every gate above refuses with `process.exit`,
 // so a refused pass writes nothing at all — not the phase, and not the review
 // verdict measured moments before it. That is what keeps a wrong positive from
-// becoming permanent: `reviewEvidence` can answer confidently from a partially
-// readable binding (F27, owned by `host.mjs`), and if that lands on `self` the
-// session is refused and the verdict is discarded unwritten, so the next pass
-// measures again instead of inheriting the mistake. Moving this above the gates
-// would pin it.
+// becoming permanent: `reviewEvidence` can still answer confidently from a
+// partial binding — a session bound to two host sessions whose older
+// transcript has been pruned answers from the surviving newer one alone (F12,
+// not yet built; an *unreadable* binding is F27, owned by `host.mjs`, and is
+// refused rather than answered) — and if that lands on `self` the session is
+// refused and the verdict is discarded unwritten, so the next pass measures
+// again instead of inheriting the mistake. Moving this above the gates would
+// pin it.
 // THE POINTER FOLLOWS THE WORK — but only once the transition has been allowed,
 // and never for work that is over.
 //

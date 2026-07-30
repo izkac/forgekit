@@ -187,25 +187,29 @@ function fixture(prefix) {
 test('findTranscripts finds transcripts across project directories', () => {
   const { configDir, projA, projB, sidecar } = fixture('forge-host-find-');
 
-  assert.deepEqual(findTranscripts([ID_A, ID_B], { configDir }), [
-    { sessionId: ID_A, transcript: path.join(projA, `${ID_A}.jsonl`), sidecarDir: sidecar },
-    { sessionId: ID_B, transcript: path.join(projB, `${ID_B}.jsonl`), sidecarDir: null },
-  ]);
+  assert.deepEqual(findTranscripts([ID_A, ID_B], { configDir }), {
+    found: [
+      { sessionId: ID_A, transcript: path.join(projA, `${ID_A}.jsonl`), sidecarDir: sidecar },
+      { sessionId: ID_B, transcript: path.join(projB, `${ID_B}.jsonl`), sidecarDir: null },
+    ],
+    unreadable: [],
+  });
 });
 
 test('findTranscripts omits ids with no transcript on disk', () => {
   const { configDir } = fixture('forge-host-miss-');
 
-  const found = findTranscripts([ID_C, ID_A], { configDir });
+  const { found, unreadable } = findTranscripts([ID_C, ID_A], { configDir });
   assert.deepEqual(
     found.map((f) => f.sessionId),
     [ID_A],
   );
+  assert.deepEqual(unreadable, []);
 });
 
 test('findTranscripts returns [] for no ids at all', () => {
   const { configDir } = fixture('forge-host-none-');
-  assert.deepEqual(findTranscripts([], { configDir }), []);
+  assert.deepEqual(findTranscripts([], { configDir }), { found: [], unreadable: [] });
 });
 
 test('findTranscripts resolves the config dir from CLAUDE_CONFIG_DIR', () => {
@@ -216,13 +220,16 @@ test('findTranscripts resolves the config dir from CLAUDE_CONFIG_DIR', () => {
       env: { CLAUDE_CONFIG_DIR: configDir },
       homedir: () => '/nonexistent-home',
     }),
-    [
-      {
-        sessionId: ID_A,
-        transcript: path.join(projA, `${ID_A}.jsonl`),
-        sidecarDir: path.join(projA, ID_A, 'subagents'),
-      },
-    ],
+    {
+      found: [
+        {
+          sessionId: ID_A,
+          transcript: path.join(projA, `${ID_A}.jsonl`),
+          sidecarDir: path.join(projA, ID_A, 'subagents'),
+        },
+      ],
+      unreadable: [],
+    },
   );
 });
 
@@ -232,17 +239,154 @@ test('findTranscripts falls back to <homedir>/.claude', () => {
   fs.renameSync(configDir, path.join(home, '.claude'));
   const moved = path.join(home, '.claude', 'projects', path.basename(projA));
 
-  assert.deepEqual(findTranscripts([ID_A], { env: {}, homedir: () => home }), [
-    {
-      sessionId: ID_A,
-      transcript: path.join(moved, `${ID_A}.jsonl`),
-      sidecarDir: path.join(moved, ID_A, 'subagents'),
-    },
-  ]);
+  assert.deepEqual(findTranscripts([ID_A], { env: {}, homedir: () => home }), {
+    found: [
+      {
+        sessionId: ID_A,
+        transcript: path.join(moved, `${ID_A}.jsonl`),
+        sidecarDir: path.join(moved, ID_A, 'subagents'),
+      },
+    ],
+    unreadable: [],
+  });
 });
 
 test('findTranscripts returns [] when projects/ is missing rather than throwing', () => {
   const configDir = tmp('forge-host-empty-');
-  assert.deepEqual(findTranscripts([ID_A], { configDir }), []);
-  assert.deepEqual(findTranscripts([ID_A], { configDir: path.join(configDir, 'nope') }), []);
+  assert.deepEqual(findTranscripts([ID_A], { configDir }), { found: [], unreadable: [] });
+  assert.deepEqual(findTranscripts([ID_A], { configDir: path.join(configDir, 'nope') }), {
+    found: [],
+    unreadable: [],
+  });
+});
+
+test('findTranscripts finds a transcript in the second project directory after an EACCES in the first', () => {
+  // Scenario 1: found-elsewhere wins. The first project directory an id is
+  // *not* in is unsearchable, but the id's transcript is in the second,
+  // readable one. A naive "remember any error" implementation would report
+  // this id unreadable even though it was found — this is the guard against
+  // over-reporting the brief calls out as the dangerous direction.
+  const { configDir, projA, projB } = fixture('forge-host-eacces-found-');
+  fs.chmodSync(projA, 0o000);
+  try {
+    // Prove the fixture is genuinely unreadable before trusting the assertions
+    // below — a quietly-readable directory would make this test pass for free.
+    assert.throws(() => fs.statSync(path.join(projA, `${ID_B}.jsonl`)), /EACCES/);
+
+    // This test's discriminating power — catching `if (blocked)` in place of
+    // `if (!matched && blocked)` — depends on readdirSync visiting the
+    // blocked directory before the one that holds the transcript: only then
+    // does `blocked` get set before the inner loop breaks on the match.
+    // readdirSync order is not guaranteed, so assert the precondition rather
+    // than assume it — a reordering filesystem must redden this test, not
+    // pass it without ever exercising the over-reporting path.
+    const projects = path.join(configDir, 'projects');
+    assert.equal(
+      fs.readdirSync(projects)[0],
+      path.basename(projA),
+      'fixture assumes projA is enumerated before projB; this test is vacuous otherwise',
+    );
+
+    const { found, unreadable } = findTranscripts([ID_B], { configDir });
+
+    assert.deepEqual(found, [
+      { sessionId: ID_B, transcript: path.join(projB, `${ID_B}.jsonl`), sidecarDir: null },
+    ]);
+    assert.deepEqual(unreadable, []);
+  } finally {
+    fs.chmodSync(projA, 0o755);
+  }
+});
+
+test('findTranscripts scopes `blocked` to one id, not the whole call', () => {
+  // Pins the boundary the reviewer's mutant erases: hoist `let blocked = null`
+  // one scope out of `for (const sessionId of ids)` and it survives across
+  // ids instead of resetting per id. A second id, absent everywhere and never
+  // blocked itself, then inherits the *first* id's blocked path and reason —
+  // a session refused at the gate for a directory failure that belongs to a
+  // different session. Every other test in this file calls findTranscripts
+  // with a single id, so nothing else here pins this boundary.
+  const configDir = tmp('forge-host-blocked-scope-');
+  const proj = path.join(configDir, 'projects', '-a');
+  fs.mkdirSync(proj, { recursive: true });
+  // A regular file named `blocker` makes any id whose own name walks through
+  // it — via a literal `/` — fail with ENOTDIR rather than ENOENT: blocked,
+  // not absent, and only for the one id whose path traverses it.
+  fs.writeFileSync(path.join(proj, 'blocker'), 'not a directory', 'utf8');
+  const BLOCKED_ID = 'blocker/deadbeef';
+  const ABSENT_ID = 'cccccccc-0000-4000-8000-000000000009';
+  const blockedPath = path.join(proj, `${BLOCKED_ID}.jsonl`);
+  assert.throws(
+    () => fs.statSync(blockedPath),
+    /ENOTDIR/,
+    'fixture must genuinely block this id, not just miss it',
+  );
+
+  const { found, unreadable } = findTranscripts([BLOCKED_ID, ABSENT_ID], { configDir });
+
+  assert.deepEqual(found, []);
+  assert.equal(unreadable.length, 1, "the absent id must not inherit the blocked id's entry");
+  assert.equal(unreadable[0].sessionId, BLOCKED_ID);
+  assert.equal(unreadable[0].path, blockedPath);
+  assert.match(unreadable[0].reason, /ENOTDIR/);
+});
+
+test('findTranscripts reports an id as unreadable when it is found in no project directory and one is unsearchable', () => {
+  // Scenario 2: found nowhere, with a directory blocked along the way. The id
+  // is genuinely absent from every project directory, but one of those
+  // directories could not be searched at all — so "absent" cannot be
+  // concluded, and the id must be reported unreadable rather than silently
+  // dropped the way a pruned transcript would be.
+  const { configDir, projA } = fixture('forge-host-eacces-miss-');
+  fs.chmodSync(projA, 0o000);
+  try {
+    assert.throws(() => fs.statSync(path.join(projA, `${ID_C}.jsonl`)), /EACCES/);
+
+    const { found, unreadable } = findTranscripts([ID_C], { configDir });
+
+    assert.deepEqual(found, []);
+    assert.equal(unreadable.length, 1);
+    assert.equal(unreadable[0].sessionId, ID_C);
+    assert.equal(unreadable[0].path, path.join(projA, `${ID_C}.jsonl`));
+    assert.match(unreadable[0].reason, /EACCES/);
+  } finally {
+    fs.chmodSync(projA, 0o755);
+  }
+});
+
+test('findTranscripts omits an id absent from every readable project directory, and never marks it unreadable', () => {
+  // Scenario 3: the pruned case, and it must stay cheap — no chmod at all,
+  // every directory readable, the id simply is not there.
+  const { configDir } = fixture('forge-host-absent-clean-');
+
+  const { found, unreadable } = findTranscripts([ID_C], { configDir });
+
+  assert.deepEqual(found, []);
+  assert.deepEqual(unreadable, []);
+});
+
+test('findTranscripts reports a sidecar path that exists but is not a directory as unreadable', () => {
+  // A regular file where `subagents/` should be a directory: `statSync`
+  // succeeds so this is not the ENOENT case, and `isDirectory()` is false —
+  // the fourth outcome, distinct from both "resolved" and "ordinarily absent".
+  const configDir = tmp('forge-host-sidecar-file-');
+  const proj = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  fs.mkdirSync(path.join(proj, ID_A), { recursive: true });
+  fs.writeFileSync(path.join(proj, `${ID_A}.jsonl`), '{"type":"user"}\n', 'utf8');
+  const sidecar = path.join(proj, ID_A, 'subagents');
+  fs.writeFileSync(sidecar, 'not a directory', 'utf8');
+
+  const { found, unreadable } = findTranscripts([ID_A], { configDir });
+
+  // The transcript is still readable, so the id is still in `found` — its
+  // lines still count for metrics — with a null sidecar, same as an absent one.
+  assert.deepEqual(found, [
+    { sessionId: ID_A, transcript: path.join(proj, `${ID_A}.jsonl`), sidecarDir: null },
+  ]);
+  // And it also lands in `unreadable`, which is the fact that tells a caller
+  // like `reviewEvidence` this is not the ordinary "dispatched nothing" case.
+  assert.equal(unreadable.length, 1);
+  assert.equal(unreadable[0].sessionId, ID_A);
+  assert.equal(unreadable[0].path, sidecar);
+  assert.match(unreadable[0].reason, /not a directory/i);
 });

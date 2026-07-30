@@ -1558,11 +1558,14 @@ test('a refused transition persists nothing — not the phase, and not the verdi
   // is not a review.
   //
   // NOTHING IS WRITTEN ON A REFUSAL, because the gate exits before
-  // `saveSession`. That is what keeps F27 — a verdict built on a partially
-  // readable binding — from being pinned to the session for good: a refused
-  // pass leaves the session exactly as it was, so the next one measures again.
-  // Move `saveSession` above the gates and that wrong positive becomes
-  // permanent.
+  // `saveSession`. That is what keeps a wrong positive from being pinned to
+  // the session for good — for example a verdict `reviewEvidence` still
+  // answers confidently from a partial binding, such as a session bound to two
+  // host sessions whose older transcript has been pruned (F12, not yet built;
+  // an *unreadable* binding is F27, owned by `host.mjs`, and is refused rather
+  // than answered): a refused pass leaves the session exactly as it was, so
+  // the next one measures again. Move `saveSession` above the gates and that
+  // wrong positive becomes permanent.
   const dir = tmp('forge-refuse-nosave-');
   const configDir = tmp('forge-refuse-nosave-cfg-');
   try {

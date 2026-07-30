@@ -1,0 +1,168 @@
+<!-- forge-brief-specs-hash:04d1baf78cc21309 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — a half-read binding must not decide the gate</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5;
+       padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .8rem 1rem;
+             margin: 1.25rem 0; }
+  .bad { background: #fdf0f0; border-left: 3px solid #c0392b; padding: .8rem 1rem;
+         margin: 1.25rem 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #e5e5e5;
+           vertical-align: top; }
+  th { background: #fafafa; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>A half-read binding must not decide the gate</h1>
+<p class="sub">Finding F27 &middot; change <code>partial-binding-unreadable</code></p>
+
+<h2>TL;DR</h2>
+<p>
+Forge decides whether a change was reviewed by someone other than its author by
+reading what the host recorded about the subagents it ran. When it can only read
+<em>part</em> of that record, it currently answers anyway — and the answer it
+gives is "you reviewed your own work", which blocks the change at the money/auth
+gate. After this change, a record Forge cannot read in full makes it say
+"I can't tell" and fall back to reading the review file, which never blocks
+correct work.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A session whose review evidence is only half readable no longer gets
+      refused for a review that genuinely happened.</li>
+  <li>Forge stops confusing <em>"this isn't here"</em> with <em>"I couldn't
+      look"</em> — two facts it has been reporting identically.</li>
+  <li>When metrics collection can only read some of a session's history, the
+      numbers it reports say so instead of quietly being a partial total.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+A Forge session is tied to one or more host conversations. That's routine, not
+exotic — resuming a session adds another one. Forge looks on disk for each
+conversation's transcript and its folder of subagent records.
+</p>
+<p>
+Both of those lookups currently treat <em>every</em> kind of failure as "not
+there". A folder that has been deleted and a folder this process has no
+permission to open produce the same silent shrug. So if a session is tied to two
+conversations and the second one can't be opened, Forge answers confidently from
+the first — and the reviewer who ran in the second is simply invisible.
+</p>
+
+<div class="bad">
+<strong>Today:</strong> reviewer ran in the unreadable half &rarr; Forge sees no
+reviewer &rarr; verdict is "self-reviewed", stamped as measured fact &rarr;
+<code>forge phase done</code> refuses a change that <em>was</em> properly reviewed.
+</div>
+
+<p>The fix is to tell the two failures apart:</p>
+
+<pre class="mermaid">
+flowchart TD
+    A[Look for this conversation's records] --> B{What went wrong?}
+    B -->|Nothing — found them| C[Read them]
+    B -->|Not there at all| D[Ordinary: pruned, or nothing was dispatched<br/>Carry on quietly, as today]
+    B -->|There, but unreadable| E[Report it]
+    E --> F[Evidence answers: I cannot tell]
+    F --> G[Fall back to reading the review file]
+    G --> H[Correct work is not refused]
+    C --> I[Answer from the record]
+</pre>
+
+<p>
+The distinction matters because "not there" is genuinely ordinary — old
+transcripts get cleaned up after a few days, and plenty of sessions dispatch no
+subagents at all. Treating <em>those</em> as "I can't tell" would make Forge
+unable to answer for most sessions, which is why an earlier, blunter version of
+this fix was rejected. Splitting the two cases gets the safety without the cost.
+</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>No new commands and no new flags.</li>
+  <li><code>forge phase done</code> will occasionally say it could not read the
+      evidence and fell back to the review file. That is the fix working — it
+      replaces a confident wrong answer.</li>
+  <li>Session metrics may note that some of a session's history could not be
+      read. Previously that shortfall was invisible.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<table>
+  <tr><th>Risk</th><th>Where it stands</th></tr>
+  <tr>
+    <td>A shared internal helper changes shape</td>
+    <td>It has exactly two callers, both in this repo, both updated here. Its
+        existing results keep their exact form.</td>
+  </tr>
+  <tr>
+    <td>Forge says "I can't tell" more often than before</td>
+    <td>Only for records that genuinely can't be read — never for ones that were
+        cleaned up. And "I can't tell" falls back to reading the review file,
+        which is the side that cannot refuse correct work.</td>
+  </tr>
+  <tr>
+    <td><strong>A deliberately unfixed case</strong></td>
+    <td>If the older half of a session's history was <em>cleaned up</em> rather
+        than blocked, Forge still answers confidently from the surviving half —
+        and a reviewer who ran in the cleaned-up half is still invisible. Fixing
+        that costs the "unable to answer for most sessions" problem above. It
+        stays a named limit in the code, and its real fix is a separate piece of
+        work: stamping the review file itself when Forge dispatches the reviewer,
+        so the proof survives cleanup.</td>
+  </tr>
+</table>
+
+<div class="callout">
+<strong>Worth watching:</strong> the acceptance test for this change is
+deliberately inverted — it proves the gate now <em>accepts</em> a case it
+currently refuses. If it ever starts passing without the fix in place, the
+fixture has rotted and is proving nothing.
+</div>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>The cleaned-up-transcript case described above.</li>
+  <li>Stamping review files at dispatch time (finding F12) — the structural fix
+      several open findings point at, and a change of its own.</li>
+  <li>Any change to how a review file's prose is read. This change only decides
+      <em>when</em> that reading is consulted.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>Size</th><th>What</th></tr>
+  <tr><td>Absent and unreadable stop being the same answer</td><td>6 tasks</td>
+      <td>The core fix, starting with a test that fails on today's code</td></tr>
+  <tr><td>A partial harvest says so</td><td>2 tasks</td>
+      <td>Metrics report what they could not read</td></tr>
+  <tr><td>Product-loop acceptance</td><td>1 task</td>
+      <td>End-to-end proof through the real <code>forge</code> binary</td></tr>
+  <tr><td>Whole-workspace verification</td><td>4 tasks</td>
+      <td>Full test suite, lint, a spec-to-test audit, and correcting comments
+          elsewhere in the code that assert this bug is unfixed</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+
+</body>
+</html>

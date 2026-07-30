@@ -514,32 +514,67 @@ export function reviewEvidence(options) {
       return unavailable('no host session bound to this Forge session — nothing to read');
     }
 
-    const bound = findTranscripts(sessionIds, { configDir: opts.configDir, env: opts.env });
+    const { found: bound, unreadable } = findTranscripts(sessionIds, {
+      configDir: opts.configDir,
+      env: opts.env,
+    });
     if (bound.length === 0) {
       return unavailable(
         `no transcript on disk for host session ${sessionIds.join(', ')} — pruned or written elsewhere`,
       );
     }
 
+    // A binding this module could only read in part must not decide the gate.
+    // `findTranscripts` distinguishes a `subagents` path it could not stat, or
+    // one that exists and is not a directory, from the ordinary case of no
+    // subagents dispatched at all (the ENOENT split) — and reports the former
+    // here by session id and path rather than folding it into `sidecarDir:
+    // null`. This must be checked before the `sidecarDirs.length === 0` guard
+    // below: an unreadable sidecar sitting beside one or more resolvable ones
+    // would otherwise slip past it and answer confidently from the readable
+    // half, which is the exact defect that guard's own comment used to
+    // describe.
+    if (unreadable.length > 0) {
+      const detail = unreadable
+        .map((u) => `host session ${u.sessionId} (${u.path}): ${u.reason}`)
+        .join('; ');
+      return unavailable(`could not read host session data — ${detail}`);
+    }
+
     const sidecarDirs = bound
       .map((entry) => entry.sidecarDir)
       .filter((dir) => typeof dir === 'string' && dir);
-    // KNOWN HOLE, owner elsewhere. This is all-or-nothing: the answer is
-    // unavailable only when *every* bound host session's sidecar directory is
-    // unresolvable. A session bound to two host sessions (ordinary — `bindHost`
-    // appends an id on resume) whose *second* directory cannot be read still
-    // answers confidently from the first, and a reviewer that ran in the
-    // unreachable half is simply absent from `units`. That is worse than the
-    // silent negatives fixed above: `prescribed > 0` tells the caller the
-    // convention is in use, so prose is not consulted and the verdict is `self`
-    // at the money/auth gate — a confidently wrong positive.
+    // THE FIX ABOVE, AND ITS DELIBERATE LIMIT. This guard used to describe a
+    // known hole: a `subagents` path that could not be stat-ed, or that existed
+    // and was not a directory, came back from `findTranscripts` as
+    // `sidecarDir: null` — byte-identical to a session that dispatched no
+    // subagents. A session bound to two host sessions (ordinary; `bindHost`
+    // appends an id on resume) whose second such path was blocked still
+    // answered confidently from the first, and a reviewer dispatched in the
+    // unreachable half was simply absent from `units` — a confidently wrong
+    // positive, worse than the silent negatives the rest of this module exists
+    // to prevent. The `unreadable` guard above now closes that: `host.mjs`'s
+    // ENOENT split reports a blocked or non-directory sidecar by name and path
+    // instead of collapsing it into absence, and this module refuses to answer
+    // rather than reading only the resolvable half.
     //
-    // The clean fix belongs in `host.mjs`, which must distinguish "this session
-    // has no subagents/" from "I could not stat it". The in-module half-fix
-    // (`bound.length < sessionIds.length` → unavailable) trades a rare wrong
-    // answer for frequent unavailability on every resumed session whose older
-    // transcript has expired — measured in days. Group 3's freeze must not
-    // preserve a verdict computed from a partially readable binding.
+    // What this did NOT buy, on purpose, is the pruned-transcript residual. A
+    // session bound to two host sessions where the *older* transcript is
+    // genuinely gone from disk — pruned, not blocked — still answers from the
+    // surviving newer one, and a reviewer that ran in the pruned half stays
+    // invisible to this module. The Scenario this spec requires ("A transcript
+    // that was pruned, not blocked") demands exactly that answer stay
+    // available: reporting unavailable whenever `bound.length <
+    // sessionIds.length`, which would also catch the residual, is the
+    // in-module half-fix this comment rejected before the ENOENT split
+    // existed, and rejects again now — it would make *every* resumed session
+    // unavailable the instant its older transcript ages out of the host's
+    // retention window, which is a matter of days, not an edge case. The
+    // residual's real fix is a dispatch-time stamp written into the review
+    // artefact itself, tracked as F12: that stamp is read from the artefact
+    // this module is verifying, not reconstructed from a transcript that may
+    // no longer be on disk, so it survives the pruning this module cannot see
+    // past.
     if (sidecarDirs.length === 0) {
       // The host wrote no `subagents/` directory. That is *probably* a session
       // that dispatched nothing, but "probably" is not evidence: the directory

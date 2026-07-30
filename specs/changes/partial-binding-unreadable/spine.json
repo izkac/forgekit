@@ -1,0 +1,33 @@
+{
+  "change": "partial-binding-unreadable",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — locating a binding distinguishes absent from unreadable",
+      "library": "packages/cli/src/metrics/host.mjs (findTranscripts → { found, unreadable })",
+      "runtimeOwner": "packages/cli/src/metrics/review-evidence.mjs reviewEvidence() and packages/cli/src/metrics/collect.mjs collectMetrics(); reviewEvidence is reached from packages/cli/src/set-phase.mjs freezeReviewVerdict() on phase finish|done",
+      "writes": "N/A — returns the two lists; persistence belongs to the freeze path already spec'd by review-authorship-evidence",
+      "reads": "<configDir>/projects/*/<hostSessionId>.jsonl and .../<hostSessionId>/subagents/, per bound host session id",
+      "uiConsumer": "forge phase done refusal text (via the census verdict), forge score cap, forge fleet report",
+      "evidence": "packages/cli/src/metrics/host.test.mjs (ENOENT vs every other stat error, at both stat sites; found-elsewhere wins) + e2e step review-evidence-decides"
+    },
+    {
+      "capability": "review-evidence — a partially readable binding cannot decide the gate",
+      "library": "packages/cli/src/metrics/review-evidence.mjs (the unreadable guard, ahead of the sidecarDirs.length === 0 guard)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs freezeReviewVerdict() → reviewCensus, at the money/auth floor",
+      "writes": "N/A — an unavailable answer routes the verdict to the prose rule, which the freeze row persists",
+      "reads": "the unreadable list findTranscripts now returns for the session's bound host sessions",
+      "uiConsumer": "forge phase done refusal text, scorecard caps, forge fleet report",
+      "evidence": "packages/cli/src/metrics/review-evidence.test.mjs (two bound sessions, second chmod 000, reviewer in the second → available:false) + review-census.test.mjs (the partial binding no longer reaches the bucket===undefined self branch)"
+    },
+    {
+      "capability": "session-metrics — a partial harvest is reported as partial",
+      "library": "packages/cli/src/metrics/collect.mjs (collectMetrics records unread ids rather than degrading)",
+      "runtimeOwner": "packages/cli/src/metrics-cli.mjs (forge metrics collect, registered in bin/forge.mjs) and packages/cli/src/set-phase.mjs on the done|finish transition — both call collectMetrics then writeMetrics",
+      "writes": ".forge/sessions/<id>/metrics.json — totals from the readable host sessions, plus source.unread[{sessionId,counted}] naming the ids that could not be read",
+      "reads": "the found/unreadable lists from findTranscripts for the session's bound host sessions",
+      "uiConsumer": "NONE surfaces source.unread today — forge analyze and forge fleet report read metrics.json for totals but neither renders the unread/counted fields. The spec requires the document to RECORD the ids, which it does; a reader is follow-on work, not part of this change",
+      "evidence": "packages/cli/src/metrics/collect.test.mjs (two bound sessions, second unreadable → not degraded, totals from the first, second named unread)"
+    }
+  ]
+}

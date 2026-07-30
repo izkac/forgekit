@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { CENSUS_RULE, FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
+import { reviewEvidence } from './metrics/review-evidence.mjs';
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -989,4 +990,249 @@ test("a pace skip is not an outside reader — Forge's own SKIPPED string counts
   // And the string the pace table actually renders, verbatim from review.md.
   const dir = sessionWith({}, 'SKIPPED (pace=standard)\n');
   assert.notEqual(reviewCensus(dir).finalReview, 'independent');
+});
+
+// ---------------------------------------------------------------------------
+// The join — a real `reviewEvidence` answer, not the hand-written `evidence()`
+// literal above.
+//
+// Every test above this line that passes `evidence` builds it with the local
+// helper: a hand-typed literal of the shape `reviewEvidence` returns. That
+// pins this module's half of the contract and nothing about the join itself —
+// it would keep passing even if `reviewEvidence` stopped producing
+// `available: false` for a half-read binding, because no `reviewEvidence`
+// ever runs in it. This fixture instead builds the on-disk host tree from
+// `metrics/review-evidence.test.mjs`'s "stays unavailable when only one of two
+// bound host sessions can be searched" fixture — read and followed, not
+// reinvented — and feeds `reviewEvidence`'s real return value into
+// `reviewCensus`. It is the only test in the suite that would catch the two
+// halves drifting apart.
+//
+// Duplicated rather than imported from the sibling test file. A shared
+// fixture helper across `review-census.test.mjs` and
+// `metrics/review-evidence.test.mjs` would be the right refactor, but the
+// brief for this task scoped it out — noted as a concern in the task report.
+// ---------------------------------------------------------------------------
+
+/** One assistant transcript line — i.e. one content block of one reply. */
+function hostAssistantLine({ requestId, at }) {
+  return {
+    type: 'assistant',
+    requestId,
+    timestamp: at,
+    isSidechain: true,
+    message: {
+      id: `msg_${requestId}`,
+      model: 'claude-opus-5',
+      content: [{ type: 'text' }],
+      usage: {
+        input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 0,
+      },
+    },
+  };
+}
+
+function hostJsonl(lines) {
+  return lines.map((line) => JSON.stringify(line)).join('\n');
+}
+
+/** A meta in the host's own shape. */
+function hostMeta({ description }) {
+  return {
+    agentType: 'general-purpose',
+    description,
+    toolUseId: 'toolu_017uFdNuuRF9FFhJk8oz15Gr',
+    spawnDepth: 1,
+    model: 'opus',
+  };
+}
+
+/** Lay out `agent-<id>.meta.json` / `agent-<id>.jsonl` pairs, as the host writes them. */
+function plantHostSidecars(agents, dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [agentId, { meta: agentMeta, lines }] of Object.entries(agents)) {
+    fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(agentMeta));
+    if (lines !== undefined) fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), hostJsonl(lines));
+  }
+}
+
+/**
+ * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
+ * (this same function's earlier return value) to plant a second host session
+ * beside the first, under one project directory — a session bound to several
+ * host ids has them all there.
+ */
+function plantHostSession({ sessionId, subagents, configDir = fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), 'forge-census-join-host-'))) }) {
+  const project = path.join(configDir, 'projects', 'demo-project');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(
+    path.join(project, `${sessionId}.jsonl`),
+    hostJsonl([hostAssistantLine({ requestId: 'parent_1', at: '2026-07-28T10:00:00.000Z' })]),
+  );
+  plantHostSidecars(subagents, path.join(project, sessionId, 'subagents'));
+  return configDir;
+}
+
+test('the join: a half-read host binding does not reach the one genuine host self', () => {
+  // The gate this pins, end to end: `bucket === undefined` in
+  // `hostFinalReview` — this module's own comment calls it "the one genuine
+  // negative in this function" — must never fire off a `reviewEvidence`
+  // answer that could only read half of a two-host-session binding. Read half
+  // and reported `available: true` with `final` simply missing from `units`,
+  // that half-read binding would look exactly like "the host looked and this
+  // session's reviewer is not there", and a correct final review would refuse
+  // at the money/auth gate.
+  const FORGE_SESSION_ID = '20260730T161704Z-census-join-demo';
+  const FIRST_HOST_ID = '99999999-8888-7777-6666-555555555555';
+  const SECOND_HOST_ID = '11111111-2222-3333-4444-666666666666';
+
+  // First host session, fully readable: a prescribed but non-`final` dispatch,
+  // so `prescribed > 0` and the convention reads as in use here — the state in
+  // which the final reviewer's absence from the table is supposed to mean
+  // something.
+  const configDir = plantHostSession({
+    sessionId: FIRST_HOST_ID,
+    subagents: {
+      a1: {
+        meta: hostMeta({ description: `forge-review group-01 ${FORGE_SESSION_ID}` }),
+        lines: [hostAssistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  // Second host session: the final reviewer ran here. Its session directory is
+  // about to be made unsearchable, exactly as
+  // `metrics/review-evidence.test.mjs` does it — `chmod 000` on the *session*
+  // directory, not on `subagents/` itself: `statSync` succeeds on a `000`
+  // directory because stat reads the parent's entry, so only the outer
+  // directory reproduces an unreadable sidecar.
+  plantHostSession({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    subagents: {
+      a2: {
+        meta: hostMeta({ description: `forge-review final ${FORGE_SESSION_ID}` }),
+        lines: [hostAssistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
+      },
+    },
+  });
+
+  const secondHostDir = path.join(configDir, 'projects', 'demo-project', SECOND_HOST_ID);
+  const secondSidecarPath = path.join(secondHostDir, 'subagents');
+
+  // The Forge session directory: a final review whose prose reads
+  // `independent`. Load-bearing, deliberately: if the prose said `self`, the
+  // verdict would be `self` either way and this test would pass against the
+  // very defect it exists to catch. With the prose reading `independent` the
+  // defect and the fix answer differently —
+  //   defect: evidence available, `final` absent from `units` → `self` / `host`
+  //   fixed:  evidence unavailable → prose decides → `independent` / `inferred`
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+
+  fs.chmodSync(secondHostDir, 0o000);
+  try {
+    // The fixture is only meaningful if the process genuinely cannot read it.
+    assert.throws(() => fs.statSync(secondSidecarPath), /EACCES/);
+
+    // Fixture guard, exactly as the existing tests in this file do: assert the
+    // prose-alone reading before evidence enters the picture. A fixture whose
+    // prose does not read as assumed would make the whole test vacuous.
+    const bare = reviewCensus(dir);
+    assert.equal(bare.finalReview, 'independent', 'fixture: prose alone says independent');
+
+    // The real `reviewEvidence`, against the real on-disk fixture — not the
+    // hand-written `evidence()` helper used everywhere else in this file.
+    const evidence = reviewEvidence({
+      session: {
+        id: FORGE_SESSION_ID,
+        createdAt: '2026-07-28T10:00:00.000Z',
+        host: {
+          agent: 'claude-code',
+          sessionIds: [FIRST_HOST_ID, SECOND_HOST_ID],
+          boundAt: '2026-07-28T10:00:00.000Z',
+        },
+      },
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+    // Pin the join's other half before trusting what the census does with it —
+    // task 1.1's own coverage, re-asserted here so a regression there fails
+    // this test for the right reason instead of a confusing census mismatch.
+    assert.equal(evidence.available, false, 'fixture: reviewEvidence must be unavailable on the half-read binding');
+
+    const census = reviewCensus(dir, { evidence });
+    assert.equal(census.finalReview, 'independent', 'not self — a half-read binding must not decide the gate');
+    assert.equal(census.finalReviewEvidence, 'inferred');
+    // The evidence did not decide: the whole census matches the no-evidence
+    // reading, field for field — the same "prose decided" statement the
+    // neighbouring evidence tests in this file make.
+    assert.deepEqual(census, bare, 'exactly what the prose rule alone returns');
+  } finally {
+    fs.chmodSync(secondHostDir, 0o755);
+  }
+});
+
+test('the pruned-transcript limit reaches the census as independent on host grade (F12)', () => {
+  // The companion to `metrics/review-evidence.test.mjs`'s "answers from the
+  // surviving half when a bound session has no transcript at all" — same
+  // deliberate limit, carried through to a verdict. The module-level test
+  // alone does not connect the dots to `forge phase done`: this is the
+  // assertion that fails loudly the day the gate starts refusing resumed
+  // sessions, by asserting `independent` on `host` grade rather than merely
+  // `available: true`.
+  const FORGE_SESSION_ID = '20260730T161704Z-census-pruned-limit-demo';
+  const READABLE_HOST_ID = '99999999-8888-7777-6666-444444444444';
+  const ABSENT_HOST_ID = '00000000-1111-2222-3333-444444444444';
+
+  const configDir = plantHostSession({
+    sessionId: READABLE_HOST_ID,
+    subagents: {
+      a1: {
+        meta: hostMeta({ description: `forge-review final ${FORGE_SESSION_ID}` }),
+        // At least FINAL_REVIEW_REQUEST_FLOOR requests, or the census's own
+        // floor — not this scenario — would be what refuses the unit.
+        lines: Array.from({ length: FINAL_REVIEW_REQUEST_FLOOR }, (_, n) =>
+          hostAssistantLine({ requestId: `f_${n}`, at: '2026-07-28T11:00:00.000Z' }),
+        ),
+      },
+    },
+  });
+  // ABSENT_HOST_ID is never planted at all — no `.jsonl` anywhere under
+  // `projects/`, no `chmod`: the pruned, not blocked, case.
+
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\nAPPROVED\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  const evidence = reviewEvidence({
+    session: {
+      id: FORGE_SESSION_ID,
+      createdAt: '2026-07-28T10:00:00.000Z',
+      host: {
+        agent: 'claude-code',
+        sessionIds: [ABSENT_HOST_ID, READABLE_HOST_ID],
+        boundAt: '2026-07-28T10:00:00.000Z',
+      },
+    },
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+  // NOT a fixture precondition — this is the limit itself, restated. A pruned
+  // half must not make the answer unavailable, so this line going red means the
+  // product regressed toward refusing every resumed session, not that the
+  // fixture broke. Worded this way because the `fixture:` prefix it used to
+  // carry sent a reader hunting for a broken fixture instead.
+  assert.equal(
+    evidence.available,
+    true,
+    'the pruned half must not make the answer unavailable — this is the limit, not a fixture problem',
+  );
+  assert.equal(evidence.units.final?.dispatched, 1);
+
+  const census = reviewCensus(dir, { evidence });
+  assert.equal(census.finalReview, 'independent', 'the surviving half still certifies the review');
+  assert.equal(census.finalReviewEvidence, 'host');
 });
