@@ -180,6 +180,18 @@ if (sub === 'init') {
   process.stdout.write(
     `Scaffolded ${file}\nAuthor the product-loop steps (produce → consume → assert domain side effects).\nSteps that would pass against a stubbed handler are invalid.\nRun with: forge e2e run\n`,
   );
+  // SAY WHEN IT DID NOT LAND BESIDE THE CHANGE. With no change named yet, the
+  // only place to scaffold is the session dir — and the operator has no reason
+  // to suspect that, because the command succeeded. Once the session names a
+  // change, readers fall back to this copy and say so (F50), but the file is
+  // still somewhere no reviewer and no archive will look.
+  if (!session.openspecChange) {
+    process.stderr.write(
+      `[forge] This session names no change yet, so e2e.json went to the session dir.\n` +
+        `  Once you run \`forge phase plan\`, move it beside the change — it is read from\n` +
+        `  here meanwhile, but nothing else looks in the session dir for it.\n`,
+    );
+  }
   const harness = loadHarness();
   if (harness) process.stdout.write(`\n${harnessLines(harness)}\n`);
   process.exit(0);

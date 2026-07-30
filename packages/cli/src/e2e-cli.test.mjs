@@ -37,6 +37,57 @@ function makeFixture(root) {
   fs.mkdirSync(path.join(root, 'specs', 'changes', 'my-change'), { recursive: true });
 }
 
+test('an e2e.json scaffolded before the session named a change is still found', () => {
+  // F50. `forge e2e init` can only target the change dir once the session names
+  // a change, and plan-specs.md's own step order scaffolds first (step 4) and
+  // sets the phase second (step 6). So init lands in the session dir, the
+  // session then gains its change, and `forge e2e run` used to report
+  // "e2e.json not found — run forge e2e init" about the command that had just
+  // succeeded.
+  const root = tmp('forge-e2e-stray-');
+  const sessionDir = path.join(root, '.forge', 'sessions', 's1');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const session = { id: 's1', slug: 'fixture', planType: 'specs' };
+  const writeSession = (extra) =>
+    fs.writeFileSync(
+      path.join(sessionDir, 'session.json'),
+      `${JSON.stringify({ ...session, ...extra })}\n`,
+      'utf8',
+    );
+  // Step 4: no change named yet.
+  writeSession({});
+  fs.writeFileSync(path.join(root, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`, 'utf8');
+  const init = spawnSync(process.execPath, [E2E, 'init'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('e2e-fleet-'), 's') },
+  });
+  assert.equal(init.status, 0, init.stderr);
+  const stray = path.join(sessionDir, 'e2e.json');
+  assert.ok(fs.existsSync(stray), 'with no change to name, it can only go to the session dir');
+  assert.match(init.stderr, /names no change yet/, 'and init says so rather than looking clean');
+
+  // Step 6: the session names its change, so the canonical path now resolves.
+  writeSession({ openspecChange: 'my-change' });
+  fs.mkdirSync(path.join(root, 'specs', 'changes', 'my-change'), { recursive: true });
+  const canonical = path.join(root, 'specs', 'changes', 'my-change', 'e2e.json');
+  assert.equal(fs.existsSync(canonical), false, 'nothing moved it');
+
+  const status = spawnSync(process.execPath, [E2E, 'status'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('e2e-fleet-'), 's') },
+  });
+  assert.doesNotMatch(
+    `${status.stdout}${status.stderr}`,
+    /not found/,
+    'the file exists; a reader that cannot see it is the bug',
+  );
+  assert.match(status.stderr, /Reading e2e\.json from the session dir/);
+  assert.match(status.stderr, /F50/, 'and names the finding rather than only the path');
+  assert.match(status.stderr, /Move it/, 'and says the canonical location is still where it belongs');
+});
+
 test('e2e harness: record → show → surfaced by init; config keys preserved', () => {
   const root = tmp('e2e-harness-');
   makeFixture(root);

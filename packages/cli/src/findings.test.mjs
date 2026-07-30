@@ -103,6 +103,41 @@ test('list shows open findings and resolve closes one by id', () => {
   assert.match(after.out.resolved[0].note, /quarantined/);
 });
 
+test('a resolution note can be corrected, and the superseded text is kept', () => {
+  // F42. Refusing to amend is why F52 exists: a whole second finding filed
+  // purely to carry a correction the first one would not accept.
+  const cwd = makeProject();
+  const { out } = run(cwd, ['add', 'the keep rule reads the wrong field']);
+
+  run(cwd, ['resolve', out.id, '--note', 'fixed by dropping the conjunct']);
+  const amended = run(cwd, ['resolve', out.id, '--note', 'CORRECTION: dropping it broke a pin']);
+  assert.equal(amended.status, 0, amended.stderr);
+  assert.match(amended.out.note, /CORRECTION/);
+  assert.deepEqual(amended.out.noteHistory, ['fixed by dropping the conjunct']);
+  assert.equal(amended.out.status, 'resolved', 'amending a note does not reopen the finding');
+  assert.ok(amended.out.amendedAt, 'the amendment is dated');
+
+  // resolvedAt records when it was resolved, which was the first call — an
+  // amendment that moved it would misdate the finding to hide its own edit.
+  const first = run(cwd, ['list', '--json', '--all']).out.resolved.at(-1);
+  assert.equal(first.resolvedAt, amended.out.resolvedAt);
+  assert.notEqual(amended.out.amendedAt, undefined);
+
+  // A second correction stacks rather than replacing the first supersession.
+  const again = run(cwd, ['resolve', out.id, '--note', 'third pass']);
+  assert.deepEqual(again.out.noteHistory, [
+    'fixed by dropping the conjunct',
+    'CORRECTION: dropping it broke a pin',
+  ]);
+
+  // But a bare re-resolve still refuses: nothing to add, and answering "fine"
+  // to a no-op is how the silent discard started.
+  const bare = run(cwd, ['resolve', out.id]);
+  assert.equal(bare.status, 1);
+  assert.match(bare.stderr, /already resolved/);
+  assert.match(bare.stderr, /--note/, 'and the refusal names the way to correct it');
+});
+
 test('resolving an unknown id fails loudly instead of silently succeeding', () => {
   const cwd = makeProject();
   const { status, stderr } = run(cwd, ['resolve', 'F999']);

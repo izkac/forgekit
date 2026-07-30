@@ -90,7 +90,38 @@ export function resolveFinding(opts) {
   const idx = entries.findIndex((e) => e.id === opts.id);
   if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
   if (entries[idx].status !== 'open') {
-    throw new Error(`Finding ${opts.id} is already ${entries[idx].status}.`);
+    // AMENDING A RESOLUTION NOTE IS THE POINT, NOT AN EDGE CASE. Refusing
+    // outright is what this used to do, and the cost is on the record: F31's
+    // note kept its round-1 text through three attempted corrections, and F52
+    // exists **only** because F49's note could not be amended — a second
+    // finding filed to carry a correction to the first. That is F42.
+    //
+    // A bare re-resolve is still refused: with nothing to add it is either a
+    // mistake or a no-op, and answering "fine" to both is how the silence
+    // started. `resolvedAt` keeps its original value — the finding was resolved
+    // then, not now — and the superseded note is kept rather than overwritten,
+    // because a durable record that quietly loses its previous text is the same
+    // defect one layer down.
+    const amended = typeof opts.note === 'string' && opts.note.trim() !== '';
+    if (!amended) {
+      throw new Error(
+        `Finding ${opts.id} is already ${entries[idx].status}. ` +
+          'To correct its note: forge finding resolve ' +
+          `${opts.id} --note "<text>"`,
+      );
+    }
+    const previous = entries[idx].note;
+    entries[idx] = {
+      ...entries[idx],
+      note: opts.note,
+      noteHistory: [
+        ...(Array.isArray(entries[idx].noteHistory) ? entries[idx].noteHistory : []),
+        ...(typeof previous === 'string' && previous.trim() !== '' ? [previous] : []),
+      ],
+      amendedAt: (opts.now?.() ?? new Date()).toISOString(),
+    };
+    writeAll(opts.forgeDir, entries);
+    return entries[idx];
   }
   entries[idx] = {
     ...entries[idx],
