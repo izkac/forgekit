@@ -61,7 +61,7 @@
       `host`. Verify: same command, plus
       `node --test packages/cli/src/set-phase.test.mjs` — the money/auth gate
       still passes this session.
-- [ ] 2.6 Repair the fixtures the floor invalidated.
+- [x] 2.6 Repair the fixtures the floor invalidated.
       `writeReviewerSidecars` in `packages/cli/src/set-phase.test.mjs` (~line
       195) writes one transcript line per agent, so every dispatch it plants now
       reads as a token dispatch and 8 of 41 tests fail — 3 of them because the
@@ -75,18 +75,29 @@
 
 ## 3. Test the validator in front of the gate (F34)
 
-- [ ] 3.1 Add `packages/cli/src/review-verdict.test.mjs` covering
+- [x] 3.1 Add `packages/cli/src/review-verdict.test.mjs` covering
       `frozenReviewVerdict` directly: a non-object session, an absent
       `reviewVerdict`, an array, `final: null` (valid — "there is no final
       review"), an unrecognised `final`, an unrecognised `evidence`, a
       non-boolean `stoppedByOperator`, and the valid round-trip returning
       exactly `{final, evidence, stoppedByOperator}`. Verify:
       `node --test packages/cli/src/review-verdict.test.mjs`.
-- [ ] 3.2 Assert it never throws on hostile input (frozen object, prototype-less
+- [x] 3.2 Assert it never throws on hostile input (frozen object, prototype-less
       object, `reviewVerdict` as a string, getters that throw) — every caller is
       on the `forge phase done` path and a throw there loses the transition.
       Verify: same command. `review-verdict.mjs` itself must not change; if a
       test forces a change, stop and record why.
+- [x] 3.3 Make the "never throws" contract true. 3.2 found it false: a getter or
+      Proxy trap that raises propagates out of `frozenReviewVerdict`, because the
+      function has no `try`. Wrap the body and return `null` on a throw — the
+      value every caller already reads as "fall back to a live census", and the
+      only answer that cannot refuse correct work. Un-`todo` 3.2's test. Added
+      during implement on the operator's decision: the plan said the module would
+      not change, and it does, because shipping a validator in front of the
+      money/auth gate whose header claims a guarantee it does not provide is the
+      same defect class this change exists to correct. Verify: `node --test
+      packages/cli/src/review-verdict.test.mjs` with no todo remaining, and
+      `node --test packages/cli/src/set-phase.test.mjs` still 41/41.
 
 ## 4. Product-loop acceptance and the shipped record
 

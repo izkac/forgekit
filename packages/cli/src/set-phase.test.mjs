@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runE2eSteps, writeE2eResults } from './integrity.mjs';
 import { readLedger } from './ledger.mjs';
-import { reviewCensus } from './review-census.mjs';
+import { FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 
@@ -182,6 +182,21 @@ function writeHostTranscript(configDir, hostId, at) {
  * it in time. `at` has to sit inside `[session.createdAt, now]`, or the
  * dispatch belongs to some other Forge session sharing the host session.
  *
+ * EVERY DISPATCH PLANTED HERE MADE `FINAL_REVIEW_REQUEST_FLOOR` REQUESTS —
+ * imported, never typed as a number, so a fixture cannot drift below a floor
+ * that moves. One line per dispatch was the earlier shape, and it describes a
+ * subagent that was spawned and did nothing: `review-census.mjs` now reads such
+ * a dispatch as no answer at all, which is the right reading of it and the
+ * wrong scenario for a test named for a reviewer that ran.
+ *
+ * The count is the floor exactly, not a comfortable multiple of it, so these
+ * fixtures sit on the boundary and any tightening of the floor turns them red
+ * rather than passing unnoticed. Stopped dispatches get the same count as
+ * unstopped ones: `maxRequests` ignores them by design, and a fixture that gave
+ * the stopped dispatch the bigger number would quietly describe an
+ * operator-killed run vouching for a token one beside it — a different scenario
+ * from any of the ones these tests are named for.
+ *
  * @param {string} configDir
  * @param {string} hostId
  * @param {string} at
@@ -203,19 +218,20 @@ function writeReviewerSidecars(configDir, hostId, at, agents, forgeSessionId) {
     const meta = { agentType: 'general-purpose', description: named, model: 'opus' };
     if (stoppedByUser !== undefined) meta.stoppedByUser = stoppedByUser;
     fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(meta), 'utf8');
+    const lines = Array.from({ length: FINAL_REVIEW_REQUEST_FLOOR }, (_, i) => ({
+      type: 'assistant',
+      requestId: `req_${agentId}_${i}`,
+      timestamp: at,
+      message: {
+        id: `msg_${agentId}_${i}`,
+        model: 'claude-opus-5',
+        content: [{ type: 'text' }],
+        usage: { input_tokens: 1, output_tokens: 2 },
+      },
+    }));
     fs.writeFileSync(
       path.join(dir, `agent-${agentId}.jsonl`),
-      `${JSON.stringify({
-        type: 'assistant',
-        requestId: `req_${agentId}`,
-        timestamp: at,
-        message: {
-          id: `msg_${agentId}`,
-          model: 'claude-opus-5',
-          content: [{ type: 'text' }],
-          usage: { input_tokens: 1, output_tokens: 2 },
-        },
-      })}\n`,
+      `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
       'utf8',
     );
   }
