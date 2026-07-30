@@ -152,6 +152,14 @@ check for 43.
    forge evidence --task <nn>-<slug> --command "<tier-2 cmd>" --exit 0 --summary "<pass summary>"
    ```
    (Refuses non-zero exit without `--allow-fail`; template + rules in [../references/test-evidence.md](../references/test-evidence.md).)
+
+   **Add `--session <id>` when more than one session is open in the project.**
+   Without it the session comes from `.forge/active.json`, which is a hint — and
+   this command writes into `sessions/<id>/tasks/<task>/`, where `forge score`
+   reads the exit code into that session's scorecard and durable ledger. It will
+   refuse rather than replace evidence a previous run produced, so a wrong guess
+   costs you a re-run rather than somebody else's record; naming the session
+   removes the refusal for later runs of the same task.
 7. Mark task complete in `tasks.md` (`- [ ]` → `- [x]`). That checklist is the source of truth — fleet/status/health derive `tasksComplete` from it (and heal the session cache). Still run the progress command below when you want `--subagents` updated. Detect group boundary: next line in `tasks.md` is a new `##` heading, or no remaining tasks under the current heading.
 8. **Checkpoint** — when the project opts in (`.forge/config.json` → `git.checkpoint`):
    ```bash
