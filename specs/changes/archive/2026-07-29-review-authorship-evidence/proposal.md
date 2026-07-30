@@ -31,6 +31,15 @@ The host already writes a sidecar per subagent it actually ran —
 without really dispatching. That is **evidence**. The review file is
 **testimony**. Forge should prefer the former.
 
+> **Corrected in 0.3.34.** The paragraph above is left as it was written, and it
+> overclaims in the same way the 0.3.29 CHANGELOG entry did. Really dispatching
+> is cheap: a throwaway subagent carrying the label made one request, reviewed
+> nothing, and its sidecar passed the money/auth gate (F33). The distinction
+> between evidence and testimony holds — the reviewed party cannot *write* a
+> sidecar — but a sidecar proves a dispatch, not a review. `review-dispatch-
+> substance` adds a request floor so a dispatch that did no work no longer
+> certifies. That is still not proof the work was a review; F12 is.
+
 - **A prescribed dispatch description.** Reviewer subagents are dispatched with
   `forge-review final` / `forge-review <unit>`. `description` is coordinator-
   authored at dispatch and host-recorded, present on **383/383** metas measured,

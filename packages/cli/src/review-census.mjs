@@ -294,7 +294,7 @@ function hostFinalReview(evidence) {
   // correct work.
   //
   // `maxRequests` IS ONE OF THE THREE, and it is the one that had to be added:
-  // every bucket persisted before the floor existed carries the other two and
+  // every bucket built before the floor existed carries the other two and
   // not it, and `undefined < FINAL_REVIEW_REQUEST_FLOOR` is `false`, so such a
   // bucket sailed past the floor and graded `independent`. Reading a missing
   // measurement as "large enough" is this module's own collapse run backwards.

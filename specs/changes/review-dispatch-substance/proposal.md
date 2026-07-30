@@ -64,8 +64,12 @@ has one, and `decisions.md` says to re-measure before moving it.
 
 **Risk: a real reviewer degrades to prose.** A record whose transcript was
 pruned keeps `requests: 0` by design (`review-evidence.mjs:220`), so it reads as
-sub-floor. The cost is a weaker evidence grade, never a refusal — prose can only
-lose a grade. 0 of 420 sidecar metas on this machine lack a transcript.
+sub-floor. The cost is usually a weaker evidence grade — but not *never* a
+refusal: a verdict graded `inferred` is unprotected by the freeze, so a
+below-floor session whose sidecar is later pruned can be refused at the gate.
+See `design.md`'s Risks section, which carries the reproduction. Prose still
+loses only a grade where the freeze does not intervene, and 0 of 420 sidecar
+metas on this machine lack a transcript, so the case is rare either way.
 
 **Not fixed here**, and staying filed: F27 (a partially readable host binding
 still yields a confident wrong positive — owner is `host.mjs`), F11/F18/F19 (the

@@ -525,7 +525,7 @@ test('a final bucket that cannot be read is not a reviewer that did not run', ()
     { stopped: 1 },
     {},
     // AND AN UNREADABLE SUBSTANCE COUNT. This is the shape every bucket
-    // persisted before the floor existed has: two readable tallies and no
+    // built before the floor existed has: two readable tallies and no
     // `maxRequests` at all. `undefined < FINAL_REVIEW_REQUEST_FLOOR` is `false`,
     // so without this guard such a bucket sails past the floor and grades
     // `independent` on `host` — a missing measurement read as "large enough",
@@ -850,6 +850,39 @@ test('the floor is a boundary — a dispatch that meets it still certifies the r
 
   const under = reviewCensus(dir, { evidence: evidence(unit(FINAL_REVIEW_REQUEST_FLOOR - 1)) });
   assert.deepEqual(under, bare, 'one request short and there is no host answer at all');
+});
+
+test('the floor is high enough to have rejected the alternatives the design rejected', () => {
+  // THE VALUE, NOT JUST THE COMPARISON. Every other test here reads the floor
+  // off the constant, which is right — a bare `=== 5` is a change-detector that
+  // fails on any edit whether or not behaviour changed. But it leaves the value
+  // itself pinned by nothing: the final reviewer measured that a floor of 2, 3
+  // or 4 passes this entire suite, so a silent downgrade to the alternative
+  // `design.md` argues against ships green.
+  //
+  // Pinned behaviourally instead. `design.md` rejects 2 because "pad to 3 and
+  // walk through": a forger who knows a floor of 2 exists needs three requests
+  // to beat it, which is still a dispatch that reviewed nothing. So the rule
+  // this asserts is that a dispatch of 4 requests — comfortably padded, and a
+  // quarter of the smallest review in the corpus — does not certify. That holds
+  // for any floor of 5 or more and fails for every value the design rejected as
+  // too low, without naming a number.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\nAPPROVED\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  const padded = 4;
+  assert.ok(
+    padded < FINAL_REVIEW_REQUEST_FLOOR,
+    `the floor is ${FINAL_REVIEW_REQUEST_FLOOR}, at or below the padded-forgery count this test ` +
+      'exists to reject — see design.md, which rejected 2 for exactly this reason',
+  );
+  const result = reviewCensus(dir, {
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: padded, maxRequests: padded } },
+    }),
+  });
+  assert.deepEqual(result, bare, 'a padded token dispatch is still no host answer');
 });
 
 test('THE CONTROL — a real review still outranks self-check prose, at every observed size', () => {

@@ -685,8 +685,16 @@ gate against a review file stating plainly that no subagent had read it. So sinc
 0.3.34 the host is asked what the dispatch *did*. A unit whose busiest single
 dispatch — counting only the ones you did not stop — made fewer than **5
 requests** certifies nothing; the verdict falls back to the review file's wording
-and grades `inferred`. Being under the floor never refuses on its own, it only
-stops vouching. The number has a corpus behind it: all 24 labelled review
+and grades `inferred`. Being under the floor never refuses on its own — it only
+stops vouching.
+
+**But something downstream can.** A verdict graded `inferred` is not protected by
+the freeze, so a below-floor session whose sidecar directory is later pruned has
+that verdict replaced at `done` by a `self` reading and is refused — even when
+its review file plainly reads independent and a reviewer really ran. It is
+permanent, because a refused pass writes nothing. If that happens the session is
+fine and the gate is wrong: use `forge phase done --final-review-waived "<reason>"`
+and say so in the reason. Filed as F49/F52; the fix is in `set-phase.mjs`. The number has a corpus behind it: all 24 labelled review
 dispatches on the author's machine (2026-07-30) ran 15 requests at the minimum,
 55 median, 173 maximum, none below 15 — and the forgery ran 1.
 

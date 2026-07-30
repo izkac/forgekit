@@ -19,6 +19,13 @@ Falling below the floor SHALL NOT by itself produce a verdict of `self`, and
 SHALL NOT by itself refuse a transition. It routes the decision to the review
 file's prose, which may then refuse on its own grounds.
 
+These are requirements on the census's answer, in a single pass, and are not
+end-to-end guarantees about `forge phase done`. They are stated that way because
+they are not true end to end today: a verdict graded `inferred` is not protected
+by the freeze, so a later pass that reads a manufactured host negative can
+overwrite it and refuse. That is a defect in the freeze qualifier, recorded
+separately, and not licence for this requirement to be read as covering it.
+
 Where every dispatch for a unit was stopped, the operator's refusal SHALL decide
 the unit and the floor SHALL NOT be consulted. Such a unit reports a busiest
 dispatch of zero, which would otherwise fall below any floor and discard a
@@ -62,7 +69,10 @@ measurement the operator themselves produced.
 - **WHEN** the census runs
 - **THEN** the host reports no answer for that unit
 - **AND** the verdict comes from the review file's prose
-- **AND** no transition is refused on account of the missing transcript
+- **AND** the census refuses nothing on account of the missing transcript
+
+  (Scoped to this pass. If the sidecar directory is later emptied as well, the
+  freeze qualifier can still refuse the transition — see the note above.)
 
 ### Requirement: Unit evidence reports the busiest single unstopped dispatch
 
@@ -91,8 +101,8 @@ count is enough.
 
 #### Scenario: Evidence round-tripped through JSON without the new field
 
-- **GIVEN** persisted evidence written before this change, whose buckets carry
-  no busiest-dispatch count
+- **GIVEN** an evidence object built before this change, whose buckets carry no
+  busiest-dispatch count
 - **WHEN** the census reads it
 - **THEN** the host reports no answer for that unit
 - **AND** the verdict comes from the review file's prose

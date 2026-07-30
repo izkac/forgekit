@@ -27,6 +27,11 @@ refuted, so every number here names how it was obtained.
   - Rationale: the review file is written by the party being judged. A sidecar
     cannot be fabricated without actually dispatching a subagent that burns
     tokens and writes a transcript.
+  - **Corrected in 0.3.34.** The rationale above is left as it was written, and
+    it overclaims: dispatching a subagent is cheap, so the record proves a
+    *dispatch* and nothing about a *review*. A throwaway subagent carrying the
+    label made one request and passed the money/auth gate (F33). What the record
+    supports is only that the reviewed party cannot produce it by writing.
 
 - **Decision: the join key is the dispatch `description`, prescribed as `forge-review <unit>`.**
   - Alternatives considered: `toolUseId` (the coordinator never observes it);

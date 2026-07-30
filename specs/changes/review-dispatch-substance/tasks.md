@@ -117,7 +117,10 @@
       0.3.29 CHANGELOG entry that the dispatch record cannot be
       fabricated (it can — dispatching a subagent is cheap; what is now costly is
       dispatching one that does nothing); add the 0.3.34 entry. Verify:
-      `grep` finds no surviving "cannot be fabricated" claim.
+      `grep` finds no surviving *uncorrected* claim. Two archived records keep
+      their original wording with a dated correction appended, since an archive
+      is the historical record; the vendored copy under `packages/cli/vendor/` is
+      gitignored and regenerated from `skills/` at prepack, verified.
 - [x] 4.4 Resolve F33 and F34 with notes naming the floor and the corpus, and
       file a finding recording that the prose rules (F11/F18/F19) now carry more
       traffic than they did. Verify: `forge finding list` shows both resolved.

@@ -59,8 +59,8 @@ evidence object since it was introduced, unread.
     zero", and let the unmeasurable case keep `host` grade.
   - Rationale: deleting a transcript is easier than faking one, so that
     distinction would be an escape hatch rather than a fix. Under the decision
-    above both cases route to prose, so the ambiguity costs a grade and never a
-    refusal.
+    above both cases route to prose, so the ambiguity costs a grade — and, via
+    the freeze qualifier recorded under Risks, can cost a transition too.
 
 - **Decision: `review-verdict.mjs` gets a test file; its behaviour does not
   change.**
@@ -72,8 +72,9 @@ evidence object since it was introduced, unread.
 ## Risks / Trade-offs
 
 - **The floor fires on real work.** Mitigated by the corpus above and by the
-  direction of failure: the floor's own answer is `null`, and `null` never
-  refuses a transition — it routes to prose.
+  direction of failure: the floor's own answer is `null`, which routes to prose
+  rather than refusing. That is true of the floor in isolation and, as the two
+  corrections below record, *not* true of the system end to end.
 
   **Corrected during implement, and the correction matters.** An earlier draft of
   this entry said flatly that a false positive "costs an evidence grade, not a
@@ -85,8 +86,23 @@ evidence object since it was introduced, unread.
   `host`, so the manufactured negative overwrites a durable, correct prose
   verdict and the gate refuses.
 
-  Every session reachable by that chain is one the floor means to decline
-  anyway, so this change ships no *new* wrongful refusal. But the hole is real,
+  **That claim was wrong, and the final reviewer disproved it with a
+  reproduction.** An earlier version of this paragraph said every session
+  reachable by that chain is one the floor means to decline anyway, so the change
+  ships no new wrongful refusal. It does ship one. Fixture: a high-risk change, a
+  review file whose prose reads independent, and one genuine unstopped
+  final-review dispatch of 4 requests — below the floor, so `finish` freezes
+  `independent`/`inferred`. Empty the sidecar directory, leaving the host
+  transcript intact, and `done` refuses. The pre-change product passed that same
+  session at exit 0. It is permanent: `saveSession` runs after the gate's
+  `process.exit(1)`, so the refused pass writes nothing and every retry repeats
+  it, leaving `--final-review-waived` as the only way through — a durable waiver
+  recorded against a session that *was* independently reviewed.
+
+  The floor's own intent for that session is to allow it at grade `inferred`. The
+  refusal is manufactured downstream, by a qualifier this change did not write —
+  but this change is what makes it reachable, and saying otherwise was the same
+  overclaim the change exists to correct. The hole is real,
   it predates this change, and this change makes it reachable far more often by
   producing `inferred` verdicts where `host` ones used to be produced. Recorded
   as a finding rather than fixed here: the fix is in `set-phase.mjs`, which this

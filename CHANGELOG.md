@@ -35,11 +35,14 @@ verdict to the review file's prose at grade `inferred`. Grading a thin dispatch
 0.3.25's coverage cap, reverted in the same entry, cost a grade rather than a
 transition, so the pair is one revert of a refusal and one of a penalty rather
 than two refusals. Here it would refuse correct work for a second reason as well:
-a genuine reviewer
-whose transcript has since been pruned reads as zero requests. Prose is the side
-of this call that can only lose a grade. It is also the side that closes the
-reproduction — the forged session's review file admits no subagent read the
-change, so prose grades it `self` and the gate refuses.
+a genuine reviewer whose transcript has since been pruned reads as zero requests.
+
+Prose is the side of this call that can only lose a grade — against the `self`
+alternative, which is what that comparison is about. It is *not* a claim that
+nothing downstream can refuse; the correction at the end of this entry is about
+exactly that. It is also the side that closes the reproduction — the forged
+session's review file admits no subagent read the change, so prose grades it
+`self` and the gate refuses.
 
 **The measurement is a per-dispatch maximum, not the sum that already existed.**
 `units[*].requests`, the total across a unit's dispatches, would have answered the
@@ -96,17 +99,46 @@ here loses the transition outright: the gate never runs, the cap never applies,
 no digest line is written. The body is wrapped now and a throw answers `null`, the
 same answer as absent and as malformed. Nothing else about the module changed.
 
+**One behaviour change you may notice in the digest.** `stoppedByOperator` is a
+measurement only on `host` grade; everywhere else it is a placeholder `false`.
+Sub-floor units now take the prose path, so a unit whose dispatches included one
+the operator stopped reports `stoppedByOperator: false` where it used to report
+`true` — the host's own record of a declined reviewer stops reaching the durable
+digest for those sessions. That follows from the documented contract rather than
+contradicting it, and it is pinned by test, but no previous entry has had to say
+it out loud.
+
 Still open and filed: prose decides in more sessions than it used to, and F11,
 F18 and F19 all say the prose rules are imperfect — a deliberate trade, since
 prose can misgrade while the host path was certifying forgeries. And
 `set-phase.mjs` protects a frozen verdict from being overwritten only when its
 evidence was `host`, so a below-floor session frozen `independent`/`inferred` at
 `finish`, whose sidecar is then pruned, has that verdict replaced at `done` by
-`self`/`host` and is refused. That hole predates this change and every session
-reachable through it is one the floor means to decline anyway — but this change
-makes it reachable far more often, by producing `inferred` verdicts where `host`
-ones used to be produced. The fix is in `set-phase.mjs`, which this change
-deliberately does not touch.
+`self`/`host` and is refused.
+
+**That path can refuse correct work, and this release makes it reachable.** A
+draft of this entry claimed every session reachable through it was one the floor
+meant to decline anyway. The final reviewer disproved it: a high-risk change with
+a review file whose prose reads independent, and one genuine unstopped
+final-review dispatch of four requests, freezes `independent`/`inferred` at
+`finish`; empty the sidecar directory and `done` refuses, where 0.3.33 passed the
+same session. It is permanent — the gate exits before `saveSession`, so a retry
+repeats it, and `--final-review-waived` is the only way through, recording a
+durable waiver against a session that *was* independently reviewed.
+
+The floor's own answer for that session is to allow it at grade `inferred`; the
+refusal comes from the freeze qualifier, which this change did not write but does
+make reachable, by producing `inferred` verdicts where `host` ones used to be
+produced. The fix is in `set-phase.mjs`, which this change deliberately does not
+touch. **If you hit it, the session is fine and the gate is wrong** — waive it
+and say so in the reason.
+
+Recorded as a finding, with the measurements a fix will need: dropping the
+`evidence === 'host'` qualifier alone breaks the pin that a stale prose verdict
+must not outrank a fresh reading of the same file; testing `next.evidence` alone
+breaks a different one; accepting either side passes the suite and the product
+loop but suppresses a genuine "nothing was dispatched" negative. None of the
+three is obviously right, which is why this release does not pick one.
 
 ## 0.3.33 — 2026-07-30
 
