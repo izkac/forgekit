@@ -14,6 +14,11 @@ A pass that finds no record where no earlier pass found one either SHALL replace
 the verdict normally. Nothing was dispatched, nothing has changed, and the fresh
 reading is as good as the frozen one.
 
+This protection SHALL apply only to a frozen verdict of `independent`. A frozen
+`self` or `none` SHALL refresh freely: a stale negative may never strand a
+session, and the asymmetry is deliberate — losing a measurement costs a grade,
+keeping a stale one costs the work.
+
 Whether the deciding unit was on record SHALL be recorded on the verdict when it
 is frozen, and SHALL NOT be inferred later from the evidence grade. "The record
 was pruned" and "nothing was ever dispatched" are identical in a single reading;

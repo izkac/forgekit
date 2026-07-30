@@ -35,8 +35,11 @@ strictly boolean.
 **Three alternatives were measured and rejected — one of them almost shipped.**
 Dropping the `evidence === 'host'` conjunct outright breaks a correct,
 independently-pinned test: a stale verdict measured from prose alone must not
-outrank a fresher reading of the same durable dispatch record, and that
-conjunct is what stops it. Testing `next.evidence === 'host'` instead of
+outrank a fresher reading of the same durable **review file**, and that
+conjunct is what stops it. The durable artefact there is the file, not the
+dispatch record — prose lives in the session directory and survives pruning,
+which is exactly why a stale reading of it must not outrank a fresh one, and the
+record's impermanence is this whole entry's premise. Testing `next.evidence === 'host'` instead of
 `frozen.evidence === 'host'` breaks a sibling pin the same way. The third —
 `frozen.evidence === 'host' || next.evidence === 'host'` — is the one worth
 naming for a future maintainer: **it was measured to pass the entire suite,
