@@ -698,6 +698,25 @@ and say so in the reason. Filed as F49/F52; the fix is in `set-phase.mjs`. The n
 dispatches on the author's machine (2026-07-30) ran 15 requests at the minimum,
 55 median, 173 maximum, none below 15 — and the forgery ran 1.
 
+**Corrected in 0.3.35.** The paragraph above is left as it shipped, and the
+refusal it warns about no longer happens the way it describes. The frozen
+verdict now also records whether the deciding dispatch was on record *at the
+moment it froze* (`unitOnRecord`); a later pass that finds that record gone,
+where an earlier pass found it, keeps the frozen verdict instead of replacing
+it with a fresh `self` reading. A below-floor session whose sidecar directory
+is pruned *after* it froze `independent`/`inferred` no longer gets refused at
+`done` for that reason, and does not need `--final-review-waived`.
+
+One narrower case still does: if the sidecar record is already gone the *very
+first* time a verdict freezes for a session — nothing measured earlier to
+compare against — the census still grades that first reading `self`/`host`
+("nothing was dispatched"), and `forge phase done` still refuses, even if a
+reviewer genuinely ran and its record simply didn't survive that long. If you
+hit that, the session is fine and the gate is wrong: waive it and say so in
+the reason. That narrower gap is **F12**'s — Forge stamping the review file
+itself when it dispatches the reviewer, so the verdict never depends on
+transcript survival at all — and remains open.
+
 This is **not a security boundary** and is not claimed as one. Someone who knows
 the floor can pad past it. What it removes is the one-line forgery: faking a
 review now costs a subagent that genuinely runs. The real fix is Forge stamping

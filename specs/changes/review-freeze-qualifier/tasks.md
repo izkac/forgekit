@@ -67,7 +67,7 @@
 
 ## 3. The shipped record
 
-- [ ] 3.1 Fold the delta into `specs/specs/review-evidence/spec.md`. The
+- [x] 3.1 Fold the delta into `specs/specs/review-evidence/spec.md`. The
       pre-existing requirement `The verdict outlives its evidence` says verdicts
       "SHALL NOT be recomputed from evidence that may since have been pruned" —
       which this chain violated for `inferred` verdicts and now satisfies. Update
@@ -75,7 +75,7 @@
       scoping note 0.3.34 added to `A dispatch must carry substance` if this
       change makes it untrue. Verify: read both requirements together and say
       whether they now agree.
-- [ ] 3.2 Resolve F49 and F52. Add the 0.3.35 CHANGELOG entry and bump both
+- [x] 3.2 Resolve F49 and F52. Add the 0.3.35 CHANGELOG entry and bump both
       manifests. The entry must correct 0.3.34's operator guidance in
       `docs/usage.md` and its CHANGELOG entry, both of which tell the reader to
       waive a refusal that no longer happens. Verify: `grep` finds no surviving

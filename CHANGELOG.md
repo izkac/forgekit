@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.3.35 — 2026-07-30
+
+### The freeze qualifier now protects an `inferred` verdict too
+
+0.3.34's own final reviewer reproduced the chain its entry had recorded as a
+finding rather than fixed: a high-risk change whose review file's prose reads
+independent, with one genuine unstopped final-review dispatch below the
+request floor, freezes `independent`/`inferred` at `finish`. Empty the sidecar
+directory and take the session to `done`: the host now reads `seen === 0`,
+which `hostFinalReview` grades `self`/`host` ("nothing was dispatched"), the
+frozen verdict was unprotected because `set-phase.mjs`'s keep-the-measurement
+branch only ever checked `frozen.evidence === 'host'`, and the negative
+overwrites it. `forge phase done` refuses the money/auth gate for a session
+that really was independently reviewed — permanently, since `saveSession` runs
+after the gate's `process.exit(1)`, so every retry repeats the refusal and
+`--final-review-waived` was the only way through. This is findings **F49** and
+**F52**, the second extending the first with exactly this reproduction and
+three measured candidate fixes.
+
+**The fix records the fact instead of inferring it, because inference cannot
+tell the two cases apart.** "The record was pruned since the earlier pass" and
+"nothing was ever dispatched, in either pass" produce byte-identical evidence
+in a single reading — `seen === 0`, grade `self`/`host`. Nothing available to
+a single pass distinguishes them; only a comparison against what an *earlier*
+pass saw can. So the frozen verdict now also carries `unitOnRecord`: whether
+the pass that froze it saw the deciding (`final`) unit in the host's dispatch
+record at that moment. The keep rule in `set-phase.mjs` reads
+`frozen.unitOnRecord ?? frozen.evidence === 'host'` instead of testing
+`frozen.evidence === 'host'` alone, and `review-verdict.mjs`'s
+`frozenReviewVerdict` accepts the field as optional and, when present,
+strictly boolean.
+
+**Three alternatives were measured and rejected — one of them almost shipped.**
+Dropping the `evidence === 'host'` conjunct outright breaks a correct,
+independently-pinned test: a stale verdict measured from prose alone must not
+outrank a fresher reading of the same durable dispatch record, and that
+conjunct is what stops it. Testing `next.evidence === 'host'` instead of
+`frozen.evidence === 'host'` breaks a sibling pin the same way. The third —
+`frozen.evidence === 'host' || next.evidence === 'host'` — is the one worth
+naming for a future maintainer: **it was measured to pass the entire suite,
+all three e2e review steps, and close the F49/F52 reproduction outright, and
+it is still wrong.** It suppresses a genuine "nothing was dispatched" host
+negative on the strength of the very reading the freeze exists to distrust — a
+session frozen `independent` from stale prose, then genuinely never reviewed
+in the pass that matters, would still pass. A green suite is not proof of
+correctness when the suite cannot yet express the case that matters; the
+discriminator that catches it (a frozen `independent`/`inferred` whose unit
+was *never* on record must still refresh and still refuse) is a fixture built
+for this release, not one inherited from 0.3.34.
+
+**`unitOnRecord` is optional and boolean-if-present, and no migration is
+needed.** `frozenReviewVerdict` rejects any shape that is not exactly what
+`set-phase.mjs` writes, so a required field would have invalidated every
+verdict frozen before this change, discarding exactly the measurement the
+freeze exists to preserve. Absent means "written before this field existed"
+and takes the `??` fallback to the old `evidence === 'host'` test, which is
+safe precisely because a host-graded independent verdict was always reachable
+only from a present dispatch bucket — the new field subsumes the old test
+rather than contradicting it. Absent must never be read as `false`: that would
+silently assert no dispatch was ever on record for sessions where one plainly
+was. Old sessions take the `??` arm and behave exactly as they did before this
+release.
+
+**What this does not close.** `seen === 0` is still unresolvable in a single
+pass. If the sidecar record is already gone the *very first* time a verdict
+freezes for a session, there is no earlier verdict to compare against, so that
+first reading still grades `self`/`host` and `forge phase done` still refuses
+— even when a reviewer genuinely ran and its record simply didn't survive that
+long. That gap is **F12**'s: Forge stamping the review file itself when it
+dispatches the reviewer, removing the dependency on transcript survival
+altogether. It is unaffected by this release and remains open.
+
+0.3.34's own entry below and `docs/usage.md`'s **But something downstream can**
+paragraph both told operators to file a durable `--final-review-waived` waiver
+against this exact refusal. Both are corrected in place with a note — neither
+had its original text removed, matching how this changelog corrected 0.3.29's
+entry from within 0.3.34's. The guidance survives, narrowed, for the residual
+first-freeze case above.
+
 ## 0.3.34 — 2026-07-30
 
 ### A dispatch that did no work no longer certifies a review
@@ -139,6 +218,16 @@ must not outrank a fresh reading of the same file; testing `next.evidence` alone
 breaks a different one; accepting either side passes the suite and the product
 loop but suppresses a genuine "nothing was dispatched" negative. None of the
 three is obviously right, which is why this release does not pick one.
+
+**Corrected in 0.3.35.** The paragraphs above are left as they shipped. The
+refusal they describe no longer reaches a below-floor session once it has been
+frozen: the verdict now also records whether the deciding dispatch was on
+record *at the moment it froze* (`unitOnRecord`), and a later pass that finds
+the record gone, where an earlier pass found it, keeps the frozen verdict
+instead of replacing it. **If you hit this refusal on a session frozen since
+0.3.35, waiving is no longer the fix — it points at a different, narrower gap
+(F12: a first freeze whose own reading already finds no record), not this
+one.** See the 0.3.35 entry above for the fix and what it does not close.
 
 ## 0.3.33 — 2026-07-30
 
