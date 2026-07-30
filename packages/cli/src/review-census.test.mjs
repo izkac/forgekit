@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { CENSUS_RULE, reviewCensus } from './review-census.mjs';
+import { CENSUS_RULE, FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -301,7 +301,8 @@ test('the real corpus case that forced the revert', () => {
  * produces. Pass them explicitly only when the point of the test *is* that they
  * differ from the units (the adoption gate below).
  *
- * @param {{ units?: Record<string, {dispatched: number, stopped: number, requests: number}>,
+ * @param {{ units?: Record<string, {dispatched: number, stopped: number, requests: number,
+ *     maxRequests?: number}>,
  *   seen?: number, prescribed?: number, available?: boolean, reason?: string }} [spec]
  */
 function evidence(spec = {}) {
@@ -628,6 +629,84 @@ test('a stopped dispatch followed by a completed one is independent, stop still 
   });
   assert.equal(bothStopped.finalReview, 'self');
   assert.equal(bothStopped.stoppedByOperator, true);
+});
+
+test('a token dispatch does not certify the review — the prose answers instead', () => {
+  // F33, reproduced. A throwaway subagent dispatched as `forge-review final
+  // <sessionId>` — one request, reviewing nothing — is a dispatch the operator
+  // did not stop, so the census answered `independent` on `host` grade and the
+  // money/auth done gate let the session through, against a review file saying
+  // in plain English that no subagent read the change. Dispatching a subagent
+  // is cheap; what the floor makes expensive is dispatching one that runs.
+  //
+  // The `self` here must come from the PROSE and not from the floor — the
+  // floor's own answer is `null`, "the host cannot say". So the fixture is
+  // graded by the prose rule alone first, and the whole census is then compared
+  // field for field against that reading: this test cannot pass by the floor
+  // inventing a verdict of its own, and goes red if the floor ever refuses.
+  const dir = sessionWith(
+    {},
+    '# Final review\n\n' +
+      '**Reviewer:** the coordinator. No final-reviewer subagent read this change;\n' +
+      'the dispatch below is a stub.\n\n' +
+      '**Verdict: APPROVED**\n',
+  );
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+  assert.equal(bare.finalReviewEvidence, 'inferred');
+
+  const forged = reviewCensus(dir, {
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests: 1, maxRequests: 1 } },
+    }),
+  });
+  assert.equal(forged.finalReview, 'self');
+  assert.equal(forged.finalReviewEvidence, 'inferred', 'the host has no answer to give');
+  assert.deepEqual(forged, bare, 'exactly what the prose rule alone returns');
+});
+
+test('the floor is a boundary — a dispatch that meets it still certifies the review', () => {
+  // Both edges, read off the constant rather than typed as a number: a count AT
+  // the floor is enough, one below it is not. Nothing else in this file
+  // exercises the comparison itself, so without this a `<=` for `<` — or a
+  // floor moved to any other value — is invisible. The fixture's prose says
+  // `self`, so the row that expects `independent` cannot pass by falling
+  // through to it.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\nAPPROVED\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  /** One unstopped dispatch that made `n` requests — so `requests` is `n` too. */
+  const unit = (n) => ({ units: { final: { dispatched: 1, stopped: 0, requests: n, maxRequests: n } } });
+
+  const met = reviewCensus(dir, { evidence: evidence(unit(FINAL_REVIEW_REQUEST_FLOOR)) });
+  assert.equal(met.finalReview, 'independent', 'at the floor the host still decides');
+  assert.equal(met.finalReviewEvidence, 'host');
+
+  const under = reviewCensus(dir, { evidence: evidence(unit(FINAL_REVIEW_REQUEST_FLOOR - 1)) });
+  assert.deepEqual(under, bare, 'one request short and there is no host answer at all');
+});
+
+test("the operator's refusal outranks the floor — a stopped-only unit is still self", () => {
+  // A unit whose every dispatch was stopped reports `maxRequests: 0` by the
+  // collector's own rule: a stopped record never contributes its substance.
+  // Applying the floor to that zero would route the operator's recorded refusal
+  // to the prose of the file it contradicts — and this fixture's prose claims
+  // an outside reader, which is exactly what such a session's file would say.
+  // The refusal is a measurement, so it keeps `host` grade and the flag.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  assert.equal(
+    reviewCensus(dir).finalReview,
+    'independent',
+    'fixture: prose alone says independent',
+  );
+
+  const declined = reviewCensus(dir, {
+    evidence: evidence({ units: { final: { dispatched: 1, stopped: 1, requests: 40, maxRequests: 0 } } }),
+  });
+  assert.equal(declined.finalReview, 'self');
+  assert.equal(declined.finalReviewEvidence, 'host', 'measured, not handed back to the prose');
+  assert.equal(declined.stoppedByOperator, true);
 });
 
 test('the census stamps which rule produced its verdict', () => {

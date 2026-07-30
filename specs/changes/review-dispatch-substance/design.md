@@ -72,9 +72,28 @@ evidence object since it was introduced, unread.
 ## Risks / Trade-offs
 
 - **The floor fires on real work.** Mitigated by the corpus above and by the
-  direction of failure: a false positive costs an evidence grade, not a
-  transition. `decisions.md` records that the floor must be re-measured against
-  a real corpus before it is moved — the rule F11 was filed to establish.
+  direction of failure: the floor's own answer is `null`, and `null` never
+  refuses a transition — it routes to prose.
+
+  **Corrected during implement, and the correction matters.** An earlier draft of
+  this entry said flatly that a false positive "costs an evidence grade, not a
+  transition". Group 2a's reviewer produced a counterexample from
+  `set-phase.test.mjs`: a below-floor dispatch freezes `independent`/`inferred`
+  at `finish`; if the sidecar is then pruned, the `done` pass finds the bucket
+  absent — `hostFinalReview`'s one genuine negative — and reads `self`/`host`.
+  `set-phase.mjs:443` only protects a frozen verdict when its evidence was
+  `host`, so the manufactured negative overwrites a durable, correct prose
+  verdict and the gate refuses.
+
+  Every session reachable by that chain is one the floor means to decline
+  anyway, so this change ships no *new* wrongful refusal. But the hole is real,
+  it predates this change, and this change makes it reachable far more often by
+  producing `inferred` verdicts where `host` ones used to be produced. Recorded
+  as a finding rather than fixed here: the fix is in `set-phase.mjs`, which this
+  change deliberately does not touch.
+
+  `decisions.md` records that the floor must be re-measured against a real corpus
+  before it is moved — the rule F11 was filed to establish.
 - **Prose becomes more reachable.** Every sub-floor dispatch now lands on the
   prose rules, which F11, F18 and F19 all say are imperfect. This is a
   deliberate trade: the prose path can misgrade, the host path was certifying

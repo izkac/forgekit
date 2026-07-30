@@ -194,6 +194,30 @@ const REJECTION_RE = /\bREJECT(ED)?\b/;
 const FINAL_REVIEW_UNIT = 'final';
 
 /**
+ * The requests one dispatch must have made before it can certify a review.
+ *
+ * MEASURED, NOT PICKED. `readReviewerSidecars` over all 24 `forge-review`
+ * dispatches on this machine (2026-07-30): minimum 15 requests, median 55,
+ * maximum 173, none below 15. The forged dispatch that prompted this made 1.
+ * Five sits well under the observed minimum and well over the forgery, so it
+ * separates them without sitting near either. The figures are in
+ * `specs/changes/review-dispatch-substance/design.md`.
+ *
+ * RE-MEASURE AGAINST A REAL CORPUS BEFORE MOVING IT — real reviews and token
+ * ones both, before the change ships and not after it has graded a session.
+ * That rule is F11, still open, and it was filed because 0.3.24 tightened a
+ * classifier in front of this gate on a number nobody had measured: 0.3.26
+ * reverted it, and what it cost in between was correct work refused. Raising
+ * this is the direction that starts refusing short reviews of small changes.
+ *
+ * Not a security boundary, and not claimed as one: a forger who reads this can
+ * pad to five. It ends the one-line forgery — the cost of faking a review
+ * becomes a subagent that genuinely runs — and F12's stamp written at dispatch
+ * time is still the real fix.
+ */
+export const FINAL_REVIEW_REQUEST_FLOOR = 5;
+
+/**
  * What the host's record says about the final review, or `null` when it cannot
  * say and the prose rule must answer instead.
  *
@@ -238,7 +262,9 @@ const FINAL_REVIEW_UNIT = 'final';
  *
  * @param {unknown} evidence the object `reviewEvidence` returns
  * @returns {{ finalReview: 'independent' | 'self', stoppedByOperator: boolean } | null}
- *   `null` means "the host cannot answer" and never "no reviewer ran"
+ *   `null` means "the host cannot answer" and never "no reviewer ran" — the
+ *   fourth way to reach it is a dispatch below `FINAL_REVIEW_REQUEST_FLOOR`,
+ *   at the end of this function
  */
 function hostFinalReview(evidence) {
   if (!evidence || typeof evidence !== 'object') return null;
@@ -274,10 +300,36 @@ function hostFinalReview(evidence) {
   ) {
     return null;
   }
-  return {
-    finalReview: bucket.stopped >= bucket.dispatched ? 'self' : 'independent',
-    stoppedByOperator: bucket.stopped > 0,
-  };
+  // THE `self` BRANCH IS EXEMPT FROM THE FLOOR BELOW, and that is not an
+  // oversight. A unit whose every dispatch was stopped is `self` because the
+  // operator declined the reviewer — a decision the host recorded, which this
+  // module is required to report and the prose has no standing to overturn.
+  // Routing it to prose on a low request count would let a review file the
+  // operator's own refusal contradicts answer `independent` instead. Substance
+  // is a question about a reviewer that ran; nothing here ran.
+  if (bucket.stopped >= bucket.dispatched) {
+    return { finalReview: 'self', stoppedByOperator: bucket.stopped > 0 };
+  }
+  // A DISPATCH IS NOT A REVIEW. Reaching here means a dispatch the operator did
+  // not stop exists, which is all this function used to ask: a throwaway
+  // subagent labelled `forge-review final <sessionId>` — one request, reading
+  // nothing — certified the review and passed the money/auth gate against a
+  // file that said no subagent had read the change (F33). So the busiest single
+  // unstopped dispatch must also look like work. `maxRequests`, never
+  // `requests`: the sum is assembled out of dispatches that each reviewed
+  // nothing, and it counts stopped ones, so a long dispatch the operator killed
+  // would vouch for a token one beside it. Some ONE dispatch has to have done
+  // the work.
+  //
+  // BELOW THE FLOOR THE ANSWER IS `null` — "the host cannot say" — AND NEVER
+  // `self`. `self` here would refuse a transition at the money/auth gate on a
+  // request count, and a genuine reviewer whose transcript was pruned reports
+  // zero requests: this module would then be refusing correct work on an
+  // absence, the failure it has now been reverted for twice. Prose is the side
+  // of this call that can only cost a grade. It grades `inferred`, and the
+  // forged session's own review file is what then decides it.
+  if (bucket.maxRequests < FINAL_REVIEW_REQUEST_FLOOR) return null;
+  return { finalReview: 'independent', stoppedByOperator: bucket.stopped > 0 };
 }
 
 /**
