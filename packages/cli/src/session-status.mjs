@@ -45,7 +45,7 @@ const ambiguity = resolvedSession.ambiguous
         phase: c.phase ?? null,
         unreadable: c.unreadable === true,
       })),
-      note: 'forge phase done|finish will refuse until you pass --session',
+      note: 'forge phase done|finish|skipped, checkpoint, score --write, brief stamp and review-label will refuse until you pass --session',
     }
   : null;
 if (!resolvedSession.id) {

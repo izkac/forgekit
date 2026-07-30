@@ -637,3 +637,46 @@ test('a fleet inbox note is not work the session did', () => {
   });
   assert.equal(fs.existsSync(dir), false, 'an inbox note must not make a session unclearable');
 });
+
+test('forge cleanup says why a named session survived', () => {
+  // Round 4. `--session <id>` is a request about one session, so an empty
+  // `removed` list and exit 0 is the same silence the typo check was written to
+  // end — and it fired on the ordinary cases: a session younger than retention
+  // (which is the remedy the tool itself prints) and one whose session.json
+  // could not be read.
+  const root = tmp('forge-cleanup-why-');
+  const now = new Date().toISOString();
+  const fresh = path.join(root, '.forge', 'sessions', 'fresh');
+  fs.mkdirSync(fresh, { recursive: true });
+  fs.writeFileSync(
+    path.join(fresh, 'session.json'),
+    `${JSON.stringify({ id: 'fresh', slug: 'fresh', phase: 'implement', createdAt: now, updatedAt: now })}\n`,
+  );
+  const broken = path.join(root, '.forge', 'sessions', 'broken');
+  fs.mkdirSync(broken, { recursive: true });
+  fs.writeFileSync(path.join(broken, 'session.json'), '{"id":"bro');
+
+  const cleanup = path.join(path.dirname(SESSION_STATUS), 'cleanup-sessions.mjs');
+  const run = (...args) =>
+    spawnSync(process.execPath, [cleanup, ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-why-fleet-'), 's') },
+    });
+
+  const young = run('--session', 'fresh', '--include-unfinished');
+  assert.match(young.stderr, /Kept fresh/);
+  assert.match(young.stderr, /retention is \d+ days/, 'and says what would change it');
+  assert.equal(fs.existsSync(fresh), true);
+
+  const unreadable = run('--session', 'broken');
+  assert.match(unreadable.stderr, /Kept broken/);
+  assert.match(unreadable.stderr, /no readable session\.json/);
+
+  // `--session` with nothing after it crashed with an uncaught
+  // ERR_INVALID_ARG_TYPE, introduced by the typo validation itself.
+  const bare = run('--session');
+  assert.notEqual(bare.status, 0);
+  assert.match(bare.stderr, /--session needs a session id/);
+  assert.equal(/ERR_INVALID_ARG_TYPE/.test(bare.stderr), false, 'and must not be a stack trace');
+});

@@ -8,6 +8,7 @@ description: Explicitly skip Forge for this task
 User opted out of Forge for **this task only**.
 
 1. If active session exists: `forge phase skipped`
+   (with more than one session open this refuses and lists them — re-run with `--session <id>`)
 2. Do **not** brainstorm or plan
 3. Execute the request under normal project rules
 

@@ -251,8 +251,14 @@ steps** live next to the plan: `openspec/changes/<name>/spine.json` + `e2e.json`
 
 **Session ID:** `<UTC-compact>-<kebab-slug>-<6-hex>`
 
-**Retention:** 14 days. Finished sessions (`phase: done|skipped`) are removed
-on cleanup. Active session is never removed unless `--include-active`.
+**Retention:** 14 days. Finished sessions (`phase: done|skipped`) are removed on
+the next `forge cleanup`; the session `.forge/active.json` names is kept unless
+you pass `--include-active`. An *unfinished* session is never aged out while it
+holds anything beyond its own `session.json`, `status.json` and `inbox/` — pass
+`--include-unfinished --session <id>` to remove one anyway, which also overrides
+the active-session protection for that one id. Nothing removes a session before
+its retention window, whatever flags you pass. `--session <id>` scopes the whole
+run to that session.
 
 Optional `cursorChatId` on `session.json` when a hook can supply it — not
 required for correctness.

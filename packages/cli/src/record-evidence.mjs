@@ -68,15 +68,15 @@ export function parseArgs(argv) {
  * @param {{ task: string, tier: string, command: string, exit: number, summary: string, runAt: string }} fields
  * @returns {string}
  */
-export function buildEvidence({ task, tier, command, exit, summary, runAt, session }) {
+export function buildEvidence({ task, tier, command, exit, summary, runAt, session, sessionFrom }) {
   return [
     `# Test evidence — Task ${task}`,
     '',
-    // Which session recorded it. Without this, a re-run cannot tell its own
-    // earlier evidence from a neighbour's, so the guard against clobbering
-    // somebody else's run had to refuse *every* overwrite in a project with two
-    // sessions open — freezing whatever ran first, failing or not.
-    ...(session ? [`- **Session:** ${session}`] : []),
+    // Which session this was recorded against, and **how that was decided** —
+    // the second half is the honest part. The id alone is written from the same
+    // variable as the path, so it can only ever agree with itself; what a reader
+    // needs to know is whether it was named or guessed from the pointer.
+    ...(session ? [`- **Session:** ${session}${sessionFrom ? ` (${sessionFrom})` : ''}`] : []),
     `- **Tier:** ${tier}`,
     `- **Command:** \`${command}\``,
     `- **Exit code:** ${exit}`,
@@ -194,34 +194,33 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
   const taskDir = path.join(sessionDir, 'tasks', opts.task);
   const filePath = path.join(taskDir, 'test-evidence.md');
 
-  // OVERWRITING SOMEBODY ELSE'S RUN IS NOT RECOVERABLE. This file is
-  // gitignored, `score.mjs` reads it into the evidence ratio, and that lands in
+  // OVERWRITING SOMEBODY ELSE'S RUN IS NOT RECOVERABLE. The file is gitignored,
+  // `score.mjs` reads its exit code into the evidence ratio, and that lands in
   // the durable ledger — so a guessed session that clobbers an existing
   // `test-evidence.md` destroys a record and moves another change's score.
   //
-  // The question is whose evidence is already there, not how many sessions the
-  // project happens to have open. Keying on the latter refused every re-run of
-  // `implement.md`'s bare command in a two-session project — freezing the first
-  // run's evidence, failing or not, and printing "recording against A"
-  // immediately before refusing to.
+  // THE GUARD CANNOT ASK THE FILE WHOSE IT IS. A previous version wrote a
+  // `- **Session:** <id>` header and compared it against the session it had
+  // resolved to. Both come from the same variable — the header is written from
+  // `sessionId`, and the path is `sessions/<sessionId>/tasks/…` — so the
+  // comparison was a tautology that could only fire on files the product cannot
+  // produce. It read as a guard and was a no-op: an agent working on A ran the
+  // bare command, the pointer said B, and B's evidence was replaced by A's
+  // failing run at exit 0, with the file still claiming it was B's.
+  //
+  // When the session was a guess, there is nothing on disk that knows better.
+  // So: creating a new file on a guess is a stray file and only warns;
+  // *replacing* one refuses, and `--session` is the way through — naming the
+  // session makes the resolution certain, after which re-runs overwrite freely.
   if (sessionAmbiguous && fs.existsSync(filePath)) {
-    let owner = null;
-    try {
-      owner = /^- \*\*Session:\*\* (.+)$/m.exec(fs.readFileSync(filePath, 'utf8'))?.[1] ?? null;
-    } catch {
-      owner = null;
-    }
-    // `null` is evidence written before this field existed: unattributable, and
-    // this is the one branch where guessing wrong destroys a record.
-    if (owner !== sessionId) {
-      return {
-        exitCode: 1,
-        message:
-          `Refusing to overwrite evidence for task ${opts.task} that ${owner ? `belongs to session ${owner}` : 'names no session'}, ` +
-          `while more than one session is unfinished and this run resolved to ${sessionId}.\n` +
-          'Pass --session <id> to say which one this run belongs to.',
-      };
-    }
+    return {
+      exitCode: 1,
+      message:
+        `Refusing to overwrite existing evidence for task ${opts.task} in session ${sessionId} ` +
+        'while more than one session is unfinished — this session was resolved from ' +
+        '.forge/active.json, not named, so it may not be the one this run belongs to.\n' +
+        'Re-run with --session <id>. Naming it also lets later runs of the same task overwrite freely.',
+    };
   }
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
@@ -229,6 +228,11 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     buildEvidence({
       task: opts.task,
       session: sessionId,
+      sessionFrom: opts.session
+        ? 'named with --session'
+        : sessionAmbiguous
+          ? 'resolved from .forge/active.json while several sessions were open'
+          : null,
       tier: opts.tier ?? DEFAULT_TIER,
       command: opts.command,
       exit: testExit,

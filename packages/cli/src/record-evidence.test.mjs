@@ -262,44 +262,84 @@ test('--forge-dir overrides the .forge root', () => {
   }
 });
 
-test('a re-run updates its own evidence, and will not touch another session’s', () => {
-  // Post-publish. The overwrite guard keyed on `sessionAmbiguous` — a property
-  // of the *project*, not of the resolution — so every re-run of
-  // `implement.md`'s bare command exited 1 in any two-session project, freezing
-  // whatever ran first, failing or not. It printed "recording against A"
-  // immediately before refusing to.
+test('a guessed session cannot replace evidence another run produced', () => {
+  // ROUND 4, and the reason it survived mutation: the previous guard compared a
+  // `- **Session:** <id>` header against the session it had resolved to, but
+  // the header is written from `sessionId` and the path is
+  // `sessions/<sessionId>/tasks/…` — the same variable. It could only ever
+  // agree with itself. The tests passed because they hand-planted a header
+  // naming a *different* session inside a session's own directory, a state no
+  // code path produces.
   //
-  // The question is whose evidence is already there. That is now written into
-  // the file, so a re-run can tell.
-  const dir = tmp('forge-evidence-owner-');
+  // So this drives the product end to end and never writes an evidence file by
+  // hand: session B records, then a run that resolves to B *by guess* must not
+  // be able to replace it.
+  const dir = tmp('forge-evidence-clobber-');
   try {
-    const forgeDir = makeForgeFixture(dir, 'sess-a');
-    // A second open session is what makes the resolution a guess.
-    fs.mkdirSync(path.join(forgeDir, 'sessions', 'sess-b', 'tasks'), { recursive: true });
-    fs.writeFileSync(
-      path.join(forgeDir, 'sessions', 'sess-b', 'session.json'),
-      `${JSON.stringify({ id: 'sess-b', slug: 'b', phase: 'implement' })}\n`,
+    const forgeDir = makeForgeFixture(dir, 'sess-b');
+    for (const id of ['sess-a', 'sess-b']) {
+      fs.mkdirSync(path.join(forgeDir, 'sessions', id, 'tasks'), { recursive: true });
+      fs.writeFileSync(
+        path.join(forgeDir, 'sessions', id, 'session.json'),
+        `${JSON.stringify({ id, slug: id, phase: 'implement' })}\n`,
+      );
+    }
+
+    const mine = runRecordEvidence(makeOpts({ summary: "B's real run" }), dir, FIXED_NOW);
+    assert.equal(mine.exitCode, 0, mine.message);
+    const file = evidencePath(forgeDir, 'sess-b', '03-record-evidence');
+    assert.match(fs.readFileSync(file, 'utf8'), /B's real run/);
+
+    // The bare command again — resolves to B from the pointer, which is a guess.
+    const guessed = runRecordEvidence(
+      makeOpts({ summary: "A's failing run", exit: 1, allowFail: true }),
+      dir,
+      FIXED_NOW,
     );
-    fs.writeFileSync(
-      path.join(forgeDir, 'sessions', 'sess-a', 'session.json'),
-      `${JSON.stringify({ id: 'sess-a', slug: 'a', phase: 'implement' })}\n`,
+    assert.equal(guessed.exitCode, 1, 'a guessed session must not replace existing evidence');
+    assert.match(fs.readFileSync(file, 'utf8'), /B's real run/, 'and must not have replaced it');
+    assert.match(guessed.message, /--session/, 'and must name the way through');
+
+    // Naming the session makes the resolution certain, and then it overwrites.
+    const named = runRecordEvidence(
+      makeOpts({ summary: 'B, named', session: 'sess-b' }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(named.exitCode, 0, `naming the session must unblock the re-run:\n${named.message}`);
+    assert.match(fs.readFileSync(file, 'utf8'), /B, named/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the evidence header records how the session was decided, not who ran the test', () => {
+  // The id alone is written from the same variable as the path, so it can only
+  // agree with itself and tells a reader nothing. What it can honestly say is
+  // whether the session was named or guessed from the pointer.
+  const dir = tmp('forge-evidence-provenance-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-b');
+    for (const id of ['sess-a', 'sess-b']) {
+      fs.mkdirSync(path.join(forgeDir, 'sessions', id, 'tasks'), { recursive: true });
+      fs.writeFileSync(
+        path.join(forgeDir, 'sessions', id, 'session.json'),
+        `${JSON.stringify({ id, slug: id, phase: 'implement' })}\n`,
+      );
+    }
+
+    runRecordEvidence(makeOpts({ session: 'sess-a' }), dir, FIXED_NOW);
+    assert.match(
+      fs.readFileSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence'), 'utf8'),
+      /- \*\*Session:\*\* sess-a \(named with --session\)/,
     );
 
-    const first = runRecordEvidence(makeOpts({ summary: 'first, failing', exit: 1, allowFail: true }), dir, FIXED_NOW);
-    assert.equal(first.exitCode, 0, first.message);
-
-    // Re-running against the same session must update it.
-    const second = runRecordEvidence(makeOpts({ summary: 'second, passing' }), dir, FIXED_NOW);
-    assert.equal(second.exitCode, 0, `a re-run of your own evidence must not be refused:\n${second.message}`);
-    const file = evidencePath(forgeDir, 'sess-a', '03-record-evidence');
-    assert.match(fs.readFileSync(file, 'utf8'), /second, passing/);
-
-    // Evidence that belongs to another session is still protected.
-    fs.writeFileSync(file, '# Test evidence\n- **Session:** sess-b\n- **Summary:** theirs\n');
-    const clobber = runRecordEvidence(makeOpts({ summary: 'mine' }), dir, FIXED_NOW);
-    assert.equal(clobber.exitCode, 1, 'another session’s evidence must not be overwritten on a guess');
-    assert.match(fs.readFileSync(file, 'utf8'), /theirs/);
-    assert.match(clobber.message, /sess-b/);
+    runRecordEvidence(makeOpts(), dir, FIXED_NOW);
+    assert.match(
+      fs.readFileSync(evidencePath(forgeDir, 'sess-b', '03-record-evidence'), 'utf8'),
+      /- \*\*Session:\*\* sess-b \(resolved from \.forge\/active\.json while several sessions were open\)/,
+      'a guessed session must say so in the file it writes',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

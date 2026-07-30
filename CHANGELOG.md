@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.3.32 — 2026-07-30
+
+### `forge evidence`'s overwrite guard was a no-op
+
+0.3.31 tried to tell your own re-run from a clobber by writing a
+`- **Session:** <id>` header and comparing it against the session it had
+resolved to. Both come from the same variable — the header from `sessionId`,
+the path from `sessions/<sessionId>/tasks/…` — so the comparison was a tautology
+that could only fire on files the product cannot produce.
+
+It read as a guard and permitted exactly what it was written to stop: with two
+sessions open and the pointer naming B, an agent working on A ran the bare
+command from `implement.md` and **B's tier-2 evidence was replaced by A's
+failing run at exit 0**, the file still claiming it was B's. `score.mjs` reads
+that exit code into B's scorecard and durable ledger, and the file is gitignored.
+0.3.30 refused this; 0.3.31 permitted it silently.
+
+There is nothing on disk that knows better when the session was a guess, so the
+rule is back to what it was: creating a new file on a guess warns, *replacing*
+one refuses, and `--session <id>` is the way through — naming the session makes
+the resolution certain, after which re-runs overwrite freely. The header now
+records **how** the session was decided (`named with --session` /
+`resolved from .forge/active.json while several sessions were open`), which is a
+fact about the resolution rather than a claim about who ran the test.
+
+The tests that let this ship passed for the wrong reason: both hand-planted a
+header naming a different session inside a session's own directory, a state no
+code path reaches. They now drive the product end to end, and they kill 0.3.31's
+guard.
+
+### Smaller
+
+- `forge cleanup --session <id>` says why a named session survived. Answering a
+  request about one session with an empty list and exit 0 was the same silence
+  the typo check was written to end, and it fired on the ordinary cases — a
+  session younger than retention, or one whose `session.json` could not be read.
+- `forge cleanup --session` with no value crashed with an uncaught
+  `ERR_INVALID_ARG_TYPE`, introduced by that typo check.
+- `forge status` said only `done|finish` refuse on an ambiguous session;
+  `skipped`, `checkpoint`, `score --write`, `brief stamp` and `review-label` do
+  too. `docs/forge.md`'s retention paragraph predated
+  `--include-unfinished --session`.
+- `/forge:skip` and the triage reference ran a bare `forge phase skipped`, which
+  0.3.31 made refuse with several sessions open; they now say so.
+- `skills/forge/SKILL.md` told you to record a declined final review with
+  `forge defer`, contradicting `docs/usage.md`. An open deferral costs the full
+  10 deferral points and makes `forge integrity-check` refuse; it now points at
+  `forge phase done --final-review-waived "<reason>"`.
+
 ## 0.3.31 — 2026-07-29
 
 ### Follow-ups from 0.3.30's post-publish review

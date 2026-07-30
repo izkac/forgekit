@@ -40,7 +40,13 @@ const includeUnfinished = args.has('--include-unfinished');
  * operator never named. It also gates `--include-unfinished`.
  */
 const argv = process.argv.slice(2);
-const onlySession = argv.includes('--session') ? argv[argv.indexOf('--session') + 1] : null;
+const onlySession = argv.includes('--session') ? (argv[argv.indexOf('--session') + 1] ?? null) : null;
+if (argv.includes('--session') && !onlySession) {
+  // `--session` with nothing after it crashed with an uncaught
+  // ERR_INVALID_ARG_TYPE out of path.join — introduced by the validation below.
+  process.stderr.write('--session needs a session id.\n');
+  process.exit(1);
+}
 if (onlySession !== null && !fs.existsSync(path.join(SESSIONS_DIR, onlySession, 'session.json'))) {
   // A typo used to be a silent no-op: exit 0, nothing removed, no message.
   process.stderr.write(`No such session: ${onlySession}\n`);
@@ -177,5 +183,21 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
   }
 }
 
+// A NAMED SESSION THAT SURVIVES MUST SAY WHY. `--session <id>` is a request
+// about one session, so answering it with an empty `removed` list and exit 0 is
+// the same silence the typo check above was written to end — and it fires on
+// the ordinary cases: a session younger than the retention window, which is the
+// remedy this tool itself prints, or one whose `session.json` could not be read.
+if (onlySession && !removed.some((r) => r.sessionId === onlySession)) {
+  const why = kept.find((k) => k.sessionId === onlySession);
+  process.stderr.write(
+    why
+      ? `Kept ${onlySession}: phase ${why.phase ?? 'unknown'}, ${why.ageDays} days old — ` +
+          `retention is ${RETENTION_DAYS} days. Nothing removes a session before its ` +
+          `retention window, whatever flags you pass.\n`
+      : `Kept ${onlySession}: it was not considered at all — its directory has no readable ` +
+          `session.json.\n`,
+  );
+}
 process.stdout.write(JSON.stringify({ removed, kept, dryRun, retentionDays: RETENTION_DAYS }, null, 2));
 process.stdout.write('\n');

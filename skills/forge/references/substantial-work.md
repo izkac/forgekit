@@ -26,7 +26,7 @@ tracked OpenSpec change. Smaller work skips Forge entirely (direct execution).
 
 1. If an active Forge session exists, run:
    ```bash
-   forge phase skipped
+   forge phase skipped        # refuses if several sessions are open — add --session <id>
    ```
 2. Do **not** start brainstorm or plan for this task.
 3. Proceed with the user's request under normal project rules.
