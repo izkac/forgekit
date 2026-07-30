@@ -235,7 +235,63 @@ test('stoppedByOperator must be an actual boolean, and false is one', () => {
   );
 });
 
-test('every legal combination round-trips to exactly the three fields', () => {
+test('unitOnRecord is returned when the session carries it as a boolean', () => {
+  // Both booleans must survive the round trip — `false` is a legal answer
+  // here just as it is for `stoppedByOperator`.
+  for (const unitOnRecord of [true, false]) {
+    const got = frozenReviewVerdict({
+      reviewVerdict: verdict({ final: 'independent', evidence: 'host', unitOnRecord }),
+    });
+    assert.notEqual(got, null, `unitOnRecord ${unitOnRecord} was rejected outright`);
+    assert.equal(got.unitOnRecord, unitOnRecord);
+  }
+});
+
+test('a non-boolean unitOnRecord rejects the whole verdict, like every other field', () => {
+  // `null` is deliberately in this list and is not a special case the way it
+  // is for `final`: there is no legal `null` reading for `unitOnRecord` — the
+  // only way to say "no opinion" is to leave the field off the object
+  // entirely, which is the compatibility case covered separately below.
+  for (const unitOnRecord of [
+    'yes',
+    0,
+    1,
+    null,
+    'true',
+    'false',
+    '',
+    {},
+    [],
+    Number.NaN,
+    new Boolean(true),
+  ]) {
+    assert.equal(
+      frozenReviewVerdict({
+        reviewVerdict: verdict({ final: 'independent', evidence: 'host', unitOnRecord }),
+      }),
+      null,
+      `accepted unitOnRecord ${JSON.stringify(unitOnRecord) ?? String(unitOnRecord)}`,
+    );
+  }
+});
+
+test('a verdict frozen before unitOnRecord existed is still a valid measurement, and reads undefined — never false', () => {
+  // The compatibility case this field exists for: every session frozen before
+  // this change has no opinion on whether the unit was on record, and that
+  // must come back as "no opinion" (`undefined`), never as an invented
+  // `false`. A `false` here would assert "no dispatch was on record" for a
+  // session where one may well have been — the exact absence-into-a-negative
+  // collapse this field was added to stop.
+  const got = frozenReviewVerdict({
+    reviewVerdict: verdict({ final: 'independent', evidence: 'host' }),
+  });
+
+  assert.notEqual(got, null, 'a verdict with no unitOnRecord field must still be a valid measurement');
+  assert.equal(got.unitOnRecord, undefined);
+  assert.notEqual(got.unitOnRecord, false);
+});
+
+test('every legal final/evidence/stoppedByOperator combination round-trips without an absent unitOnRecord leaking in as a key', () => {
   let combinations = 0;
 
   for (const final of LEGAL_FINALS) {
@@ -248,7 +304,7 @@ test('every legal combination round-trips to exactly the three fields', () => {
         assert.deepEqual(
           Object.keys(got).sort(),
           ['evidence', 'final', 'stoppedByOperator'],
-          `extra or missing keys for ${JSON.stringify(frozen)}`,
+          `an absent unitOnRecord must not appear as a key for ${JSON.stringify(frozen)}`,
         );
         combinations += 1;
       }
@@ -265,20 +321,32 @@ test('extra keys on the verdict are dropped, not passed through', () => {
   // The three consumers read the returned object, not the stored one. Passing
   // the stored object straight through would let a hand-edited `session.json`
   // smuggle fields past a validator whose whole job is that they cannot.
+  //
+  // `unitOnRecord` is no longer one of the dropped keys — it is the fourth
+  // field this validator recognises — so the fixture carries a real one
+  // alongside the genuinely extra keys, to prove the two are told apart
+  // rather than both surviving or both being stripped.
   const stored = {
     final: 'independent',
     evidence: 'host',
     stoppedByOperator: true,
+    unitOnRecord: true,
     measuredAt: '2026-07-30T08:00:00.000Z',
     note: 'hand edited',
     stoppedByOperatorReason: 'nope',
   };
   const got = frozenReviewVerdict({ reviewVerdict: stored });
 
-  assert.deepEqual(got, { final: 'independent', evidence: 'host', stoppedByOperator: true });
+  assert.deepEqual(got, {
+    final: 'independent',
+    evidence: 'host',
+    stoppedByOperator: true,
+    unitOnRecord: true,
+  });
   assert.notEqual(got, stored, 'the stored object must not be handed back by reference');
   assert.equal(Object.hasOwn(got, 'note'), false);
   assert.equal(Object.hasOwn(got, 'measuredAt'), false);
+  assert.equal(Object.hasOwn(got, 'stoppedByOperatorReason'), false);
 });
 
 test('a frozen session is read without throwing', () => {
@@ -360,6 +428,16 @@ test('a hostile session object never costs the caller its transition', () => {
         final: 'self',
         evidence: 'host',
         get stoppedByOperator() {
+          return boom();
+        },
+      },
+    },
+    'a getter on unitOnRecord': {
+      reviewVerdict: {
+        final: 'self',
+        evidence: 'host',
+        stoppedByOperator: false,
+        get unitOnRecord() {
           return boom();
         },
       },

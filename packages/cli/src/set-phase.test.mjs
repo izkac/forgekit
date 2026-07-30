@@ -278,6 +278,9 @@ test('phase done freezes the verdict host evidence produces, not the one the pro
       final: 'independent',
       evidence: 'host',
       stoppedByOperator: false,
+      // r1's `forge-review final` sidecar is on record for this session, so
+      // this pass saw the deciding unit.
+      unitOnRecord: true,
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -310,7 +313,13 @@ test('the frozen verdict and its digest line survive the host pruning the transc
     const ledger = path.join(dir, '.forge', 'sessions.jsonl');
     runSetPhase(dir, ['finish'], env);
     const measured = JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict;
-    assert.deepEqual(measured, { final: 'independent', evidence: 'host', stoppedByOperator: false });
+    assert.deepEqual(measured, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+      // r1's `forge-review final` sidecar is on record at `finish`.
+      unitOnRecord: true,
+    });
     const recorded = readLedger(ledger).at(-1).reviews;
     assert.equal(recorded.final, 'independent');
     assert.equal(recorded.evidence, 'host');
@@ -363,6 +372,8 @@ test('a stale self verdict never survives to refuse a session that was then revi
       final: 'self',
       evidence: 'host',
       stoppedByOperator: false,
+      // Only `group-01` was dispatched — no unit keyed `final` is on record.
+      unitOnRecord: false,
     });
 
     // The reviewer that was declined at step 1 is now dispatched for real, and
@@ -381,6 +392,9 @@ test('a stale self verdict never survives to refuse a session that was then revi
       final: 'independent',
       evidence: 'inferred',
       stoppedByOperator: false,
+      // configDir was removed before this pass — the host is entirely
+      // unavailable, so nothing could have been on record.
+      unitOnRecord: false,
     });
     assert.equal(session.finalReviewWaived, undefined, 'a real review retires the waiver');
     const { reviews } = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
@@ -411,6 +425,8 @@ test('a frozen verdict inferred from prose is never protected — only a measure
       final: 'independent',
       evidence: 'inferred',
       stoppedByOperator: false,
+      // No host is bound at all in this fixture — nothing could be on record.
+      unitOnRecord: false,
     });
 
     writeFinalReview(sessionDir, SELF_PROSE);
@@ -453,6 +469,8 @@ test('a measured independent verdict survives its dispatch record being pruned',
       final: 'independent',
       evidence: 'host',
       stoppedByOperator: false,
+      // r1's `forge-review final` sidecar is on record at `finish`.
+      unitOnRecord: true,
     });
 
     // The host prunes the sidecars. The directory still exists and reads
@@ -467,6 +485,10 @@ test('a measured independent verdict survives its dispatch record being pruned',
       final: 'independent',
       evidence: 'host',
       stoppedByOperator: false,
+      // The `done` pass itself sees no `final` unit (sidecars pruned) — this
+      // stays `true` only because the keep rule preserves the verdict frozen
+      // at `finish` untouched; it is not remeasured this pass.
+      unitOnRecord: true,
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -547,6 +569,8 @@ test('a fresh host reading always wins over a stale one, including when it is wo
       final: 'independent',
       evidence: 'host',
       stoppedByOperator: false,
+      // r1's `forge-review final` sidecar is on record at `finish`.
+      unitOnRecord: true,
     });
 
     // The operator stops that same dispatch; the host stamps the meta it wrote.
@@ -564,6 +588,9 @@ test('a fresh host reading always wins over a stale one, including when it is wo
       final: 'self',
       evidence: 'host',
       stoppedByOperator: true,
+      // r1's unit is still `final` even though this dispatch was stopped — the
+      // unit is on record, it simply did not finish.
+      unitOnRecord: true,
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -601,6 +628,8 @@ test('a reviewer dispatched between finish and done still reaches the frozen ver
       final: 'self',
       evidence: 'host',
       stoppedByOperator: false,
+      // The sidecar directory is empty at `finish` — no `final` unit yet.
+      unitOnRecord: false,
     });
 
     writeReviewerSidecars(configDir, 'host-refresh', createdAt, {
@@ -612,6 +641,8 @@ test('a reviewer dispatched between finish and done still reaches the frozen ver
       final: 'independent',
       evidence: 'host',
       stoppedByOperator: false,
+      // r1's `forge-review final` sidecar was added before this pass.
+      unitOnRecord: true,
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -656,6 +687,8 @@ test('an operator declining the final reviewer is measured, frozen and recorded'
       final: 'self',
       evidence: 'host',
       stoppedByOperator: true,
+      // r1's unit is `final`, on record, even though it was stopped.
+      unitOnRecord: true,
     });
     assert.equal(
       session.finalReviewWaived,
@@ -1397,6 +1430,9 @@ test('a stopped dispatch is reported at the gate, never turned into a refusal', 
       final: 'independent',
       evidence: 'host',
       stoppedByOperator: true,
+      // Both r1 and r2 are keyed `final` — the unit is on record regardless
+      // of r1's stop.
+      unitOnRecord: true,
     });
     assert.equal(session.finalReviewWaived, undefined, 'and no waiver was applied for them');
     const { reviews } = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);

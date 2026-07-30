@@ -1,0 +1,33 @@
+{
+  "change": "review-freeze-qualifier",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — record whether the deciding unit was on record",
+      "library": "packages/cli/src/set-phase.mjs freezeReviewVerdict() — writes reviewVerdict.unitOnRecord from the same sawTheUnit it already computes",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs, on the finish|done transition — the only writer of session.reviewVerdict",
+      "writes": "session.json → reviewVerdict.unitOnRecord (boolean)",
+      "reads": "the evidence object from metrics/review-evidence.mjs — Object.hasOwn(units, 'final')",
+      "uiConsumer": "the keep rule in the same function on the next transition; nothing else reads it, deliberately",
+      "evidence": "packages/cli/src/set-phase.test.mjs (the field is written; the reproduction keeps the verdict; the discriminator still refreshes)"
+    },
+    {
+      "capability": "review-evidence — validate the widened verdict shape",
+      "library": "packages/cli/src/review-verdict.mjs frozenReviewVerdict — optional, boolean-if-present",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs enforceFinalReviewFloor() (money/auth gate), packages/cli/src/score.mjs, packages/cli/src/ledger.mjs — all three read the verdict through it",
+      "writes": "N/A — validates on read",
+      "reads": "session.json → reviewVerdict, of any shape including verdicts frozen before this field existed",
+      "uiConsumer": "forge phase done refusal text, scorecard cap, .forge/sessions.jsonl digest",
+      "evidence": "packages/cli/src/review-verdict.test.mjs (present boolean returned; non-boolean rejects the verdict; absent stays valid and reads undefined, not false)"
+    },
+    {
+      "capability": "review-evidence — a pruned record no longer refuses a review that happened",
+      "library": "packages/cli/src/set-phase.mjs — the keep rule, frozen.unitOnRecord ?? frozen.evidence === 'host'",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs enforceFinalReviewFloor(), reached via freezeReviewVerdict() on the same transition",
+      "writes": "session.json → reviewVerdict (kept rather than replaced), and via score.mjs the .forge/sessions.jsonl digest",
+      "reads": "the frozen verdict's unitOnRecord and this pass's sawTheUnit",
+      "uiConsumer": "forge phase done — the difference between a refused transition and an allowed one",
+      "evidence": "packages/cli/src/set-phase.test.mjs — the F49/F52 reproduction (kept, gate passes), the discriminator (refreshed, gate refuses), and both previously-reverted rules still pinned with untouched fixtures"
+    }
+  ]
+}

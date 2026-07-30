@@ -369,6 +369,14 @@ function enforceFinalReviewFloor() {
  * second sidecar directory is unreadable still answers confidently from the
  * first (F27, owned by `host.mjs`). This freezes what was measured, no more.
  *
+ * `next` ALSO CARRIES `unitOnRecord` — whether *this* pass saw the deciding
+ * (`final`) unit in the host's dispatch record, the same fact the keep rule
+ * below computes as `sawTheUnit`. It is frozen here (F49/F52) so a later pass
+ * can eventually ask the verdict instead of inferring the answer from its own
+ * evidence grade, which is what let a pruned dispatch record read identically
+ * to one that never existed. Not read by anything yet — see the comment above
+ * the keep rule below.
+ *
  * Advisory, exactly like the metrics block below: telemetry may cost a session
  * its measurement, never its transition.
  */
@@ -377,10 +385,19 @@ function freezeReviewVerdict() {
   try {
     const evidence = reviewEvidence({ session, env: process.env });
     const census = reviewCensus(dir, { evidence });
+    // Whether *this pass* saw the deciding (`final`) unit in the host's
+    // dispatch record — computed once here and written onto `next` below as
+    // `unitOnRecord`, so the fact persisted on the verdict and the fact the
+    // keep rule below reasons about can never drift apart. Not yet read by
+    // that keep rule (see the comment above it) — it is written now so a
+    // verdict frozen after this change carries it, in preparation for that.
+    const sawTheUnit =
+      evidence.available && !!evidence.units && Object.hasOwn(evidence.units, 'final');
     const next = {
       final: census.finalReview,
       evidence: census.finalReviewEvidence,
       stoppedByOperator: census.stoppedByOperator,
+      unitOnRecord: sawTheUnit,
     };
     // A MEASURED `independent` IS NEVER REPLACED BY A GUESS — and nothing else
     // is protected. `finish` then `done` a day apart is ordinary, and the host
@@ -440,10 +457,15 @@ function freezeReviewVerdict() {
     //
     // A frozen `self` or `none` still refreshes freely, which is what the
     // asymmetry was for — a stale negative can never strand a session.
+    //
+    // NOT YET READ HERE. `sawTheUnit` above is exactly this axis and is now
+    // persisted on the verdict as `unitOnRecord`, but the condition below still
+    // asks the older, narrower question (`frozen?.evidence === 'host'`) instead
+    // of `frozen?.unitOnRecord`. That rewiring is a separate task — this one
+    // only makes the fact available to freeze so the two can never be computed
+    // twice and disagree.
     const measured = frozen?.final === 'independent' && frozen?.evidence === 'host';
     const remeasured = next.final === 'independent' && next.evidence === 'host';
-    const sawTheUnit =
-      evidence.available && !!evidence.units && Object.hasOwn(evidence.units, 'final');
     if (measured && !remeasured && !sawTheUnit) {
       process.stderr.write(
         '[forge] Kept the review verdict already measured for this session — this pass had no host evidence to read.\n',

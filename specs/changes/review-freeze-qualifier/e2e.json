@@ -1,0 +1,22 @@
+{
+  "change": "review-freeze-qualifier",
+  "notApplicable": null,
+  "steps": [
+    { "name": "boot", "cmd": "node scripts/e2e/harness-portability.mjs boot" },
+    {
+      "name": "review-evidence-pruned-record",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-evidence-pruned-record",
+      "expect": "PRUNED verdict=independent/inferred gate=passed kept=yes"
+    },
+    {
+      "name": "review-evidence-substance",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-evidence-substance",
+      "expect": "REVIEW final=self evidence=inferred gate=refused"
+    },
+    {
+      "name": "review-evidence-decides",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-evidence-decides",
+      "expect": "REVIEW final=independent evidence=host prose=self-check"
+    }
+  ]
+}

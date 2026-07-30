@@ -1,0 +1,88 @@
+<!-- forge-brief-specs-hash:4521c0c2b034594f -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — a deleted log stops blocking a review that happened</title>
+<style>
+  :root { color-scheme: light; }
+  body { max-width: 48rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .4rem; }
+  h2 { font-size: 1.12rem; margin: 2.2rem 0 .6rem; padding-bottom: .3rem; border-bottom: 1px solid #e5e5e5; }
+  .sub { color: #666; margin: 0 0 2rem; font-size: .95rem; }
+  ul { padding-left: 1.2rem; } li { margin: .35rem 0; }
+  code { background: #f4f4f5; padding: .1rem .35rem; border-radius: 3px; font-size: .89em; }
+  .tldr { background: #fdf6f0; border-left: 3px solid #c47a3d; padding: .9rem 1.1rem; border-radius: 0 4px 4px 0; }
+  .tldr p:first-child { margin-top: 0; } .tldr p:last-child { margin-bottom: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { color: #555; font-weight: 600; }
+  pre.mermaid { background: #fafafa; border: 1px solid #eee; border-radius: 4px; padding: 1rem; overflow-x: auto; }
+  .note { color: #666; font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<h1>A deleted log stops blocking a review that really happened</h1>
+<p class="sub">Operator brief — change <code>review-freeze-qualifier</code></p>
+
+<div class="tldr">
+  <p>Forge can currently refuse to let you finish a high-risk change that <em>was</em> properly reviewed, because the record of the review helper was cleaned up between two steps. It reads the missing record as "nobody reviewed this" and blocks you — permanently, since the blocked attempt saves nothing and every retry does the same thing.</p>
+  <p>This teaches Forge to tell "the log was deleted" from "no reviewer ran", by writing down what it saw the first time instead of guessing the second time.</p>
+</div>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A change whose reviewer really ran finishes normally, even if the helper's log was cleaned up in the meantime.</li>
+  <li>A change nobody reviewed is still blocked. That is the whole point of the gate and it does not move.</li>
+  <li>You stop having to talk Forge past a decision it got wrong. Today the only way through is to file a formal waiver saying the review was skipped — against a change that was reviewed. That record was false and it was permanent.</li>
+</ul>
+
+<h2>Why it happens</h2>
+<p>Forge decides who reviewed a change once, at the finish step, and writes the answer down so it survives the logs being cleaned up later. It also has a safety rule: if a later step knows <em>less</em> than the first one did, keep the earlier answer.</p>
+<p>That safety rule only applies when the first answer came from the helper's log. Since the last release, many correct answers now come from the review write-up instead — and those get no protection at all. So the later step, seeing an empty log directory, concludes nobody was ever dispatched and overrules a correct answer.</p>
+
+<pre class="mermaid">
+flowchart TD
+  A["Finish step: a reviewer ran,<br/>its log is short"] --> B["Answer: reviewed independently"]
+  B --> C["Log directory is cleaned up"]
+  C --> D{"Done step: any record<br/>of a reviewer?"}
+  D -- "none found" --> E{"Did the earlier step<br/>find one?"}
+  E -- "yes — so it was deleted" --> F["Keep the earlier answer<br/>Finish allowed"]
+  E -- "no — nothing ever ran" --> G["Use the fresh answer<br/>Blocked, correctly"]
+</pre>
+
+<p>The fix is the box on the right: Forge now writes down whether it saw a reviewer on record, so the second step can compare two facts instead of guessing from one.</p>
+
+<h2>What changes for you</h2>
+<p>No new commands and nothing to configure. Sessions finished before this change keep behaving exactly as they do today — the new note simply isn't there for them, and Forge treats "not written down" as "unknown", never as "no reviewer".</p>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li><strong>The obvious shortcut would be wrong.</strong> Simply protecting every earlier answer would fix the symptom and break something real: the review write-up can be edited between the two steps, and a stale reading of it must not outrank a fresh one. One test in this change exists purely to tell the correct fix from that shortcut — without it, the weaker version passes everything and ships looking identical.</li>
+  <li><strong>Two earlier attempts at this same rule were reverted.</strong> Both are still pinned by tests, and those tests must pass without their setups being touched. If either needs adjusting, that is the signal this attempt has the same flaw and the work stops.</li>
+  <li><strong>This does not fix the first-pass case.</strong> If the log is already gone the very first time Forge looks, there is no earlier answer to compare with, and it will still block. Closing that properly means Forge marking the review write-up itself when it dispatches a reviewer — tracked separately, not attempted here.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>The request floor from the last release is unchanged.</li>
+  <li>How the review write-up is read is unchanged.</li>
+  <li>The gate's own question — was the final review independent — is unchanged.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What</th><th>Size</th></tr>
+  <tr><td>1</td><td>Write down what the first step saw</td><td>3 tasks</td></tr>
+  <tr><td>2</td><td>Use it instead of guessing, and prove it beats the shortcut</td><td>6 tasks</td></tr>
+  <tr><td>3</td><td>Sync the spec, close the findings, correct last release's advice</td><td>2 tasks</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
+</body>
+</html>
