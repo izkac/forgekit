@@ -33,11 +33,19 @@ Forge sessions, so a neighbour's reviewer was indistinguishable from yours.
 Three review rounds each found a fresh way for that to pass a self-written
 review through the money/auth floor. A dispatch still described in the old
 two-word form is not counted for anyone: Forge reports that it cannot tell, and
-falls back to the review file's wording. It is the one field here you cannot fabricate by
-writing prose: a record exists only if a subagent really ran and burnt tokens.
-It proves a *dispatch*, not a *review* — a throwaway subagent carrying the label
-produces the same record — so this is a check on the honest, not a defence
-against the deliberate.
+falls back to the review file's wording. No amount of prose in a review file
+produces that record; a subagent has to really run.
+
+An earlier version of this paragraph called it the one field here you cannot
+fabricate. That was too strong, and this project has the proof: it records a
+*dispatch*, not a *review*, and dispatching is cheap — a throwaway subagent
+carrying the label produced the same record, and it carried a change through the
+money/auth gate against a review file that said in plain words no subagent had
+read it. Forge now asks what the dispatch did: a unit whose busiest single
+dispatch you did not stop made fewer than five requests certifies nothing, and
+the wording decides instead. That ends the one-line forgery and nothing more —
+someone who knows the floor can pad past it. Still a check on the honest, not a
+defence against the deliberate.
 
 The match is **exact** for a reason. `forge-review implement group 1` and
 `talk about forge-review implementation details` both matched an earlier, looser

@@ -27,6 +27,9 @@
  *   review-evidence-decides   a review file that says "self-check" beside a host
  *                             record of a real reviewer → independent, on host
  *                             evidence, past the money/auth done gate
+ *   review-evidence-substance the same file beside a host record of a reviewer
+ *                             that made one request → the host cannot certify
+ *                             it, the prose decides, and the gate refuses
  *   review-evidence-survives  delete the transcript; the recorded verdict does
  *                             not move
  *
@@ -40,6 +43,22 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+// Imported, never retyped: these fixtures describe dispatches on either side of
+// the shipped floor, so if the floor moves they must move with it. A literal
+// would rot — under a raised floor the control's reviewer becomes a token one,
+// `forge phase done` refuses, and the step fails. Loudly, not silently: that
+// failure is the correct outcome for a stale fixture, but it is a maintenance
+// cost, and the import removes it.
+//
+// What the import does NOT buy — an earlier version of this comment claimed it
+// did, and it was measured false: it does not make the step notice a floor set
+// above what real reviewers do. Raise the floor past the corpus maximum and
+// these fixtures rise with it, so both steps stay green while the product would
+// be refusing every genuine review. Nothing in this harness canaries that. The
+// guard against it is the corpus recorded beside the constant in
+// `review-census.mjs` and the rule that it is re-measured before it moves.
+import { FINAL_REVIEW_REQUEST_FLOOR } from '../../packages/cli/src/review-census.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FORGE_BIN = path.join(REPO, 'packages', 'cli', 'bin', 'forge.mjs');
@@ -314,17 +333,32 @@ function layerReviewFixture(dir, options) {
 }
 
 /**
- * A host record of one final-review subagent that genuinely ran: the sidecar
- * meta describing it as `forge-review final <session-id>` — the session id is
- * what attributes the record, so no transcript timestamp has to place it.
+ * The requests a forged dispatch makes: one. Measured, not chosen — the record
+ * that prompted the floor made exactly one request, and `review-census.mjs`
+ * documents it. Kept as a constant so the guard in `review-evidence-substance`
+ * can compare it to the shipped floor rather than assert a relationship between
+ * two literals.
+ */
+const TOKEN_DISPATCH_REQUESTS = 1;
+
+/**
+ * A host record of one final-review subagent: the sidecar meta describing it as
+ * `forge-review final <session-id>` — the session id is what attributes the
+ * record, so no transcript timestamp has to place it.
  *
  * The main transcript beside it is not decoration — `findTranscripts` locates a
  * sidecar directory by finding `<hostId>.jsonl` first, so without it there is
  * no dispatch record to read at all.
  *
+ * `requests` is what the two review steps disagree about, and it is the only
+ * thing they disagree about: a reviewer that did work versus one that did not.
+ * The lines carry distinct request ids because a request is what is counted —
+ * one id restated across content blocks is still one request.
+ *
  * @param {string} at ISO timestamp inside `[session.createdAt, now]`
+ * @param {number} requests distinct requests the dispatch made
  */
-function plantReviewerDispatch(at) {
+function plantReviewerDispatch(at, requests) {
   const projectDir = path.join(REVIEW_HOST_CFG, 'projects', REVIEW_PROJECT_DIR);
   const sidecarDir = path.join(projectDir, REVIEW_HOST_ID, 'subagents');
   fs.rmSync(REVIEW_HOST_CFG, { recursive: true, force: true });
@@ -335,11 +369,9 @@ function plantReviewerDispatch(at) {
     `${assistantLine('req_coord0', 0, at, false)}\n`,
     'utf8',
   );
-  fs.writeFileSync(
-    path.join(sidecarDir, 'agent-rv1.jsonl'),
-    `${[assistantLine('req_rv0', 0, at, true), assistantLine('req_rv1', 0, at, true)].join('\n')}\n`,
-    'utf8',
-  );
+  const lines = [];
+  for (let i = 0; i < requests; i += 1) lines.push(assistantLine(`req_rv${i}`, 0, at, true));
+  fs.writeFileSync(path.join(sidecarDir, 'agent-rv1.jsonl'), `${lines.join('\n')}\n`, 'utf8');
   fs.writeFileSync(
     path.join(sidecarDir, 'agent-rv1.meta.json'),
     `${JSON.stringify({
@@ -637,8 +669,12 @@ if (phase === 'boot') {
   }
 
   // --- the same file, with a host record beside it ----------------------
+  // Exactly the floor, not a comfortable margin above it: at the boundary this
+  // fixture pins `<` rather than `<=`, which a margin would not. Tied to the
+  // constant rather than fixed so the fixture cannot rot when the floor moves —
+  // see the import comment for what that does and does not buy.
   const fixture = layerReviewFixture(SCRATCH, { createdAt, hostId: REVIEW_HOST_ID });
-  plantReviewerDispatch(at);
+  plantReviewerDispatch(at, FINAL_REVIEW_REQUEST_FLOOR);
   const same =
     fs.readFileSync(path.join(fixture.sessionDir, 'reviews', 'final-review.md'), 'utf8') ===
     fs.readFileSync(path.join(control.sessionDir, 'reviews', 'final-review.md'), 'utf8');
@@ -675,6 +711,95 @@ if (phase === 'boot') {
   process.stdout.write(
     `REVIEW final=${verdict.final} evidence=${verdict.evidence} ` +
       `prose=${prose.final === 'self' ? 'self-check' : prose.final}\n`,
+  );
+} else if (phase === 'review-evidence-substance') {
+  // A DISPATCH IS NOT A REVIEW. Byte for byte the fixture `review-evidence-
+  // decides` passes with, one thing changed: the reviewer on record made a
+  // single request. That is the forgery this floor exists to end — a subagent
+  // labelled `forge-review final <sessionId>` that read nothing certified a
+  // review file which says in plain English that no subagent read the change,
+  // and carried it through the money/auth gate.
+  //
+  // The host therefore may not answer, the prose must, and the prose says
+  // self-check — which is what `review-evidence-decides`' control measures on
+  // this same file, so all three assertions below are anchored to a reading
+  // that step proves rather than to this one's say-so.
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  const at = new Date(Date.now() - 60_000).toISOString();
+
+  // The fixture has to still straddle the floor. Nothing else here notices a
+  // floor lowered to 1: the dispatch would clear it, the gate would pass, and
+  // the failure would read as a product regression rather than as a step that
+  // stopped describing a forgery.
+  if (TOKEN_DISPATCH_REQUESTS >= FINAL_REVIEW_REQUEST_FLOOR) {
+    fail(
+      `this step plants a ${TOKEN_DISPATCH_REQUESTS}-request dispatch, which a floor of ` +
+        `${FINAL_REVIEW_REQUEST_FLOOR} accepts — the fixture is no longer a forgery`,
+    );
+  }
+
+  const fixture = layerReviewFixture(SCRATCH, { createdAt, hostId: REVIEW_HOST_ID });
+  plantReviewerDispatch(at, TOKEN_DISPATCH_REQUESTS);
+
+  const digestFile = path.join(SCRATCH, '.forge', 'sessions.jsonl');
+  const ledgerBefore = JSON.stringify(lastDigest(digestFile));
+
+  // The real gate: no --allow-incomplete, no waiver, a high-risk change.
+  const refused = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (refused.code === 0) {
+    // Trimmed for the runner's 30-line tail, as in the control above: a passing
+    // `phase done` prints the whole session JSON and pushes this message out.
+    fail(
+      'the money/auth done gate ACCEPTED a change whose only reviewer on record made ' +
+        `${TOKEN_DISPATCH_REQUESTS} request — a dispatch that read nothing certified the review`,
+      tail(refused.out, 8),
+    );
+  }
+  // WHY it refused, not merely that it did. A step that greps for a non-zero
+  // exit passes against a gate refusing for an unrelated reason — a missing
+  // verify-evidence file, an integrity failure — and would keep passing with
+  // the floor deleted if anything else in the fixture ever broke.
+  if (!refused.out.includes('self-authored')) {
+    fail('the gate refused for some reason other than a self-authored final review', tail(refused.out, 20));
+  }
+
+  // AND NOTHING MOVED. `saveSession` runs last, after every gate's exit, so a
+  // refusal that still transitioned the session or filed a durable line would
+  // be the worse half of this defect: judged, refused, and recorded as done.
+  const stalled = JSON.parse(fs.readFileSync(path.join(fixture.sessionDir, 'session.json'), 'utf8'));
+  if (stalled.phase !== 'implement') {
+    fail(`the refused gate transitioned the session anyway`, `phase = ${stalled.phase}`);
+  }
+  if (JSON.stringify(lastDigest(digestFile)) !== ledgerBefore) {
+    fail('a refused gate wrote a durable ledger line', tail(refused.out, 8));
+  }
+
+  // Now record the refusal, so the transition completes and the verdict it
+  // refused on lands where it can be read back — the same move the control in
+  // `review-evidence-decides` makes, for the same reason: the refused pass
+  // above never reached `saveSession`, so it froze nothing to disk.
+  const waived = forge(
+    SCRATCH,
+    ['phase', 'done', '--final-review-waived', 'e2e substance: recording the refusal to read the verdict back'],
+    { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG },
+  );
+  if (waived.code !== 0) fail(`forge phase done --final-review-waived exited ${waived.code}`, tail(waived.out, 8));
+  const verdict = frozenVerdictOf(fixture.sessionDir);
+  if (!verdict) fail('no verdict was frozen onto the session', tail(waived.out, 8));
+  if (verdict.evidence !== 'inferred') {
+    fail(
+      `verdict graded ${verdict.evidence}, expected inferred — the host answered off a one-request ` +
+        'dispatch instead of standing aside for the prose',
+      JSON.stringify(verdict),
+    );
+  }
+  if (verdict.final !== 'self') {
+    fail(`verdict ${verdict.final} on prose evidence, expected self`, JSON.stringify(verdict));
+  }
+
+  process.stdout.write(
+    `REVIEW final=${verdict.final} evidence=${verdict.evidence} ` +
+      `gate=${refused.code === 0 ? 'accepted' : 'refused'}\n`,
   );
 } else if (phase === 'review-evidence-survives') {
   // THE VERDICT OUTLIVES ITS EVIDENCE. The host prunes transcripts in days; the
@@ -838,7 +963,8 @@ if (phase === 'boot') {
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
-      'telemetry-analyze|review-evidence-decides|review-evidence-survives|session-ambiguity\n',
+      'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
+      'review-evidence-survives|session-ambiguity\n',
   );
   process.exit(1);
 }

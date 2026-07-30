@@ -16,7 +16,13 @@ A dispatch stopped by the operator SHALL NOT contribute its substance to the
 unit. Its own outcome is already decided by the operator's refusal.
 
 Falling below the floor SHALL NOT by itself produce a verdict of `self`, and
-SHALL NOT refuse a transition.
+SHALL NOT by itself refuse a transition. It routes the decision to the review
+file's prose, which may then refuse on its own grounds.
+
+Where every dispatch for a unit was stopped, the operator's refusal SHALL decide
+the unit and the floor SHALL NOT be consulted. Such a unit reports a busiest
+dispatch of zero, which would otherwise fall below any floor and discard a
+measurement the operator themselves produced.
 
 #### Scenario: A token dispatch against a review file that admits no reviewer ran
 

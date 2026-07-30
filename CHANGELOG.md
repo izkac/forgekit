@@ -1,5 +1,113 @@
 # Changelog
 
+## 0.3.34 — 2026-07-30
+
+### A dispatch that did no work no longer certifies a review
+
+Since 0.3.29 the money/auth `forge phase done` floor has been decided by the
+host's record of a review subagent, and the census asked only *whether* a
+dispatch happened — never what it did. So a throwaway subagent dispatched as
+`forge-review final <session-id>`, one request long and reading nothing, graded
+the final review `independent` on `host` evidence and carried a change through
+the gate, against a review file stating in plain words that no subagent had read
+it. An independent reviewer reproduced it; it is finding **F33**. 0.3.29's entry
+offered "the record cannot be produced without really dispatching a subagent" as
+the guarantee, which is true and beside the point — dispatching a subagent is
+cheap. That entry is corrected in place below.
+
+`hostFinalReview` now applies a floor of **5 requests** to the busiest single
+dispatch for a review unit. Measured with the product's own
+`readReviewerSidecars` over all 24 `forge-review` dispatches on this machine
+(2026-07-30): minimum 15, median 55, maximum 173, none below 15. The forgery made
+1. Five sits 3x under the observed minimum and 5x over the forgery. Two closes
+the reproduction and little else — pad to three and walk through. Ten is only a
+third under the minimum, close enough that a short review of a small change would
+start to degrade. Configurable was rejected outright: a threshold an operator can
+lower is one a forger can lower, and `.forge/config.json` lives inside the repo
+being reviewed. F11 exists because 0.3.24 tightened a classifier in front of this
+same gate on a number nobody had measured; this one has a corpus, and the design
+record says to re-measure it before moving it.
+
+**Below the floor the host says nothing — it does not say `self`.** `null` is the
+answer `hostFinalReview` already gives when it cannot answer, and it routes the
+verdict to the review file's prose at grade `inferred`. Grading a thin dispatch
+`self` would be the fail-closed shape 0.3.24 shipped and 0.3.26 reverted — and
+0.3.25's coverage cap, reverted in the same entry, cost a grade rather than a
+transition, so the pair is one revert of a refusal and one of a penalty rather
+than two refusals. Here it would refuse correct work for a second reason as well:
+a genuine reviewer
+whose transcript has since been pruned reads as zero requests. Prose is the side
+of this call that can only lose a grade. It is also the side that closes the
+reproduction — the forged session's review file admits no subagent read the
+change, so prose grades it `self` and the gate refuses.
+
+**The measurement is a per-dispatch maximum, not the sum that already existed.**
+`units[*].requests`, the total across a unit's dispatches, would have answered the
+wrong question: ten forged dispatches of one request each sum to ten and clear a
+floor of five, and what a floor asks is whether any *single* dispatch looks like a
+review. Each bucket gains `maxRequests` beside the unchanged `requests`, which
+stays because it is persisted evidence other readers may want.
+
+Stopped dispatches are excluded from that maximum, and a unit whose every
+dispatch was stopped reports zero. The declined-reviewer grade is
+`stopped < dispatched`, so a 60-request dispatch the operator killed sitting
+beside a 1-request one that ran already reads `independent` — and an unrestricted
+maximum would have let the killed dispatch vouch for the token one. A dispatch
+the operator refused has had its outcome decided by the operator.
+
+**Two fixtures had to be repaired, and that is worth saying.** `set-phase.test.mjs`
+planted one transcript line per reviewer dispatch, and the e2e control step's
+reviewer made two requests. Both describe a subagent that was spawned and did
+nothing, and the new rule correctly declined them: tests named for a reviewer
+that ran had been passing on the record of one that did not. Both now import
+`FINAL_REVIEW_REQUEST_FLOOR` and plant exactly that many requests — on the
+boundary rather than a comfortable multiple above it, so any tightening of the
+floor turns them red instead of passing unnoticed. A new e2e step,
+`review-evidence-substance`, runs the forgery end to end against the same review
+file the control step passes with, and asserts the gate refuses, refuses *for the
+stated reason*, and leaves the session untransitioned with no durable ledger
+line.
+
+**And this was planned long ago.** F20 asked for "request counts that distinguish
+a real review from a token one", and `units[*].requests` has been collected,
+windowed and persisted by `metrics/review-evidence.mjs` ever since — read by
+nobody. The data needed to catch this was on disk the entire time the escape was
+open.
+
+**None of it is a security boundary**, and none of it is claimed as one: anyone
+who reads this entry can pad a forged dispatch to five requests. What it removes
+is the one-line forgery — the cost of faking a review rises from a throwaway
+dispatch to a subagent that genuinely runs. F12, Forge stamping the review file
+when *it* dispatches the reviewer, remains the real fix and is untouched here.
+
+### `review-verdict.mjs` has a test file, and writing it found a defect
+
+87 lines of strict validation sitting in front of that same money/auth gate, the
+scorecard's cap and the durable `sessions.jsonl` digest, covered only incidentally
+through `ledger.test.mjs` and `set-phase.test.mjs` while every other module in the
+cluster had its own. That was finding **F34**.
+
+Its header promised **never throws**, and shape checks alone did not buy that.
+Rejecting an unrecognised shape is a `return null`, but the function reads four
+properties off an object the caller supplies, and a property read can raise on its
+own — a getter on `reviewVerdict`, `final`, `evidence` or `stoppedByOperator`, or
+a Proxy trap. Every caller is on the `forge phase done` path, where a throw out of
+here loses the transition outright: the gate never runs, the cap never applies,
+no digest line is written. The body is wrapped now and a throw answers `null`, the
+same answer as absent and as malformed. Nothing else about the module changed.
+
+Still open and filed: prose decides in more sessions than it used to, and F11,
+F18 and F19 all say the prose rules are imperfect — a deliberate trade, since
+prose can misgrade while the host path was certifying forgeries. And
+`set-phase.mjs` protects a frozen verdict from being overwritten only when its
+evidence was `host`, so a below-floor session frozen `independent`/`inferred` at
+`finish`, whose sidecar is then pruned, has that verdict replaced at `done` by
+`self`/`host` and is refused. That hole predates this change and every session
+reachable through it is one the floor means to decline anyway — but this change
+makes it reachable far more often, by producing `inferred` verdicts where `host`
+ones used to be produced. The fix is in `set-phase.mjs`, which this change
+deliberately does not touch.
+
 ## 0.3.33 — 2026-07-30
 
 ### `implement.md` names `--session` on the evidence line
@@ -170,6 +278,14 @@ description `forge review-label <unit>` prints — `forge-review <unit>
 be fabricated without actually dispatching a **subagent**. It does not yet prove
 that subagent reviewed anything — request counts are collected for that and not
 yet read.
+
+**Corrected in 0.3.34.** The sentence above is left as it shipped, and it is
+wrong in its emphasis: it presents "a subagent really had to run" as the
+guarantee, when dispatching a subagent is cheap. A throwaway one carrying the
+label, one request long and reading nothing, produced a record that passed the
+money/auth gate against a review file stating no subagent had read the change.
+0.3.34 makes the record's *substance* count. The claim as it should have read:
+the record proves a dispatch, and nothing about the review.
 
 - **Evidence outranks wording**, and where a host record exists the file is not
   consulted at all.

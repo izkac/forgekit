@@ -672,18 +672,36 @@ independent reviewer.
 
 So the safe orders are *label the final reviewer* (group labels then harmless) or
 *label nothing*. "Label everything" is only safe while you never forget the one
-that counts, and its failure is silent. Where a record exists `forge phase done`
-reads it, and no wording in the review file can change the verdict. A record
-cannot be fabricated without really dispatching a **subagent** — and note Forge
-does not yet check that the subagent reviewed anything, so the record proves a
-dispatch, not a review.
+that counts, and its failure is silent. Where a record exists and the reviewer on
+it did some work, `forge phase done` reads it and no wording in the review file
+changes the verdict.
+
+**The record proves a dispatch, not a review, and dispatching is cheap.** Earlier
+versions of this page said a record could not be produced without really
+dispatching a **subagent** and left it there, as though that settled it. It does
+not: a throwaway subagent carrying this session's label — one request long,
+reading nothing — produced a record that carried a change through the money/auth
+gate against a review file stating plainly that no subagent had read it. So since
+0.3.34 the host is asked what the dispatch *did*. A unit whose busiest single
+dispatch — counting only the ones you did not stop — made fewer than **5
+requests** certifies nothing; the verdict falls back to the review file's wording
+and grades `inferred`. Being under the floor never refuses on its own, it only
+stops vouching. The number has a corpus behind it: all 24 labelled review
+dispatches on the author's machine (2026-07-30) ran 15 requests at the minimum,
+55 median, 173 maximum, none below 15 — and the forgery ran 1.
+
+This is **not a security boundary** and is not claimed as one. Someone who knows
+the floor can pad past it. What it removes is the one-line forgery: faking a
+review now costs a subagent that genuinely runs. The real fix is Forge stamping
+the review file when *it* dispatches the reviewer, which is filed as F12 and not
+done.
 
 Every verdict carries a grade saying how it was reached:
 
 | grade | meaning |
 |-------|---------|
 | `host` | decided from the host's record of a dispatch **this session labelled**. One caveat, and it is real: it is **not** a promise a matching dispatch was found — a `host` grade with no match is the verdict "no outside reader ran", and that is what refuses at the gate. It is no longer a time-window guess: earlier versions matched dispatches by when they ran, so a session sharing a Claude Code conversation with another could be credited with that session's reviewer. The session id in the description ended that. |
-| `inferred` | read from the review file's wording — either no host record survives, or none of this session's dispatches carries a label, so the convention is not in use here |
+| `inferred` | read from the review file's wording — no host record survives, or none of this session's dispatches carries a label so the convention is not in use here, or the labelled dispatch did too little work to certify anything |
 | `none` | there is no final review to judge |
 
 The verdict is **frozen** when the session finishes, because transcripts are

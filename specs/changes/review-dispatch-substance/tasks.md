@@ -101,22 +101,23 @@
 
 ## 4. Product-loop acceptance and the shipped record
 
-- [ ] 4.1 Add a `review-evidence-substance` phase to
+- [x] 4.1 Add a `review-evidence-substance` phase to
       `scripts/e2e/harness-portability.mjs`, beside `review-evidence-decides`:
       plant a sidecar whose final-review dispatch carries a single request,
       write the self-check review file, and require `forge phase done` to
       **refuse** on the money/auth floor. Prints
       `REVIEW final=self evidence=inferred gate=refused`. Verify: run the phase
       directly.
-- [ ] 4.2 Register the step in the change's `e2e.json` with that expected line
+- [x] 4.2 Register the step in the change's `e2e.json` with that expected line
       and run `forge e2e run --session <id>` green. Verify: the run is green and
       recorded against the current `e2e.json`.
-- [ ] 4.3 Sync the shipped record: fold the delta into
-      `specs/specs/review-evidence/spec.md`; correct the claim in `docs/forge.md`
-      and the 0.3.29 CHANGELOG entry that the dispatch record cannot be
+- [x] 4.3 Sync the shipped record: fold the delta into
+      `specs/specs/review-evidence/spec.md`; correct the claim in `docs/usage.md`
+      (the task originally named `docs/forge.md`, which never carried it) and the
+      0.3.29 CHANGELOG entry that the dispatch record cannot be
       fabricated (it can — dispatching a subagent is cheap; what is now costly is
       dispatching one that does nothing); add the 0.3.34 entry. Verify:
       `grep` finds no surviving "cannot be fabricated" claim.
-- [ ] 4.4 Resolve F33 and F34 with notes naming the floor and the corpus, and
+- [x] 4.4 Resolve F33 and F34 with notes naming the floor and the corpus, and
       file a finding recording that the prose rules (F11/F18/F19) now carry more
       traffic than they did. Verify: `forge finding list` shows both resolved.

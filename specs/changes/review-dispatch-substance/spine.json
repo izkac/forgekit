@@ -1,0 +1,33 @@
+{
+  "change": "review-dispatch-substance",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — measure the busiest unstopped dispatch per unit",
+      "library": "packages/cli/src/metrics/review-evidence.mjs (reviewEvidence — units[*].maxRequests, over records whose stoppedByUser is false)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs freezeReviewVerdict() on phase finish|done, which calls reviewEvidence({session, env}) before enforceFinalReviewFloor()",
+      "writes": "N/A — returns the evidence object; persistence belongs to the freeze row of the change that introduced it",
+      "reads": "<configDir>/projects/*/<hostSessionId>/subagents/agent-*.meta.json and the sibling agent-*.jsonl transcripts, for the session's bound host sessions",
+      "uiConsumer": "reviewCensus → forge phase done gate, forge score cap, forge fleet report",
+      "evidence": "packages/cli/src/metrics/review-evidence.test.mjs (stopped 60 + completed 20 → requests 80, maxRequests 20; all-stopped → 0; pruned transcript → 0) + e2e step review-evidence-substance"
+    },
+    {
+      "capability": "review-evidence — a sub-floor dispatch does not certify a review",
+      "library": "packages/cli/src/review-census.mjs (FINAL_REVIEW_REQUEST_FLOOR, applied in hostFinalReview on the independent branch)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs enforceFinalReviewFloor() (the money/auth done gate, via the verdict frozen moments earlier), packages/cli/src/score.mjs scoreSession (review depth and the high-risk cap)",
+      "writes": "N/A — the verdict is persisted by set-phase's existing freeze",
+      "reads": "units[*].maxRequests from the evidence object; the review file's prose only once the host declines to answer",
+      "uiConsumer": "forge phase done refusal text, scorecard caps, forge fleet report",
+      "evidence": "packages/cli/src/review-census.test.mjs (1-request dispatch → self/inferred; ten 1-request dispatches → no host answer; stopped 60 beside completed 1 → no host answer; 55 requests → independent/host) + set-phase.test.mjs (the gate refuses the forgery and still passes the real reviewer) + e2e step review-evidence-substance"
+    },
+    {
+      "capability": "review-evidence — the frozen verdict is validated before every consumer reads it",
+      "library": "packages/cli/src/review-verdict.mjs (frozenReviewVerdict)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs enforceFinalReviewFloor(), packages/cli/src/score.mjs, packages/cli/src/ledger.mjs — all three read the frozen verdict through it rather than revalidating",
+      "writes": "N/A — validates on read; session.json → reviewVerdict is written by set-phase",
+      "reads": "session.json → reviewVerdict, of any shape at all including hostile input",
+      "uiConsumer": "forge phase done gate, forge score, .forge/sessions.jsonl digest",
+      "evidence": "packages/cli/src/review-verdict.test.mjs (new — every rejected shape, the valid round-trip, and that it never throws)"
+    }
+  ]
+}

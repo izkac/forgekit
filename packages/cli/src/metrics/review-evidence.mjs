@@ -13,10 +13,23 @@
  *
  * What this module reads instead is the host's `subagents/` sidecar directory:
  * an `agent-<id>.meta.json` written when a subagent is spawned and an
- * `agent-<id>.jsonl` written as it runs. A coordinator cannot fabricate that
- * record without genuinely dispatching a subagent that burns tokens and writes
- * a transcript. That is evidence. **Do not "simplify" this back into reading
- * the review file** — the file is the thing under suspicion.
+ * `agent-<id>.jsonl` written as it runs. A coordinator cannot write that record
+ * without genuinely dispatching a subagent.
+ *
+ * THAT IS LESS THAN IT SOUNDS, and this comment claimed more until 0.3.34.
+ * Dispatching a subagent is cheap: a throwaway one carrying the review label
+ * made one request, reviewed nothing, and its record passed the money/auth gate
+ * against a review file that said in plain English that nobody had read the
+ * change. The record proves a *dispatch*, and nothing about a *review*. What
+ * closes the gap is `maxRequests` below, and the floor `review-census.mjs`
+ * applies to it — a dispatch that did no work no longer certifies anything. A
+ * dispatch that does enough work to clear the floor is still not proof that the
+ * work was a review; that needs the review file stamped at dispatch time, which
+ * is filed as F12 and not built.
+ *
+ * It is nonetheless evidence the reviewed party cannot produce by *writing*,
+ * which the review file is not. **Do not "simplify" this back into reading the
+ * review file** — the file is the thing under suspicion.
  *
  * THE OTHER TRAP — `available: false` is not `available: true, units: {}`.
  *
