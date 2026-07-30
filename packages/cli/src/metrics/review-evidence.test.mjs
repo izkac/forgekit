@@ -421,7 +421,8 @@ test('reviewEvidence reports the units the host recorded a reviewer dispatch for
 
   assert.equal(result.available, true);
   assert.deepEqual(plain(result.units), {
-    final: { dispatched: 1, stopped: 0, requests: expectedRequests },
+    // One dispatch, unstopped, so the busiest is the whole total.
+    final: { dispatched: 1, stopped: 0, requests: expectedRequests, maxRequests: expectedRequests },
   });
   // Available answers carry no excuse.
   assert.equal('reason' in result, false);
@@ -490,15 +491,20 @@ test('reviewEvidence counts an operator-stopped dispatch against its unit', () =
 test('reviewEvidence sums repeat dispatches for one unit', () => {
   const subagents = {};
   const perAgent = [1, 2, 3];
+  const wasStopped = (index) => index === 0;
   for (const [index, requests] of perAgent.entries()) {
     subagents[`a${index}`] = {
-      meta: meta({ description: `forge-review final ${DEMO_ID}`, stoppedByUser: index === 0 ? true : undefined }),
+      meta: meta({ description: `forge-review final ${DEMO_ID}`, stoppedByUser: wasStopped(index) ? true : undefined }),
       lines: Array.from({ length: requests }, (_, n) =>
         assistantLine({ requestId: `rev_${index}_${n}`, at: '2026-07-28T10:30:00.000Z' }),
       ),
     };
   }
   const expectedRequests = perAgent.reduce((sum, n) => sum + n, 0);
+  const expectedMax = perAgent.reduce(
+    (best, n, index) => (wasStopped(index) ? best : Math.max(best, n)),
+    0,
+  );
 
   const result = reviewEvidence({
     session: boundSession(),
@@ -507,8 +513,171 @@ test('reviewEvidence sums repeat dispatches for one unit', () => {
   });
 
   assert.deepEqual(plain(result.units), {
-    final: { dispatched: perAgent.length, stopped: 1, requests: expectedRequests },
+    final: {
+      dispatched: perAgent.length,
+      stopped: perAgent.filter((_, index) => wasStopped(index)).length,
+      requests: expectedRequests,
+      maxRequests: expectedMax,
+    },
   });
+});
+
+// ---------------------------------------------------------------------------
+// maxRequests — the busiest *single* unstopped dispatch
+//
+// The sum already there cannot be the measurement a floor reads: ten token
+// dispatches for one unit add up to whatever the floor is. The maximum cannot
+// be assembled out of small pieces, so it is the one that answers "did any one
+// reviewer actually do work". Stopped dispatches are excluded because
+// `hostFinalReview` grades a unit independent on `stopped < dispatched`: a long
+// dispatch the operator killed, sitting beside a token dispatch that ran, would
+// otherwise vouch for the token one.
+// ---------------------------------------------------------------------------
+
+/**
+ * One `forge-review <unit> <this session>` sidecar per descriptor, each writing
+ * `requests` distinct requests across two content blocks apiece — so a reader
+ * counting lines rather than requests lands on a different number. A descriptor
+ * with `requests: null` gets a meta and no transcript: the pruned `.jsonl`.
+ */
+function plantDispatches(descriptors, unit = 'final') {
+  const subagents = {};
+  for (const { agentId, requests, stopped } of descriptors) {
+    subagents[agentId] = {
+      meta: meta({
+        description: `forge-review ${unit} ${DEMO_ID}`,
+        stoppedByUser: stopped ? true : undefined,
+      }),
+      lines:
+        requests === null
+          ? undefined
+          : Array.from({ length: requests * 2 }, (_, n) =>
+              assistantLine({
+                requestId: `${agentId}_req_${Math.floor(n / 2)}`,
+                at: '2026-07-28T10:30:00.000Z',
+              }),
+            ),
+    };
+  }
+  return plantHost({ lines: PARENT, subagents });
+}
+
+/** What the bucket should say, derived from the fixture and nothing else. */
+function expectedBucket(descriptors) {
+  return {
+    dispatched: descriptors.length,
+    stopped: descriptors.filter((d) => d.stopped).length,
+    requests: descriptors.reduce((sum, d) => sum + (d.requests ?? 0), 0),
+    maxRequests: descriptors
+      .filter((d) => !d.stopped)
+      .reduce((best, d) => Math.max(best, d.requests ?? 0), 0),
+  };
+}
+
+test('reviewEvidence reports the busiest unstopped dispatch beside the total', () => {
+  // The stopped one is the *busier*, so a maximum that ignored `stoppedByUser`
+  // would report its count instead — the exact confusion that lets a killed
+  // reviewer vouch for a token one that ran beside it. And there are two
+  // unstopped dispatches of different sizes, so a reader that added them up
+  // instead of taking the largest is caught too: that sum is the evasion the
+  // maximum exists to defeat, so a fixture with one unstopped dispatch cannot
+  // tell the two rules apart.
+  const dispatches = [
+    { agentId: 'a1', requests: 4, stopped: true },
+    { agentId: 'a2', requests: 3, stopped: false },
+    { agentId: 'a3', requests: 2, stopped: false },
+  ];
+  const expected = expectedBucket(dispatches);
+  // Every wrong answer a plausible implementation could give must differ from
+  // the right one, or this asserts only that some rule ran.
+  assert.notEqual(expected.maxRequests, expected.requests, 'max over all vs sum over all');
+  assert.notEqual(
+    expected.maxRequests,
+    Math.max(...dispatches.map((d) => d.requests)),
+    'the stopped dispatch must be the busier one, or the exclusion is untested',
+  );
+  assert.notEqual(
+    expected.maxRequests,
+    dispatches.filter((d) => !d.stopped).reduce((sum, d) => sum + d.requests, 0),
+    'the unstopped dispatches must differ in size, or a sum reads as a max',
+  );
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    configDir: plantDispatches(dispatches),
+  });
+
+  assert.equal(result.available, true);
+  assert.deepEqual(plain(result.units), { final: expected });
+});
+
+test('reviewEvidence reports a busiest of zero when every dispatch was stopped', () => {
+  const dispatches = [
+    { agentId: 'a1', requests: 3, stopped: true },
+    { agentId: 'a2', requests: 5, stopped: true },
+  ];
+  const expected = expectedBucket(dispatches);
+  assert.equal(expected.maxRequests, 0);
+  // The total is untouched by the exclusion: this unit did burn requests, and
+  // `requests` still says so. Only the busiest *unstopped* one is zero.
+  assert.ok(expected.requests > 0);
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    configDir: plantDispatches(dispatches),
+  });
+
+  assert.deepEqual(plain(result.units), { final: expected });
+});
+
+test('reviewEvidence reports the whole total as the busiest for a lone unstopped dispatch', () => {
+  const dispatches = [{ agentId: 'a1', requests: 4, stopped: false }];
+  const expected = expectedBucket(dispatches);
+  assert.equal(expected.maxRequests, expected.requests);
+  // More than one request, or "the max equals the sum" holds for any reader.
+  assert.ok(expected.requests > 1);
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    configDir: plantDispatches(dispatches),
+  });
+
+  assert.deepEqual(plain(result.units), { final: expected });
+});
+
+test('reviewEvidence keeps a pruned-transcript dispatch in the unit, contributing zero', () => {
+  // A meta with no `.jsonl` beside it counts zero requests. It must still be a
+  // dispatch — dropping it would report one fewer reviewer than demonstrably
+  // ran, the collapse of absence into a negative this module exists to stop —
+  // and it must not become the busiest.
+  const dispatches = [
+    { agentId: 'a1', requests: null, stopped: false },
+    { agentId: 'a2', requests: 2, stopped: false },
+  ];
+  const expected = expectedBucket(dispatches);
+  assert.equal(expected.dispatched, 2, 'the pruned record is one of the two');
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    configDir: plantDispatches(dispatches),
+  });
+
+  assert.deepEqual(plain(result.units), { final: expected });
+});
+
+test('reviewEvidence reports a busiest of zero for a unit whose only dispatch was pruned', () => {
+  const dispatches = [{ agentId: 'a1', requests: null, stopped: false }];
+  const expected = expectedBucket(dispatches);
+  assert.equal(expected.maxRequests, 0);
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    configDir: plantDispatches(dispatches),
+  });
+
+  // Present with zero counts, not absent: `dispatched: 1` is what separates
+  // "a reviewer ran and left no transcript" from "no reviewer ran".
+  assert.deepEqual(plain(result.units), { final: expected });
 });
 
 test('reviewEvidence gives the pruned-transcript and absent-sidecar cases distinct reasons', () => {
@@ -678,7 +847,12 @@ test('reviewEvidence keys units by a bare table, so a unit named constructor is 
   });
 
   assert.deepEqual(Object.getOwnPropertyNames(result.units), ['constructor']);
-  assert.deepEqual(result.units.constructor, { dispatched: 1, stopped: 0, requests: 1 });
+  assert.deepEqual(result.units.constructor, {
+    dispatched: 1,
+    stopped: 0,
+    requests: 1,
+    maxRequests: 1,
+  });
   // The counts land on whatever `units.constructor` resolves to. On an
   // ordinary object that is the `Object` constructor *function* — not
   // `Object.prototype`, as an earlier comment here wrongly claimed — so this
@@ -977,7 +1151,9 @@ test('the same dispatch counts when it names this session', () => {
   const result = reviewEvidence({ session: boundSession(), configDir });
 
   assert.equal(result.available, true);
-  assert.deepEqual(plain(result.units), { final: { dispatched: 1, stopped: 0, requests: 1 } });
+  assert.deepEqual(plain(result.units), {
+    final: { dispatched: 1, stopped: 0, requests: 1, maxRequests: 1 },
+  });
   assert.equal(result.prescribed, 1);
 });
 
@@ -1001,7 +1177,9 @@ test('a dispatch outside the old window still counts when it names this session'
     configDir,
   });
 
-  assert.deepEqual(plain(result.units), { final: { dispatched: 1, stopped: 0, requests: 1 } });
+  assert.deepEqual(plain(result.units), {
+    final: { dispatched: 1, stopped: 0, requests: 1, maxRequests: 1 },
+  });
 });
 
 test('a review dispatch naming no session is unattributable, not absent', () => {

@@ -47,6 +47,13 @@
  * out of it — is a prescribed identifier, not prose, and is the only thing that
  * crosses this boundary.
  *
+ * MEASUREMENT, NEVER POLICY. Each unit bucket carries four counts — how many
+ * dispatches the unit had, how many of those the operator stopped, the requests
+ * summed across all of them, and `maxRequests`, the largest request count of any
+ * single *unstopped* dispatch. No threshold lives here. `review-census.mjs`
+ * decides what count is enough; this module only says what the count was, so a
+ * floor can be re-measured and moved without touching the collector.
+ *
  * Everything degrades instead of throwing: this ends up inside
  * `forge phase done`, and telemetry must never block a transition.
  */
@@ -470,9 +477,13 @@ function unavailable(reason) {
  *   both inputs to the attribution *inference* and are no longer read, since a
  *   dispatch record now names the session that made it.
  * @returns {{ available: boolean,
- *   units: Record<string, { dispatched: number, stopped: number, requests: number }>,
+ *   units: Record<string, { dispatched: number, stopped: number, requests: number,
+ *     maxRequests: number }>,
  *   seen: number, prescribed: number, reason?: string }} `units` is
- *   prototype-less and keyed by review unit. `seen` is every identifiable
+ *   prototype-less and keyed by review unit. `requests` is the sum across all of
+ *   the unit's dispatches, stopped or not; `maxRequests` is the largest of any
+ *   single dispatch the operator did *not* stop, and `0` when every one was
+ *   stopped. `seen` is every identifiable
  *   dispatch in this host conversation and `prescribed` only those naming *this*
  *   session, so `prescribed <= seen` always. `reason` is present only when `available` is
  *   false, and `units`, `seen` and `prescribed` are then placeholders — zero
@@ -537,7 +548,8 @@ export function reviewEvidence(options) {
       return unavailable('session has no id — a dispatch record cannot be matched to it');
     }
 
-    /** @type {Record<string, { dispatched: number, stopped: number, requests: number }>} */
+    /** @type {Record<string, { dispatched: number, stopped: number, requests: number,
+     *   maxRequests: number }>} */
     // Prototype-less: the keys come from host-supplied description text. The
     // reachable collision is `constructor` — it is all-lowercase, so it
     // survives the unit's normalisation, where `__proto__` cannot (a leading
@@ -599,10 +611,37 @@ export function reviewEvidence(options) {
         if (record.forgeSessionId !== id) continue;
 
         prescribed += 1;
-        const bucket = (units[record.unit] ??= { dispatched: 0, stopped: 0, requests: 0 });
+        const bucket = (units[record.unit] ??= {
+          dispatched: 0,
+          stopped: 0,
+          requests: 0,
+          maxRequests: 0,
+        });
         bucket.dispatched += 1;
         if (record.stoppedByUser) bucket.stopped += 1;
         bucket.requests += record.requests;
+        // THE BUSIEST SINGLE DISPATCH, AND WHY IT IS NOT THE SUM ABOVE. A
+        // caller asking "did a reviewer actually do any work" cannot read
+        // `requests`: ten throwaway dispatches for one unit add up to whatever
+        // number it is compared against, so a sum is assembled out of pieces
+        // that individually reviewed nothing. A maximum cannot be — some one
+        // dispatch has to have done the work.
+        //
+        // STOPPED RECORDS ARE EXCLUDED, and that is load-bearing rather than
+        // tidiness. `review-census.mjs` grades a unit independent when
+        // `stopped < dispatched`, so an operator-killed dispatch beside a token
+        // one that ran is already an "independent" unit — and a maximum that
+        // counted the killed dispatch's requests would let it vouch for the
+        // token one, which is precisely the pair the grade cannot separate. A
+        // unit whose every dispatch was stopped therefore reports 0, while
+        // `requests` above still says the tokens were burnt.
+        //
+        // Measurement only. The floor this is compared against lives in the
+        // census: this module reports counts, it does not decide what count is
+        // enough.
+        if (!record.stoppedByUser && record.requests > bucket.maxRequests) {
+          bucket.maxRequests = record.requests;
+        }
       }
     }
 
