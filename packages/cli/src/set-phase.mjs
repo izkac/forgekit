@@ -22,6 +22,7 @@ import {
   saveSession,
   writeActive,
 } from './lib.mjs';
+import { isTerminalPhase } from './lib/fleet.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
 import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
 import { reviewCensus } from './review-census.mjs';
@@ -562,7 +563,7 @@ if (phase === 'done' || phase === 'finish') {
 // repeat. Terminal phases are excluded because making a finished session active
 // points `forge status`, the resume hook and `forge review-label` at work that
 // is done, and hides a session with tasks still in flight.
-if (phase !== 'done' && phase !== 'skipped' && readActive()?.sessionId !== sessionId) {
+if (!isTerminalPhase(phase) && readActive()?.sessionId !== sessionId) {
   try {
     writeActive(sessionId);
   } catch (err) {

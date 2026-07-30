@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { e2ePath, e2eStepsHash, loadE2eResults } from './integrity.mjs';
 import { readJson } from './lib.mjs';
+import { isTerminalPhase } from './lib/fleet.mjs';
 import { readPlanTaskProgress } from './plan-progress.mjs';
 
 /** Hours of no session write after which an unfinished session reads as stopped. */
@@ -65,7 +66,7 @@ export function sessionHealth(opts) {
     if (SEVERITY[next] > SEVERITY[state]) state = next;
   };
 
-  if (session.phase === 'done' || session.phase === 'skipped') {
+  if (isTerminalPhase(session.phase)) {
     return {
       state: 'done',
       reasons: [],

@@ -26,6 +26,52 @@ export const PHASE_ORDER = [
   'done',
 ];
 
+/**
+ * The phases that mean "this session is over".
+ *
+ * `skipped` is terminal exactly as `done` is: the work either shipped or was
+ * deliberately never tracked. Four call sites already agreed on that pair —
+ * `unfinishedSessions`, cleanup's `isDone`, `health.mjs`, and the done gate's
+ * own reading. Two did not, and both tested `phase !== 'done'` alone: `forge
+ * fleet watch`, where a session parked at `skipped` rendered in the *live* view
+ * forever, and `liveOverlaps`, where it counted as a second agent editing the
+ * same working tree.
+ *
+ * One exported predicate rather than a sixth private copy, because F47 records
+ * what the copies cost: "terminal phase" had five independent definitions and
+ * adding a phase meant finding all five. `GATE_PHASES` in `set-phase.mjs` stays
+ * separate on purpose — it answers "which transitions run the gates" and
+ * includes `finish`, which is emphatically not terminal.
+ */
+export const TERMINAL_PHASES = new Set(['done', 'skipped']);
+
+/**
+ * @param {string | null | undefined} phase
+ * @returns {boolean} whether the session is over — see `TERMINAL_PHASES`
+ */
+export function isTerminalPhase(phase) {
+  return TERMINAL_PHASES.has(/** @type {string} */ (phase));
+}
+
+/**
+ * The rows `forge fleet watch` shows. `--all` shows every registered session;
+ * otherwise a session is hidden once it is over — `done` *or* `skipped` — or
+ * once its project is unreachable.
+ *
+ * Exported, and living here rather than in `fleet.mjs`, for one reason: it is
+ * the entire behavioural content of `watch`, and `watch` itself wraps it in a
+ * `setInterval` that a test cannot call without hanging. `fleet.mjs` also runs
+ * its CLI switch at import time, so nothing inside it can be imported and
+ * asserted on at all. The filter regressed once by testing `phase !== 'done'`
+ * alone; a named export is what lets that be pinned.
+ *
+ * @param {Array<Record<string, any>>} entries
+ * @param {boolean} [all]
+ */
+export function watchEntries(entries, all = false) {
+  return entries.filter((e) => all || (!e.missing && !isTerminalPhase(e.phase)));
+}
+
 export function fleetDir() {
   return (
     process.env.FORGEKIT_FLEET_DIR ||
@@ -127,8 +173,20 @@ export function registerSession(projectRoot, session) {
     };
     fs.mkdirSync(fleetDir(), { recursive: true });
     fs.writeFileSync(file, `${JSON.stringify(entry, null, 2)}\n`, 'utf8');
-  } catch {
-    /* registry is advisory */
+  } catch (err) {
+    // ADVISORY, BUT NEVER SILENT. Failing to register must not cost the caller
+    // its transition — the registry is a convenience, and `saveSession` is on
+    // every write path — so this still swallows. What it must not do is swallow
+    // *quietly*: the registry is the only surface that shows an operator work
+    // happening in another project, and a session missing from it is invisible
+    // to `forge fleet` entirely, indistinguishable from one that was never
+    // created. Observed in the wild: a change ran to `done` at 35/35 tasks
+    // having never once appeared in the fleet, and the empty handler that used
+    // to sit here meant there was nothing on disk or on stderr to find.
+    process.stderr.write(
+      '[forge] Warning: could not register this session with the fleet registry — ' +
+        `it will not appear in \`forge fleet\`: ${err instanceof Error ? err.message : err}\n`,
+    );
   }
 }
 
@@ -159,7 +217,7 @@ export const LIVE_WINDOW_MS = 30 * 60 * 1000;
 export function liveOverlaps(projectRoot, sessionId, now = Date.now()) {
   const root = path.resolve(projectRoot);
   return listFleet().filter((e) => {
-    if (e.sessionId === sessionId || e.missing || e.phase === 'done') return false;
+    if (e.sessionId === sessionId || e.missing || isTerminalPhase(e.phase)) return false;
     if (path.resolve(e.project) !== root) return false;
     const seen = new Date(e.lastSeen ?? e.updatedAt).getTime();
     return !Number.isNaN(seen) && now - seen < LIVE_WINDOW_MS;

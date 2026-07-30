@@ -18,7 +18,7 @@ import {
   SESSIONS_DIR,
   sessionAgeDays,
 } from './lib.mjs';
-import { unregisterSession } from './lib/fleet.mjs';
+import { isTerminalPhase, unregisterSession } from './lib/fleet.mjs';
 import { appendScorecardLedger } from './score.mjs';
 
 const args = new Set(process.argv.slice(2));
@@ -93,7 +93,7 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
 
   const isActive = sessionId === activeId;
   const tooOld = sessionAgeDays(session) > RETENTION_DAYS;
-  const isDone = session.phase === 'done' || session.phase === 'skipped';
+  const isDone = isTerminalPhase(session.phase);
 
   // AGE ALONE MUST NOT DELETE WORK IN PROGRESS. `(tooOld || isDone)` deleted a
   // twenty-day session sitting at `implement` — with its verify evidence and

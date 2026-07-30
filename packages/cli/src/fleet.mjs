@@ -11,8 +11,9 @@
  *   forge fleet send <session>|--all <message...>
  *
  * <session> matches by sessionId, slug, or project name; must be unique.
- * watch shows only active sessions (not done, session dir present); --all
- * includes done/missing ones. list always shows everything.
+ * watch shows only sessions still under way — neither `done` nor `skipped`,
+ * session dir present; --all includes the finished and missing ones. list
+ * always shows everything.
  */
 
 import fs from 'node:fs';
@@ -24,6 +25,7 @@ import {
   peekInbox,
   queueMessage,
   sessionDirFor,
+  watchEntries,
 } from './lib/fleet.mjs';
 import { healthCell, sessionHealth } from './health.mjs';
 import { buildFleetReport, formatFleetReport } from './fleet-report.mjs';
@@ -162,10 +164,10 @@ function cmdWatch(args) {
   const interval = Math.max(1, Number(i >= 0 ? args[i + 1] : 3) || 3) * 1000;
   const all = args.includes('--all');
   const render = () => {
-    const entries = listFleet().filter((e) => all || (!e.missing && e.phase !== 'done'));
+    const entries = watchEntries(listFleet(), all);
     process.stdout.write('\x1b[2J\x1b[H');
     process.stdout.write(
-      `forge fleet — ${new Date().toLocaleTimeString()} (Ctrl+C to exit${all ? '' : ', --all for done/missing'})\n\n`,
+      `forge fleet — ${new Date().toLocaleTimeString()} (Ctrl+C to exit${all ? '' : ', --all for finished/missing'})\n\n`,
     );
     process.stdout.write(renderTable(entries));
   };

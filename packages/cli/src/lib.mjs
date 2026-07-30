@@ -6,7 +6,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { registerSession } from './lib/fleet.mjs';
+import { isTerminalPhase, registerSession } from './lib/fleet.mjs';
 import { findRepoRoot } from './repo-root.mjs';
 
 export { findRepoRoot };
@@ -148,7 +148,7 @@ export function unfinishedSessions(sessionsDir = SESSIONS_DIR) {
       out.push({ id: name, unreadable: true });
       continue;
     }
-    if (raw?.phase === 'done' || raw?.phase === 'skipped') continue;
+    if (isTerminalPhase(raw?.phase)) continue;
     // THE DIRECTORY NAME IS THE ADDRESSABLE KEY. `loadSession` resolves
     // `SESSIONS_DIR/<id>`, `--session` is passed straight to it, and
     // `active.json` stores the same thing — so returning the *declared*

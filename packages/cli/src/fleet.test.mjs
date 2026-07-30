@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  TERMINAL_PHASES,
   drainInbox,
   entryFile,
+  isTerminalPhase,
   listFleet,
   LIVE_WINDOW_MS,
   liveOverlaps,
@@ -17,6 +19,7 @@ import {
   sanitizePath,
   touchSession,
   unregisterSession,
+  watchEntries,
 } from './lib/fleet.mjs';
 import { saveSession } from './lib.mjs';
 
@@ -248,6 +251,87 @@ test('liveOverlaps flags only live sessions in the same project', () => {
 
 test('sanitizePath matches Claude Code project-dir naming', () => {
   assert.equal(sanitizePath('S:\\Projects\\forgekit'), 'S--Projects-forgekit');
+});
+
+test('a skipped session is over: watch hides it and it is not a live overlap', () => {
+  // Both call sites tested `phase !== 'done'` alone, so a session parked at
+  // `skipped` rendered in the *live* watch view forever and counted as a second
+  // agent editing the same working tree. Observed on two real sessions whose
+  // work was complete (43/43 and 46/46 tasks) and which had been stamped
+  // `skipped` rather than `done`.
+  //
+  // Every phase is derived from the module's own set rather than restated, so a
+  // phase added to TERMINAL_PHASES is exercised here instead of silently
+  // skipped — the same tripwire shape `review-verdict.test.mjs` uses.
+  assert.deepEqual([...TERMINAL_PHASES].sort(), ['done', 'skipped']);
+  for (const phase of TERMINAL_PHASES) assert.equal(isTerminalPhase(phase), true, phase);
+  for (const phase of ['triage', 'brainstorm', 'plan', 'implement', 'verify', 'review', 'finish']) {
+    assert.equal(isTerminalPhase(phase), false, phase);
+  }
+  // Absent is not terminal: an unreadable or half-written entry is a session
+  // that may still be running, and hiding it is the direction that loses work.
+  assert.equal(isTerminalPhase(undefined), false);
+  assert.equal(isTerminalPhase(null), false);
+
+  const rows = [
+    { sessionId: 'live', phase: 'implement', missing: false },
+    { sessionId: 'finished', phase: 'done', missing: false },
+    { sessionId: 'parked', phase: 'skipped', missing: false },
+    { sessionId: 'gone', phase: 'implement', missing: true },
+  ];
+  assert.deepEqual(
+    watchEntries(rows).map((e) => e.sessionId),
+    ['live'],
+    'watch shows only sessions still under way',
+  );
+  assert.deepEqual(
+    watchEntries(rows, true).map((e) => e.sessionId),
+    rows.map((e) => e.sessionId),
+    '--all shows every registered session, unfiltered',
+  );
+
+  // And the same rule at the other call site, through the real registry.
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-skip-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  for (const id of ['me', 'peer', 'parked']) makeProject(project, id);
+  registerSession(project, makeSession('me'));
+  registerSession(project, makeSession('peer'));
+  registerSession(project, makeSession('parked', { phase: 'skipped' }));
+  assert.deepEqual(
+    liveOverlaps(project, 'me').map((e) => e.sessionId),
+    ['peer'],
+    'a skipped session is not another agent in the working tree',
+  );
+});
+
+test('a session that cannot be registered says so instead of vanishing', () => {
+  // The handler here used to be an empty catch. Measured consequence: a change
+  // in another project ran to `done` at 35/35 tasks having never once appeared
+  // in `forge fleet`, and there was nothing on disk or on stderr to explain it —
+  // an unregistered session is indistinguishable from one that never existed.
+  // Registration stays best-effort (it must never cost a transition); what it
+  // may not be is silent.
+  const blocked = path.join(tmp('fleet-blocked-'), 'not-a-dir');
+  fs.writeFileSync(blocked, 'this is a file, so mkdir of a child must fail\n', 'utf8');
+  process.env.FORGEKIT_FLEET_DIR = path.join(blocked, 'sessions');
+  const project = tmp('fleet-proj-');
+  makeProject(project, 's1');
+
+  const original = process.stderr.write.bind(process.stderr);
+  let captured = '';
+  process.stderr.write = (chunk) => {
+    captured += chunk;
+    return true;
+  };
+  try {
+    registerSession(project, makeSession('s1'));
+  } finally {
+    process.stderr.write = original;
+  }
+
+  assert.match(captured, /could not register this session with the fleet registry/);
+  assert.match(captured, /forge fleet/, 'the warning names the surface the session is missing from');
+  assert.match(captured, /ENOTDIR|EEXIST|ENOENT/, 'and carries the underlying cause');
 });
 
 test('registerSession keeps scratch projects out of the default registry', () => {
