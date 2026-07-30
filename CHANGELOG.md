@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.33 — 2026-07-30
+
+### `implement.md` names `--session` on the evidence line
+
+The bare `forge evidence` command in the implement loop is how 0.3.32's blocker
+was reached: it writes into `sessions/<id>/tasks/<task>/`, and `forge score`
+reads that exit code into the session's scorecard and durable ledger. The
+refusal added in 0.3.32 protects the record, but the instruction itself never
+said which session it was writing to. It does now.
+
+Documentation only — no behaviour change.
+
 ## 0.3.32 — 2026-07-30
 
 ### `forge evidence`'s overwrite guard was a no-op
