@@ -19,6 +19,15 @@
       "reads": "<sessionDir>/reviews/dispatches.json (via readStamps), the evidence object from reviewEvidence, <sessionDir>/reviews/final-review*.md presence",
       "uiConsumer": "forge phase done gate outcome, forge score scorecard, forge fleet report, session-status",
       "evidence": "packages/cli/src/review-census.test.mjs (recorded path pins prose-not-read; host wins over stamp; below-floor bucket routes to prose; sessionId mismatch and malformed file fall through) + set-phase.test.mjs (gate passes on recorded; frozen host verdict not downgraded; recorded refreshes to host self) + e2e step review-stamp-decides"
+    },
+    {
+      "capability": "review-evidence — a partial binding's absence-negative does not outrank the stamp (D4)",
+      "library": "packages/cli/src/metrics/review-evidence.mjs (partial: bound ids vs transcripts found on disk) + packages/cli/src/review-census.mjs (hostFinalReview's fromAbsence marker; the override in reviewCensus's final-review loop)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs freezeReviewVerdict() on phase finish|done — passes the evidence object by reference into reviewCensus, so partial arrives with no wiring",
+      "writes": "session.json → reviewVerdict {final:'independent', evidence:'recorded'} via the existing freeze; .forge/sessions.jsonl digest line",
+      "reads": "<sessionDir>/reviews/dispatches.json (stamp), the bound host transcripts still on disk (partial computed from what is missing)",
+      "uiConsumer": "forge phase done gate outcome, forge score, forge fleet report",
+      "evidence": "packages/cli/src/metrics/review-evidence.test.mjs (partial flag, five mutants) + review-census.test.mjs (override boundaries, ten mutants incl. grade-drift) + set-phase.test.mjs gate pin 'the done gate does not refuse a stamped session whose absence-negative came from half a binding'"
     }
   ]
 }

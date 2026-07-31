@@ -773,7 +773,7 @@ export function reviewEvidence(options) {
     // length test would be sound only by coincidence of the two lists growing
     // together.
     const measured = new Set(bound.map((entry) => entry.sessionId));
-    const partial = sessionIds.some((id) => !measured.has(id));
+    const partial = sessionIds.some((boundId) => !measured.has(boundId));
 
     // No `reason` key at all on the way out: an empty `units` here is a
     // measurement, not an excuse, and a caller must be able to tell the two
