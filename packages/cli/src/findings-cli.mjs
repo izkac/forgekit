@@ -55,43 +55,8 @@ function reopenedFirst(entries) {
   });
 }
 
-/** Soft-wrap `text` to `width`, prefixing every line with `indent`. */
-function wrapIndented(text, { width, indent }) {
-  const words = String(text ?? '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (words.length === 0) return indent.trimEnd() === '' ? '' : indent;
-  const max = Math.max(width, indent.length + 8);
-  const lines = [];
-  let line = indent;
-  for (const word of words) {
-    const candidate = line === indent ? `${indent}${word}` : `${line} ${word}`;
-    if (candidate.length > max && line !== indent) {
-      lines.push(line);
-      line = `${indent}${word}`;
-    } else {
-      line = candidate;
-    }
-  }
-  if (line.length > indent.length) lines.push(line);
-  return lines.join('\n');
-}
-
-/**
- * One finding as a scannable block: meta on its own line, body indented and
- * soft-wrapped so a long paragraph does not run into the next id.
- */
-function formatFindingBlock(entry, columns) {
-  const id = String(entry.id).padEnd(4);
-  const kind = String(entry.kind ?? 'unknown').padEnd(9);
-  const severity = String(entry.severity ?? 'major').padEnd(7);
-  let meta = `${id}  ${kind} ${severity}`.trimEnd();
-  if (entry.reopenCount >= 1) meta += `  ↻${entry.reopenCount}`;
-  if (entry.status !== 'open') meta += '  ✓';
-  if (entry.change) meta += `  → ${entry.change}`;
-  const wrapped = wrapIndented(entry.text, { width: columns, indent: '      ' });
-  return wrapped ? `${meta}\n${wrapped}` : meta;
+function reopenMarker(entry) {
+  return entry.reopenCount >= 1 ? `↻${entry.reopenCount}` : '  ';
 }
 
 /**
@@ -197,12 +162,14 @@ if (cmd === 'list') {
     process.stdout.write('No findings recorded. File one: forge finding add "<text>"\n');
     process.exit(0);
   }
-  const columns = process.stdout.columns || 80;
-  const rows = (all ? [...visibleOpen, ...visibleResolved] : visibleOpen).map((e) =>
-    formatFindingBlock(e, columns),
+  const rows = (all ? [...visibleOpen, ...visibleResolved] : visibleOpen).map(
+    (e) =>
+      `${e.id}  ${String(e.kind ?? 'unknown').padEnd(9)} ${String(e.severity ?? 'major').padEnd(7)} ${reopenMarker(e)} ${
+        e.status === 'open' ? ' ' : '✓'
+      } ${e.text}${e.change ? `  → ${e.change}` : ''}`,
   );
   process.stdout.write(
-    `${rows.join('\n\n')}${rows.length ? '\n\n' : ''}${visibleOpen.length} open, ${visibleResolved.length} resolved${
+    `${rows.join('\n')}\n\n${visibleOpen.length} open, ${visibleResolved.length} resolved${
       all ? '' : ' (--all to see resolved)'
     }${hiddenOpenNonBugs ? `; ${hiddenOpenNonBugs} open non-bug findings hidden (--all-kinds to see them)` : ''}\n`,
   );
