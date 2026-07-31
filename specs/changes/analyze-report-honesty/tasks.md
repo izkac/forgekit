@@ -37,7 +37,7 @@
 
 ## 4. Dogfood Claude hooks in forgekit (F64)
 
-- [ ] 4.1 Run `forge init --claude` (or copy templates), commit
+- [x] 4.1 Run `forge init --claude` (or copy templates), commit
       `.claude/hooks/*` and a merged `.claude/settings.json` so PreToolUse
       runs `forge-model-hook.mjs`. Add a small pin (test or e2e) that the
       repo tree contains the hook path + settings matcher. Resolve F64.

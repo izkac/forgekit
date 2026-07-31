@@ -1,0 +1,20 @@
+# Forge (thin rule)
+
+Full workflow: `~/.claude/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.claude/skills/forge/SKILL.md` after `forge install`).
+
+**Default:** triage before implementation. Substantial work → **Forge**
+(brainstorm → plan → subagent TDD implement → review).
+
+**Planning engine:** this project's engine is recorded in `.forge/config.json` (`plan.engine`). After brainstorm, create the change spec directly — do not ask for a plan mode:
+- OpenSpec → `/opsx:propose`
+- built-in specs → `forge change new <slug>`
+
+Work too small to spec should skip Forge (`/forge:skip` or direct execution).
+
+**Skip Forge** only when work is trivial OR user sends **`/forge:skip`**.
+
+Scratch sessions: `.forge/sessions/` (14-day retention). Active pointer: `.forge/active.json`.
+
+CLI: `forge new`, `forge status`, `forge prefs`, `forge models`, `forge phase`, `forge doctor`.
+
+Do not edit vendor planning-engine skills — Forge orchestrates them. Workflow skills are bundled under the Forge skill's `skills/` folder.
