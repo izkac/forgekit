@@ -9,7 +9,6 @@ tell.
 ## Requirements
 
 ### Requirement: Authorship is measured from host evidence when it exists
-
 Where the host recorded a subagent dispatch matching this session's review unit,
 that record SHALL decide the verdict, and the review file's prose SHALL NOT be
 consulted for it.
@@ -52,7 +51,6 @@ SHALL contribute to no session's verdict.
 - **AND** its evidence is `host`
 
 ### Requirement: Absence of evidence never refuses work
-
 Where host evidence is unavailable, the verdict SHALL fall back to the existing
 prose reading, and SHALL NOT be reported as a self-check on the grounds of
 absence alone.
@@ -66,7 +64,6 @@ absence alone.
 - **AND** `forge phase done` behaves exactly as it did before this change
 
 ### Requirement: Adoption is detected, not assumed
-
 Where the host recorded subagent dispatches for this session but **none** of them
 carry the prescribed review label, the convention SHALL be treated as not in use
 and the verdict SHALL fall back to the prose reading. A session SHALL NOT be
@@ -97,7 +94,6 @@ unprescribed description.
 - **AND** its evidence is `host`
 
 ### Requirement: A dispatch must carry substance before it certifies a review
-
 Where the host recorded a review dispatch for a unit, the record SHALL decide
 that unit's verdict only when at least one dispatch the operator did not stop
 did enough work to be a review. Below that floor the host SHALL report no
@@ -175,7 +171,6 @@ measurement the operator themselves produced.
   verdict from being refused at that later pass — see below.)
 
 ### Requirement: The verdict outlives its evidence
-
 The verdict and its evidence grade SHALL be written into the session and the
 durable digest when collected. Once frozen, it SHALL NOT be recomputed from
 evidence that may since have been pruned, except as *A frozen verdict is
@@ -192,7 +187,6 @@ NOT replace it on that account alone.
 - **THEN** the recorded verdict and evidence are unchanged
 
 ### Requirement: A frozen verdict is replaced only by a pass that learnt something
-
 Where a verdict has already been frozen for a session, a later pass SHALL
 replace it only when that pass learnt something about the final review. A
 pass that finds no record of the deciding review unit, where an earlier pass
@@ -262,7 +256,6 @@ record".
 - **AND** the caller falls back to a live census
 
 ### Requirement: A declined dispatch is reported, not assumed
-
 Where the host records that an operator stopped a reviewer dispatch, the census
 SHALL surface that fact and SHALL NOT treat it as either a completed review or
 an automatic waiver.
@@ -276,7 +269,6 @@ an automatic waiver.
 - **AND** no waiver is applied on the session's behalf
 
 ### Requirement: Unit evidence reports the busiest single unstopped dispatch
-
 Each unit's evidence SHALL carry the request count of its busiest dispatch among
 those the operator did not stop, alongside the existing total across all
 dispatches. A unit whose every dispatch was stopped SHALL report zero for the
@@ -309,7 +301,6 @@ count is enough.
 - **AND** the verdict comes from the review file's prose
 
 ### Requirement: Evidence records counts, never content
-
 Persisted review evidence SHALL contain identifiers, counts and timestamps only.
 The dispatch `description` SHALL NOT be written, even though its format is
 prescribed.
@@ -319,3 +310,81 @@ prescribed.
 - **GIVEN** a reviewer sidecar whose `description` carries free-form text beyond the prescribed token
 - **WHEN** evidence is collected and persisted
 - **THEN** no part of the description text appears in any written artifact
+
+### Requirement: A binding that cannot be read in full cannot decide the gate
+Where any host session bound to a Forge session cannot be read — its transcript
+or its dispatch-record directory present and unreadable, as distinct from
+absent — host evidence SHALL report itself unavailable, and the verdict SHALL
+fall back to the prose reading.
+
+A binding SHALL NOT be reported as readable because *some* of it was read. The
+absence of a reviewer from a partially read binding is not evidence that no
+reviewer ran.
+
+#### Scenario: A reviewer that ran in the unreachable half
+
+- **GIVEN** a session bound to two host sessions
+- **AND** the first is fully readable and carries prescribed dispatches
+- **AND** the second's session directory cannot be searched
+- **AND** the final reviewer was dispatched in the second
+- **WHEN** the census runs
+- **THEN** host evidence is unavailable
+- **AND** the verdict matches what the prose rule alone would return
+- **AND** its evidence is `inferred`
+- **AND** the final review is **not** reported as `self` on `host` grade
+
+#### Scenario: A dispatch-record directory that is present and unreadable
+
+- **GIVEN** a session whose bound host session has a `subagents` path that
+  cannot be stat-ed, or that exists and is not a directory
+- **WHEN** the census runs
+- **THEN** host evidence is unavailable
+- **AND** the reason names the host session id and the path
+
+#### Scenario: A transcript that was pruned, not blocked
+
+- **GIVEN** a session bound to two host sessions
+- **AND** the older transcript is absent from disk
+- **AND** the newer is fully readable
+- **WHEN** the census runs
+- **THEN** host evidence is available and answers from the readable session
+- **AND** the answer is unchanged from before this change
+
+This last scenario is the known limit and is specified as such: a pruned half
+still yields a confident answer. Making it unavailable would make every resumed
+session unavailable once its older transcript expires. The reviewer that ran in
+a pruned half remains invisible until a dispatch-time stamp is written into the
+review artefact itself.
+
+### Requirement: Locating a host transcript distinguishes absent from unreadable
+The helper that locates transcripts and dispatch-record directories on disk
+SHALL report ids it could not examine separately from ids it did not find.
+
+An error of `ENOENT` SHALL be treated as absence, because a pruned transcript
+and a session that dispatched nothing are ordinary conditions. Any other error
+SHALL be reported.
+
+An id found in one project directory SHALL NOT be reported as unreadable because
+a different project directory could not be examined while searching for it.
+
+#### Scenario: An id absent from an unreadable project directory
+
+- **GIVEN** two project directories, the first unsearchable
+- **AND** the id's transcript in the second
+- **WHEN** transcripts are located
+- **THEN** the id is reported as found
+- **AND** no id is reported as unreadable
+
+#### Scenario: An id found nowhere, with one directory unsearchable
+
+- **GIVEN** two project directories, the first unsearchable
+- **AND** the id's transcript in neither
+- **WHEN** transcripts are located
+- **THEN** the id is reported as unreadable, not as absent
+
+#### Scenario: A transcript that is simply not there
+
+- **GIVEN** an id whose transcript is absent from every project directory
+- **AND** every directory readable
+- **WHEN** transcripts are located
+- **THEN** the id is omitted, and is not reported as unreadable
