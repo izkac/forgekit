@@ -1,0 +1,33 @@
+{
+  "change": "stamp-follow-ups",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — atomic stamp write (F62)",
+      "library": "packages/cli/src/review-stamp.mjs (writeStamp → temp + renameSync)",
+      "runtimeOwner": "packages/cli/src/review-label-cli.mjs (forge review-label), registered in packages/cli/bin/forge.mjs; census reader packages/cli/src/review-census.mjs via readStamps on set-phase money/auth gate",
+      "writes": ".forge/sessions/<id>/reviews/dispatches.json (via sibling .tmp + rename)",
+      "reads": "existing dispatches.json for append / refuse-on-malformed",
+      "uiConsumer": "stderr warning on refuse; forge phase done gate consumes stamps via reviewCensus",
+      "evidence": "packages/cli/src/review-stamp.test.mjs (atomic write + orphan .tmp harmless) + scripts/e2e/stamp-follow-ups.mjs"
+    },
+    {
+      "capability": "session-metrics + review-evidence — repeated sessionIds measured once (F61)",
+      "library": "packages/cli/src/metrics/host.mjs (findTranscripts order-preserving dedupe)",
+      "runtimeOwner": "reviewEvidence (packages/cli/src/metrics/review-evidence.mjs) → reviewCensus → set-phase enforceFinalReviewFloor; collectMetrics (packages/cli/src/metrics/collect.mjs) via forge metrics collect and phase done",
+      "writes": "N/A — changes locating multiplicity only; no durable session.json rewrite",
+      "reads": "host.sessionIds from session.json",
+      "uiConsumer": "money/auth gate substance floor (units.*.dispatched must not inflate)",
+      "evidence": "packages/cli/src/metrics/host.test.mjs + review-evidence.test.mjs (duplicate id → dispatched===1) + scripts/e2e/stamp-follow-ups.mjs"
+    },
+    {
+      "capability": "review-evidence — readdir-blocked reason names id and path (F60)",
+      "library": "packages/cli/src/metrics/review-evidence.mjs (scanSidecar reason + unavailable wrap)",
+      "runtimeOwner": "set-phase.mjs freezeReviewVerdict → reviewEvidence → reviewCensus at enforceFinalReviewFloor",
+      "writes": "N/A — changes the unavailable REASON string only",
+      "reads": "bound sidecar directory via findTranscripts",
+      "uiConsumer": "operator reading a refused/stood-aside gate message",
+      "evidence": "packages/cli/src/metrics/review-evidence.test.mjs (chmod readdir case asserts id+path) + scripts/e2e/stamp-follow-ups.mjs"
+    }
+  ]
+}

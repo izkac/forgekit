@@ -286,6 +286,27 @@ test('list puts reopened open findings first and marks their reopen count', () =
   assert.match(text.text, new RegExp(`${reopened.out.id}.*minor\\s+↻1`));
 });
 
+test('list separates findings into scannable blocks with indented bodies', () => {
+  const cwd = makeProject();
+  run(cwd, ['add', 'short finding one', '--kind', 'bug', '--severity', 'major']);
+  run(cwd, [
+    'add',
+    'short finding two',
+    '--kind',
+    'bug',
+    '--severity',
+    'minor',
+    '--change',
+    'fix-two',
+  ]);
+
+  const text = run(cwd, ['list']).text;
+  assert.match(text, /^F1\s+bug\s+major\s*$/m);
+  assert.match(text, /^ {6}short finding one$/m);
+  assert.match(text, /\n\nF2\s+bug\s+minor\s+→ fix-two\s*$/m);
+  assert.match(text, /^ {6}short finding two$/m);
+});
+
 test('resolving an unknown id fails loudly instead of silently succeeding', () => {
   const cwd = makeProject();
   const { status, stderr } = run(cwd, ['resolve', 'F999']);

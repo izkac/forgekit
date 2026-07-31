@@ -70,6 +70,57 @@ test('writeStamp is append-only: a second stamp joins the first rather than repl
   assert.equal(doc.stamps[1].unit, 'final', 'the newer stamp must be last');
 });
 
+test('writeStamp ignores a stale truncated temporary file and preserves the valid live document', () => {
+  const sessionDir = tmp('review-stamp-stale-tmp-');
+  const existingStamp = {
+    unit: 'group-01',
+    label: 'forge-review group-01 stale-tmp',
+    sessionId: 'stale-tmp',
+    at: '2026-07-31T00:00:00.000Z',
+    model: null,
+  };
+  const nextStamp = {
+    unit: 'final',
+    label: 'forge-review final stale-tmp',
+    sessionId: existingStamp.sessionId,
+  };
+  writeRaw(sessionDir, { version: 1, stamps: [existingStamp] });
+  const temporaryFile = path.join(sessionDir, 'reviews', 'dispatches.json.tmp');
+  fs.writeFileSync(temporaryFile, '{ "version": 1, "stamps": [');
+
+  const result = writeStamp(sessionDir, nextStamp);
+
+  assert.equal(result.ok, true, result.reason);
+  const liveDocument = readRaw(sessionDir);
+  assert.equal(liveDocument.version, 1);
+  assert.deepEqual(
+    liveDocument.stamps.map(({ unit, label, sessionId }) => ({ unit, label, sessionId })),
+    [
+      {
+        unit: existingStamp.unit,
+        label: existingStamp.label,
+        sessionId: existingStamp.sessionId,
+      },
+      nextStamp,
+    ],
+  );
+  assert.deepEqual(
+    readStamps(sessionDir).map(({ label }) => label),
+    [existingStamp.label, nextStamp.label],
+    'readStamps must read both stamps from the valid live document, not stale temporary content',
+  );
+});
+
+test('writeStamp replaces the live document with renameSync', () => {
+  const source = fs.readFileSync(new URL('./review-stamp.mjs', import.meta.url), 'utf8');
+
+  assert.match(
+    source,
+    /\bfs\.renameSync\s*\(/,
+    'writeStamp must rename a completed sibling temporary file onto dispatches.json',
+  );
+});
+
 test('model is stored as given when a plain object, and null for anything else', () => {
   for (const model of ['opus', 42, ['opus'], undefined, null]) {
     const sessionDir = tmp('review-stamp-model-bad-');

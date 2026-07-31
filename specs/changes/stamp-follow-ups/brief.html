@@ -1,0 +1,110 @@
+<!-- forge-brief-specs-hash:f97edd70e10d6c8d -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — stamp follow-ups</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5;
+       padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .8rem 1rem;
+             margin: 1.25rem 0; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Stamp follow-ups</h1>
+<p class="sub">Findings F62, F61, F60 &middot; change <code>stamp-follow-ups</code></p>
+
+<h2>TL;DR</h2>
+<p>
+Three small fixes in the same place: how Forge records that a reviewer was
+dispatched, and how it reads host conversation records for the final-review
+gate. After this change, a crashed stamp write can no longer silently disable
+stamping; a duplicated host id can no longer inflate review counts; and a
+blocked sidecar directory is named in the error (id and path), not just
+"could not be read".
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li><strong>Atomic stamp writes</strong> — killing Forge mid-write leaves the
+      previous good stamp file (or a harmless temp sibling), never a truncated
+      live file that refuses every later stamp until manual cleanup.</li>
+  <li><strong>Honest counts on duplicate bindings</strong> — if the same host
+      session id appears twice in a session record, Forge measures it once.
+      The money/auth substance floor cannot be flattered by a double-count.</li>
+  <li><strong>Diagnosable readdir failures</strong> — when Forge can see a
+      sidecar directory but cannot list it, the stand-aside message names the
+      host session and the path, matching the other blocked-sidecar messages.</li>
+</ul>
+
+<h2>How it works</h2>
+<pre class="mermaid">
+flowchart LR
+  A[review-label] --> B[write temp stamp]
+  B --> C[rename onto dispatches.json]
+  C --> D[census / gate]
+  E[host.sessionIds] --> F[findTranscripts dedupe]
+  F --> G[reviewEvidence once per id]
+  G --> D
+</pre>
+<p>
+Stamp writes go through a sibling temp file, then rename. Host id lists are
+deduped in the shared locator used by both the review gate and metrics
+collection. Sidecar list failures keep the existing stand-aside behaviour —
+only the reason string gains identity.
+</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>No new commands. <code>forge review-label</code> and
+      <code>forge phase done</code> behave as today when everything is healthy.</li>
+  <li>If a stamp write was previously stuck after a crash, the next successful
+      write works again without deleting files by hand (assuming the live file
+      is still valid, or only a leftover <code>.tmp</code> remains).</li>
+  <li>Blocked-sidecar stand-aside messages become more specific.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<div class="callout">
+  <strong>Money/auth floor.</strong> Deduping touches the counts that decide
+  whether a final review had enough substance. That is intentional: today a
+  hand-edited duplicate could inflate those counts. Thorough review applies.
+</div>
+<ul>
+  <li>Leftover <code>.tmp</code> files after a kill are ignored, not merged.</li>
+  <li>Live sessions created via normal binding already have unique ids; the
+      dedupe residual is hand-edited or merged <code>session.json</code>.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>F63 — live-census fallback grading without host evidence</li>
+  <li>Analyze report accuracy (F64–F71)</li>
+  <li>Cleanup deleting plan-phase sessions (F48)</li>
+  <li>Thorough-risk detector / scoring redesigns (F11, F13)</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li><strong>Atomic writeStamp</strong> — 2 tasks (test then code)</li>
+  <li><strong>Dedupe sessionIds</strong> — 2 tasks</li>
+  <li><strong>Named readdir reason</strong> — 2 tasks</li>
+  <li><strong>Product loop + resolve findings</strong> — 2 tasks</li>
+</ul>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>
