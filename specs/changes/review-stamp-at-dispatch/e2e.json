@@ -1,0 +1,15 @@
+{
+  "change": "review-stamp-at-dispatch",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "review-stamp-decides",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-stamp-decides",
+      "expect": "REVIEW stamped final=independent evidence=recorded gate=passed; control final=self evidence=inferred gate=refused; subfloor gate=refused"
+    }
+  ]
+}

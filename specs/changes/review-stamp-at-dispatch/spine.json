@@ -1,0 +1,24 @@
+{
+  "change": "review-stamp-at-dispatch",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — a dispatch stamp is written when the label is issued",
+      "library": "packages/cli/src/review-stamp.mjs (new — writeStamp/readStamps over reviews/dispatches.json, append-only, never throws)",
+      "runtimeOwner": "packages/cli/src/review-label-cli.mjs — after session resolution it resolves the model in-process (resolveModel, tier capable default) and writes the stamp into loadSession().dir before printing the label",
+      "writes": ".forge/sessions/<id>/reviews/dispatches.json ({version, stamps:[{unit,label,sessionId,at,model}]})",
+      "reads": ".forge/active.json / session.json (existing session resolution), models.defaults.json + .forge/models.local.json (via resolveModel)",
+      "uiConsumer": "stderr report of stamp path + resolved model; the stamp itself is consumed by reviewCensus",
+      "evidence": "packages/cli/src/review-stamp.test.mjs (new) + review-label-cli.test.mjs (new — stamp written, stdout byte-identical, failure still prints the label) + e2e step review-stamp-decides"
+    },
+    {
+      "capability": "review-evidence — the recorded grade: stamp decides when the host cannot answer, never below the substance floor",
+      "library": "packages/cli/src/review-census.mjs (stamp consultation when hostFinalReview is null and the evidence has no well-formed final bucket; CENSUS_RULE 5)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs freezeReviewVerdict() on phase finish|done (feeds enforceFinalReviewFloor, the money/auth gate); packages/cli/src/score.mjs and ledger.mjs via the frozen verdict",
+      "writes": "session.json → reviewVerdict {final, evidence:'recorded', ...} via set-phase's existing freeze; .forge/sessions.jsonl digest line via the existing ledger",
+      "reads": "<sessionDir>/reviews/dispatches.json (via readStamps), the evidence object from reviewEvidence, <sessionDir>/reviews/final-review*.md presence",
+      "uiConsumer": "forge phase done gate outcome, forge score scorecard, forge fleet report, session-status",
+      "evidence": "packages/cli/src/review-census.test.mjs (recorded path pins prose-not-read; host wins over stamp; below-floor bucket routes to prose; sessionId mismatch and malformed file fall through) + set-phase.test.mjs (gate passes on recorded; frozen host verdict not downgraded; recorded refreshes to host self) + e2e step review-stamp-decides"
+    }
+  ]
+}

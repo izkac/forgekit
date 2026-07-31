@@ -1,0 +1,115 @@
+<!-- forge-brief-specs-hash:e0d9f68ca49a6046 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief — Review stamp at dispatch</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 48rem; margin: 2rem auto; padding: 0 1rem;
+         color: #1a1a1a; background: #fff; line-height: 1.55; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; font-size: .9em; }
+  li { margin: .3rem 0; }
+  .muted { color: #555; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>window.mermaid && mermaid.initialize({ startOnLoad: true });</script>
+</head>
+<body>
+
+<h1>Review stamp at dispatch</h1>
+
+<h2>TL;DR</h2>
+<p>When a high-risk change (money, auth, contracts, migrations) is finished,
+Forge must know whether an outside reviewer actually read it. Today that
+knowledge lives in two fragile places: the host agent's own dispatch records,
+which are deleted after a few days, and the review report's wording, which is
+written by the very party being judged. After this change, the moment a
+reviewer is dispatched Forge writes its own permanent receipt — a
+<em>stamp</em> — and reads that receipt instead of parsing prose.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A reviewer who genuinely ran can no longer <strong>vanish</strong>:
+      even after the host deletes its transcripts, the stamp survives and the
+      change still passes the high-risk gate it earned.</li>
+  <li>Verdicts carry a new, honest evidence grade: <code>recorded</code> —
+      stronger than "we read the report's wording", weaker than "the host's
+      live records confirm it". Ledgers and scorecards show which one decided.</li>
+  <li>No new steps. The one command you already run before dispatching a
+      reviewer (<code>forge review-label final</code>) now writes the stamp
+      as a side effect, and also tells you which model to use.</li>
+  <li>The recent anti-forgery fix stays intact: a stamped dispatch that
+      demonstrably did no work still does not certify a review.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>The label command already sits at the exact moment of dispatch and already
+knows which session it is labelling. It now also resolves the reviewer's
+model and appends a small JSON record — unit, label, session id, time, model
+— into the session's own folder, which the host never prunes. When the
+final verdict is measured, evidence is consulted strongest-first: the host's
+live records if they can answer; otherwise the stamp; only then the report's
+wording.</p>
+
+<pre class="mermaid">
+flowchart TD
+    A[forge review-label final] -->|prints label| B[Reviewer dispatched]
+    A -->|writes stamp| S[(reviews/dispatches.json<br/>in the session folder)]
+    B --> H[(Host dispatch records<br/>pruned in days)]
+    G{Final verdict} -->|1st: can it answer?| H
+    G -->|2nd: stamp present?| S
+    G -->|last resort| P[Report wording]
+</pre>
+
+<h2>What changes for you</h2>
+<ul>
+  <li><code>forge review-label final</code> additionally reports (on stderr)
+      the stamp it wrote and the model it resolved. Its printed label is
+      byte-identical to today, so nothing that parses it breaks.</li>
+  <li>If you decline a reviewer after the label was issued, record it with
+      <code>--final-review-waived</code> as before — the stamp says a
+      dispatch was intended, not that you were forbidden to change your mind.</li>
+  <li>Old sessions and projects that never stamp behave exactly as today.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>A stamp proves the dispatch moment, not the review itself. If you stamp,
+      decline the dispatch, <em>and</em> the host record is pruned, the change
+      is over-credited. That direction — crediting too generously rather than
+      refusing correct work — is the one this subsystem deliberately errs
+      toward, and the waiver is the prescribed record for declines.</li>
+  <li>When a stamp decides, the report's wording is not read at all — even an
+      honest "I wrote this myself" line. Same doctrine as the host path: the
+      file under suspicion never moves the verdict.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Per-group review grading stays on wording (worth ~2 points, no gate).</li>
+  <li>The known wording-rule weaknesses stay open for legacy sessions; they
+      simply carry less traffic as stamps appear.</li>
+  <li>No completion receipt after the review is finished — one step that
+      cannot be forgotten beats two that can.</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li><strong>1. Stamp module and writer</strong> — the receipt file and the
+      label command writing it (2 tasks).</li>
+  <li><strong>2. Verdict precedence</strong> — host &gt; stamp &gt; wording,
+      with the anti-forgery floor preserved (2 tasks).</li>
+  <li><strong>3. Gate and consumers</strong> — pin the money/auth gate on the
+      new grade; update ledgers, comments and the skill docs (3 tasks).</li>
+  <li><strong>4. Product-loop acceptance</strong> — end-to-end proof against
+      the shipped binary, pruning included (1 task).</li>
+</ul>
+
+<p class="muted">Change: <code>specs/changes/review-stamp-at-dispatch</code> ·
+Session: <code>review-stamp-at-dispatch</code> · 2026-07-31</p>
+
+</body>
+</html>
