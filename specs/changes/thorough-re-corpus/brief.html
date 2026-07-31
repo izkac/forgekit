@@ -1,0 +1,33 @@
+<!-- forge-brief-specs-hash:8b7cae2cd1230bc2 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief — Thorough RE corpus</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto;
+         padding: 0 1rem; line-height: 1.55; color: #1a1a1a; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>Thorough RE corpus</h1>
+<h2>TL;DR</h2>
+<p>Before anyone narrows the high-risk pace detector again, we need a fixed
+list of real sentences and a test that fails with their names if
+classification changes. This change adds that list and test. It does
+<strong>not</strong> change the detector.</p>
+<h2>What you'll get</h2>
+<ul>
+  <li>A fixture of risky and benign sentences (including F11's measured
+      examples and hard-wrapped forms).</li>
+  <li>A test that pins today's <code>isHighRiskText</code> answers; a
+      future regex edit shows exactly which sentences flipped.</li>
+</ul>
+<h2>What does not change</h2>
+<p>Bare <code>contract</code> still escalates. F11 stays open until a
+measured narrowing lands on top of this corpus.</p>
+</body>
+</html>

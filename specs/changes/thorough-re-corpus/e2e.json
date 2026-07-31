@@ -1,0 +1,5 @@
+{
+  "change": "thorough-re-corpus",
+  "notApplicable": "Fixture + unit test only — no product loop beyond npm test on thorough-re-corpus.test.mjs",
+  "steps": []
+}

@@ -1,0 +1,15 @@
+{
+  "change": "thorough-re-corpus",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "pace-signals — thorough-risk corpus pins isHighRiskText",
+      "library": "packages/cli/src/preferences.mjs (isHighRiskText) + packages/cli/src/fixtures/thorough-re-corpus.json",
+      "runtimeOwner": "packages/cli/src/thorough-re-corpus.test.mjs (CI / npm test); production callers of isHighRiskText remain suggestPaceFromSignals / review floors — unchanged",
+      "writes": "packages/cli/src/fixtures/thorough-re-corpus.json (static fixture)",
+      "reads": "fixture rows; isHighRiskText",
+      "uiConsumer": "N/A — test failure output names flipped sentences",
+      "evidence": "packages/cli/src/thorough-re-corpus.test.mjs"
+    }
+  ]
+}
