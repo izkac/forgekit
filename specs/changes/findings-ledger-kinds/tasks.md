@@ -50,14 +50,14 @@
 
 ## 4. Backfill + acceptance check
 
-- [ ] 4.1 One-shot `scripts/backfill-finding-kinds.mjs`: read each row in
+- [x] 4.1 One-shot `scripts/backfill-finding-kinds.mjs`: read each row in
       `.forge/findings.jsonl`, assign `kind` (and F11/F13
       `reopenedFrom`/`reopenCount`), write back; print before/after open-
       by-kind counts. Run it, delete the script, leave the local ledger
       updated. Verification: `forge finding list` shows single-digit bugs
       (or documents the actual count); `forge status` `openFindings.count`
       matches bug count.
-- [ ] 4.2 Backfill known `dependsOn`: F11 → `['F12']` (F18/F19 already
+- [x] 4.2 Backfill known `dependsOn`: F11 → `['F12']` (F18/F19 already
       resolved in W1; F51 residual does not depend on F12 for its remaining
       below-floor claim — leave unlinked or link only if text still cites
       F12 as fix). Spot-check with `forge finding resolve F12 --note` amend
