@@ -21,12 +21,12 @@
 
 ## 2. dependsOn (W3)
 
-- [ ] 2.1 `findings.mjs` / `findings-cli.mjs` / tests: optional
+- [x] 2.1 `findings.mjs` / `findings-cli.mjs` / tests: optional
       `dependsOn: string[]` on add (`--depends-on F12,F18`); `forge
       finding link <id> --depends-on <ids>` merges edges on an existing
       finding; unknown target id refuses. Test: add with dependsOn;
       link appends without duplicating.
-- [ ] 2.2 On `resolveFinding` / CLI resolve: collect open findings whose
+- [x] 2.2 On `resolveFinding` / CLI resolve: collect open findings whose
       `dependsOn` contains the resolved id; print heading `Re-check these
       — their root cause just closed:` with id + first line of text each;
       leave them `open`; exit 0. Test: resolve with dependents → listed

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { addFinding, KINDS } from './findings.mjs';
 
@@ -39,16 +39,12 @@ function makeProject() {
 
 function run(cwd, args) {
   const env = { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('finding-fleet-'), 's') };
+  const result = spawnSync(process.execPath, [FINDINGS, ...args], { cwd, env, encoding: 'utf8' });
+  const text = result.stdout;
   try {
-    const stdout = execFileSync(process.execPath, [FINDINGS, ...args], { cwd, env });
-    const text = stdout.toString();
-    try {
-      return { status: 0, out: JSON.parse(text), text };
-    } catch {
-      return { status: 0, out: null, text };
-    }
-  } catch (err) {
-    return { status: err.status, out: null, text: String(err.stdout), stderr: String(err.stderr) };
+    return { status: result.status, out: JSON.parse(text), text, stderr: result.stderr };
+  } catch {
+    return { status: result.status, out: null, text, stderr: result.stderr };
   }
 }
 
@@ -122,6 +118,44 @@ test('list shows open findings and resolve closes one by id', () => {
   assert.equal(after.out.open.length, 1);
   assert.equal(after.out.resolved.length, 1);
   assert.match(after.out.resolved[0].note, /quarantined/);
+});
+
+test('resolving a finding lists its open dependents without resolving them', () => {
+  const cwd = makeProject();
+  const root = run(cwd, ['add', 'root cause', '--kind', 'bug', '--severity', 'major']);
+  const dependent = run(cwd, [
+    'add',
+    're-check service startup\nbecause the root cause changed',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
+    '--depends-on',
+    root.out.id,
+  ]);
+
+  const resolved = run(cwd, ['resolve', root.out.id, '--note', 'fixed']);
+
+  assert.equal(resolved.status, 0, resolved.stderr);
+  assert.deepEqual(resolved.out.dependents.map(({ id, text }) => ({ id, text })), [
+    { id: dependent.out.id, text: dependent.out.text },
+  ]);
+  assert.match(resolved.stderr, /Re-check these — their root cause just closed:/);
+  assert.match(resolved.stderr, new RegExp(`${dependent.out.id}.*re-check service startup`));
+
+  const after = run(cwd, ['list', '--json']);
+  assert.deepEqual(after.out.open.map((entry) => entry.id), [dependent.out.id]);
+});
+
+test('resolving a finding without dependents prints no re-check heading', () => {
+  const cwd = makeProject();
+  const finding = run(cwd, ['add', 'standalone finding', '--kind', 'bug', '--severity', 'major']);
+
+  const resolved = run(cwd, ['resolve', finding.out.id, '--note', 'fixed']);
+
+  assert.equal(resolved.status, 0, resolved.stderr);
+  assert.deepEqual(resolved.out.dependents, []);
+  assert.doesNotMatch(resolved.stderr, /Re-check these — their root cause just closed:/);
 });
 
 test('list defaults to open bugs and can show all finding kinds', () => {
@@ -296,4 +330,67 @@ test('addFinding refuses unknown kind and severity', () => {
     () => addFinding({ forgeDir, text: 'unknown severity', kind: 'bug', severity: 'urgent' }),
     /unknown severity/i,
   );
+});
+
+test('add stores dependencies only when target findings exist', () => {
+  const cwd = makeProject();
+  const target = run(cwd, ['add', 'target finding', '--kind', 'bug', '--severity', 'major']);
+  const dependent = run(cwd, [
+    'add',
+    'dependent finding',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
+    '--depends-on',
+    target.out.id,
+  ]);
+
+  assert.equal(dependent.status, 0, dependent.stderr);
+  assert.deepEqual(dependent.out.dependsOn, [target.out.id]);
+
+  const unknown = run(cwd, [
+    'add',
+    'missing dependency',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
+    '--depends-on',
+    'F999',
+  ]);
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /F999/);
+});
+
+test('link merges dependencies without duplicate edges', () => {
+  const cwd = makeProject();
+  const source = run(cwd, ['add', 'source finding', '--kind', 'bug', '--severity', 'major']);
+  const firstTarget = run(cwd, ['add', 'first target', '--kind', 'bug', '--severity', 'major']);
+  const secondTarget = run(cwd, ['add', 'second target', '--kind', 'bug', '--severity', 'major']);
+
+  const linked = run(cwd, [
+    'link',
+    source.out.id,
+    '--depends-on',
+    `${firstTarget.out.id},${secondTarget.out.id},${firstTarget.out.id}`,
+  ]);
+  assert.equal(linked.status, 0, linked.stderr);
+  assert.deepEqual(linked.out.dependsOn, [firstTarget.out.id, secondTarget.out.id]);
+
+  const again = run(cwd, ['link', source.out.id, '--depends-on', secondTarget.out.id]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.deepEqual(again.out.dependsOn, [firstTarget.out.id, secondTarget.out.id]);
+
+  const missingSource = run(cwd, ['link', 'F999', '--depends-on', firstTarget.out.id]);
+  assert.equal(missingSource.status, 1);
+  assert.match(missingSource.stderr, /F999/);
+
+  const missingTarget = run(cwd, ['link', source.out.id, '--depends-on', 'F999']);
+  assert.equal(missingTarget.status, 1);
+  assert.match(missingTarget.stderr, /F999/);
+
+  const emptyTarget = run(cwd, ['link', source.out.id, '--depends-on', `${firstTarget.out.id},`]);
+  assert.equal(emptyTarget.status, 1);
+  assert.match(emptyTarget.stderr, /empty/i);
 });

@@ -3,18 +3,20 @@
  * `forge finding` — file, list and close findings (see findings.mjs).
  *
  * Usage:
- *   forge finding add "<text>" [--change <slug>] --kind bug|debt|tradeoff|idea|process --severity blocker|major|minor|note
+ *   forge finding add "<text>" [--change <slug>] [--depends-on <ids>] --kind bug|debt|tradeoff|idea|process --severity blocker|major|minor|note
+ *   forge finding link <id> --depends-on <ids>
  *   forge finding list [--json] [--all] [--all-kinds]
  *   forge finding resolve <id> [--note "<text>"]
  */
 
 import { FORGE_DIR, loadSession, readActive } from './lib.mjs';
-import { addFinding, readFindings, resolveFinding } from './findings.mjs';
+import { addFinding, linkFinding, readFindings, resolveFinding } from './findings.mjs';
 
 function usage() {
   process.stderr.write(
     `Usage:
-  forge finding add "<text>" [--change <slug>] --kind bug|debt|tradeoff|idea|process --severity blocker|major|minor|note
+  forge finding add "<text>" [--change <slug>] [--depends-on <ids>] --kind bug|debt|tradeoff|idea|process --severity blocker|major|minor|note
+  forge finding link <id> --depends-on <ids>
   forge finding list [--json] [--all] [--all-kinds]
   forge finding resolve <id> [--note "<text>"]
 `,
@@ -28,6 +30,19 @@ function fail(message) {
 
 function emit(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function warnDependents(dependents) {
+  if (dependents.length === 0) return;
+  const rows = dependents.map((entry) => `${entry.id}  ${String(entry.text ?? '').split(/\r?\n/, 1)[0]}`);
+  process.stderr.write(`Re-check these — their root cause just closed:\n${rows.join('\n')}\n`);
+}
+
+function parseDependencyIds(value) {
+  if (typeof value !== 'string') fail('Dependencies need one or more finding ids.');
+  const ids = value.split(',').map((id) => id.trim());
+  if (ids.some((id) => id === '')) fail('Dependency ids must not be empty.');
+  return ids;
 }
 
 /**
@@ -64,10 +79,12 @@ if (cmd === 'add') {
   let change = null;
   let kind;
   let severity;
+  let dependsOn;
   for (let i = 2; i < argv.length; i += 1) {
     if (argv[i] === '--change' && argv[i + 1]) change = argv[(i += 1)];
     else if (argv[i] === '--kind' && argv[i + 1]) kind = argv[(i += 1)];
     else if (argv[i] === '--severity' && argv[i + 1]) severity = argv[(i += 1)];
+    else if (argv[i] === '--depends-on') dependsOn = parseDependencyIds(argv[(i += 1)]);
     else fail(`Unknown argument: ${argv[i]}`);
   }
   try {
@@ -77,6 +94,7 @@ if (cmd === 'add') {
       kind,
       severity,
       change,
+      dependsOn,
       session: activeSessionInfo(),
     });
     emit({
@@ -86,6 +104,23 @@ if (cmd === 'add') {
         ? `Open its home: forge change new ${change}`
         : 'Give it a home: forge change new <slug>, forge defer add, or fix it now — otherwise label it a note (--severity note).',
     });
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+  process.exit(0);
+}
+
+if (cmd === 'link') {
+  const id = argv[1];
+  if (!id) fail('Usage: forge finding link <id> --depends-on <ids>');
+  let dependsOn;
+  for (let i = 2; i < argv.length; i += 1) {
+    if (argv[i] === '--depends-on') dependsOn = parseDependencyIds(argv[(i += 1)]);
+    else fail(`Unknown argument: ${argv[i]}`);
+  }
+  if (!dependsOn) fail('Usage: forge finding link <id> --depends-on <ids>');
+  try {
+    emit({ ok: true, ...linkFinding({ forgeDir: FORGE_DIR, id, dependsOn }) });
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   }
@@ -136,7 +171,9 @@ if (cmd === 'resolve') {
     else fail(`Unknown argument: ${argv[i]}`);
   }
   try {
-    emit({ ok: true, ...resolveFinding({ forgeDir: FORGE_DIR, id, note }) });
+    const { entry, dependents } = resolveFinding({ forgeDir: FORGE_DIR, id, note });
+    emit({ ok: true, ...entry, dependents });
+    warnDependents(dependents);
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   }

@@ -57,9 +57,35 @@ function writeAll(forgeDir, entries) {
   fs.writeFileSync(file, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf8');
 }
 
+/** @param {unknown} ids */
+function normalizeDependencyIds(ids) {
+  if (ids === undefined) return [];
+  if (!Array.isArray(ids)) throw new Error('Dependencies must be an array of finding ids.');
+  const normalized = ids.map((id) => {
+    if (typeof id !== 'string' || id.trim() === '') {
+      throw new Error('Dependency ids must not be empty.');
+    }
+    return id.trim();
+  });
+  return [...new Set(normalized)];
+}
+
+/**
+ * @param {Record<string, any>[]} entries
+ * @param {string[]} ids
+ */
+function requireKnownDependencies(entries, ids) {
+  for (const id of ids) {
+    if (!entries.some((entry) => entry.id === id)) {
+      throw new Error(`No finding with id ${id}. See: forge finding list --all`);
+    }
+  }
+}
+
 /**
  * @param {{ forgeDir: string, text: string, kind: string, severity: string, change?: string | null,
- *           session?: { sessionId?: string | null, slug?: string | null }, now?: () => Date }} opts
+ *           dependsOn?: string[], session?: { sessionId?: string | null, slug?: string | null },
+ *           now?: () => Date }} opts
  */
 export function addFinding(opts) {
   const text = String(opts.text ?? '').trim();
@@ -77,6 +103,8 @@ export function addFinding(opts) {
     throw new Error(`Unknown severity "${severity}" (expected ${SEVERITIES.join(' | ')}).`);
   }
   const entries = readFindings(opts.forgeDir);
+  const dependsOn = normalizeDependencyIds(opts.dependsOn);
+  requireKnownDependencies(entries, dependsOn);
   const entry = {
     id: nextFindingId(entries),
     text,
@@ -87,9 +115,28 @@ export function addFinding(opts) {
     sessionId: opts.session?.sessionId ?? null,
     slug: opts.session?.slug ?? null,
     createdAt: (opts.now?.() ?? new Date()).toISOString(),
+    ...(dependsOn.length > 0 ? { dependsOn } : {}),
   };
   writeAll(opts.forgeDir, [...entries, entry]);
   return entry;
+}
+
+/**
+ * @param {{ forgeDir: string, id: string, dependsOn: string[] }} opts
+ */
+export function linkFinding(opts) {
+  const entries = readFindings(opts.forgeDir);
+  const idx = entries.findIndex((entry) => entry.id === opts.id);
+  if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
+  const dependsOn = normalizeDependencyIds(opts.dependsOn);
+  requireKnownDependencies(entries, dependsOn);
+  const existing = normalizeDependencyIds(entries[idx].dependsOn);
+  entries[idx] = {
+    ...entries[idx],
+    dependsOn: [...new Set([...existing, ...dependsOn])],
+  };
+  writeAll(opts.forgeDir, entries);
+  return entries[idx];
 }
 
 /**
@@ -131,8 +178,11 @@ export function resolveFinding(opts) {
       amendedAt: (opts.now?.() ?? new Date()).toISOString(),
     };
     writeAll(opts.forgeDir, entries);
-    return entries[idx];
+    return { entry: entries[idx], dependents: [] };
   }
+  const dependents = entries.filter(
+    (entry) => entry.status === 'open' && Array.isArray(entry.dependsOn) && entry.dependsOn.includes(opts.id),
+  );
   entries[idx] = {
     ...entries[idx],
     status: 'resolved',
@@ -140,5 +190,5 @@ export function resolveFinding(opts) {
     resolvedAt: (opts.now?.() ?? new Date()).toISOString(),
   };
   writeAll(opts.forgeDir, entries);
-  return entries[idx];
+  return { entry: entries[idx], dependents };
 }
