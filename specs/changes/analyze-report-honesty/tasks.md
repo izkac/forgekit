@@ -44,7 +44,7 @@
 
 ## 5. Product-loop e2e
 
-- [ ] 5.1 Author `scripts/e2e/analyze-report-honesty.mjs` + `e2e.json` steps:
+- [x] 5.1 Author `scripts/e2e/analyze-report-honesty.mjs` + `e2e.json` steps:
       digest with compact splits + zero-dispatch tables → analyze text shows
       digest-backed model tokens, “sessions reported no dispatches”, no
       `<synthetic>` row, `sess err` header. `forge e2e run` green.
