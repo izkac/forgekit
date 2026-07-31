@@ -429,6 +429,42 @@ test('aggregateTokens sums the four token totals across requests', () => {
   assert.deepEqual(summary.tokens, { input: 3, output: 30, cacheRead: 300, cacheCreate: 11 });
 });
 
+test('aggregateTokens omits the host synthetic model from byModel but still counts its requests in totals', () => {
+  const syntheticTokens = { input: 3, output: 30, cacheRead: 300, cacheCreate: 3 };
+  const realTokens = { input: 1, output: 10, cacheRead: 100, cacheCreate: 1 };
+  const entries = usageByRequest([
+    assistantLine({
+      requestId: 'req_synthetic',
+      model: '<synthetic>',
+      tokens: syntheticTokens,
+    }),
+    assistantLine({
+      requestId: 'req_real',
+      model: 'claude-opus-5',
+      tokens: realTokens,
+    }),
+  ]);
+  const summary = aggregateTokens(entries);
+  const expectedTotal = {
+    input: syntheticTokens.input + realTokens.input,
+    output: syntheticTokens.output + realTokens.output,
+    cacheRead: syntheticTokens.cacheRead + realTokens.cacheRead,
+    cacheCreate: syntheticTokens.cacheCreate + realTokens.cacheCreate,
+  };
+  assert.equal(summary.requests, 2);
+  assert.deepEqual(summary.tokens, expectedTotal);
+  assert.equal(Object.hasOwn(summary.byModel, '<synthetic>'), false);
+  assert.deepEqual(plain(summary.byModel), {
+    'claude-opus-5': {
+      requests: 1,
+      input: realTokens.input,
+      output: realTokens.output,
+      cacheRead: realTokens.cacheRead,
+      cacheCreate: realTokens.cacheCreate,
+    },
+  });
+});
+
 test('aggregateTokens splits totals by model slug', () => {
   const entries = usageByRequest([
     assistantLine({

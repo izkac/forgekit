@@ -155,6 +155,31 @@ test('coverage counts every session but token math counts only the measured ones
   assert.equal(analysis.sessions.filter((s) => s.hasMetrics).length, 6);
 });
 
+test('byModel omits the host synthetic model named in a digest', () => {
+  const d = doc({
+    byModel: {
+      '<synthetic>': { requests: 5, input: 5, output: 250, cacheRead: 50000, cacheCreate: 500 },
+      'claude-opus-5': { requests: 90, input: 90, output: 4500, cacheRead: 800000, cacheCreate: 4000 },
+    },
+  });
+  const analysis = buildAnalysis({
+    cwd: project({
+      digests: [
+        digest('s1', {
+          metrics: compact({ models: ['<synthetic>', 'claude-opus-5'] }),
+        }),
+      ],
+      docs: { s1: d },
+    }),
+  });
+
+  assert.equal(Object.hasOwn(analysis.byModel, '<synthetic>'), false);
+  const opus = analysis.byModel['claude-opus-5'];
+  assert.equal(opus.sessions, 1);
+  assert.equal(opus.requests, d.byModel['claude-opus-5'].requests);
+  assert.equal(opus.output, d.byModel['claude-opus-5'].output);
+});
+
 test('per-model rows come from the surviving documents, and grades from every session', () => {
   const d = doc();
   const analysis = buildAnalysis({

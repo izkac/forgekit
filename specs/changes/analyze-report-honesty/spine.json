@@ -1,0 +1,51 @@
+{
+  "change": "analyze-report-honesty",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-analysis — durable byModel/byPhase in digest (F66)",
+      "library": "packages/cli/src/ledger.mjs (compactMetrics); packages/cli/src/analyze.mjs (buildAnalysis)",
+      "runtimeOwner": "forge phase done → appendDigest / compactMetrics; forge analyze → buildAnalysis",
+      "writes": ".forge/sessions.jsonl metrics.byModel / metrics.byPhase on new digests",
+      "reads": "metrics.json (optional), sessions.jsonl digests",
+      "uiConsumer": "forge analyze text / JSON byModel byPhase tables",
+      "evidence": "ledger + analyze unit tests; scripts/e2e/analyze-report-honesty.mjs"
+    },
+    {
+      "capability": "session-analysis — model policy empty-state copy (F65)",
+      "library": "packages/cli/src/analyze.mjs (formatAnalysis)",
+      "runtimeOwner": "forge analyze",
+      "writes": "N/A — render only",
+      "reads": "aggregated dispatches.sessions / total",
+      "uiConsumer": "Model policy line in analyze text",
+      "evidence": "analyze.test.mjs format cases; e2e analyze-report-honesty"
+    },
+    {
+      "capability": "session-analysis — skip <synthetic> (F69)",
+      "library": "packages/cli/src/metrics/transcript.mjs (and/or collect.mjs); analyze.mjs naming loop",
+      "runtimeOwner": "forge metrics collect; forge analyze",
+      "writes": "metrics.json / digest models without <synthetic> going forward",
+      "reads": "host transcripts; digests",
+      "uiConsumer": "By model table",
+      "evidence": "transcript/collect + analyze tests; e2e"
+    },
+    {
+      "capability": "session-analysis — renderer honesty (F67, F68)",
+      "library": "packages/cli/src/analyze.mjs (formatAnalysis)",
+      "runtimeOwner": "forge analyze",
+      "writes": "N/A",
+      "reads": "buildAnalysis output",
+      "uiConsumer": "By model caption and column headers",
+      "evidence": "analyze.test.mjs; e2e"
+    },
+    {
+      "capability": "session-analysis — forgekit Claude hook dogfood (F64)",
+      "library": "templates/project/claude/hooks/* → .claude/hooks; .claude/settings.json",
+      "runtimeOwner": "Claude Code PreToolUse → forge-model-hook.mjs → enforce-model / dispatches.jsonl",
+      "writes": ".claude/ in repo; future session dispatches.jsonl under Claude Code",
+      "reads": "N/A at analyze time",
+      "uiConsumer": "future forge analyze Model policy numbers in this repo",
+      "evidence": "pin that .claude/hooks/forge-model-hook.mjs + settings PreToolUse exist; e2e or unit pin"
+    }
+  ]
+}

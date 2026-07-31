@@ -286,19 +286,24 @@ export function aggregateTokens(entries) {
 
     summary.requests += 1;
     const model = typeof entry.model === 'string' && entry.model ? entry.model : 'unknown';
-    const bucket = (summary.byModel[model] ??= {
-      requests: 0,
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheCreate: 0,
-    });
-    bucket.requests += 1;
-
+    const usageCounts = {};
     for (const field of ['input', 'output', 'cacheRead', 'cacheCreate']) {
       const tokens = count(usage[field]);
       summary.tokens[field] += tokens;
-      bucket[field] += tokens;
+      usageCounts[field] = tokens;
+    }
+    if (model !== '<synthetic>') {
+      const bucket = (summary.byModel[model] ??= {
+        requests: 0,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheCreate: 0,
+      });
+      bucket.requests += 1;
+      for (const field of ['input', 'output', 'cacheRead', 'cacheCreate']) {
+        bucket[field] += usageCounts[field];
+      }
     }
 
     if (typeof entry.version === 'string' && entry.version) {

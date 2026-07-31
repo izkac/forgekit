@@ -151,7 +151,7 @@ export function buildAnalysis(options = {}) {
         ? compact.models
         : [];
     for (const model of named) {
-      if (typeof model !== 'string' || !model) continue;
+      if (typeof model !== 'string' || !model || model === '<synthetic>') continue;
       const row = (byModel[model] ??= {
         sessions: 0,
         detailed: 0,

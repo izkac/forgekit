@@ -1,0 +1,111 @@
+<!-- forge-brief-specs-hash:1e345aff2581e793 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — analyze report honesty</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5;
+       padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .8rem 1rem;
+             margin: 1.25rem 0; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { border: 1px solid #e5e5e5; padding: .4rem .55rem; text-align: left; }
+  th { background: #fafafa; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Analyze report honesty</h1>
+<p class="sub">Findings F64–F69 &middot; change <code>analyze-report-honesty</code></p>
+
+<h2>TL;DR</h2>
+<p>
+<code>forge analyze</code> will stop lying about what it measured: forgekit
+gets the Claude model-policy hooks it already ships to everyone else; the
+Model policy line distinguishes “hook never wrote a table” from “tables say
+zero”; per-model and per-phase token splits survive cleanup in the digest;
+the By-model table labels match the evidence tiers; and
+<code>&lt;synthetic&gt;</code> stops being graded as a model.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li><strong>Wired hooks here (F64)</strong> — committed
+      <code>.claude/hooks</code> + <code>settings.json</code> so Claude Code
+      PreToolUse can record dispatches in this repo.</li>
+  <li><strong>Honest empty Model policy (F65)</strong> — zero totals with
+      sessions that carried tables no longer say “wire the hook”.</li>
+  <li><strong>Durable model/phase splits (F66)</strong> — after cleanup,
+      analyze can still show per-model requests/tokens from the digest.</li>
+  <li><strong>Clearer By-model table (F67, F68)</strong> — caption covers
+      requests as detailed-only; column <code>sess err</code> instead of
+      <code>err</code>.</li>
+  <li><strong>No new synthetic grades (F69)</strong> — collection and analyze
+      skip <code>&lt;synthetic&gt;</code>; old digest names stay in history
+      but no longer get a table row.</li>
+</ul>
+
+<h2>How it works</h2>
+<pre class="mermaid">
+flowchart TD
+  A[metrics.json at phase done] --> B[compactMetrics]
+  B --> C[sessions.jsonl digest]
+  C --> D[buildAnalysis]
+  A -. optional live .-> D
+  D --> E[formatAnalysis]
+  F[Claude PreToolUse hook] --> G[dispatches.jsonl]
+  G --> A
+</pre>
+
+<table>
+  <thead><tr><th>Finding</th><th>Change</th></tr></thead>
+  <tbody>
+    <tr><td>F64</td><td>Commit Claude hooks + merged settings in forgekit</td></tr>
+    <tr><td>F65</td><td>Branch Model policy on <code>dispatches.sessions</code></td></tr>
+    <tr><td>F66</td><td>Digest carries compact <code>byModel</code> / <code>byPhase</code></td></tr>
+    <tr><td>F67</td><td>Caption marks detailed-only columns including requests</td></tr>
+    <tr><td>F68</td><td>Header <code>sess err</code></td></tr>
+    <tr><td>F69</td><td>Filter <code>&lt;synthetic&gt;</code> at collect + analyze read</td></tr>
+  </tbody>
+</table>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>New finished sessions write slightly richer digest metrics.</li>
+  <li>Analyze text wording and By-model headers change; JSON gains digest-backed
+      splits when live metrics are gone.</li>
+  <li>If you use Claude Code in this checkout, model-policy hooks are on after
+      merge (ensure <code>forge</code> is on PATH as today).</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>F48 cleanup of plan-phase sessions (separate change).</li>
+  <li>F13 scoring redesign; F63; F70–F71; coverage “collection failed” split.</li>
+</ul>
+
+<h2>Risks</h2>
+<div class="callout">
+Cursor Task runs in this repo still will not populate Claude PreToolUse
+dispatch tables — F64 is Claude dogfooding as specified. Historical digests
+that list <code>&lt;synthetic&gt;</code> are not rewritten; analyze simply
+stops showing that row.
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+</script>
+</body>
+</html>
