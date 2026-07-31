@@ -1,5 +1,11 @@
 {
   "change": "findings-ledger-routing",
-  "notApplicable": "CLI advisory fields + docs — covered by unit tests; no separate service loop",
-  "steps": []
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "findings-routing-loop",
+      "cmd": "node scripts/e2e/findings-routing.mjs",
+      "expect": "FINDINGS routing related=ok stale=ok"
+    }
+  ]
 }

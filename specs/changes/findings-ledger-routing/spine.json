@@ -9,7 +9,7 @@
       "writes": "JSON stdout fields relatedFindings / staleFindings (no ledger mutation)",
       "reads": ".forge/findings.jsonl",
       "uiConsumer": "forge new / forge status operators and agents",
-      "evidence": "packages/cli/src/findings.test.mjs (+ new-session coverage if present)"
+      "evidence": "packages/cli/src/findings.test.mjs + packages/cli/src/lib.test.mjs + e2e step findings-routing-loop (scripts/e2e/findings-routing.mjs)"
     },
     {
       "capability": "findings-ledger — agent guardrails documented",
