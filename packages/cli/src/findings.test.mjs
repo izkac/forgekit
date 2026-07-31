@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { addFinding, KINDS } from './findings.mjs';
 
 const FINDINGS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'findings-cli.mjs');
 
@@ -59,6 +60,10 @@ test('a finding lands in a durable ledger with the session that raised it', () =
   const { status, out } = run(cwd, [
     'add',
     'smoke suite pinned --workers=1 in 6/6 changes; the shared-state race is never fixed',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
   ]);
 
   assert.equal(status, 0);
@@ -78,7 +83,16 @@ test('a finding lands in a durable ledger with the session that raised it', () =
 
 test('a finding can name the change that will carry it', () => {
   const cwd = makeProject();
-  const { out } = run(cwd, ['add', 'grouping.ts D1 extraction', '--change', 'fix-grouping-d1']);
+  const { out } = run(cwd, [
+    'add',
+    'grouping.ts D1 extraction',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
+    '--change',
+    'fix-grouping-d1',
+  ]);
   assert.equal(out.change, 'fix-grouping-d1');
   // The command tells you how to open that change rather than creating it
   // behind your back.
@@ -87,8 +101,15 @@ test('a finding can name the change that will carry it', () => {
 
 test('list shows open findings and resolve closes one by id', () => {
   const cwd = makeProject();
-  const first = run(cwd, ['add', 'server suite baseline is 1-4 varying failures']);
-  run(cwd, ['add', 'untick 6.2 in the archived tasks.md']);
+  const first = run(cwd, [
+    'add',
+    'server suite baseline is 1-4 varying failures',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
+  ]);
+  run(cwd, ['add', 'untick 6.2 in the archived tasks.md', '--kind', 'bug', '--severity', 'major']);
 
   const open = run(cwd, ['list', '--json']);
   assert.equal(open.out.open.length, 2);
@@ -103,11 +124,42 @@ test('list shows open findings and resolve closes one by id', () => {
   assert.match(after.out.resolved[0].note, /quarantined/);
 });
 
+test('list defaults to open bugs and can show all finding kinds', () => {
+  const cwd = makeProject();
+  run(cwd, ['add', 'broken pointer handling', '--kind', 'bug', '--severity', 'major']);
+  run(cwd, ['add', 'consolidate session parser', '--kind', 'debt', '--severity', 'minor']);
+  run(cwd, ['add', 'try a compact dashboard', '--kind', 'idea', '--severity', 'note']);
+
+  const defaultList = run(cwd, ['list']);
+  assert.match(defaultList.text, /bug/);
+  assert.doesNotMatch(defaultList.text, /consolidate session parser/);
+  assert.doesNotMatch(defaultList.text, /try a compact dashboard/);
+  assert.match(defaultList.text, /2 open non-bug findings hidden.*--all-kinds/);
+
+  const allKinds = run(cwd, ['list', '--all-kinds']);
+  assert.match(allKinds.text, /debt/);
+  assert.match(allKinds.text, /idea/);
+  assert.doesNotMatch(allKinds.text, /hidden/);
+
+  const json = run(cwd, ['list', '--json', '--all-kinds']);
+  assert.deepEqual(
+    json.out.open.map((entry) => entry.kind),
+    ['bug', 'debt', 'idea'],
+  );
+});
+
 test('a resolution note can be corrected, and the superseded text is kept', () => {
   // F42. Refusing to amend is why F52 exists: a whole second finding filed
   // purely to carry a correction the first one would not accept.
   const cwd = makeProject();
-  const { out } = run(cwd, ['add', 'the keep rule reads the wrong field']);
+  const { out } = run(cwd, [
+    'add',
+    'the keep rule reads the wrong field',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
+  ]);
 
   run(cwd, ['resolve', out.id, '--note', 'fixed by dropping the conjunct']);
   const amended = run(cwd, ['resolve', out.id, '--note', 'CORRECTION: dropping it broke a pin']);
@@ -156,14 +208,33 @@ test('findings work without an active session', () => {
   // Reports are often written between sessions; that must not block filing.
   const cwd = tmp('forge-finding-nosession-');
   fs.mkdirSync(path.join(cwd, '.forge'), { recursive: true });
-  const { status, out } = run(cwd, ['add', 'pace auto never selects brisk or lite']);
+  const { status, out } = run(cwd, [
+    'add',
+    'pace auto never selects brisk or lite',
+    '--kind',
+    'bug',
+    '--severity',
+    'major',
+  ]);
   assert.equal(status, 0);
   assert.equal(out.sessionId, null);
 });
 
-test('forge status reports open findings so they cannot be forgotten', () => {
+test('forge status headlines open bugs and groups open findings by kind', () => {
   const cwd = makeProject();
-  run(cwd, ['add', 'e2e parallel race unfixed']);
+  run(cwd, ['add', 'e2e parallel race unfixed', '--kind', 'bug', '--severity', 'major']);
+  const resolvedBug = run(cwd, ['add', 'resolved bug', '--kind', 'bug', '--severity', 'minor']);
+  run(cwd, ['resolve', resolvedBug.out.id, '--note', 'fixed']);
+  run(cwd, ['add', 'pay down parser duplication', '--kind', 'debt', '--severity', 'minor']);
+  run(cwd, ['add', 'record the compatibility choice', '--kind', 'tradeoff', '--severity', 'note']);
+  run(cwd, ['add', 'try a compact dashboard', '--kind', 'idea', '--severity', 'note']);
+  run(cwd, ['add', 'make the handoff checklist explicit', '--kind', 'process', '--severity', 'minor']);
+  fs.appendFileSync(
+    path.join(cwd, '.forge', 'findings.jsonl'),
+    `${JSON.stringify({ id: 'F999', status: 'open', severity: 'major', text: 'legacy finding' })}\n`,
+    'utf8',
+  );
+
   const statusScript = path.join(path.dirname(FINDINGS), 'session-status.mjs');
   const stdout = execFileSync(process.execPath, [statusScript], {
     cwd,
@@ -171,5 +242,58 @@ test('forge status reports open findings so they cannot be forgotten', () => {
   }).toString();
   const status = JSON.parse(stdout);
   assert.equal(status.openFindings.count, 1);
+  assert.deepEqual(status.openFindings.byKind, {
+    bug: 1,
+    debt: 1,
+    tradeoff: 1,
+    idea: 1,
+    process: 1,
+  });
   assert.match(status.openFindings.latest[0].text, /parallel race/);
+});
+
+test('addFinding requires a kind from the five allowed values', () => {
+  const forgeDir = path.join(tmp('forge-finding-library-'), '.forge');
+
+  assert.deepEqual(KINDS, ['bug', 'debt', 'tradeoff', 'idea', 'process']);
+  assert.throws(
+    () => addFinding({ forgeDir, text: 'missing kind', severity: 'major' }),
+    /bug.*debt.*tradeoff.*idea.*process/,
+  );
+});
+
+test('addFinding requires severity', () => {
+  const forgeDir = path.join(tmp('forge-finding-library-'), '.forge');
+
+  assert.throws(
+    () => addFinding({ forgeDir, text: 'missing severity', kind: 'bug' }),
+    /severity/i,
+  );
+});
+
+test('addFinding stores valid kind and severity', () => {
+  const forgeDir = path.join(tmp('forge-finding-library-'), '.forge');
+
+  const entry = addFinding({
+    forgeDir,
+    text: 'document the decision',
+    kind: 'tradeoff',
+    severity: 'minor',
+  });
+
+  assert.equal(entry.kind, 'tradeoff');
+  assert.equal(entry.severity, 'minor');
+});
+
+test('addFinding refuses unknown kind and severity', () => {
+  const forgeDir = path.join(tmp('forge-finding-library-'), '.forge');
+
+  assert.throws(
+    () => addFinding({ forgeDir, text: 'unknown kind', kind: 'unknown', severity: 'major' }),
+    /unknown kind/i,
+  );
+  assert.throws(
+    () => addFinding({ forgeDir, text: 'unknown severity', kind: 'bug', severity: 'urgent' }),
+    /unknown severity/i,
+  );
 });

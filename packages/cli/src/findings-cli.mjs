@@ -3,8 +3,8 @@
  * `forge finding` — file, list and close findings (see findings.mjs).
  *
  * Usage:
- *   forge finding add "<text>" [--change <slug>] [--severity blocker|major|minor|note]
- *   forge finding list [--json] [--all]
+ *   forge finding add "<text>" [--change <slug>] --kind bug|debt|tradeoff|idea|process --severity blocker|major|minor|note
+ *   forge finding list [--json] [--all] [--all-kinds]
  *   forge finding resolve <id> [--note "<text>"]
  */
 
@@ -14,8 +14,8 @@ import { addFinding, readFindings, resolveFinding } from './findings.mjs';
 function usage() {
   process.stderr.write(
     `Usage:
-  forge finding add "<text>" [--change <slug>] [--severity blocker|major|minor|note]
-  forge finding list [--json] [--all]
+  forge finding add "<text>" [--change <slug>] --kind bug|debt|tradeoff|idea|process --severity blocker|major|minor|note
+  forge finding list [--json] [--all] [--all-kinds]
   forge finding resolve <id> [--note "<text>"]
 `,
   );
@@ -62,9 +62,11 @@ if (cmd === 'add') {
     fail('A finding needs text: forge finding add "<text>"');
   }
   let change = null;
-  let severity = 'major';
+  let kind;
+  let severity;
   for (let i = 2; i < argv.length; i += 1) {
     if (argv[i] === '--change' && argv[i + 1]) change = argv[(i += 1)];
+    else if (argv[i] === '--kind' && argv[i + 1]) kind = argv[(i += 1)];
     else if (argv[i] === '--severity' && argv[i + 1]) severity = argv[(i += 1)];
     else fail(`Unknown argument: ${argv[i]}`);
   }
@@ -72,6 +74,7 @@ if (cmd === 'add') {
     const entry = addFinding({
       forgeDir: FORGE_DIR,
       text,
+      kind,
       severity,
       change,
       session: activeSessionInfo(),
@@ -91,27 +94,35 @@ if (cmd === 'add') {
 
 if (cmd === 'list') {
   const all = argv.includes('--all');
+  const allKinds = argv.includes('--all-kinds');
   const entries = readFindings(FORGE_DIR);
   const open = entries.filter((e) => e.status === 'open');
   const resolved = entries.filter((e) => e.status !== 'open');
+  const visibleOpen = allKinds ? open : open.filter((e) => e.kind === 'bug');
+  const visibleResolved = allKinds ? resolved : resolved.filter((e) => e.kind === 'bug');
+  const hiddenOpenNonBugs = allKinds ? 0 : open.length - visibleOpen.length;
   if (argv.includes('--json')) {
-    emit({ open, resolved: all ? resolved : resolved.slice(-10), total: entries.length });
+    emit({
+      open: visibleOpen,
+      resolved: all ? visibleResolved : visibleResolved.slice(-10),
+      total: entries.length,
+    });
     process.exit(0);
   }
   if (entries.length === 0) {
     process.stdout.write('No findings recorded. File one: forge finding add "<text>"\n');
     process.exit(0);
   }
-  const rows = (all ? entries : open).map(
+  const rows = (all ? [...visibleOpen, ...visibleResolved] : visibleOpen).map(
     (e) =>
-      `${e.id}  ${String(e.severity ?? 'major').padEnd(7)} ${e.status === 'open' ? ' ' : '✓'} ${e.text}${
-        e.change ? `  → ${e.change}` : ''
-      }`,
+      `${e.id}  ${String(e.kind ?? 'unknown').padEnd(9)} ${String(e.severity ?? 'major').padEnd(7)} ${
+        e.status === 'open' ? ' ' : '✓'
+      } ${e.text}${e.change ? `  → ${e.change}` : ''}`,
   );
   process.stdout.write(
-    `${rows.join('\n')}\n\n${open.length} open, ${resolved.length} resolved${
+    `${rows.join('\n')}\n\n${visibleOpen.length} open, ${visibleResolved.length} resolved${
       all ? '' : ' (--all to see resolved)'
-    }\n`,
+    }${hiddenOpenNonBugs ? `; ${hiddenOpenNonBugs} open non-bug findings hidden (--all-kinds to see them)` : ''}\n`,
   );
   process.exit(0);
 }

@@ -17,6 +17,7 @@ import path from 'node:path';
 import { readLedger } from './ledger.mjs';
 
 export const SEVERITIES = ['blocker', 'major', 'minor', 'note'];
+export const KINDS = ['bug', 'debt', 'tradeoff', 'idea', 'process'];
 
 /** @param {string} forgeDir */
 export function findingsPath(forgeDir) {
@@ -57,13 +58,21 @@ function writeAll(forgeDir, entries) {
 }
 
 /**
- * @param {{ forgeDir: string, text: string, severity?: string, change?: string | null,
+ * @param {{ forgeDir: string, text: string, kind: string, severity: string, change?: string | null,
  *           session?: { sessionId?: string | null, slug?: string | null }, now?: () => Date }} opts
  */
 export function addFinding(opts) {
   const text = String(opts.text ?? '').trim();
   if (!text) throw new Error('A finding needs text: forge finding add "<text>"');
-  const severity = opts.severity ?? 'major';
+  const kind = opts.kind;
+  if (!kind) {
+    throw new Error(`A finding needs kind (expected ${KINDS.join(' | ')}).`);
+  }
+  if (!KINDS.includes(kind)) {
+    throw new Error(`Unknown kind "${kind}" (expected ${KINDS.join(' | ')}).`);
+  }
+  const severity = opts.severity;
+  if (!severity) throw new Error(`A finding needs severity (expected ${SEVERITIES.join(' | ')}).`);
   if (!SEVERITIES.includes(severity)) {
     throw new Error(`Unknown severity "${severity}" (expected ${SEVERITIES.join(' | ')}).`);
   }
@@ -71,6 +80,7 @@ export function addFinding(opts) {
   const entry = {
     id: nextFindingId(entries),
     text,
+    kind,
     severity,
     status: 'open',
     change: opts.change ?? null,

@@ -1,6 +1,6 @@
 # Plan — make the findings ledger converge
 
-**Status:** proposed, not started
+**Status:** in progress — W1 done 2026-07-31 (F18/F19 resolved; F11 kept+amended; F51 residual amended, major→minor). Open 26→24.
 **Created:** 2026-07-31
 **Owner:** whoever picks it up next — this document is the brief; follow it in order.
 
