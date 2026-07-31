@@ -66,8 +66,8 @@ fail.
 - GIVEN open finding F20 with `dependsOn: ["F10"]` and open F10
 - WHEN `forge finding resolve F10 --note "fixed"` runs
 - THEN F10 is resolved
-- AND stdout includes a `Re-check these — their root cause just closed:`
-  section naming F20
+- AND stderr includes a `Re-check these — their root cause just closed:`
+  section naming F20 (stdout remains the JSON payload for machine consumers)
 - AND F20 remains `open`
 - AND the command exits 0
 

@@ -57,8 +57,10 @@
       updated. Verification: `forge finding list` shows single-digit bugs
       (or documents the actual count); `forge status` `openFindings.count`
       matches bug count.
-- [x] 4.2 Backfill known `dependsOn`: F11 → `['F12']` (F18/F19 already
-      resolved in W1; F51 residual does not depend on F12 for its remaining
-      below-floor claim — leave unlinked or link only if text still cites
-      F12 as fix). Spot-check with `forge finding resolve F12 --note` amend
-      path listing F11 if still open.
+- [x] 4.2 Backfill known `dependsOn` edges that still hold after W1.
+      Original plan named F11/F18/F19/F51 → F12; W1 audit closed F18/F19
+      as superseded and amended F11/F51 to state they are **not** F12
+      dependents (F11 is THOROUGH_RE/pace; F51 residual is the deliberate
+      below-floor prose path). No live dependsOn edges to backfill.
+      Spot-check: amending F12's resolve note does not list F11 as a
+      dependent.
