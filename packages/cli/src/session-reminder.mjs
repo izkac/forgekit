@@ -11,6 +11,7 @@
 import { FORGE_DIR, loadSession, resolveSessionId, REPO_ROOT } from './lib.mjs';
 import {
   drainInbox,
+  flushPendingSessions,
   liveOverlaps,
   queueMessage,
   sessionDirFor,
@@ -183,6 +184,14 @@ if (!info) {
 // Fleet heartbeat: this hook fires on every agent turn, so lastSeen in the
 // registry tracks "agent actually running", not just the last saveSession.
 touchSession(REPO_ROOT, info.session.id);
+
+// Retry registrations that failed under a write-blocked home (Cursor sandbox).
+// Advisory — never blocks the reminder.
+try {
+  flushPendingSessions(REPO_ROOT);
+} catch {
+  /* advisory */
+}
 
 let message = prompt
   ? buildForgePromptMessage(info, prompt)

@@ -9,6 +9,7 @@ import {
   TERMINAL_PHASES,
   drainInbox,
   entryFile,
+  flushPendingSessions,
   isTerminalPhase,
   listFleet,
   LIVE_WINDOW_MS,
@@ -17,6 +18,7 @@ import {
   queueMessage,
   registerSession,
   sanitizePath,
+  syncProjectSessions,
   touchSession,
   unregisterSession,
   watchEntries,
@@ -332,6 +334,86 @@ test('a session that cannot be registered says so instead of vanishing', () => {
   assert.match(captured, /could not register this session with the fleet registry/);
   assert.match(captured, /forge fleet/, 'the warning names the surface the session is missing from');
   assert.match(captured, /ENOTDIR|EEXIST|ENOENT/, 'and carries the underlying cause');
+});
+
+test('permission-denied register writes fleet-pending.json and names Cursor sandbox recovery', () => {
+  const fleetRoot = tmp('fleet-ro-');
+  fs.chmodSync(fleetRoot, 0o555);
+  process.env.FORGEKIT_FLEET_DIR = path.join(fleetRoot, 'sessions');
+  process.env.CURSOR_SANDBOX = 'native';
+  const project = tmp('fleet-proj-');
+  const sessionDir = makeProject(project, 's-pending');
+  const session = makeSession('s-pending');
+
+  const original = process.stderr.write.bind(process.stderr);
+  let captured = '';
+  process.stderr.write = (chunk) => {
+    captured += chunk;
+    return true;
+  };
+  try {
+    registerSession(project, session);
+  } finally {
+    process.stderr.write = original;
+    delete process.env.CURSOR_SANDBOX;
+    fs.chmodSync(fleetRoot, 0o755);
+  }
+
+  const pending = path.join(sessionDir, 'fleet-pending.json');
+  assert.equal(fs.existsSync(pending), true, 'pending stamp under the session dir');
+  const body = JSON.parse(fs.readFileSync(pending, 'utf8'));
+  assert.equal(body.sessionId, 's-pending');
+  assert.match(captured, /could not register this session with the fleet registry/);
+  assert.match(captured, /required_permissions|unrestricted|forge fleet sync/i);
+  assert.match(captured, /CURSOR_SANDBOX|sandbox/i);
+});
+
+test('successful register clears fleet-pending.json', () => {
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-clear-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  const sessionDir = makeProject(project, 's-clear');
+  fs.writeFileSync(
+    path.join(sessionDir, 'fleet-pending.json'),
+    `${JSON.stringify({ sessionId: 's-clear', reason: 'prior', at: new Date().toISOString() })}\n`,
+    'utf8',
+  );
+  registerSession(project, makeSession('s-clear'));
+  assert.equal(fs.existsSync(path.join(sessionDir, 'fleet-pending.json')), false);
+  assert.equal(fs.existsSync(entryFile(project, 's-clear')), true);
+});
+
+test('flushPendingSessions registers a pending session when the registry is writable', () => {
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-flush-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  const sessionDir = makeProject(project, 's-flush');
+  const session = makeSession('s-flush');
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify(session)}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(sessionDir, 'fleet-pending.json'),
+    `${JSON.stringify({ sessionId: 's-flush', reason: 'EACCES', at: new Date().toISOString() })}\n`,
+    'utf8',
+  );
+  const result = flushPendingSessions(project);
+  assert.equal(result.attempted, 1);
+  assert.equal(result.registered, 1);
+  assert.equal(result.failed, 0);
+  assert.equal(fs.existsSync(path.join(sessionDir, 'fleet-pending.json')), false);
+  assert.equal(fs.existsSync(entryFile(project, 's-flush')), true);
+});
+
+test('syncProjectSessions re-registers every session.json in the project', () => {
+  process.env.FORGEKIT_FLEET_DIR = path.join(tmp('fleet-sync-'), 'sessions');
+  const project = tmp('fleet-proj-');
+  const a = makeProject(project, 's-a');
+  const b = makeProject(project, 's-b');
+  fs.writeFileSync(path.join(a, 'session.json'), `${JSON.stringify(makeSession('s-a'))}\n`, 'utf8');
+  fs.writeFileSync(path.join(b, 'session.json'), `${JSON.stringify(makeSession('s-b'))}\n`, 'utf8');
+  const result = syncProjectSessions(project);
+  assert.equal(result.total, 2);
+  assert.equal(result.registered, 2);
+  assert.equal(result.failed, 0);
+  assert.equal(result.pending, 0);
+  assert.equal(listFleet().length, 2);
 });
 
 test('registerSession keeps scratch projects out of the default registry', () => {

@@ -76,6 +76,14 @@ forge new <kebab-slug>
 plan-engine doctor in warn-only mode (missing OpenSpec CLI does not block
 session creation; specs-engine projects skip the CLI check).
 
+**Cursor sandbox:** Cursor agent shells often block writes outside the
+workspace (`CURSOR_SANDBOX=native`). Fleet registration needs
+`~/.forgekit/fleet/`. Every `forge` command that creates or updates a session
+(`new`, `phase`, `prefs --session-set`, `fleet sync`, …) MUST run with
+unrestricted shell permissions (`required_permissions: ["all"]` on the Shell
+tool). If registration was blocked, `.forge/sessions/<id>/fleet-pending.json`
+remains until `forge reminder` or `forge fleet sync` can write home.
+
 Resume: `forge status` — it resolves the session itself and says so when more
 than one is open. Do **not** read `.forge/active.json` and pass the id along:
 the pointer is a hint, and passing it as `--session` silences the very check

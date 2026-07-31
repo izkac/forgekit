@@ -294,29 +294,52 @@ export function ensureClaudeHookHints(cwd, opts) {
 }
 
 /**
- * Write Cursor hooks.json snippet.
+ * Write Cursor hooks snippet + ensure `.cursor/hooks.json` has forge sessionStart.
  * @param {string} cwd
  * @param {{ force?: boolean }} opts
  */
 export function ensureCursorHookHints(cwd, opts) {
   const notePath = path.join(cwd, '.cursor', 'forge-hooks.snippet.json');
+  const hooksPath = path.join(cwd, '.cursor', 'hooks.json');
+  const forgeStart = {
+    command: 'node .cursor/hooks/forge-session-start.mjs',
+  };
   const snippet = {
     _comment:
-      'Merge into .cursor/hooks.json. Requires Node on PATH (forge-session-start.mjs).',
+      'Also written into .cursor/hooks.json by forge init. Requires Node on PATH.',
     version: 1,
     hooks: {
-      sessionStart: [
-        {
-          command: 'node .cursor/hooks/forge-session-start.mjs',
-        },
-      ],
+      sessionStart: [forgeStart],
     },
   };
   fs.mkdirSync(path.dirname(notePath), { recursive: true });
   if (!fs.existsSync(notePath) || opts.force) {
     fs.writeFileSync(notePath, `${JSON.stringify(snippet, null, 2)}\n`, 'utf8');
   }
-  return notePath;
+
+  /** @type {{ version?: number, hooks?: Record<string, Array<{ command?: string }>> }} */
+  let hooksDoc = { version: 1, hooks: {} };
+  if (fs.existsSync(hooksPath)) {
+    try {
+      hooksDoc = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    } catch {
+      hooksDoc = { version: 1, hooks: {} };
+    }
+  }
+  if (!hooksDoc || typeof hooksDoc !== 'object') hooksDoc = { version: 1, hooks: {} };
+  if (typeof hooksDoc.version !== 'number') hooksDoc.version = 1;
+  if (!hooksDoc.hooks || typeof hooksDoc.hooks !== 'object') hooksDoc.hooks = {};
+  const starts = Array.isArray(hooksDoc.hooks.sessionStart)
+    ? [...hooksDoc.hooks.sessionStart]
+    : [];
+  const hasForge = starts.some((h) =>
+    String(h?.command ?? '').includes('forge-session-start'),
+  );
+  if (!hasForge) starts.push(forgeStart);
+  hooksDoc.hooks.sessionStart = starts;
+  fs.writeFileSync(hooksPath, `${JSON.stringify(hooksDoc, null, 2)}\n`, 'utf8');
+
+  return { snippet: notePath, hooks: hooksPath };
 }
 
 /**
@@ -355,6 +378,7 @@ export function initProject(selected, opts) {
       ),
     );
     report.cursorHookSnippet = ensureCursorHookHints(cwd, copyOpts);
+    report.cursorHooks = report.cursorHookSnippet;
   }
 
   if (selected.includes('claude')) {

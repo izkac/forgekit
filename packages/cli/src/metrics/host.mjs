@@ -7,10 +7,11 @@
  * the only missing link is *which* transcripts belong to this session.
  *
  * That link is an environment variable. `CLAUDE_CODE_SESSION_ID` is exported
- * into the shell `forge` runs in, and its value is the transcript's basename,
- * so binding needs no hook installed and does not care whether the Forge
- * session existed when the host session started. A session resumed tomorrow
- * under a new host id simply appends the new id.
+ * into the shell `forge` runs in (Claude Code), and its value is the
+ * transcript's basename. Cursor exports `CURSOR_CONVERSATION_ID` (preferred)
+ * or `CURSOR_TRACE_ID`. Binding needs no hook and does not care whether the
+ * Forge session existed when the host session started. A session resumed
+ * tomorrow under a new host id simply appends the new id.
  *
  *   ~/.claude/projects/<munged-cwd>/<host-session-id>.jsonl      main
  *   ~/.claude/projects/<munged-cwd>/<host-session-id>/subagents/ sidecars
@@ -18,6 +19,8 @@
  * `findTranscripts` globs `projects/*` rather than reconstructing the munged
  * directory name: that munging rule is undocumented, and host session ids are
  * unique anyway, so a scan is both exact and immune to the rule changing.
+ * Cursor transcript harvest is not implemented yet — binding still records the
+ * id for later adapters.
  *
  * Everything here is advisory. Telemetry must never throw, never block a
  * phase transition, and never fail a command — a missing transcript or an
@@ -29,20 +32,34 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function nonEmpty(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/**
  * Which host agent is running this command, and under what session id.
  *
  * `AI_AGENT` (e.g. `claude-code_2-1-220_agent`) is deliberately ignored: its
  * shape is version-dependent and not a contract, so the presence of a session
  * id — the thing we actually need to find transcripts — is what decides.
+ * Claude's id wins when both Claude and Cursor markers are present.
  *
  * @param {Record<string, string | undefined> | undefined | null} [env]
  * @returns {{ agent: string, sessionId: string | null }}
  */
 export function detectHost(env) {
   const source = env && typeof env === 'object' ? env : {};
-  const raw = source.CLAUDE_CODE_SESSION_ID;
-  const sessionId = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
-  return sessionId ? { agent: 'claude-code', sessionId } : { agent: 'unknown', sessionId: null };
+  const claudeId = nonEmpty(source.CLAUDE_CODE_SESSION_ID);
+  if (claudeId) return { agent: 'claude-code', sessionId: claudeId };
+
+  const cursorId =
+    nonEmpty(source.CURSOR_CONVERSATION_ID) || nonEmpty(source.CURSOR_TRACE_ID);
+  if (cursorId) return { agent: 'cursor', sessionId: cursorId };
+
+  return { agent: 'unknown', sessionId: null };
 }
 
 /**
@@ -84,6 +101,16 @@ export function bindHost(session, env, now = () => new Date()) {
   if (!host.boundAt) host.boundAt = now().toISOString();
   host.agent = agent;
   if (!host.sessionIds.includes(sessionId)) host.sessionIds.push(sessionId);
+
+  // Cursor conversation id doubles as chat id when the session has none yet
+  // (--chat-id and prior binds win). Trace-only binds do not set cursorChatId.
+  const conversationId = nonEmpty(
+    env && typeof env === 'object' ? env.CURSOR_CONVERSATION_ID : null,
+  );
+  if (conversationId && (session.cursorChatId == null || session.cursorChatId === '')) {
+    session.cursorChatId = conversationId;
+  }
+
   return session;
 }
 

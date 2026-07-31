@@ -56,6 +56,45 @@ test('detectHost never throws on an empty, undefined or non-object env', () => {
   assert.deepEqual(detectHost(42), { agent: 'unknown', sessionId: null });
 });
 
+test('detectHost reports cursor from CURSOR_CONVERSATION_ID when Claude id is absent', () => {
+  assert.deepEqual(detectHost({ CURSOR_CONVERSATION_ID: ID_C, CURSOR_AGENT: '1' }), {
+    agent: 'cursor',
+    sessionId: ID_C,
+  });
+});
+
+test('detectHost prefers CURSOR_CONVERSATION_ID over CURSOR_TRACE_ID', () => {
+  assert.deepEqual(
+    detectHost({ CURSOR_CONVERSATION_ID: ID_A, CURSOR_TRACE_ID: ID_B }),
+    { agent: 'cursor', sessionId: ID_A },
+  );
+});
+
+test('detectHost falls back to CURSOR_TRACE_ID when conversation id is blank', () => {
+  assert.deepEqual(detectHost({ CURSOR_CONVERSATION_ID: '  ', CURSOR_TRACE_ID: ID_B }), {
+    agent: 'cursor',
+    sessionId: ID_B,
+  });
+});
+
+test('detectHost Claude id wins over Cursor ids', () => {
+  assert.deepEqual(
+    detectHost({
+      CLAUDE_CODE_SESSION_ID: ID_A,
+      CURSOR_CONVERSATION_ID: ID_C,
+      CURSOR_TRACE_ID: ID_B,
+    }),
+    { agent: 'claude-code', sessionId: ID_A },
+  );
+});
+
+test('detectHost ignores blank Cursor ids', () => {
+  assert.deepEqual(detectHost({ CURSOR_CONVERSATION_ID: '', CURSOR_TRACE_ID: '   ' }), {
+    agent: 'unknown',
+    sessionId: null,
+  });
+});
+
 // --- bindHost --------------------------------------------------------------
 
 test('bindHost records agent, id and boundAt on a fresh session', () => {
@@ -104,6 +143,36 @@ test('bindHost with no host env yields agent unknown and no ids', () => {
 
   assert.equal(session.host.agent, 'unknown');
   assert.deepEqual(session.host.sessionIds, []);
+});
+
+test('bindHost records cursor agent and sets cursorChatId from conversation id', () => {
+  const session = { cursorChatId: null };
+  bindHost(
+    session,
+    { CURSOR_CONVERSATION_ID: ID_C },
+    clock('2026-07-31T15:00:00.000Z'),
+  );
+
+  assert.equal(session.host.agent, 'cursor');
+  assert.deepEqual(session.host.sessionIds, [ID_C]);
+  assert.equal(session.cursorChatId, ID_C);
+});
+
+test('bindHost does not overwrite an existing cursorChatId', () => {
+  const session = { cursorChatId: 'already-set' };
+  bindHost(session, { CURSOR_CONVERSATION_ID: ID_C }, clock('2026-07-31T15:00:00.000Z'));
+
+  assert.equal(session.cursorChatId, 'already-set');
+  assert.deepEqual(session.host.sessionIds, [ID_C]);
+});
+
+test('bindHost with only CURSOR_TRACE_ID does not set cursorChatId', () => {
+  const session = { cursorChatId: null };
+  bindHost(session, { CURSOR_TRACE_ID: ID_B }, clock('2026-07-31T15:00:00.000Z'));
+
+  assert.equal(session.host.agent, 'cursor');
+  assert.deepEqual(session.host.sessionIds, [ID_B]);
+  assert.equal(session.cursorChatId, null);
 });
 
 test('bindHost does not stamp boundAt when there is nothing to bind to', () => {

@@ -102,3 +102,52 @@ test('initProject wires templated envs and marks the rest skill-only', () => {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test('cursor init creates .cursor/hooks.json with forge sessionStart', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-cursor-hooks-'));
+  try {
+    initProject(['cursor'], { cwd, force: true, adr: false, planEngine: null });
+    const hooksPath = path.join(cwd, '.cursor', 'hooks.json');
+    assert.ok(fs.existsSync(hooksPath), 'hooks.json created');
+    const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    assert.equal(hooks.version, 1);
+    const cmds = (hooks.hooks?.sessionStart ?? []).map((h) => h.command);
+    assert.ok(
+      cmds.some((c) => String(c).includes('forge-session-start')),
+      'sessionStart runs forge-session-start',
+    );
+    assert.ok(fs.existsSync(path.join(cwd, '.cursor', 'forge-hooks.snippet.json')));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('cursor init merges forge sessionStart without dropping other hooks', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-cursor-merge-'));
+  try {
+    fs.mkdirSync(path.join(cwd, '.cursor'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cwd, '.cursor', 'hooks.json'),
+      `${JSON.stringify(
+        {
+          version: 1,
+          hooks: {
+            stop: [{ command: 'echo stop-hook' }],
+            sessionStart: [{ command: 'echo other-start' }],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    initProject(['cursor'], { cwd, force: true, adr: false, planEngine: null });
+    const hooks = JSON.parse(fs.readFileSync(path.join(cwd, '.cursor', 'hooks.json'), 'utf8'));
+    assert.equal(hooks.hooks.stop[0].command, 'echo stop-hook');
+    const starts = hooks.hooks.sessionStart.map((h) => h.command);
+    assert.ok(starts.includes('echo other-start'));
+    assert.ok(starts.some((c) => String(c).includes('forge-session-start')));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});

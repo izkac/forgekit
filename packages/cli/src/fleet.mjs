@@ -25,6 +25,7 @@ import {
   peekInbox,
   queueMessage,
   sessionDirFor,
+  syncProjectSessions,
   watchEntries,
 } from './lib/fleet.mjs';
 import { healthCell, sessionHealth } from './health.mjs';
@@ -38,6 +39,7 @@ function usage() {
   forge fleet watch [--interval <sec>] [--all]
   forge fleet view <session> [--transcript [N]]
   forge fleet send <session>|--all <message...>
+  forge fleet sync
 `,
   );
   process.exit(1);
@@ -259,6 +261,17 @@ function cmdSend(args) {
   if (targets.length === 0) process.stdout.write('No reachable fleet sessions.\n');
 }
 
+function cmdSync() {
+  const result = syncProjectSessions(process.cwd());
+  process.stdout.write(
+    `Fleet sync: ${result.registered}/${result.total} registered` +
+      (result.failed ? `, ${result.failed} failed` : '') +
+      (result.pending ? `, ${result.pending} still pending` : '') +
+      '\n',
+  );
+  if (result.failed > 0 || result.pending > 0) process.exitCode = 1;
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
   case 'list':
@@ -275,6 +288,9 @@ switch (cmd) {
     break;
   case 'send':
     cmdSend(rest);
+    break;
+  case 'sync':
+    cmdSync();
     break;
   default:
     usage();
