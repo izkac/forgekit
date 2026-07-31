@@ -17,16 +17,36 @@
  * as a tiebreak, not as a sanity check. Anything less leaves the file under
  * suspicion still able to move the verdict.
  *
+ * TWO RECORDS, THEN THE PROSE. The host's record is not always there to read —
+ * transcripts get pruned, bindings go half-readable — and rule 4's answer in
+ * that case was to hand the verdict back to the file under suspicion. Rule 5
+ * adds the second source: `forge review-label` writes a stamp into
+ * `reviews/dispatches.json` when it prints the label for a reviewer dispatch,
+ * and `readStamps` (`review-stamp.mjs`) hands it back here. Precedence is
+ * **host > recorded > inferred**, and the doctrine that fixes where `recorded`
+ * stops is that *the stamp substitutes for a record the host lost, never for
+ * work the reviewer didn't do*. On that path too, the prose is not read.
+ *
+ * WHY `recorded` RANKS BELOW `host`: the stamp is written when the label is
+ * printed, which is *before* any subagent exists and happens whether or not one
+ * is ever dispatched. It records an intention to dispatch, where the host
+ * records a dispatch that ran. So a stamp is evidence that the reviewer was
+ * sent, and only the host can say what became of it — which is why a host
+ * answer overrides a stamp in both directions, and why over-credit is the
+ * accepted error here (the alternative refuses correct work, and this module
+ * has been reverted for that twice).
+ *
  * ABSENCE OF A SIGNAL IS NOT A NEGATIVE SIGNAL, and every defect this subsystem
  * has shipped was that rule broken. Three separate absences reach this module
  * and none of them may become `self`:
  *
  *   - the caller passed no evidence, or the reader could not look
- *     (`available: false`) — fall back to prose, graded `inferred`
+ *     (`available: false`) — the stamp answers if there is one, else prose
  *   - the host recorded dispatches but none carries the prescribed label —
  *     nobody in this repo labels their dispatches, so the host cannot answer the
- *     question either; fall back to prose, graded `inferred`
- *   - there is no final review file — `null`, graded `none`
+ *     question either; the stamp answers if there is one, else prose
+ *   - there is no final review file — `null`, graded `none`, and a stamp does
+ *     not change that: it records a dispatch, not a review
  *
  * Only "the host looked and this session's reviewer is not there" is a negative,
  * and it is the one that produces `self` on host evidence.
@@ -39,6 +59,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+
+import { readStamps } from './review-stamp.mjs';
 
 /**
  * A review the coordinator wrote about its own work — a weaker signal.
@@ -171,14 +193,21 @@ function attributionRegion(body) {
  *   1  0.3.24–0.3.25 — fail closed: independence had to be claimed
  *   2  0.3.26 — inference again, self-declarations read in the attribution region
  *   3  0.3.27 — `Reviewer: coordinator` counts as a declaration
- *   4  this change (0.3.29) — the host's dispatch record decides `finalReview`
- *      where it can; prose is the fallback and is graded `inferred`
+ *   4  0.3.29 — the host's dispatch record decides `finalReview` where it can;
+ *      prose is the fallback and is graded `inferred`
+ *   5  this change: a dispatch stamp written by `forge review-label` at dispatch
+ *      time decides `finalReview` (`recorded`) when the host cannot answer;
+ *      prose remains the last fallback
  *
  * Rule 4 is the first that is not a prose rule at all on its primary path, so a
  * rule-3 `independent` and a rule-4 `independent` are not the same measurement
- * and `fleet-report` must keep refusing to add them.
+ * and `fleet-report` must keep refusing to add them. Rule 5 widens that: its
+ * `independent` can now come from three different records, and the stamp's is
+ * one no earlier rule could see — a session graded `self` under rule 4 because
+ * its host transcript had been pruned would be `independent` under rule 5 on
+ * the same bytes.
  */
-export const CENSUS_RULE = 4;
+export const CENSUS_RULE = 5;
 
 /** A round that sent work back: proof the review was not a rubber stamp. */
 const REJECTION_RE = /\bREJECT(ED)?\b/;
@@ -345,6 +374,91 @@ function hostFinalReview(evidence) {
 }
 
 /**
+ * Whether this session recorded dispatching a final reviewer.
+ *
+ * THE STAMP SUBSTITUTES FOR A RECORD THE HOST LOST, NEVER FOR WORK THE REVIEWER
+ * DIDN'T DO. `forge review-label` writes one stamp into
+ * `reviews/dispatches.json` when it prints the label a reviewer subagent is to
+ * be dispatched with — before any subagent exists, and whether or not one
+ * follows. So this answers "a reviewer was sent", not "a reviewer ran": the
+ * gap is deliberate and is exactly why `recorded` ranks below `host`, which
+ * measures the dispatch itself. What it recovers is the session whose host
+ * transcript was later pruned, where the host cannot answer and the prose then
+ * decides by reading the file written by the party being judged. The doctrine
+ * is also the limit: `hostFinalReview` answering `null` because it *measured*
+ * the dispatch and found no work is a different state, and
+ * `finalBucketWellFormed` below keeps the stamp out of it.
+ *
+ * TWO CONDITIONS, BOTH LOAD-BEARING. `unit` is the module's existing scope
+ * boundary — a per-group reviewer says nothing about who read the change as a
+ * whole, exactly as on the host path. It is compared LOWER-CASED because the
+ * writer does not normalise it: `review-label`'s unit charset is
+ * case-insensitive and only the printed label is lower-cased, so
+ * `forge review-label Final` stores `"unit": "Final"`. A case-sensitive
+ * comparison discarded that genuine stamp and handed the gate back to the
+ * judged party's file — the unsafe direction, off a capital letter.
+ * `reviewEvidence` lower-cases the unit it captures for the same reason (see
+ * `FINAL_REVIEW_UNIT`); this is the comparison that had drifted out of step.
+ * `sessionId` is the copy guard: this file sits inside the session directory
+ * and travels with it, so a stamp naming another session would let one
+ * dispatched reviewer certify every copy of the directory it ran in. The
+ * session directory's name IS the session id.
+ *
+ * `readStamps` returns `[]` for a missing, unreadable, malformed or
+ * wrong-shaped file and never throws, so every failure here reads as "no stamp"
+ * and falls through to prose — the side of this call that cannot refuse correct
+ * work, the same discipline the rest of this module is built on.
+ *
+ * @param {string} sessionDir
+ * @returns {boolean}
+ */
+function stampedFinalReview(sessionDir) {
+  const sessionId = path.basename(sessionDir);
+  return readStamps(sessionDir).some(
+    (stamp) =>
+      String(stamp.unit).toLowerCase() === FINAL_REVIEW_UNIT && stamp.sessionId === sessionId,
+  );
+}
+
+/**
+ * Whether the host's answer carries a `final` bucket the host could read whole.
+ *
+ * THE ONE `null` THE HOST MEASURED. `hostFinalReview` returns `null` for five
+ * different reasons and only one of them is a measurement: a well-formed `final`
+ * bucket whose busiest unstopped dispatch is below `FINAL_REVIEW_REQUEST_FLOOR`.
+ * The others are all the host unable to look — no answer, unreadable tallies, a
+ * convention not in use (whose `units` is empty, because buckets are built only
+ * from prescribed records), a unit missing from the table, a bucket whose counts
+ * are junk. So "the evidence has a well-formed `final` bucket" isolates the
+ * below-floor branch exactly, without `hostFinalReview` having to grow a second
+ * return channel — its contract and its tests stand.
+ *
+ * The shape checked here MIRRORS that function's own bucket validation and must
+ * keep mirroring it: widening one without the other either lets the stamp answer
+ * on the branch this guard exists to close, or blocks it on a `null` the host
+ * never measured.
+ *
+ * @param {unknown} evidence the object `reviewEvidence` returns
+ * @returns {boolean}
+ */
+function finalBucketWellFormed(evidence) {
+  if (!evidence || typeof evidence !== 'object') return false;
+  const { available, units, seen, prescribed } = /** @type {any} */ (evidence);
+  if (available !== true) return false;
+  if (typeof seen !== 'number' || typeof prescribed !== 'number') return false;
+  if (!units || typeof units !== 'object') return false;
+  const bucket = units[FINAL_REVIEW_UNIT];
+  return (
+    typeof bucket === 'object' &&
+    bucket !== null &&
+    !Array.isArray(bucket) &&
+    typeof bucket.dispatched === 'number' &&
+    typeof bucket.stopped === 'number' &&
+    typeof bucket.maxRequests === 'number'
+  );
+}
+
+/**
  * Census of the review artifacts on disk.
  *
  * Counts what was *dispatched*, not what is absent: the previous version
@@ -354,17 +468,20 @@ function hostFinalReview(evidence) {
  *
  * @param {string} sessionDir
  * @param {{ evidence?: unknown }} [options] `evidence` is the object
- *   `metrics/review-evidence.mjs`'s `reviewEvidence` returns. Omitted — as all
- *   three of today's callers omit it (`score.mjs`, `set-phase.mjs`,
- *   `ledger.mjs`; group 3 wires them) — the verdict is the prose reading this
- *   module has always done, graded `inferred`.
+ *   `metrics/review-evidence.mjs`'s `reviewEvidence` returns. Omitted — as most
+ *   callers still omit it (`score.mjs`, `ledger.mjs`; `set-phase.mjs`'s
+ *   `freezeReviewVerdict` passes it) — the verdict falls to this session's own
+ *   dispatch stamp, graded `recorded`, and then to the prose reading this
+ *   module has always done, graded `inferred`. No caller wiring is needed for
+ *   the stamp: it lives under `sessionDir`, which every caller already passes.
  * @returns {{ total: number, independent: number, selfChecks: number,
  *   rejections: number, finalReview: 'independent' | 'self' | null,
  *   finalReviewEvidence: 'host' | 'recorded' | 'inferred' | 'none',
  *   stoppedByOperator: boolean, rule: number }} `finalReviewEvidence` grades
  *   `finalReview` only, strongest first: `host` — measured from the host's own
- *   dispatch record; `recorded` — reserved for a signed attestation and not yet
- *   produced by anything; `inferred` — read off the review file's prose;
+ *   dispatch record; `recorded` — a dispatch stamp `forge review-label` wrote
+ *   into `reviews/dispatches.json` when it labelled the reviewer, read back
+ *   here by `readStamps`; `inferred` — read off the review file's prose;
  *   `none` — there is no final review to judge. `stoppedByOperator` is a
  *   measurement only under `host`; elsewhere it is `false` as a placeholder,
  *   in the same sense `reviewEvidence` zeroes its tallies when it could not
@@ -424,6 +541,44 @@ export function reviewCensus(sessionDir, options) {
       // the two tests that pin this path are written so they go red if it is.
       census.finalReview = host.finalReview;
       census.finalReviewEvidence = 'host';
+    } else if (!finalBucketWellFormed(options?.evidence) && stampedFinalReview(sessionDir)) {
+      // THE STAMP SUBSTITUTES FOR A RECORD THE HOST LOST, NEVER FOR WORK THE
+      // REVIEWER DIDN'T DO. Reaching here means the host could not answer, and
+      // the session nonetheless recorded labelling a final reviewer for
+      // dispatch at the time it did so — the pruned-transcript session whose
+      // reviewer rule 4 erased.
+      //
+      // THE SECOND HALF OF THAT SENTENCE IS `finalBucketWellFormed`, and it is
+      // the whole of the guard. A `null` off a well-formed `final` bucket is the
+      // one `null` the host *measured*: a dispatch nobody stopped that made
+      // fewer than `FINAL_REVIEW_REQUEST_FLOOR` requests, which
+      // review-dispatch-substance routed to the prose precisely because a
+      // one-request subagent labelled `forge-review final <sessionId>` had
+      // certified a review and passed the money/auth gate (F33). The forger runs
+      // `forge review-label` too — that command is where the label came from —
+      // so a stamp answering here would hand that forgery its `independent`
+      // back, off a record written before the token dispatch even existed.
+      //
+      // A MALFORMED BUCKET IS NOT A MEASUREMENT, so the stamp does answer there,
+      // and that is not a contradiction of the block in `hostFinalReview` that
+      // refuses to read the same shape. Two different questions: the host
+      // declining to answer `self` off a bucket it cannot vouch for protects
+      // against refusing correct work at the gate; the stamp declining to
+      // certify a dispatch the host measured as empty protects against
+      // certifying work nobody did. Same doctrine, opposite shapes, because
+      // over-credit is this module's chosen error direction everywhere except
+      // where the host has already looked and found nothing.
+      //
+      // `body` IS UNTOUCHED, for the same reason as on the host path above, and
+      // the test that pins it is the one with NEUTRAL prose: a fixture whose
+      // prose says `self-check` cannot tell this branch apart from one that
+      // reads the prose and consults the stamp only to break a `self` tie —
+      // both answer `independent`. Only the grade separates them, so the pin
+      // asserts `recorded` on a file the prose rule alone would already have
+      // called independent. A task reviewer shipped exactly that tiebreak
+      // mutant against the earlier tests and the whole suite stayed green.
+      census.finalReview = 'independent';
+      census.finalReviewEvidence = 'recorded';
     } else {
       census.finalReview = SELF_REVIEW_RE.test(attributionRegion(body)) ? 'self' : 'independent';
       census.finalReviewEvidence = 'inferred';

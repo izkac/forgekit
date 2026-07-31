@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { CENSUS_RULE, FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
+import { writeStamp } from './review-stamp.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
 
 function tmp(prefix) {
@@ -990,6 +991,452 @@ test("a pace skip is not an outside reader — Forge's own SKIPPED string counts
   // And the string the pace table actually renders, verbatim from review.md.
   const dir = sessionWith({}, 'SKIPPED (pace=standard)\n');
   assert.notEqual(reviewCensus(dir).finalReview, 'independent');
+});
+
+// ---------------------------------------------------------------------------
+// The dispatch stamp — the `recorded` grade.
+//
+// Written with the real `writeStamp` from `review-stamp.mjs`, never with
+// hand-rolled JSON: the whole reason that module exists is that the writer and
+// the reader must not drift, and a test that hand-writes the document tests a
+// shape nothing produces. The one exception is the malformed-file test below,
+// where the point IS a document `writeStamp` would never emit.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stamp a dispatch for the session that owns `dir`, as `forge review-label`
+ * does. The session id defaults to the directory's own basename — the census
+ * requires that match, so a test wanting a foreign stamp passes it explicitly.
+ */
+function stampDispatch(dir, { unit = 'final', sessionId = path.basename(dir) } = {}) {
+  const written = writeStamp(dir, {
+    unit,
+    label: `forge-review ${unit} ${sessionId}`,
+    sessionId,
+  });
+  assert.equal(written.ok, true, `fixture: the stamp was written (${written.reason ?? ''})`);
+  return written;
+}
+
+test('a dispatch stamp decides the final review when the host cannot answer', () => {
+  // The doctrine: the stamp substitutes for a record the host lost, never for
+  // work the reviewer didn't do. Here nothing was passed at all — the state
+  // every caller was in before group 3 wired evidence through, and the state a
+  // resumed session whose transcript has been pruned lands in for good.
+  //
+  // The prose is a self-check, and it must NOT be read: this is the same pin
+  // the host path carries, so a lazy implementation that consults the file and
+  // then discards the reading goes red here rather than passing quietly.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'self', 'fixture: prose alone says self');
+  assert.equal(reviewCensus(dir).finalReviewEvidence, 'inferred', 'fixture: and grades inferred');
+
+  stampDispatch(dir);
+  const census = reviewCensus(dir);
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(census.finalReviewEvidence, 'recorded');
+  // A measurement only under `host`. Nothing here recorded a stop, and the
+  // stamp is not the kind of record that could.
+  assert.equal(census.stoppedByOperator, false);
+});
+
+test('the stamp DECIDES — it is not a tiebreak applied to the prose', () => {
+  // THE DISCRIMINATING PIN, and the one every other stamp test in this file is
+  // structurally incapable of being. They all pair the stamp with self-declaring
+  // prose, where "the stamp decided" and "the stamp overruled a `self` reading"
+  // produce the identical verdict — so an implementation that reads the prose
+  // first and consults the stamp only to break a `self` tie passes all of them.
+  // The task reviewer built exactly that mutant and the whole suite stayed
+  // green. It is not a cosmetic difference: consulting the file at all is the
+  // thing this path exists to stop, and a census that reads the prose whenever
+  // the prose happens to agree is still deciding the money/auth gate off text
+  // written by the party being judged.
+  //
+  // Neutral prose is what separates them, because the two implementations
+  // disagree on the GRADE while agreeing on the verdict:
+  //   deciding: the prose is never read      → independent / recorded
+  //   tiebreak: the prose already said so    → independent / inferred
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'independent', 'fixture: prose alone says independent');
+  assert.equal(bare.finalReviewEvidence, 'inferred', 'fixture: and it is the PROSE saying it');
+
+  stampDispatch(dir);
+  const census = reviewCensus(dir);
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(
+    census.finalReviewEvidence,
+    'recorded',
+    'the stamp decided; a grade of `inferred` means the prose was read and merely agreed',
+  );
+});
+
+test('the unit is read case-insensitively, because the writer does not normalise it', () => {
+  // `forge review-label Final` is accepted — `review-label.mjs`'s own charset
+  // is `/^[a-z0-9][a-z0-9._-]{0,63}$/i` — and `reviewLabel` lower-cases only
+  // the LABEL it prints. `review-label-cli.mjs` hands the raw argument to
+  // `writeStamp`, so the document on disk records `"unit": "Final"`.
+  //
+  // A case-sensitive comparison here discards that genuine stamp and hands the
+  // gate back to the judged party's own file — the unsafe direction, off a
+  // capital letter. `reviewEvidence` reads its units lower-cased for the same
+  // reason (see `FINAL_REVIEW_UNIT`), so this restores the one comparison that
+  // had drifted out of step. Normalising in the CLI would be the tidier fix and
+  // is out of scope for this task; the reader must be robust regardless,
+  // because stamps already on disk cannot be re-normalised.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'self', 'fixture: prose alone says self');
+
+  stampDispatch(dir, { unit: 'Final' });
+  const stamped = JSON.parse(fs.readFileSync(path.join(dir, 'reviews', 'dispatches.json'), 'utf8'));
+  assert.equal(stamped.stamps[0].unit, 'Final', 'fixture: the writer stored the raw casing');
+
+  const census = reviewCensus(dir);
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(census.finalReviewEvidence, 'recorded');
+});
+
+test('a group reviewer stamp does not certify the final review', () => {
+  // The same scope boundary the module header states and `FINAL_REVIEW_UNIT`
+  // enforces on the host path: per-group dispatches land in the same record and
+  // say nothing about who read the change as a whole. A session that stamps
+  // every group review and never dispatches a final reviewer must still be
+  // graded by its final review's own prose.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  stampDispatch(dir, { unit: 'group-01' });
+  stampDispatch(dir, { unit: 'group-02' });
+  assert.deepEqual(reviewCensus(dir), bare, 'exactly what the prose rule alone returns');
+});
+
+test('a stamp naming a different session credits nothing', () => {
+  // `dispatches.json` is an ordinary file under the session directory: it gets
+  // copied when a session is cloned as a template, and a session id inside it
+  // is the only thing that says which session it was written for. Crediting a
+  // stamp that names another session would let one dispatched reviewer certify
+  // every copy of the directory it ran in.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  const foreign = `${path.basename(dir)}-somewhere-else`;
+  assert.notEqual(foreign, path.basename(dir), 'fixture: it really is another session id');
+  stampDispatch(dir, { sessionId: foreign });
+  assert.deepEqual(reviewCensus(dir), bare, 'exactly what the prose rule alone returns');
+
+  // And the boundary of that guard: the same stamp under this session's own id
+  // does decide, so the test cannot pass by the census ignoring stamps outright.
+  stampDispatch(dir);
+  const census = reviewCensus(dir);
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(census.finalReviewEvidence, 'recorded');
+});
+
+test('a pruned transcript no longer erases the reviewer — the stamp answers instead', () => {
+  // The scenario the change exists for. `available: false` is `reviewEvidence`
+  // saying "I could not look", which until now handed the verdict to a file the
+  // reviewer's own subject wrote — and this fixture's file says `self-check`,
+  // which is what a coordinator honestly recording their own summary writes
+  // beside a dispatched reviewer's separate read. The stamp is the record the
+  // host lost, so it answers, and the prose is not consulted at all.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  const unreadable = evidence({
+    available: false,
+    reason: 'no host session bound to this Forge session',
+  });
+  const bare = reviewCensus(dir, { evidence: unreadable });
+  assert.equal(bare.finalReview, 'self', 'fixture: without a stamp the prose still decides');
+  assert.equal(bare.finalReviewEvidence, 'inferred');
+
+  stampDispatch(dir);
+  const census = reviewCensus(dir, { evidence: unreadable });
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(census.finalReviewEvidence, 'recorded');
+  assert.equal(census.stoppedByOperator, false);
+});
+
+test('the host answer outranks the stamp, in both directions', () => {
+  // Precedence is host > recorded > inferred, and the stamp is the weaker
+  // record on purpose: it is written when a reviewer is DISPATCHED, and only
+  // the host can say what became of that dispatch. Both rows below are states
+  // the stamp alone would read as `independent` / `recorded`.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  stampDispatch(dir);
+  assert.equal(
+    reviewCensus(dir).finalReviewEvidence,
+    'recorded',
+    'fixture: the stamp alone does decide this session',
+  );
+
+  // The operator declined the reviewer the stamp records dispatching. The host
+  // watched that happen; the stamp was written before it did.
+  const declined = reviewCensus(dir, {
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 1, requests: 40, maxRequests: 0 } },
+    }),
+  });
+  assert.equal(declined.finalReview, 'self');
+  assert.equal(declined.finalReviewEvidence, 'host');
+  assert.equal(declined.stoppedByOperator, true);
+
+  // And where the host answers `independent` the grade is still `host`, not
+  // `recorded`: the two agree on the verdict, and the census must record which
+  // of them measured it — that is what `CENSUS_RULE` and the grade exist for.
+  const requests = FINAL_REVIEW_REQUEST_FLOOR * 3;
+  assert.ok(requests >= FINAL_REVIEW_REQUEST_FLOOR, `fixture: clears the floor (${requests})`);
+  const measured = reviewCensus(dir, {
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests, maxRequests: requests } },
+    }),
+  });
+  assert.equal(measured.finalReview, 'independent');
+  assert.equal(measured.finalReviewEvidence, 'host');
+});
+
+// ---------------------------------------------------------------------------
+// The substance floor bounds the stamp (design D3, finding F33).
+//
+// `hostFinalReview` answers `null` for a well-formed `final` bucket whose
+// busiest unstopped dispatch is below `FINAL_REVIEW_REQUEST_FLOOR`, and that
+// `null` routes the verdict to the review file's prose deliberately: the host
+// did read its record, and what it measured was a dispatch that did no work.
+// The forger runs `forge review-label` too — that command is where the label
+// the token subagent was dispatched with came from — so a stamp answering on
+// that branch hands back the one-request `independent` that
+// review-dispatch-substance killed. The stamp substitutes for a record the host
+// lost, never for work the reviewer didn't do.
+// ---------------------------------------------------------------------------
+
+/**
+ * Host evidence recording exactly the forged dispatch: one dispatch nobody
+ * stopped, carrying too few requests to have read anything. The comparison
+ * against the floor is asserted off the fixture rather than assumed, so this
+ * cannot quietly stop describing a below-floor dispatch if the floor moves.
+ */
+function tokenBucket() {
+  const bucket = { dispatched: 1, stopped: 0, requests: 1, maxRequests: 1 };
+  assert.ok(
+    bucket.maxRequests < FINAL_REVIEW_REQUEST_FLOOR,
+    `fixture: the busiest unstopped dispatch is below the floor (${bucket.maxRequests})`,
+  );
+  assert.ok(
+    bucket.stopped < bucket.dispatched,
+    'fixture: nothing was stopped, so it is the floor answering `null` and not the stop branch answering `self`',
+  );
+  return bucket;
+}
+
+function tokenDispatch() {
+  return evidence({ units: { final: tokenBucket() } });
+}
+
+test('a stamped token dispatch does not certify a review', () => {
+  // F33's forgery with a stamp beside it: a throwaway subagent labelled
+  // `forge-review final <sessionId>` that made one request and read nothing,
+  // and the `forge review-label` run that printed that label leaving its stamp
+  // on disk. Two records of a dispatch, neither of them a review. The host
+  // measured this one and declined to certify it; the stamp must not certify it
+  // instead, so the file's own prose decides — and it says in plain words that
+  // nobody outside read the change.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+  assert.equal(
+    reviewCensus(dir, { evidence: tokenDispatch() }).finalReviewEvidence,
+    'inferred',
+    'fixture: below the floor the host does not answer',
+  );
+
+  stampDispatch(dir);
+  assert.equal(
+    reviewCensus(dir).finalReviewEvidence,
+    'recorded',
+    'fixture: the stamp alone does decide this session',
+  );
+
+  const census = reviewCensus(dir, { evidence: tokenDispatch() });
+  assert.equal(census.finalReview, 'self');
+  assert.equal(census.finalReviewEvidence, 'inferred', 'the stamp contributed nothing');
+  assert.deepEqual(census, bare, 'exactly what the prose rule alone returns');
+});
+
+test('below the floor the stamp contributes nothing even when it agrees with the prose', () => {
+  // The discriminating half. With self-declaring prose the guard and a stamp
+  // that merely lost a tiebreak are indistinguishable by verdict, so this
+  // fixture's prose is NEUTRAL: `independent` either way, and only the grade
+  // says which record produced it. An implementation that consults the stamp
+  // below the floor and simply prefers the prose when the prose says `self`
+  // passes the test above and goes red here.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'independent', 'fixture: prose alone says independent');
+  assert.equal(bare.finalReviewEvidence, 'inferred', 'fixture: and it is the PROSE saying it');
+
+  stampDispatch(dir);
+  assert.equal(
+    reviewCensus(dir).finalReviewEvidence,
+    'recorded',
+    'fixture: the stamp alone does decide this session',
+  );
+
+  const census = reviewCensus(dir, { evidence: tokenDispatch() });
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(
+    census.finalReviewEvidence,
+    'inferred',
+    'a grade of `recorded` means the stamp answered on a dispatch the host measured as empty',
+  );
+  assert.deepEqual(census, bare, 'exactly what the prose rule alone returns');
+});
+
+test('a bucket the host cannot read is a lost record, so the stamp still answers', () => {
+  // The boundary of the guard above, and the direction it deliberately does NOT
+  // take. A `final` bucket missing `maxRequests` is the exact shape
+  // `hostFinalReview`'s bucket validation rejects — `reviewEvidence` writes all
+  // three counts on every bucket it builds, so this is not its output — and the
+  // host is then not saying the dispatch did no work, it is saying it cannot
+  // read its own record. A lost record is what the stamp is for.
+  //
+  // Not a contradiction of the host's own "present and unreadable is not
+  // absent": that block stops the host answering `self` off a shape it cannot
+  // vouch for, which protects against refusing correct work; this guard stops
+  // the stamp certifying a dispatch the host measured as empty, which protects
+  // against certifying missing work. Different questions, same doctrine.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'self', 'fixture: prose alone says self');
+
+  const unvouched = [
+    [
+      'two readable tallies and no substance count — the shape of every bucket built before the floor existed',
+      evidence({ units: { final: { dispatched: 1, stopped: 0, requests: 1 } }, seen: 1, prescribed: 1 }),
+    ],
+    [
+      // The bucket is well-formed and below the floor, but the answer it sits
+      // in is not readable, so the host never got as far as measuring it.
+      'a below-floor bucket beside tallies that are not numbers',
+      evidence({ units: { final: tokenBucket() }, seen: 'two', prescribed: 1 }),
+    ],
+    [
+      // `reviewEvidence` zeroes its tallies and empties `units` when it could
+      // not look, so a bucket riding along on `available: false` is not a shape
+      // it emits — and after 3.2's JSON round-trip the shape stops being ours.
+      // Read the flag first, exactly as `hostFinalReview` does.
+      'a below-floor bucket on an answer that says it could not look',
+      evidence({ available: false, units: { final: tokenBucket() }, reason: 'transcript pruned' }),
+    ],
+  ];
+
+  for (const [why, unreadable] of unvouched) {
+    assert.equal(
+      reviewCensus(dir, { evidence: unreadable }).finalReviewEvidence,
+      'inferred',
+      `fixture: the host declines to answer — ${why}`,
+    );
+  }
+
+  stampDispatch(dir);
+  for (const [why, unreadable] of unvouched) {
+    const census = reviewCensus(dir, { evidence: unreadable });
+    assert.equal(census.finalReview, 'independent', why);
+    assert.equal(census.finalReviewEvidence, 'recorded', why);
+  }
+});
+
+test('the floor guard does not reach the session whose host simply never labelled', () => {
+  // The adoption gate — `seen > 0, prescribed === 0` — is the state nearly every
+  // existing session is in (adoption measured at near zero; the count lives in
+  // `review-census.mjs`), and it is one of the two the stamp exists to recover.
+  // `units` is empty there, because buckets are only ever built from prescribed
+  // records, so there is no `final` bucket for the guard to find well-formed.
+  // A guard that keyed off "evidence was passed at all", or off `available`,
+  // would silently take the stamp away from the whole corpus.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  const unlabelled = evidence({ units: {}, seen: 7, prescribed: 0 });
+  const bare = reviewCensus(dir, { evidence: unlabelled });
+  assert.equal(bare.finalReview, 'self', 'fixture: without a stamp the prose decides');
+  assert.equal(bare.finalReviewEvidence, 'inferred');
+
+  stampDispatch(dir);
+  const census = reviewCensus(dir, { evidence: unlabelled });
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(census.finalReviewEvidence, 'recorded');
+});
+
+test('a malformed stamp file is an absence, not an error', () => {
+  // This runs inside `forge phase done`, where telemetry must never block a
+  // transition — `readStamps` is built to answer `[]` for anything it cannot
+  // make sense of, and this is the census half of that contract: a truncated
+  // or half-written `dispatches.json` reads exactly like "no reviewer was
+  // stamped" and the prose decides, rather than throwing through the gate.
+  //
+  // Hand-written on purpose, unlike every other stamp fixture here: a document
+  // `writeStamp` would never emit is the entire point.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  const file = path.join(dir, 'reviews', 'dispatches.json');
+  for (const malformed of [
+    '{"version":1,"stamps":[{"unit":"final","label":"forge-rev', // truncated mid-write
+    'not json at all\n',
+    '[]\n',
+    '{"version":1}\n',
+  ]) {
+    fs.writeFileSync(file, malformed, 'utf8');
+    let census;
+    assert.doesNotThrow(() => {
+      census = reviewCensus(dir);
+    }, malformed.slice(0, 40));
+    assert.deepEqual(census, bare, `${malformed.slice(0, 40)}: the prose rule alone`);
+  }
+});
+
+test('a stamp does not conjure a review — no file is still no review', () => {
+  // A reviewer that was dispatched and wrote nothing is not a review, and the
+  // stamp records only the dispatch. `finalReview` stays null (the done gate
+  // refuses on null, which is correct here) and the grade says there was
+  // nothing to grade rather than claiming a record of one.
+  //
+  // Structural, not incidental: the stamp is consulted inside the loop over
+  // the review files, so the missing-file `continue` reaches this first. The
+  // host verdict is deliberately computed OUTSIDE that loop — a stopped
+  // dispatch is a fact about the session — and copying that placement for the
+  // stamp is exactly what this test forbids.
+  const dir = sessionWith({ '01-a/group-review.md': 'APPROVED\n' });
+  assert.equal(
+    fs.existsSync(path.join(dir, 'reviews', 'final-review.md')),
+    false,
+    'fixture: no final review file',
+  );
+
+  stampDispatch(dir);
+  const census = reviewCensus(dir);
+  assert.equal(census.finalReview, null, 'absent is not the same as independent');
+  assert.equal(census.finalReviewEvidence, 'none');
+});
+
+test('the recorded grade is a new classifier, so it carries a new rule number', () => {
+  // The number exists because four classifiers wrote verdicts into
+  // `sessions.jsonl` in one day and nothing recorded which, so `fleet-report`
+  // could not tell which totals were comparable. A rule-4 `independent` was
+  // either a host reading or a prose one; this change adds a third way to reach
+  // that same word, off a record no earlier rule could see. Totals that mix
+  // them are mixing measurements, so the rule has to move with the classifier
+  // — the one thing the field is for.
+  const LAST_RULE_WITHOUT_THE_STAMP = 4;
+  assert.ok(
+    CENSUS_RULE > LAST_RULE_WITHOUT_THE_STAMP,
+    `the stamp is a new classifier and CENSUS_RULE is still ${CENSUS_RULE}`,
+  );
+
+  // And the verdict it produces carries that number, not just the export.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  stampDispatch(dir);
+  const census = reviewCensus(dir);
+  assert.equal(census.finalReviewEvidence, 'recorded', 'fixture: the stamp decided this one');
+  assert.equal(census.rule, CENSUS_RULE);
 });
 
 // ---------------------------------------------------------------------------

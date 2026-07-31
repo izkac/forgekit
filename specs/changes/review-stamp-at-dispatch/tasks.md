@@ -29,7 +29,7 @@
 
 ## 2. Census precedence: host > recorded > inferred
 
-- [ ] 2.1 `packages/cli/src/review-census.mjs`: when `hostFinalReview`
+- [x] 2.1 `packages/cli/src/review-census.mjs`: when `hostFinalReview`
       returns `null`, consult `readStamps(sessionDir)` before prose — a
       valid `final` stamp whose `sessionId` equals
       `path.basename(sessionDir)` yields `{ finalReview: 'independent',
@@ -42,7 +42,7 @@
       file → `null`/`none`; no stamp → unchanged prose fallback; stamp +
       host answering `self` (all dispatches stopped) → host wins; stamp +
       host answering `independent` → `host` grade, not `recorded`.
-- [ ] 2.2 The D3 guard, same files: the stamp is **not** consulted when the
+- [x] 2.2 The D3 guard, same files: the stamp is **not** consulted when the
       evidence carries a well-formed `final` bucket (available, numeric
       tallies, bucket with numeric `dispatched`/`stopped`/`maxRequests`) —
       the below-floor branch keeps falling to prose. Tests: stamp + a
@@ -69,7 +69,10 @@
       `metrics/review-evidence.mjs` (pruned-residual block),
       `set-phase.mjs` at `freezeReviewVerdict` and at the below-the-gates
       write, `set-phase.test.mjs` — plus `review-census.mjs`'s header and
-      the `'recorded'` reservation in its returns doc. Audit `score.mjs`,
+      the `'recorded'` reservation in its returns doc, and
+      `review-verdict.mjs:56`, whose EVIDENCE doc still calls `recorded`
+      "reserved for a signed attestation, not yet produced by anything"
+      (2.1's reviewer flagged it as the fifth stale copy). Audit `score.mjs`,
       `ledger.mjs`, `session-status.mjs`, `fleet-report.mjs` for any
       display or branch keyed on evidence grade and make each render
       `recorded` sensibly (expected: pass-through; verify with one
