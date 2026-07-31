@@ -77,7 +77,8 @@
       "id": "arch-never-block-contract",
       "source": "archive/2026-07-28-session-telemetry/tasks.md",
       "text": "byte-identical (the existing \"must never block work\" contract)",
-      "expect": "risky"
+      "expect": "benign",
+      "note": "F11 flip: bare \"must never block work\" contract no longer escalates under qualifier+\\s+ policy"
     },
     {
       "id": "arch-money-auth-gate",

@@ -42,20 +42,17 @@ export const BRAINSTORM_DEPTH = Object.freeze(['full', 'short', 'minimal']);
  * already alternatives here, so "stripe checkout" still matches via `stripe`.
  * Only the standalone payment senses need spelling out.
  *
- * `contract` was narrowed the same way in 0.3.24 and it is REVERTED in 0.3.26.
- * An independent review measured the cost: of twelve genuinely risky sentences,
- * eight stopped matching — "alters the public contract of the /v1/orders
- * endpoint", "breaking change to the data contract", "the OpenAPI contract
- * gains two required fields". The surviving qualifiers also demanded a single
- * space or hyphen, so plan prose hard-wrapped at 80 columns disarmed them at a
- * line break. This regex fails closed on purpose: a false positive costs one
- * dispatched reviewer, a false negative ships an unreviewed money/auth change,
- * so the bare noun is back and finding F3 (ordinary software English about a
- * function's promise escalates pace) is reopened. Narrowing it needs the
- * qualified/unqualified split measured against a real corpus first.
+ * `contract` is qualified like checkout: bare software-English ("must never
+ * block work" contract, "the same contract as readLedger") must not escalate.
+ * The 0.3.24 narrowing failed on hard-wrapped plan prose because it demanded a
+ * single space or hyphen between qualifier and noun; this arm uses `\s+` so
+ * "public\ncontract" still matches. Qualifiers
+ * (public|data|api|openapi|cli|wire|schema|smart|service|breaking|interface)
+ * and the contracts?+(test|tests|testing|breach) family are pinned by the
+ * thorough-re corpus (thorough-re-narrowing / F11).
  */
 const THOROUGH_RE =
-  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|contract|contracts|gdpr|pci|wallet|checkout[- ](?:session|sessions|flow|flows|page|pages|form|forms|button)|(?:guest|express|one[- ]page)[- ]checkout)\b/i;
+  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|(?:public|data|api|openapi|cli|wire|schema|smart|service|breaking|interface)\s+contracts?|contracts?\s+(?:test|tests|testing|breach)|gdpr|pci|wallet|checkout[- ](?:session|sessions|flow|flows|page|pages|form|forms|button)|(?:guest|express|one[- ]page)[- ]checkout)\b/i;
 
 /** Signals that suggest standard (multi-surface / API / platform / orchestration). */
 const STANDARD_RE =

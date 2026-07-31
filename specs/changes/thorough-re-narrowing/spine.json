@@ -1,0 +1,15 @@
+{
+  "change": "thorough-re-narrowing",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "pace-signals — qualified contract risk with flexible whitespace (F11)",
+      "library": "packages/cli/src/preferences.mjs (THOROUGH_RE / isHighRiskText)",
+      "runtimeOwner": "suggestPaceFromSignals and review-floor helpers in preferences.mjs; called from forge new / forge prefs --resolve / session pace resolution (packages/cli/src/lib.mjs, set-phase path via resolved pace)",
+      "writes": "N/A — classification only; corpus expect update is a fixture write",
+      "reads": "signal text / plan prose",
+      "uiConsumer": "operator sees thorough vs standard pace on forge new / forge prefs; money/auth review floor still driven by highRisk",
+      "evidence": "packages/cli/src/thorough-re-corpus.test.mjs + preferences.test.mjs contract cases + scripts/e2e/thorough-re-narrowing.mjs"
+    }
+  ]
+}

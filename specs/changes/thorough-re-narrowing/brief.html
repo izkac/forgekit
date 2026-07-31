@@ -1,0 +1,92 @@
+<!-- forge-brief-specs-hash:b383b7694b16a829 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — thorough RE narrowing</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5;
+       padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .8rem 1rem;
+             margin: 1.25rem 0; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Thorough RE narrowing</h1>
+<p class="sub">Finding F11 &middot; change <code>thorough-re-narrowing</code></p>
+
+<h2>TL;DR</h2>
+<p>
+The word <code>contract</code> alone will no longer force thorough pace.
+Real API / data / OpenAPI contract changes still will — including when a line
+break sits between the qualifier and the word. The corpus that shipped earlier
+is what makes this safe to try again after the 0.3.24 revert.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Plans that say “the same contract as readLedger” or “must never block
+      work” contract stop escalating to thorough for that word alone.</li>
+  <li>F11's named risky sentences and their hard-wrapped forms still escalate.</li>
+  <li>Finding F11 closed.</li>
+</ul>
+
+<h2>How it works</h2>
+<pre class="mermaid">
+flowchart LR
+  T[signal / plan text] --> R[THOROUGH_RE]
+  R -->|public/data/OpenAPI + contract| H[thorough]
+  R -->|bare contract only| N[not from this arm]
+  R -->|money/auth/migration| H
+  C[corpus fixture] --> V[CI pin]
+  R --> V
+</pre>
+<p>
+Bare <code>contract</code> is dropped. Qualifiers must appear before the noun
+with flexible whitespace (<code>\s+</code>), so an 80-column wrap cannot disarm
+the match the way the old single-space rule did.
+</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>No new commands. <code>forge new</code> / pace suggestion behave as today
+      except for bare-contract false positives.</li>
+  <li>Money, auth, secrets, migrations, Stripe, etc. are unchanged.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<div class="callout">
+  <strong>Measured corpus impact:</strong> of 21 fixture rows, exactly one
+  flips (a bare “must never block work” contract sentence → benign). All six
+  F11 risky/wrap rows stay risky. Residual: “public contract of this helper”
+  still matches because it has the qualifier <code>public</code>.
+</div>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>F13 review-depth scoring redesign</li>
+  <li>Further demotion of qualified-but-benign “public contract …” prose</li>
+  <li>Analyze-report findings F64–F71</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li><strong>RED pins</strong> — 1 task (corpus expect + preferences tests)</li>
+  <li><strong>GREEN narrow + resolve F11</strong> — 1 task</li>
+</ul>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>
