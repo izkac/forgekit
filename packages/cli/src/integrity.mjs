@@ -146,9 +146,52 @@ export function resolveChangeDir(opts = {}) {
  *
  * @param {{ cwd?: string, session?: Record<string, unknown> | null, sessionDir?: string }} opts
  */
+/** Stray files already reported, so a multi-check command says it once. */
+const warnedStrays = new Set();
+
+/**
+ * A reader's answer to "where is this artefact?", which is not always the
+ * canonical path.
+ *
+ * `spine.json` and `e2e.json` belong in the change dir, but `forge spine init` /
+ * `forge e2e init` can only put them there once the session **names** a change.
+ * Scaffold first and set the phase second — which is the order
+ * `plan-specs.md` itself documents, spine/e2e at step 4 and `forge phase plan`
+ * at step 6 — and they land in the session dir instead. The session then gains
+ * its change, the canonical path starts resolving, and `forge e2e run` reports
+ * "e2e.json not found — run forge e2e init" about the one command that just
+ * succeeded. That is F50.
+ *
+ * Readers therefore prefer a file that exists over a path that is merely
+ * correct. `forWrite` callers never take this branch: scaffolding must always
+ * target the canonical location, or the stray copy becomes the permanent one.
+ *
+ * NOT SILENT, or the file stays lost. The canonical path is where a reviewer,
+ * `forge change archive` and everything reading the change dir will look, so a
+ * fallback that says nothing trades one confusion for a quieter one.
+ *
+ * @param {string} canonical the change-dir path
+ * @param {{ sessionDir?: string, forWrite?: boolean }} opts
+ * @param {string} file basename to look for in the session dir
+ */
+function strayFallback(canonical, opts, file) {
+  if (opts.forWrite === true || fs.existsSync(canonical) || !opts.sessionDir) return canonical;
+  const stray = path.join(opts.sessionDir, file);
+  if (!fs.existsSync(stray)) return canonical;
+  if (!warnedStrays.has(stray)) {
+    warnedStrays.add(stray);
+    process.stderr.write(
+      `[forge] Reading ${file} from the session dir: ${stray}\n` +
+        `  It belongs beside the change, at ${canonical} — scaffolded before this session named ` +
+        `a change (F50).\n  Move it there so reviewers and \`forge change archive\` can see it.\n`,
+    );
+  }
+  return stray;
+}
+
 export function spinePath(opts = {}) {
   const changeDir = resolveChangeDir(opts);
-  if (changeDir) return path.join(changeDir, SPINE_FILE);
+  if (changeDir) return strayFallback(path.join(changeDir, SPINE_FILE), opts, SPINE_FILE);
   if (opts.sessionDir) return path.join(opts.sessionDir, SPINE_FILE);
   throw new Error('Cannot resolve spine.json location: no change and no session dir');
 }
@@ -252,7 +295,7 @@ export const E2E_DEFAULT_TIMEOUT_MS = 300_000;
  */
 export function e2ePath(opts = {}) {
   const changeDir = resolveChangeDir(opts);
-  if (changeDir) return path.join(changeDir, E2E_FILE);
+  if (changeDir) return strayFallback(path.join(changeDir, E2E_FILE), opts, E2E_FILE);
   if (opts.sessionDir) return path.join(opts.sessionDir, E2E_FILE);
   throw new Error('Cannot resolve e2e.json location: no change and no session dir');
 }

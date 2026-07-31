@@ -186,6 +186,23 @@ test('review totals measured different ways are flagged, not silently summed', (
   assert.doesNotMatch(formatFleetReport(clean), /mixed authorship evidence/i);
 });
 
+test('the `recorded` grade (F12\'s dispatch stamp, read back by census rule 5) sorts and flags like any other', () => {
+  // Nothing here is specific to `recorded` — `t.reviews.evidence` and the
+  // mixed-authorship warning both generalize to any string `reviewCensus` can
+  // grade — but that genericness is exactly what a new grade could quietly
+  // break (a hard-coded `['host', 'inferred']` allowlist, for instance), so
+  // this pins that `recorded` really does flow through unmodified.
+  const p = makeProject('stamped', {
+    scores: scoresFor(['stamped', 'measured']),
+    digests: [verdictLine('stamped', 'recorded'), verdictLine('measured', 'host')],
+  });
+  const report = buildFleetReport([p]);
+
+  assert.deepEqual(report.totals.reviews.evidence, ['host', 'recorded']);
+  assert.equal(report.totals.reviews.mixedEvidence, true);
+  assert.match(formatFleetReport(report), /mixed authorship evidence/i);
+});
+
 test('a digest line written before evidence was recorded reads as unknown, never as a grade', () => {
   // Folding a missing grade into `inferred` — or into any other bucket —
   // would be this change's own defect class committed in the one file that

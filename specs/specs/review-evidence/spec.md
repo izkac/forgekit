@@ -9,7 +9,6 @@ tell.
 ## Requirements
 
 ### Requirement: Authorship is measured from host evidence when it exists
-
 Where the host recorded a subagent dispatch matching this session's review unit,
 that record SHALL decide the verdict, and the review file's prose SHALL NOT be
 consulted for it.
@@ -52,7 +51,6 @@ SHALL contribute to no session's verdict.
 - **AND** its evidence is `host`
 
 ### Requirement: Absence of evidence never refuses work
-
 Where host evidence is unavailable, the verdict SHALL fall back to the existing
 prose reading, and SHALL NOT be reported as a self-check on the grounds of
 absence alone.
@@ -66,7 +64,6 @@ absence alone.
 - **AND** `forge phase done` behaves exactly as it did before this change
 
 ### Requirement: Adoption is detected, not assumed
-
 Where the host recorded subagent dispatches for this session but **none** of them
 carry the prescribed review label, the convention SHALL be treated as not in use
 and the verdict SHALL fall back to the prose reading. A session SHALL NOT be
@@ -97,7 +94,6 @@ unprescribed description.
 - **AND** its evidence is `host`
 
 ### Requirement: A dispatch must carry substance before it certifies a review
-
 Where the host recorded a review dispatch for a unit, the record SHALL decide
 that unit's verdict only when at least one dispatch the operator did not stop
 did enough work to be a review. Below that floor the host SHALL report no
@@ -175,7 +171,6 @@ measurement the operator themselves produced.
   verdict from being refused at that later pass — see below.)
 
 ### Requirement: The verdict outlives its evidence
-
 The verdict and its evidence grade SHALL be written into the session and the
 durable digest when collected. Once frozen, it SHALL NOT be recomputed from
 evidence that may since have been pruned, except as *A frozen verdict is
@@ -192,7 +187,6 @@ NOT replace it on that account alone.
 - **THEN** the recorded verdict and evidence are unchanged
 
 ### Requirement: A frozen verdict is replaced only by a pass that learnt something
-
 Where a verdict has already been frozen for a session, a later pass SHALL
 replace it only when that pass learnt something about the final review. A
 pass that finds no record of the deciding review unit, where an earlier pass
@@ -262,7 +256,6 @@ record".
 - **AND** the caller falls back to a live census
 
 ### Requirement: A declined dispatch is reported, not assumed
-
 Where the host records that an operator stopped a reviewer dispatch, the census
 SHALL surface that fact and SHALL NOT treat it as either a completed review or
 an automatic waiver.
@@ -276,7 +269,6 @@ an automatic waiver.
 - **AND** no waiver is applied on the session's behalf
 
 ### Requirement: Unit evidence reports the busiest single unstopped dispatch
-
 Each unit's evidence SHALL carry the request count of its busiest dispatch among
 those the operator did not stop, alongside the existing total across all
 dispatches. A unit whose every dispatch was stopped SHALL report zero for the
@@ -309,7 +301,6 @@ count is enough.
 - **AND** the verdict comes from the review file's prose
 
 ### Requirement: Evidence records counts, never content
-
 Persisted review evidence SHALL contain identifiers, counts and timestamps only.
 The dispatch `description` SHALL NOT be written, even though its format is
 prescribed.
@@ -319,3 +310,210 @@ prescribed.
 - **GIVEN** a reviewer sidecar whose `description` carries free-form text beyond the prescribed token
 - **WHEN** evidence is collected and persisted
 - **THEN** no part of the description text appears in any written artifact
+
+### Requirement: A binding that cannot be read in full cannot decide the gate
+Where any host session bound to a Forge session cannot be read — its transcript
+or its dispatch-record directory present and unreadable, as distinct from
+absent — host evidence SHALL report itself unavailable, and the verdict SHALL
+fall back to the prose reading.
+
+A binding SHALL NOT be reported as readable because *some* of it was read. The
+absence of a reviewer from a partially read binding is not evidence that no
+reviewer ran.
+
+**Unreadable SHALL be diagnosed before absent.** Where every bound host session
+is unreadable, the unavailable reason SHALL name the ids and paths that could
+not be read; the reason reserved for transcripts absent from disk ("pruned or
+written elsewhere") SHALL be used only when nothing was blocked.
+
+#### Scenario: A reviewer that ran in the unreachable half
+
+- **GIVEN** a session bound to two host sessions
+- **AND** the first is fully readable and carries prescribed dispatches
+- **AND** the second's session directory cannot be searched
+- **AND** the final reviewer was dispatched in the second
+- **WHEN** the census runs
+- **THEN** host evidence is unavailable
+- **AND** the verdict matches what the prose rule alone would return
+- **AND** its evidence is `inferred`
+- **AND** the final review is **not** reported as `self` on `host` grade
+
+#### Scenario: A dispatch-record directory that is present and unreadable
+
+- **GIVEN** a session whose bound host session has a `subagents` path that
+  cannot be stat-ed, or that exists and is not a directory
+- **WHEN** the census runs
+- **THEN** host evidence is unavailable
+- **AND** the reason names the host session id and the path
+
+#### Scenario: A transcript that was pruned, not blocked
+
+- **GIVEN** a session bound to two host sessions
+- **AND** the older transcript is absent from disk
+- **AND** the newer is fully readable
+- **WHEN** the census runs
+- **THEN** host evidence is available and answers from the readable session
+- **AND** the answer is unchanged from before this change
+
+#### Scenario: Every bound host session blocked, none absent
+
+- **GIVEN** a session bound to one host session whose transcript cannot be
+  examined — the directory holding it cannot be searched, so the id is reported
+  unreadable and never found
+- **WHEN** the census runs
+- **THEN** host evidence is unavailable
+- **AND** the reason names the blocked id and path
+- **AND** the reason does not claim the transcript was pruned or written
+  elsewhere
+
+### Requirement: Locating a host transcript distinguishes absent from unreadable
+The helper that locates transcripts and dispatch-record directories on disk
+SHALL report ids it could not examine separately from ids it did not find.
+
+An error of `ENOENT` SHALL be treated as absence, because a pruned transcript
+and a session that dispatched nothing are ordinary conditions. Any other error
+SHALL be reported.
+
+An id found in one project directory SHALL NOT be reported as unreadable because
+a different project directory could not be examined while searching for it.
+
+#### Scenario: An id absent from an unreadable project directory
+
+- **GIVEN** two project directories, the first unsearchable
+- **AND** the id's transcript in the second
+- **WHEN** transcripts are located
+- **THEN** the id is reported as found
+- **AND** no id is reported as unreadable
+
+#### Scenario: An id found nowhere, with one directory unsearchable
+
+- **GIVEN** two project directories, the first unsearchable
+- **AND** the id's transcript in neither
+- **WHEN** transcripts are located
+- **THEN** the id is reported as unreadable, not as absent
+
+#### Scenario: A transcript that is simply not there
+
+- **GIVEN** an id whose transcript is absent from every project directory
+- **AND** every directory readable
+- **WHEN** transcripts are located
+- **THEN** the id is omitted, and is not reported as unreadable
+
+### Requirement: A review dispatch is stamped when its label is issued
+`forge review-label` SHALL, after resolving the session and unit, write a
+dispatch stamp into the session's own directory
+(`reviews/dispatches.json`) recording the unit, the exact label, the
+session id, the time, and the model resolved in-process at the reviewer's
+tier. The stamp SHALL be appended, never overwritten. Failure to write the
+stamp SHALL NOT block the label: the label is still printed, the failure
+is reported on stderr, and stdout SHALL remain exactly the label.
+
+#### Scenario: Labelling the final reviewer writes the stamp
+
+- **GIVEN** an open session and a writable session directory
+- **WHEN** `forge review-label final` runs
+- **THEN** stdout is exactly `forge-review final <session-id>`
+- **AND** `reviews/dispatches.json` gains a stamp with unit `final`, that
+  label, that session id, a timestamp, and the model resolved at tier
+  `capable`
+
+#### Scenario: A stamp that cannot be written does not block the dispatch
+
+- **GIVEN** a session whose `reviews/` directory cannot be created
+- **WHEN** `forge review-label final` runs
+- **THEN** the label is still printed on stdout and the exit code is 0
+- **AND** the failure is reported on stderr
+
+### Requirement: The stamp decides when the host cannot answer
+Where host evidence cannot answer for the final unit — unavailable, or
+carrying no well-formed record of that unit — a structurally valid stamp
+for the final unit naming this session SHALL decide the verdict
+`independent` with evidence `recorded`, and the review file's prose SHALL
+NOT be consulted for it. Where host evidence can answer, it SHALL answer,
+and the stamp SHALL NOT override it — with one exception: a negative
+answer built on absence (the final unit missing from the record) that was
+measured from a **partial binding** (one or more of the session's bound
+host transcripts no longer on disk) is not a complete measurement, and a
+valid stamp SHALL decide `independent` with evidence `recorded` over it.
+A negative built on a measured record — every recorded dispatch of the
+final unit stopped by the operator — SHALL stand regardless of stamps or
+partial bindings, and a negative measured from a **complete** binding
+SHALL stand: the host saw the whole conversation, and a label that was
+printed but never carried by a dispatch is not a review. A stamp SHALL
+NOT conjure a review: a session with no final review file remains `none`
+regardless of stamps.
+
+#### Scenario: A pruned transcript no longer erases the reviewer
+
+- **GIVEN** a session whose final reviewer was labelled and stamped at
+  dispatch time
+- **AND** the host transcript has since been pruned from disk
+- **AND** the review file's prose contains the words `self-check`
+- **WHEN** the census runs
+- **THEN** the final review is `independent`
+- **AND** its evidence is `recorded`
+
+#### Scenario: The host's answer outranks the stamp
+
+- **GIVEN** a stamped final unit whose every host-recorded dispatch was
+  stopped by the operator
+- **WHEN** the census runs
+- **THEN** the final review is `self` with evidence `host`
+- **AND** `stoppedByOperator` is true
+
+#### Scenario: A partial binding's confident negative does not erase a stamped reviewer
+
+- **GIVEN** a session bound to two host sessions whose older transcript has
+  been pruned from disk
+- **AND** the surviving half's record carries no dispatch of the final unit
+- **AND** a valid stamp for the final unit names this session
+- **WHEN** the census runs
+- **THEN** the final review is `independent` with evidence `recorded`
+
+#### Scenario: A measured stop wins even over a partial binding
+
+- **GIVEN** the same partial binding
+- **AND** the surviving half records a final-unit dispatch whose every run
+  was stopped by the operator
+- **WHEN** the census runs
+- **THEN** the final review is `self` with evidence `host`
+- **AND** `stoppedByOperator` is true
+
+#### Scenario: A complete binding's negative stands against the stamp
+
+- **GIVEN** a session whose every bound host transcript is on disk
+- **AND** the record carries no dispatch of the final unit
+- **AND** a valid stamp for the final unit names this session
+- **WHEN** the census runs
+- **THEN** the final review is `self` with evidence `host` — the label was
+  printed, but no dispatch ever carried it
+
+#### Scenario: A stamp naming a different session credits nothing
+
+- **GIVEN** a `dispatches.json` whose only stamp names another session's id
+- **AND** no host evidence
+- **WHEN** the census runs
+- **THEN** the verdict falls back to the review file's prose, graded
+  `inferred`
+
+#### Scenario: A malformed stamp file is an absence, not an error
+
+- **GIVEN** a `reviews/dispatches.json` that is not valid JSON
+- **WHEN** the census runs
+- **THEN** the census does not throw
+- **AND** the verdict falls back to the review file's prose, graded
+  `inferred`
+
+### Requirement: The stamp substitutes for lost records, never for missing work
+Where host evidence carries a well-formed record of the final unit whose
+busiest unstopped dispatch is below the substance floor, the verdict SHALL
+fall back to the review file's prose and the stamp SHALL NOT be consulted.
+
+#### Scenario: A stamped token dispatch does not certify a review
+
+- **GIVEN** a stamped final unit whose host record shows one unstopped
+  dispatch of 1 request
+- **WHEN** the census runs
+- **THEN** the verdict is read from the review file's prose, graded
+  `inferred`
+- **AND** the stamp contributes nothing

@@ -1,0 +1,90 @@
+<!-- forge-brief-specs-hash:c41035503097d6ed -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Cursor sessions in Forge fleet</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #1a1a1a; }
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.15rem; margin-top: 1.75rem; }
+    ul { padding-left: 1.25rem; }
+    code { font-size: 0.9em; background: #f4f4f4; padding: 0.1em 0.35em; border-radius: 3px; }
+    .mermaid { background: #fafafa; padding: 1rem; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Cursor sessions in Forge fleet</h1>
+
+  <h2>TL;DR</h2>
+  <p>
+    Forge sessions started from Cursor never showed up in <code>forge fleet</code>,
+    because Cursor’s agent sandbox blocks writes to the shared fleet folder under
+    your home directory. After this change, registration failures leave a local
+    “try again later” stamp, reminder hooks and a new sync command recover them,
+    Cursor chats bind as Cursor (not “unknown”), and project init actually wires
+    the Cursor session-start hook.
+  </p>
+
+  <h2>What you'll get</h2>
+  <ul>
+    <li>Cursor Forge work appears in <code>forge fleet list</code> once registration can write (or after sync).</li>
+    <li>A clear warning when the sandbox blocked registration, with what to do.</li>
+    <li><code>forge fleet sync</code> to re-register every session in the current project.</li>
+    <li>Cursor host binding so telemetry can attach conversation ids.</li>
+    <li><code>forge init --cursor</code> creates/merges <code>.cursor/hooks.json</code> instead of only a snippet.</li>
+  </ul>
+
+  <h2>How it works</h2>
+  <p>
+    Saving a session still tries to mirror into the machine-wide fleet folder.
+    If that write is permission-denied (typical under Cursor’s sandbox), Forge
+    drops a small pending file next to the session. The next reminder/session-start
+    that <em>can</em> write home, or an explicit sync, finishes registration and
+    clears the pending file. Agents are also told to run forge with unrestricted
+    shell permissions under Cursor so the first write often succeeds.
+  </p>
+  <pre class="mermaid">
+flowchart LR
+  A[forge new / phase] --> B{Write ~/.forgekit/fleet?}
+  B -->|ok| C[Visible in forge fleet]
+  B -->|permission denied| D[fleet-pending.json in project]
+  D --> E[reminder or forge fleet sync]
+  E --> C
+  </pre>
+
+  <h2>What changes for you</h2>
+  <ul>
+    <li>New command: <code>forge fleet sync</code> in a project that has missing fleet rows.</li>
+    <li>Under Cursor, forge commands that create/update sessions should run unsandboxed (agent requests full permissions).</li>
+    <li>Re-run <code>forge init --cursor</code> (or merge hooks) so session-start reminders fire.</li>
+  </ul>
+
+  <h2>Risks and open questions</h2>
+  <ul>
+    <li>If Cursor hooks themselves are sandboxed the same way, pending may linger until you sync from a normal terminal — watch for that.</li>
+    <li>Merging hooks must not wipe other Cursor hooks; tests cover the merge path.</li>
+  </ul>
+
+  <h2>Out of scope</h2>
+  <ul>
+    <li>Moving the fleet registry into each project.</li>
+    <li>Full Cursor transcript metrics (binding only).</li>
+    <li>Changing Cursor’s sandbox product behaviour.</li>
+  </ul>
+
+  <h2>Work overview</h2>
+  <ul>
+    <li>Host bind for Cursor — 3 tasks</li>
+    <li>Pending stamp + louder warning — 3 tasks</li>
+    <li>Flush + sync + docs — 3 tasks</li>
+    <li>Init hooks + skill + helm wiring — 5 tasks</li>
+    <li>Accept / evidence — 1 task</li>
+  </ul>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true });
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "change": "findings-ledger-routing",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "findings-ledger — related bugs on forge new; stale bugs on status",
+      "library": "packages/cli/src/findings.mjs (matchingOpenBugs, staleOpenBugs)",
+      "runtimeOwner": "packages/cli/src/new-session.mjs; packages/cli/src/session-status.mjs",
+      "writes": "JSON stdout fields relatedFindings / staleFindings (no ledger mutation)",
+      "reads": ".forge/findings.jsonl",
+      "uiConsumer": "forge new / forge status operators and agents",
+      "evidence": "packages/cli/src/findings.test.mjs + packages/cli/src/lib.test.mjs + e2e step findings-routing-loop (scripts/e2e/findings-routing.mjs)"
+    },
+    {
+      "capability": "findings-ledger — agent guardrails documented",
+      "library": "skills/forge/SKILL.md; docs/usage.md; skills/forge/docs/forge.md",
+      "runtimeOwner": "agents reading those docs at session start",
+      "writes": "documentation only",
+      "reads": "N/A",
+      "uiConsumer": "N/A",
+      "evidence": "rg 'fix beats file|--kind' skills/forge/SKILL.md docs/usage.md skills/forge/docs/forge.md"
+    }
+  ]
+}

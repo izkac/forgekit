@@ -1,0 +1,82 @@
+<!-- forge-brief-specs-hash:546eb74a04178b15 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief — Findings ledger kinds</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 48rem; margin: 2rem auto; padding: 0 1rem;
+         color: #1a1a1a; background: #fff; line-height: 1.55; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; font-size: .9em; }
+  li { margin: .3rem 0; }
+  .muted { color: #555; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>window.mermaid && mermaid.initialize({ startOnLoad: true });</script>
+</head>
+<body>
+
+<h1>Findings ledger kinds</h1>
+
+<h2>TL;DR</h2>
+<p>The open-findings number has been mixing bugs, debt, trade-offs, ideas and
+process notes — almost all labelled <code>major</code> by default. After this
+change the headline means <strong>open bugs</strong>, findings can point at
+their root cause, and a fix that regressed twice can block finishing that
+subject again.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Every new finding must declare a <code>kind</code>
+      (<code>bug|debt|tradeoff|idea|process</code>) and a
+      <code>severity</code> — no silent defaults.</li>
+  <li><code>forge finding list</code> and <code>forge status</code> show
+      <em>bugs</em> by default; other kinds stay in the ledger but off the
+      headline.</li>
+  <li>Closing a root cause lists its open dependents so they get re-checked
+      (they are not auto-closed).</li>
+  <li>Reopened findings are first-class: sorted and marked in the list, named
+      in status; a finding reopened twice can refuse
+      <code>forge phase done</code> on that change unless explicitly waived.</li>
+</ul>
+
+<h2>How it works</h2>
+<pre class="mermaid">
+flowchart LR
+    A[forge finding add<br/>--kind --severity] --> L[(.forge/findings.jsonl)]
+    L --> B[list / status<br/>bugs only]
+    L --> C[resolve root]
+    C -->|prints| D[Re-check dependents]
+    L --> E[reopen]
+    E -->|reopenCount ≥ 2| F[phase done gate]
+</pre>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Agents filing findings must pass <code>--kind</code> and
+      <code>--severity</code> or the command fails with the allowed values.</li>
+  <li><code>forge finding list --all-kinds</code> shows everything; the
+      default list footer says how many non-bugs are hidden.</li>
+  <li>New: <code>forge finding link</code>, <code>forge finding reopen</code>,
+      and <code>--reopen-waived</code> on <code>phase done</code>.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<p class="muted">THOROUGH_RE corpus (W5), surfacing bugs on
+<code>forge new</code> (W6), and skill-doc guardrails (W7) are follow-up
+changes after this schema lands.</p>
+
+<h2>Success</h2>
+<ul>
+  <li><code>openFindings.count</code> is a single-digit bug count after
+      backfill, and it is the number people mean when they say "open
+      findings".</li>
+  <li>Resolving a linked root always names its open dependents.</li>
+  <li>F11 / F13 show as reopened in status, not as ordinary majors.</li>
+</ul>
+
+</body>
+</html>

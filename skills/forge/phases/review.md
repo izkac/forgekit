@@ -18,11 +18,52 @@ forge review-label final                # → forge-review final <session-id>
 
 **It refuses rather than guessing.** If more than one session in the project is
 unfinished, or it cannot read them, it exits non-zero and lists each candidate as
-the `--session <id>` that selects it; pass that flag when it asks. It also prints
-which session it labelled, and on what basis, on stderr — read that line. That string is how `forge phase done` knows an
+the `--session <id>` that selects it; pass that flag when it asks. Pass `--tier
+fast|standard|capable` to resolve the reviewer at a tier other than the default
+`capable`; an unknown tier refuses the same way — before anything, label or
+stamp, is written. It also prints which session it labelled, and on what basis,
+on stderr — read that line. That string is how `forge phase done` knows an
 outside reader saw this change; `final` is the only unit the census reads, and it
 decides the money/auth floor, the scorecard's 69-point ceiling for an unreviewed
 high-risk change, and the durable ledger.
+
+**Running the command now does three things, not one.** It still prints the
+label on stdout, byte-identical to before. It also resolves the reviewer's model
+in-process at the requested tier — the same resolution [implement.md](./implement.md)'s
+per-task loop uses `forge resolve-model` for — and reports the resolved model on
+stderr. That in-process resolution is what the stamp below records; it does
+**not** replace the separate `forge resolve-model` call you still make for the
+Task tool's own `model` parameter — run that as prescribed and pass back what it
+returns. Third, it writes a **dispatch stamp** — unit, label, session id,
+timestamp, resolved model — to `.forge/sessions/<id>/reviews/dispatches.json`,
+and reports the stamp path on stderr. The recorded model is informative only,
+never load-bearing: the census reads a stamp's `unit` and session id, never
+its `model`, so labelling at one tier and then dispatching the Task tool at
+another `forge resolve-model` tier is harmless — the stamp records what
+`review-label` itself resolved, not what the dispatch ran as, and the verdict
+never depends on the two matching. A stamp write failure warns and never
+blocks the label; no refusal path above (ambiguous session, bad unit, bad tier)
+ever leaves a stamp. Because the stamp lives inside the session's own directory
+rather than in the host's transcript, it survives host-transcript pruning that
+would otherwise erase the record — Cursor, Codex and a pruned Claude Code
+transcript included — and `forge score` reads it back as the `recorded` grade
+when the host itself cannot answer. What it proves is narrower than it sounds: a
+label was *issued* at dispatch time with a resolved model, not that a reviewer
+*ran* — which is why `recorded` still ranks below the host's own record, and
+why a well-formed dispatch the host measured as under the substance floor still
+routes to this file's prose rather than to the stamp.
+
+That gap is also where the mechanism's error direction shows. On a
+**partial** binding, a dispatch whose own record — including any operator
+stop — falls entirely inside the pruned half reads as a plain absence, and
+the stamp can recover it as `recorded` the same way it recovers a reviewer
+that genuinely ran, even where an intact record would have said `self`.
+Over-credit is the accepted, disclosed direction here; refusing correct work
+is not. A stop that **is** on record — visible in any surviving bound
+transcript — is not this gap: it is a measured fact, not an absence, and no
+stamp, on a partial binding or a complete one, ever overrides it. See
+[implement.md](./implement.md) for the same boundary stated beside the
+armed-rule case it protects.
 
 **Run the command rather than typing the string.** The trailing session id is
 what makes the record *yours*: one Claude Code conversation routinely hosts
@@ -48,12 +89,22 @@ So the safe orders are *label the final reviewer* (group labels then harmless) o
 *label nothing*. "Label everything" is only safe while you never forget the one
 that counts, and its failure is silent. Partial adoption is worse than none.
 
-**When there is no host record, this review file's *wording* decides the
-money/auth gate.** No binding, Cursor, Codex, a pruned transcript, or a repo that
-labels nothing — in all of those `forge score` falls back to reading the file. So
-a coordinator-written final review with no declaration passes the high-risk floor
-and records `independent` in the durable digest. That is the common case today,
-and for a session that never touched Claude Code it is the only case. Falling
+**When there is no host record *and* no stamp, this review file's *wording*
+decides the money/auth gate — and only then.** No host binding, Cursor,
+Codex, and a transcript pruned in whole or in part used to fall straight to
+the file's prose in every one of those cases. Now the stamp answers first if
+`forge review-label final` was actually run for this session: it is written
+into the session's own directory, not the host's, so none of those erase it,
+and it grades `recorded` without the file ever being opened. Wording still
+decides in the two cases the stamp can't reach: a repo that never ran the
+command for this unit at all (a hand-typed label, a legacy session
+predating this change, or a stamp write that failed — warned about on
+stderr, never silent), and a dispatch the host itself *measured* and found
+under the substance floor, which is a record of thin work rather than an
+absent one and is deliberately left to prose — the stamp does not
+substitute for work a reviewer didn't do. In that no-stamp, no-host case a
+coordinator-written final review with no declaration still passes the
+high-risk floor and records `independent` in the durable digest. Falling
 back is not a substitute for labelling: the fallback's default answer is
 *independent*, so it is silence, not evidence, that passes the gate.
 

@@ -1,0 +1,12 @@
+{
+  "change": "finish-the-enoent-split",
+  "notApplicable": null,
+  "steps": [
+    { "name": "boot", "cmd": "node scripts/e2e/harness-portability.mjs boot" },
+    {
+      "name": "review-evidence-partial-binding",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-evidence-partial-binding",
+      "expect": "PARTIAL binding=half-read gate=accepted evidence=inferred"
+    }
+  ]
+}

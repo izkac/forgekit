@@ -1,0 +1,11 @@
+{
+  "change": "findings-ledger-routing",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "findings-routing-loop",
+      "cmd": "node scripts/e2e/findings-routing.mjs",
+      "expect": "FINDINGS routing related=ok stale=ok"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ import path from 'node:path';
 import { readLedger } from './ledger.mjs';
 
 export const SEVERITIES = ['blocker', 'major', 'minor', 'note'];
+export const KINDS = ['bug', 'debt', 'tradeoff', 'idea', 'process'];
 
 /** @param {string} forgeDir */
 export function findingsPath(forgeDir) {
@@ -56,30 +57,86 @@ function writeAll(forgeDir, entries) {
   fs.writeFileSync(file, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf8');
 }
 
+/** @param {unknown} ids */
+function normalizeDependencyIds(ids) {
+  if (ids === undefined) return [];
+  if (!Array.isArray(ids)) throw new Error('Dependencies must be an array of finding ids.');
+  const normalized = ids.map((id) => {
+    if (typeof id !== 'string' || id.trim() === '') {
+      throw new Error('Dependency ids must not be empty.');
+    }
+    return id.trim();
+  });
+  return [...new Set(normalized)];
+}
+
 /**
- * @param {{ forgeDir: string, text: string, severity?: string, change?: string | null,
- *           session?: { sessionId?: string | null, slug?: string | null }, now?: () => Date }} opts
+ * @param {Record<string, any>[]} entries
+ * @param {string[]} ids
+ */
+function requireKnownDependencies(entries, ids) {
+  for (const id of ids) {
+    if (!entries.some((entry) => entry.id === id)) {
+      throw new Error(`No finding with id ${id}. See: forge finding list --all`);
+    }
+  }
+}
+
+/**
+ * @param {{ forgeDir: string, text: string, kind: string, severity: string, change?: string | null,
+ *           dependsOn?: string[], session?: { sessionId?: string | null, slug?: string | null },
+ *           now?: () => Date }} opts
  */
 export function addFinding(opts) {
   const text = String(opts.text ?? '').trim();
   if (!text) throw new Error('A finding needs text: forge finding add "<text>"');
-  const severity = opts.severity ?? 'major';
+  const kind = opts.kind;
+  if (!kind) {
+    throw new Error(`A finding needs kind (expected ${KINDS.join(' | ')}).`);
+  }
+  if (!KINDS.includes(kind)) {
+    throw new Error(`Unknown kind "${kind}" (expected ${KINDS.join(' | ')}).`);
+  }
+  const severity = opts.severity;
+  if (!severity) throw new Error(`A finding needs severity (expected ${SEVERITIES.join(' | ')}).`);
   if (!SEVERITIES.includes(severity)) {
     throw new Error(`Unknown severity "${severity}" (expected ${SEVERITIES.join(' | ')}).`);
   }
   const entries = readFindings(opts.forgeDir);
+  const dependsOn = normalizeDependencyIds(opts.dependsOn);
+  requireKnownDependencies(entries, dependsOn);
   const entry = {
     id: nextFindingId(entries),
     text,
+    kind,
     severity,
     status: 'open',
     change: opts.change ?? null,
     sessionId: opts.session?.sessionId ?? null,
     slug: opts.session?.slug ?? null,
     createdAt: (opts.now?.() ?? new Date()).toISOString(),
+    ...(dependsOn.length > 0 ? { dependsOn } : {}),
   };
   writeAll(opts.forgeDir, [...entries, entry]);
   return entry;
+}
+
+/**
+ * @param {{ forgeDir: string, id: string, dependsOn: string[] }} opts
+ */
+export function linkFinding(opts) {
+  const entries = readFindings(opts.forgeDir);
+  const idx = entries.findIndex((entry) => entry.id === opts.id);
+  if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
+  const dependsOn = normalizeDependencyIds(opts.dependsOn);
+  requireKnownDependencies(entries, dependsOn);
+  const existing = normalizeDependencyIds(entries[idx].dependsOn);
+  entries[idx] = {
+    ...entries[idx],
+    dependsOn: [...new Set([...existing, ...dependsOn])],
+  };
+  writeAll(opts.forgeDir, entries);
+  return entries[idx];
 }
 
 /**
@@ -90,8 +147,42 @@ export function resolveFinding(opts) {
   const idx = entries.findIndex((e) => e.id === opts.id);
   if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
   if (entries[idx].status !== 'open') {
-    throw new Error(`Finding ${opts.id} is already ${entries[idx].status}.`);
+    // AMENDING A RESOLUTION NOTE IS THE POINT, NOT AN EDGE CASE. Refusing
+    // outright is what this used to do, and the cost is on the record: F31's
+    // note kept its round-1 text through three attempted corrections, and F52
+    // exists **only** because F49's note could not be amended — a second
+    // finding filed to carry a correction to the first. That is F42.
+    //
+    // A bare re-resolve is still refused: with nothing to add it is either a
+    // mistake or a no-op, and answering "fine" to both is how the silence
+    // started. `resolvedAt` keeps its original value — the finding was resolved
+    // then, not now — and the superseded note is kept rather than overwritten,
+    // because a durable record that quietly loses its previous text is the same
+    // defect one layer down.
+    const amended = typeof opts.note === 'string' && opts.note.trim() !== '';
+    if (!amended) {
+      throw new Error(
+        `Finding ${opts.id} is already ${entries[idx].status}. ` +
+          'To correct its note: forge finding resolve ' +
+          `${opts.id} --note "<text>"`,
+      );
+    }
+    const previous = entries[idx].note;
+    entries[idx] = {
+      ...entries[idx],
+      note: opts.note,
+      noteHistory: [
+        ...(Array.isArray(entries[idx].noteHistory) ? entries[idx].noteHistory : []),
+        ...(typeof previous === 'string' && previous.trim() !== '' ? [previous] : []),
+      ],
+      amendedAt: (opts.now?.() ?? new Date()).toISOString(),
+    };
+    writeAll(opts.forgeDir, entries);
+    return { entry: entries[idx], dependents: [] };
   }
+  const dependents = entries.filter(
+    (entry) => entry.status === 'open' && Array.isArray(entry.dependsOn) && entry.dependsOn.includes(opts.id),
+  );
   entries[idx] = {
     ...entries[idx],
     status: 'resolved',
@@ -99,5 +190,105 @@ export function resolveFinding(opts) {
     resolvedAt: (opts.now?.() ?? new Date()).toISOString(),
   };
   writeAll(opts.forgeDir, entries);
+  return { entry: entries[idx], dependents };
+}
+
+/**
+ * @param {{ forgeDir: string, id: string, from: string, note: string, now?: () => Date }} opts
+ */
+export function reopenFinding(opts) {
+  const entries = readFindings(opts.forgeDir);
+  const idx = entries.findIndex((entry) => entry.id === opts.id);
+  if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
+  if (entries[idx].status === 'open') {
+    throw new Error(`Finding ${opts.id} is already open.`);
+  }
+  if (entries[idx].status !== 'resolved') {
+    throw new Error(`Finding ${opts.id} is ${entries[idx].status}; only resolved findings can be reopened.`);
+  }
+
+  const from = String(opts.from ?? '').trim();
+  if (!from) throw new Error('A reopened finding needs --from <oldId>.');
+  const note = String(opts.note ?? '').trim();
+  if (!note) throw new Error('A reopened finding needs --note "<text>".');
+
+  const previous = entries[idx].note;
+  const reopenCount = typeof entries[idx].reopenCount === 'number' ? entries[idx].reopenCount : 0;
+  entries[idx] = {
+    ...entries[idx],
+    status: 'open',
+    reopenedFrom: from,
+    reopenCount: reopenCount + 1,
+    note,
+    noteHistory: [
+      ...(Array.isArray(entries[idx].noteHistory) ? entries[idx].noteHistory : []),
+      ...(typeof previous === 'string' && previous.trim() !== '' ? [previous] : []),
+    ],
+    reopenedAt: (opts.now?.() ?? new Date()).toISOString(),
+  };
+  writeAll(opts.forgeDir, entries);
   return entries[idx];
+}
+
+/**
+ * Slug tokens long enough to match subjects without noise (`fix`, `add`, …).
+ * @param {string} slug
+ * @returns {string[]}
+ */
+export function slugTokens(slug) {
+  return String(slug ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((t) => t.length >= 4);
+}
+
+/**
+ * Whether an open finding relates to a new session slug.
+ * Exact `change === slug`, or any ≥4-char slug token in `change` / `text`.
+ * @param {Record<string, any>} finding
+ * @param {string} slug
+ */
+export function findingMatchesSlug(finding, slug) {
+  if (!finding || finding.status !== 'open' || finding.kind !== 'bug') return false;
+  const needle = String(slug ?? '').trim().toLowerCase();
+  if (!needle) return false;
+  const change = String(finding.change ?? '').toLowerCase();
+  if (change && change === needle) return true;
+  const text = String(finding.text ?? '').toLowerCase();
+  for (const token of slugTokens(needle)) {
+    if (change.includes(token) || text.includes(token)) return true;
+  }
+  return false;
+}
+
+/**
+ * Open bugs related to a slug (advisory for `forge new`).
+ * @param {string} forgeDir
+ * @param {string} slug
+ */
+export function matchingOpenBugs(forgeDir, slug) {
+  return openFindings(forgeDir)
+    .filter((f) => findingMatchesSlug(f, slug))
+    .map(({ id, severity, text, change }) => ({ id, severity, text, change }));
+}
+
+/**
+ * Open bugs older than `maxAgeDays` (default 7).
+ * @param {string} forgeDir
+ * @param {{ now?: Date | (() => Date), maxAgeDays?: number }} [opts]
+ */
+export function staleOpenBugs(forgeDir, opts = {}) {
+  const maxAgeDays = opts.maxAgeDays ?? 7;
+  const nowValue = typeof opts.now === 'function' ? opts.now() : opts.now;
+  const nowMs = (nowValue instanceof Date ? nowValue : new Date()).getTime();
+  const out = [];
+  for (const finding of openFindings(forgeDir)) {
+    if (finding.kind !== 'bug') continue;
+    const created = Date.parse(finding.createdAt);
+    if (Number.isNaN(created)) continue;
+    const ageDays = Math.floor((nowMs - created) / 86_400_000);
+    if (ageDays < maxAgeDays) continue;
+    out.push({ id: finding.id, ageDays, text: finding.text });
+  }
+  return out;
 }

@@ -1,0 +1,33 @@
+{
+  "change": "finish-the-enoent-split",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-metrics — reading a transcript distinguishes empty from unreadable",
+      "library": "packages/cli/src/metrics/transcript.mjs (readJsonl → { lines, error })",
+      "runtimeOwner": "collectMetrics (packages/cli/src/metrics/collect.mjs), reached from packages/cli/src/metrics-cli.mjs (forge metrics collect, registered in bin/forge.mjs) and packages/cli/src/set-phase.mjs on the done|finish transition; reviewEvidence and the transcript version sniff consume .lines advisorily",
+      "writes": "N/A — returns lines and the read outcome; persistence belongs to the counted row",
+      "reads": "the transcript and sidecar .jsonl files findTranscripts located",
+      "uiConsumer": "N/A — an internal contract; its consumers are the two rows below",
+      "evidence": "packages/cli/src/metrics/transcript.test.mjs (EACCES-on-file reports error, missing reports ENOENT, empty reports null; eight translated shape tests)"
+    },
+    {
+      "capability": "session-metrics — a content-unreadable transcript is recorded, flagged or not",
+      "library": "packages/cli/src/metrics/collect.mjs (counted derived from the totals read's own error; readSucceeded probe deleted)",
+      "runtimeOwner": "collectMetrics → writeMetrics via forge metrics collect (metrics-cli.mjs) and forge phase done|finish (set-phase.mjs)",
+      "writes": ".forge/sessions/<id>/metrics.json — source.unread[{sessionId,counted}] now covering content-level failures on unflagged ids as well",
+      "reads": "readJsonl's { lines, error } per bound transcript",
+      "uiConsumer": "NONE surfaces source.unread today (unchanged from partial-binding-unreadable's honest cell); forge analyze and forge fleet report read metrics.json totals only",
+      "evidence": "packages/cli/src/metrics/collect.test.mjs (unflagged content-blocked id → counted:false with totals from the readable session; the prior change's empty-transcript counted:true test stays green unedited)"
+    },
+    {
+      "capability": "review-evidence + session-metrics — unreadable is diagnosed before absent",
+      "library": "packages/cli/src/metrics/review-evidence.mjs and collect.mjs (unreadable guard moved ahead of bound.length === 0)",
+      "runtimeOwner": "set-phase.mjs freezeReviewVerdict() → reviewEvidence → reviewCensus at enforceFinalReviewFloor() (the money/auth gate); collectMetrics on the same transition and via forge metrics collect",
+      "writes": "N/A — changes the unavailable/degraded REASON, never the decision; the verdict freeze path is untouched",
+      "reads": "findTranscripts' unreadable list, before the found list's emptiness is consulted",
+      "uiConsumer": "the operator reading a refused/stood-aside gate message and a degraded metrics document",
+      "evidence": "packages/cli/src/metrics/review-evidence.test.mjs (all-blocked binding → reason names id+path, not 'pruned or written elsewhere') + collect.test.mjs (both block points) + e2e regression review-evidence-partial-binding (the gate decision itself is unchanged)"
+    }
+  ]
+}

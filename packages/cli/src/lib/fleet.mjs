@@ -123,6 +123,72 @@ function underTempDir(projectRoot) {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+/** Session dir for a project + id (`<root>/.forge/sessions/<id>`). */
+export function sessionDir(projectRoot, sessionId) {
+  return path.join(projectRoot, '.forge', 'sessions', sessionId);
+}
+
+export function pendingPath(projectRoot, sessionId) {
+  return path.join(sessionDir(projectRoot, sessionId), 'fleet-pending.json');
+}
+
+/**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isPermissionDenied(err) {
+  const code = err && typeof err === 'object' && 'code' in err ? err.code : null;
+  if (code === 'EACCES' || code === 'EPERM') return true;
+  return /permission denied/i.test(String(err instanceof Error ? err.message : err));
+}
+
+/**
+ * @param {string} projectRoot
+ * @param {Record<string, any>} session
+ * @param {unknown} err
+ */
+function writePending(projectRoot, session, err) {
+  try {
+    const dir = sessionDir(projectRoot, session.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const body = {
+      sessionId: session.id,
+      reason: String(err instanceof Error ? err.message : err),
+      at: new Date().toISOString(),
+      engine: detectEngine(),
+    };
+    fs.writeFileSync(pendingPath(projectRoot, session.id), `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  } catch {
+    /* pending is advisory — never mask the original register failure */
+  }
+}
+
+function clearPending(projectRoot, sessionId) {
+  try {
+    fs.rmSync(pendingPath(projectRoot, sessionId), { force: true });
+  } catch {
+    /* advisory */
+  }
+}
+
+/**
+ * @param {unknown} err
+ * @param {Record<string, string | undefined>} [env]
+ */
+function formatRegisterWarning(err, env = process.env) {
+  const cause = err instanceof Error ? err.message : err;
+  let msg =
+    '[forge] Warning: could not register this session with the fleet registry — ' +
+    `it will not appear in \`forge fleet\`: ${cause}`;
+  if (env.CURSOR_SANDBOX || env.CURSOR_AGENT || isPermissionDenied(err)) {
+    msg +=
+      '\n[forge] Hint: Cursor agent sandboxes often block writes to ~/.forgekit. ' +
+      'Re-run forge with unrestricted shell permissions (`required_permissions: ["all"]`), ' +
+      'or recover later with `forge fleet sync`.';
+  }
+  return `${msg}\n`;
+}
+
 /**
  * Mirror a session into the registry. Never throws — a broken registry must
  * not break session saves.
@@ -136,6 +202,10 @@ function underTempDir(projectRoot) {
  * ones, so `forge fleet report` was aggregating almost entirely dead `/tmp`
  * paths. The guard belongs here and not in the harness, because the harness is
  * the thing being bypassed. Same shape as F28, one layer down.
+ *
+ * On permission-denied writes (typical under Cursor agent sandboxes), a
+ * `fleet-pending.json` stamp is left under the session dir so reminder /
+ * `forge fleet sync` can retry when the registry is writable.
  *
  * @param {string} projectRoot absolute project path
  * @param {Record<string, any>} session forge session.json contents
@@ -173,6 +243,7 @@ export function registerSession(projectRoot, session) {
     };
     fs.mkdirSync(fleetDir(), { recursive: true });
     fs.writeFileSync(file, `${JSON.stringify(entry, null, 2)}\n`, 'utf8');
+    clearPending(projectRoot, session.id);
   } catch (err) {
     // ADVISORY, BUT NEVER SILENT. Failing to register must not cost the caller
     // its transition — the registry is a convenience, and `saveSession` is on
@@ -183,10 +254,10 @@ export function registerSession(projectRoot, session) {
     // created. Observed in the wild: a change ran to `done` at 35/35 tasks
     // having never once appeared in the fleet, and the empty handler that used
     // to sit here meant there was nothing on disk or on stderr to find.
-    process.stderr.write(
-      '[forge] Warning: could not register this session with the fleet registry — ' +
-        `it will not appear in \`forge fleet\`: ${err instanceof Error ? err.message : err}\n`,
-    );
+    if (isPermissionDenied(err)) {
+      writePending(projectRoot, session, err);
+    }
+    process.stderr.write(formatRegisterWarning(err));
   }
 }
 
@@ -230,6 +301,100 @@ export function unregisterSession(projectRoot, sessionId) {
   } catch {
     /* advisory */
   }
+}
+
+/**
+ * List session ids under `<project>/.forge/sessions/` that still have a
+ * pending stamp.
+ *
+ * @param {string} projectRoot
+ * @returns {string[]}
+ */
+export function listPendingSessionIds(projectRoot) {
+  const root = path.join(projectRoot, '.forge', 'sessions');
+  if (!fs.existsSync(root)) return [];
+  const out = [];
+  for (const name of fs.readdirSync(root)) {
+    const dir = path.join(root, name);
+    try {
+      if (!fs.statSync(dir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    if (fs.existsSync(path.join(dir, 'fleet-pending.json'))) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Retry registration for every session with a pending stamp. Returns counts.
+ *
+ * @param {string} projectRoot
+ * @returns {{ attempted: number, registered: number, failed: number }}
+ */
+export function flushPendingSessions(projectRoot) {
+  const ids = listPendingSessionIds(projectRoot);
+  let registered = 0;
+  let failed = 0;
+  for (const id of ids) {
+    const file = path.join(sessionDir(projectRoot, id), 'session.json');
+    let session;
+    try {
+      session = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      failed += 1;
+      continue;
+    }
+    if (!session?.id) session = { ...session, id };
+    registerSession(projectRoot, session);
+    if (fs.existsSync(pendingPath(projectRoot, id))) failed += 1;
+    else registered += 1;
+  }
+  return { attempted: ids.length, registered, failed };
+}
+
+/**
+ * Re-register every session.json under the project (recovery / sync).
+ *
+ * @param {string} projectRoot
+ * @returns {{ total: number, registered: number, failed: number, pending: number }}
+ */
+export function syncProjectSessions(projectRoot) {
+  const root = path.join(projectRoot, '.forge', 'sessions');
+  let total = 0;
+  let registered = 0;
+  let failed = 0;
+  if (!fs.existsSync(root)) {
+    return { total: 0, registered: 0, failed: 0, pending: 0 };
+  }
+  for (const name of fs.readdirSync(root)) {
+    const dir = path.join(root, name);
+    try {
+      if (!fs.statSync(dir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const file = path.join(dir, 'session.json');
+    if (!fs.existsSync(file)) continue;
+    total += 1;
+    let session;
+    try {
+      session = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      failed += 1;
+      continue;
+    }
+    if (!session?.id) session = { ...session, id: name };
+    registerSession(projectRoot, session);
+    if (fs.existsSync(entryFile(projectRoot, session.id))) registered += 1;
+    else failed += 1;
+  }
+  return {
+    total,
+    registered,
+    failed,
+    pending: listPendingSessionIds(projectRoot).length,
+  };
 }
 
 /**

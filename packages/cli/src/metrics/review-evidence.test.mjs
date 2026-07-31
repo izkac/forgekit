@@ -357,9 +357,21 @@ const DEMO_ID = '20260728T100000Z-demo-abc123';
 
 const HOST_ID = 'f8447a2f-eb56-41b8-8cc1-16606b862780';
 
-/** Plant a `~/.claude`-shaped tree and return its config dir. */
-function plantHost({ sessionId = HOST_ID, lines = null, subagents = null } = {}) {
-  const configDir = tmp('forge-review-evidence-host-');
+/** The second host conversation a resumed session binds to. */
+const SECOND_HOST_ID = '11111111-2222-3333-4444-555555555555';
+
+/**
+ * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
+ * (the value this same function returned) to plant a second host session
+ * beside the first, rather than into a fresh tree of its own — a session
+ * bound to several host ids has them all under one project directory.
+ */
+function plantHost({
+  sessionId = HOST_ID,
+  lines = null,
+  subagents = null,
+  configDir = tmp('forge-review-evidence-host-'),
+} = {}) {
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   fs.mkdirSync(project, { recursive: true });
   if (lines !== null) fs.writeFileSync(path.join(project, `${sessionId}.jsonl`), jsonl(lines));
@@ -367,12 +379,12 @@ function plantHost({ sessionId = HOST_ID, lines = null, subagents = null } = {})
   return configDir;
 }
 
-/** A session bound to `HOST_ID`, created at `createdAt`. */
-function boundSession({ createdAt = '2026-07-28T10:00:00.000Z' } = {}) {
+/** A session bound to one or more host ids, created at `createdAt`. */
+function boundSession({ createdAt = '2026-07-28T10:00:00.000Z', sessionIds = [HOST_ID] } = {}) {
   return {
     id: '20260728T100000Z-demo-abc123',
     createdAt,
-    host: { agent: 'claude-code', sessionIds: [HOST_ID], boundAt: createdAt },
+    host: { agent: 'claude-code', sessionIds, boundAt: createdAt },
   };
 }
 
@@ -705,6 +717,14 @@ test('reviewEvidence gives the pruned-transcript and absent-sidecar cases distin
   assert.equal(/no sidecar directory/i.test(pruned.reason), false);
 
   assert.notEqual(pruned.reason, noSidecar.reason);
+
+  // Every bound transcript pruned is not a partial measurement — it is no
+  // measurement at all, and `partial` is a placeholder here in exactly the
+  // sense `seen` and `prescribed` are. `available` is what discriminates; a
+  // caller reading `partial: false` off an unavailable answer as "complete"
+  // has already made the mistake this module's whole shape warns about.
+  assert.equal(pruned.partial, false);
+  assert.equal(noSidecar.partial, false);
 });
 
 test('reviewEvidence cannot tell when the sidecar directory exists but cannot be read', () => {
@@ -737,6 +757,376 @@ test('reviewEvidence cannot tell when the sidecar directory exists but cannot be
     assert.match(result.reason, /could not be read/i);
   } finally {
     fs.chmodSync(dir, 0o755);
+  }
+});
+
+test('reviewEvidence answers from the surviving half when a bound session has no transcript at all', () => {
+  // A DELIBERATE LIMIT, PINNED IN THE PERMISSIVE DIRECTION — not a behaviour
+  // this change adds. Spec scenario "A transcript that was pruned, not
+  // blocked": a session bound to two host sessions where the *older*
+  // transcript is simply absent from disk (pruned, not blocked — no `chmod`
+  // anywhere in this fixture) still answers confidently from the surviving
+  // newer one, and a reviewer that ran in the pruned half stays invisible.
+  //
+  // That is intentional. The over-cautious alternative — refusing whenever
+  // `bound.length < sessionIds.length` — is exactly what an audit inserted
+  // into `reviewEvidence` and watched the entire suite stay green, because
+  // nothing pinned this limit before this test. Rejected because it would make
+  // *every* resumed session unavailable the moment its older transcript ages
+  // out of the host's retention window, which is a matter of days. The real
+  // fix is a dispatch-time stamp written into the review artefact itself —
+  // read from the artefact this module verifies, not reconstructed from a
+  // transcript that may no longer be on disk. That stamp is built and shipped
+  // (F12, `review-stamp.mjs`), and the rule the census applies to it is stated
+  // in full beside the `partial` flag in `review-evidence.mjs`: it decides
+  // wherever the host cannot answer — which includes this module answering
+  // unavailable but is not limited to it — and it additionally overrides an
+  // absence-negative measured from a partial binding, which is what covers
+  // *this* case. A measured stop and a complete binding's absence always win.
+  // `partial` is reported on the available answer below and pinned by the tests
+  // under the `partial` heading: the answer stays available and now says it was
+  // measured from half the binding.
+  const ABSENT_ID = '00000000-1111-2222-3333-444444444444';
+
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
+      },
+    },
+  });
+  // ABSENT_ID has no `.jsonl` anywhere under `projects/` — not chmod'd,
+  // genuinely never written. `findTranscripts` omits it from both `found` and
+  // `unreadable`: the ordinary ENOENT case, not a blocked read.
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [ABSENT_ID, HOST_ID] }),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  // Both assertions matter: `available` alone would still pass if the
+  // surviving half stopped being read properly. Measured — a mutation that
+  // returns `available: true` with empty `units` is caught by the second and
+  // not the first. `?.` so that mutation reddens with a readable diff rather
+  // than a TypeError from reading `dispatched` of undefined.
+  assert.equal(result.available, true);
+  assert.equal(result.units.final?.dispatched, 1);
+  // The limit is unchanged and now audible: the same permissive answer, with
+  // the fact that half the binding went unmeasured attached to it. This is the
+  // shape the retention window produces in production — an id that was never
+  // written to this tree at all, not one deleted from it.
+  assert.equal(result.partial, true);
+});
+
+// ---------------------------------------------------------------------------
+// partial — was this answer measured from the whole binding, or half of it?
+//
+// The residual the test above pins deliberately in the permissive direction:
+// a session bound to two host conversations whose older transcript has been
+// pruned still answers `available: true`, from half the record. The answer is
+// right to stay available; what was missing is that it never said it was half.
+// A negative measured that way — no `final` unit in `units` — reads at the
+// census exactly like a complete measurement of a session nobody reviewed, and
+// the money/auth gate refuses on it. `partial` is the fact that distinguishes
+// them, and `review-census.mjs` reads it: a valid dispatch stamp now overrides
+// that absence-negative when the flag says the binding was partial, so the
+// stamped reviewer who ran in the pruned half is no longer erased. Only that
+// one negative — a measured stop and a complete binding's absence both still
+// stand against any stamp.
+// ---------------------------------------------------------------------------
+
+/**
+ * The two-bound-session tree: both host sessions on disk, each with a sidecar
+ * holding one dispatch — a *group* review in the first, the `final` reviewer in
+ * the second, so the two halves are distinguishable in `units` and a reader
+ * that opens only one of them is caught.
+ */
+function plantTwoBound() {
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review group-01 ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a2: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
+      },
+    },
+  });
+  return configDir;
+}
+
+test('reviewEvidence reports a two-session binding it could read in full as not partial', () => {
+  const configDir = plantTwoBound();
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  // Strictly `false`, never `undefined`: a field that does not exist is not a
+  // report that the binding was complete.
+  assert.equal(result.partial, false);
+  // Both halves were genuinely read, or "not partial" would be true for a
+  // reader that never opened the second one.
+  assert.deepEqual(Object.getOwnPropertyNames(result.units).sort(), ['final', 'group-01']);
+});
+
+test('reviewEvidence reports a single bound session on disk as not partial', () => {
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({ session: boundSession(), configDir });
+
+  assert.equal(result.available, true);
+  assert.equal(result.partial, false);
+});
+
+test('reviewEvidence reports an answer measured over a pruned bound session as partial', () => {
+  // The F58 residual, now audible. The older host session's transcript is
+  // genuinely gone — deleted, not chmod'd, the ordinary ENOENT case
+  // `findTranscripts` omits from both its lists — and the answer still comes
+  // back available, from the surviving half alone. That much is the deliberate
+  // limit pinned above. What is new is that the answer now says so.
+  const configDir = plantTwoBound();
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  fs.rmSync(path.join(project, `${HOST_ID}.jsonl`));
+  fs.rmSync(path.join(project, HOST_ID), { recursive: true });
+  // The fixture only means anything if the older half is really unresolvable
+  // and the newer one really is not.
+  assert.equal(fs.existsSync(path.join(project, `${HOST_ID}.jsonl`)), false);
+  assert.equal(fs.existsSync(path.join(project, `${SECOND_HOST_ID}.jsonl`)), true);
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+    configDir,
+  });
+  // What the surviving half alone says, measured rather than retyped: binding
+  // only the id whose transcript is still there, against the same tree.
+  const survivor = reviewEvidence({
+    session: boundSession({ sessionIds: [SECOND_HOST_ID] }),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.partial, true);
+
+  // Everything else is the surviving half's answer, unchanged: `partial` adds
+  // a fact, it does not alter the measurement. The survivor must actually have
+  // measured something, or this pair agrees on emptiness and proves nothing.
+  assert.deepEqual(plain(result.units), plain(survivor.units));
+  assert.equal(result.seen, survivor.seen);
+  assert.equal(result.prescribed, survivor.prescribed);
+  assert.equal(survivor.units.final?.dispatched, 1);
+  // ...and the survivor, bound to nothing else, is a complete measurement. The
+  // same tree answers both ways depending only on what was bound, so `partial`
+  // cannot be a constant.
+  assert.equal(survivor.partial, false);
+  // The pruned half's own dispatch is absent, which is exactly why `partial`
+  // has to be reported: this negative is not a complete measurement.
+  assert.equal('group-01' in plain(result.units), false);
+});
+
+test('a bound host id repeated in the binding is not a partial binding', () => {
+  // WHAT WAS FOUND, since the answer decides the shape of this test: neither
+  // `reviewEvidence` nor `findTranscripts` dedupes `host.sessionIds`.
+  // `findTranscripts` resolves a repeated id once per occurrence, so `found`
+  // grows in step with the ids and a length comparison happens to survive —
+  // but only by coincidence, and `reviewEvidence` scans the repeated sidecar
+  // directory twice, which double-counts the units (pre-existing, out of this
+  // task's scope, and unreachable through `bindHost`, which appends an id only
+  // when it is not already present).
+  //
+  // So the guard here is narrow and exact: a repeat must never read as an id
+  // that resolved to nothing. It is the id, not the count, that decides.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [HOST_ID, HOST_ID] }),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.partial, false, 'the same id twice is one resolved id, not one missing');
+  // The dispatch was found, so this is not passing over an empty answer.
+  assert.ok(result.units.final?.dispatched >= 1);
+});
+
+test('reviewEvidence cannot tell when the sidecar path exists and is not a directory', () => {
+  // The same not-a-directory arm host.test.mjs pins at `findTranscripts` level
+  // ("findTranscripts reports a sidecar path that exists but is not a
+  // directory as unreadable") — run here through `reviewEvidence`, the layer
+  // the spec's scenario actually names ("WHEN the census runs"). Safe today
+  // only because `reviewEvidence` treats every `unreadable` entry identically
+  // regardless of why it is unreadable — a property worth pinning rather than
+  // assuming, since the two arms of this scenario (blocked vs. not-a-directory)
+  // are produced by different branches in `host.mjs`.
+  const configDir = plantHost({ lines: PARENT, subagents: null });
+  const hostDir = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit', HOST_ID);
+  fs.mkdirSync(hostDir, { recursive: true });
+  fs.writeFileSync(path.join(hostDir, 'subagents'), 'not a directory');
+
+  const result = reviewEvidence({
+    session: boundSession(),
+    now: () => new Date('2026-07-28T12:00:00.000Z'),
+    configDir,
+  });
+
+  assert.equal(result.available, false);
+  assert.match(result.reason, /not a directory/i);
+});
+
+test('reviewEvidence stays unavailable when only one of two bound host sessions can be searched', () => {
+  // THE HOLE THIS PINS, in the past tense it belongs in: `findTranscripts`'s
+  // sidecar `catch` used to be empty, so a sidecar dir that could not be
+  // *statted* came back as `sidecarDir: null` — byte-identical to a session
+  // that dispatched nothing — and the guard below it (`sidecarDirs.length ===
+  // 0`) only gave up when *every* bound id was unresolvable. With two bound
+  // ids where the first resolved, that first session alone answered
+  // `available: true`, and a reviewer that ran in the second was simply
+  // absent from `units`.
+  //
+  // `chmod 000` on the `subagents/` directory itself does not reproduce this:
+  // `statSync` on a `000` directory succeeds, because stat reads the entry in
+  // the parent (that is the fixture the test above this one uses, and it pins
+  // `readdirSync` throwing inside the scan — a different, already-fixed hole).
+  // What reproduces *this* hole is `chmod 000` on the host session directory
+  // one level up: the sibling transcript file still stats fine, so the id
+  // binds, but `statSync` on `subagents/` inside the now-unsearchable
+  // directory throws `EACCES` — which `findTranscripts` now reports in
+  // `unreadable` rather than discarding, and this test pins that it stays
+  // that way.
+  // The two-bound tree `plantTwoBound` builds, whose shape is the argument:
+  // the first host session is fully readable and its one dispatch is a *group*
+  // review — not `final` — so it alone can supply `prescribed > 0` but cannot
+  // supply the final reviewer, while the final reviewer ran in the second,
+  // whose session directory is about to be made unsearchable. A buggy reader
+  // that stops at the first resolvable session reports `available: true` with
+  // `final` absent from `units`, which is exactly the false "no independent
+  // reviewer" the gate must not act on.
+  const configDir = plantTwoBound();
+
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const secondHostDir = path.join(project, SECOND_HOST_ID);
+  const secondSidecarPath = path.join(secondHostDir, 'subagents');
+  fs.chmodSync(secondHostDir, 0o000);
+  try {
+    // Prove the fixture is genuinely unreadable, and that the sibling
+    // transcript is not — or the assertion below would be passing for free.
+    assert.throws(() => fs.statSync(secondSidecarPath), /EACCES/);
+    assert.equal(fs.statSync(path.join(project, `${SECOND_HOST_ID}.jsonl`)).isFile(), true);
+
+    const result = reviewEvidence({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    // A binding that could only be read in part must not decide the gate: the
+    // reviewer dispatched in the unsearchable half must not be reported absent.
+    assert.equal(result.available, false);
+    // THE REASON NAMES THE HOST SESSION ID AND THE PATH — the spec's own
+    // closing line for this scenario, and the only diagnostic an operator gets
+    // when the gate stands aside. Unpinned before this: an audit replaced the
+    // whole detail string with a literal and the suite stayed green, because
+    // only `available === false` was ever asserted here. `SECOND_HOST_ID` is
+    // the fixture's own constant, not retyped from anywhere else.
+    assert.match(result.reason, new RegExp(SECOND_HOST_ID));
+    assert.match(result.reason, /subagents/);
+    // A blocked binding is refused, never reported as a partial measurement:
+    // the F27 guard fires before anything is counted, so `partial` is the same
+    // placeholder every unavailable answer carries.
+    assert.equal(result.partial, false);
+  } finally {
+    fs.chmodSync(secondHostDir, 0o755);
+  }
+});
+
+test('reviewEvidence names the blocked id and path, not "pruned", when every bound session is blocked', () => {
+  // F57. `findTranscripts`'s own `unreadable` split (prior change) already
+  // tells "located but sidecar-blocked" apart from "never found at all" — but
+  // `reviewEvidence` checks `bound.length === 0` *before* `unreadable.length >
+  // 0`, so a binding where the sole host session is blocked at the *locating*
+  // layer (not sidecar, the transcript stat itself) still falls through to the
+  // `bound.length === 0` branch and answers with the pruned-or-elsewhere
+  // message — an operator reading it as "cleaned up by the host" instead of
+  // "we could not look at it".
+  //
+  // The fixture: a project directory holding exactly one bound id's
+  // transcript, `chmod 000`. `statSync` on a path *inside* a `000` directory
+  // throws EACCES (unlike `chmod 000` on the host-session directory used
+  // above, which only blocks the *sidecar* one level down and leaves the
+  // sibling transcript file readable). With no other project directory to
+  // find it in, the id is promoted to `unreadable` and never reaches `found` —
+  // this is the locating-layer block, distinct from the reading-layer block
+  // task (c) in `collect.test.mjs` pins.
+  const configDir = plantHost({ sessionId: HOST_ID, lines: PARENT, subagents: null });
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const transcript = path.join(project, `${HOST_ID}.jsonl`);
+  fs.chmodSync(project, 0o000);
+  try {
+    // The fixture is only meaningful if the process genuinely cannot see
+    // inside the directory, and genuinely could locate the file before it was
+    // blocked — or the assertions below would be passing for free.
+    assert.throws(() => fs.statSync(transcript), /EACCES/);
+
+    const result = reviewEvidence({
+      session: boundSession(),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    // The decision was already correct before this change — pinned here as
+    // sanity, not as the defect.
+    assert.equal(result.available, false);
+    // THE DIAGNOSIS, not the decision. Today's reason is the literal pruned
+    // message, `no transcript on disk for host session ${HOST_ID} — pruned or
+    // written elsewhere`: `sessionIds.join(', ')` happens to equal `HOST_ID`
+    // for a single-session binding, so this id assertion alone already
+    // passes today — id-match is a spec requirement to keep true after the
+    // fix, not by itself proof of the bug. `HOST_ID` is the fixture's own
+    // constant.
+    assert.match(result.reason, new RegExp(HOST_ID));
+    // The path does NOT appear in today's message — this is where it dies.
+    // Built from the same `configDir`/`HOST_ID` the fixture used, not typed,
+    // and escaped since a tmp path can contain regex metacharacters.
+    assert.match(result.reason, new RegExp(transcript.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    // Today's reason IS "pruned or written elsewhere" verbatim — this also
+    // dies, on the same wrong-diagnosis message the path assertion just
+    // caught missing its path.
+    assert.doesNotMatch(result.reason, /pruned or written elsewhere/);
+  } finally {
+    fs.chmodSync(project, 0o755);
   }
 });
 

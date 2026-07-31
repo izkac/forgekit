@@ -90,35 +90,103 @@ function withCleanPrototype(body) {
 
 test('readJsonl parses every line of a clean file', () => {
   const file = transcriptFile('{"type":"user"}\n{"type":"assistant","requestId":"req_1"}\n');
-  assert.deepEqual(readJsonl(file), [{ type: 'user' }, { type: 'assistant', requestId: 'req_1' }]);
+  const result = readJsonl(file);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.lines, [{ type: 'user' }, { type: 'assistant', requestId: 'req_1' }]);
 });
 
 test('readJsonl skips a corrupt line in the middle and keeps parsing later lines', () => {
   const file = transcriptFile('{"n":1}\nnot json at all\n{"n":2}\n');
-  assert.deepEqual(readJsonl(file), [{ n: 1 }, { n: 2 }]);
+  const result = readJsonl(file);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.lines, [{ n: 1 }, { n: 2 }]);
 });
 
 test('readJsonl skips a truncated final line from a killed process', () => {
   const file = transcriptFile('{"n":1}\n{"n":2}\n{"n":3,"messa');
-  assert.deepEqual(readJsonl(file), [{ n: 1 }, { n: 2 }]);
+  const result = readJsonl(file);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.lines, [{ n: 1 }, { n: 2 }]);
 });
 
 test('readJsonl ignores blank and whitespace-only lines', () => {
   const file = transcriptFile('\n{"n":1}\n   \n\n{"n":2}\n\n');
-  assert.deepEqual(readJsonl(file), [{ n: 1 }, { n: 2 }]);
+  const result = readJsonl(file);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.lines, [{ n: 1 }, { n: 2 }]);
 });
 
 test('readJsonl returns an empty array for an empty file', () => {
-  assert.deepEqual(readJsonl(transcriptFile('')), []);
+  const result = readJsonl(transcriptFile(''));
+  assert.equal(result.error, null);
+  assert.deepEqual(result.lines, []);
 });
 
-test('readJsonl returns an empty array for a missing file instead of throwing', () => {
+test('readJsonl reports a missing file as ENOENT instead of throwing', () => {
+  // Strictly more than this test asserted before the `{ lines, error }`
+  // contract: a missing file is now a reported failure, not a silent [].
   const missing = path.join(tmp('forge-transcript-'), 'nope.jsonl');
-  assert.deepEqual(readJsonl(missing), []);
+  const result = readJsonl(missing);
+  assert.equal(result.error.code, 'ENOENT');
+  assert.deepEqual(result.lines, []);
 });
 
-test('readJsonl returns an empty array when the path is a directory', () => {
-  assert.deepEqual(readJsonl(tmp('forge-transcript-')), []);
+test('readJsonl reports a directory path as EISDIR instead of throwing', () => {
+  const result = readJsonl(tmp('forge-transcript-'));
+  assert.equal(result.error.code, 'EISDIR');
+  assert.deepEqual(result.lines, []);
+});
+
+// ---------------------------------------------------------------------------
+// F56 — readJsonl is about to grow a `{ lines, error }` shape so a caller can
+// tell a genuinely empty transcript apart from one whose content could not be
+// read at all. Today it still collapses both into a bare `[]`, so every
+// assertion below dies on the missing `.error`/`.lines` fields. Task 1.2
+// translates the eight bare-array tests above to the new shape; these three
+// pin the shape itself and must stay red until then.
+// ---------------------------------------------------------------------------
+
+test('readJsonl reports a content-unreadable file as a failure carrying the error code, not as an empty read', () => {
+  // `chmod 000` on the *file* — its directory is left alone — is what
+  // reproduces the gap `readJsonl` currently papers over: `fs.statSync` still
+  // sees the file (it only reads the parent directory's entry) while
+  // `fs.readFileSync` throws EACCES. Verified by two reviewers in the change
+  // this test pins; confirmed again here via the guard below.
+  const file = transcriptFile('{"n":1}\n');
+  fs.chmodSync(file, 0o000);
+  try {
+    // Guard: prove the fixture is genuinely content-unreadable, or the
+    // assertions below would pass for free.
+    assert.throws(() => fs.readFileSync(file, 'utf8'), /EACCES/);
+
+    const result = readJsonl(file);
+    assert.equal(result.error.code, 'EACCES');
+    assert.deepEqual(result.lines, []);
+  } finally {
+    // A stuck 000 fixture breaks every test that runs after this one in the
+    // same file, so the mode is restored even if an assertion above throws.
+    fs.chmodSync(file, 0o644);
+  }
+});
+
+test('readJsonl reports a missing file as a failure with ENOENT — deliberately unlike the searching layer, where absence is routine', () => {
+  // `readJsonl` reads a path `findTranscripts` (host.mjs) has just located, so
+  // by the time this call runs, absence is a race against something that
+  // deleted the file a moment ago — not the ordinary "nothing here" outcome
+  // that the searching layer treats as unremarkable. See the delta spec,
+  // session-metrics, first requirement: "unlike the locating layer... the
+  // reading layer operates on a path that was just located, so absence there
+  // is exceptional." A future edit must not "fix" this into host.mjs's policy.
+  const missing = path.join(tmp('forge-transcript-'), 'nope.jsonl');
+  const result = readJsonl(missing);
+  assert.equal(result.error.code, 'ENOENT');
+  assert.deepEqual(result.lines, []);
+});
+
+test('readJsonl reports no failure for a genuinely empty file — an empty read is a successful read of nothing', () => {
+  const result = readJsonl(transcriptFile(''));
+  assert.equal(result.error, null);
+  assert.deepEqual(result.lines, []);
 });
 
 test('usageByRequest counts the usage of one reply once, not once per content block', () => {
@@ -542,7 +610,8 @@ test('a 39-line transcript of 12 replies counts 12 requests, not 39 — usage is
   });
 
   const file = transcriptFile(`${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
-  const parsed = readJsonl(file);
+  const { lines: parsed, error } = readJsonl(file);
+  assert.equal(error, null);
   // The fixture really is 39 assistant lines for 12 replies.
   assert.equal(parsed.filter((line) => line.type === 'assistant').length, 39);
   assert.equal(blocksPerReply.length, 12);

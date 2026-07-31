@@ -32,6 +32,7 @@ import { writeSessionScorecard } from './score.mjs';
 import { bindHost } from './metrics/host.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
+import { openFindings } from './findings.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -51,7 +52,7 @@ export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--reopen-waived "<reason>"] [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -70,6 +71,7 @@ let tasksComplete = null;
 let subagentsDispatched = null;
 let allowIncomplete = null;
 let finalReviewWaived = null;
+let reopenWaived = null;
 
 for (let i = 1; i < args.length; i += 1) {
   const flag = args[i];
@@ -94,6 +96,9 @@ for (let i = 1; i < args.length; i += 1) {
     i += 1;
   } else if (flag === '--final-review-waived' && next) {
     finalReviewWaived = next;
+    i += 1;
+  } else if (flag === '--reopen-waived' && next) {
+    reopenWaived = next;
     i += 1;
   } else if (flag === '--allow-incomplete' && next) {
     allowIncomplete = next;
@@ -337,6 +342,36 @@ function enforceFinalReviewFloor() {
 }
 
 /**
+ * A finding that has returned twice for this change needs an explicit operator
+ * decision before the session can be marked complete.
+ */
+function enforceReopenFloor() {
+  if (phase !== 'done' && phase !== 'finish') return;
+  if (reopenWaived) {
+    session.reopenWaived = reopenWaived;
+    return;
+  }
+
+  const changeSlugs = new Set(
+    [session.openspecChange, session.slug].filter((slug) => typeof slug === 'string' && slug !== ''),
+  );
+  const blocking = openFindings(path.join(process.cwd(), '.forge')).filter(
+    (finding) => finding.reopenCount >= 2 && changeSlugs.has(finding.change),
+  );
+  if (blocking.length === 0) {
+    delete session.reopenWaived;
+    return;
+  }
+
+  process.stderr.write(
+    `Cannot enter phase "${phase}": findings reopened twice remain open for this change:\n` +
+      `${blocking.map((finding) => `  - ${finding.id}`).join('\n')}\n` +
+      'Resolve the findings, or record the decision: --reopen-waived "<reason>".\n',
+  );
+  process.exit(1);
+}
+
+/**
  * Measure who wrote the final review, once, and freeze the answer.
  *
  * BEFORE THE GATE, NOT MERELY BEFORE THE SCORECARD. `enforceFinalReviewFloor`
@@ -367,8 +402,26 @@ function enforceFinalReviewFloor() {
  *
  * NOT A CLAIM THAT THE MEASUREMENT IS COMPLETE. `reviewEvidence` answers from
  * whatever bound host sessions it can read, and a session bound to two whose
- * second sidecar directory is unreadable still answers confidently from the
- * first (F27, owned by `host.mjs`). This freezes what was measured, no more.
+ * older transcript has since been pruned from disk still answers confidently
+ * from the surviving newer one (an *unreadable* second binding is a different
+ * case, F27, owned by `host.mjs`, and is refused rather than answered). F12's
+ * dispatch stamp is what closes that gap, one layer up in `review-census.mjs`,
+ * and it does it two ways, not one: where `reviewEvidence` cannot answer at
+ * all — unavailable, or available with no well-formed `final` bucket — the
+ * stamp DECIDES, grading `recorded`; where it answers `available: true` from
+ * that same partial binding and the `final` unit is simply missing (D4:
+ * `reviewEvidence`'s `partial` flag, `hostFinalReview`'s `fromAbsence`), the
+ * stamp OVERRIDES that absence-negative instead of leaving a reviewer who ran
+ * in the pruned half invisible. Neither path touches a measured stop or a
+ * complete binding's own absence-negative — both stay `host`, and outrank a
+ * stamp. A well-formed bucket below the request floor is a third thing again,
+ * never a `host` answer at all: `hostFinalReview` returns `null` there (D3's
+ * whole point is "the host looked and cannot say"), so the verdict routes to
+ * the review file's prose, graded `inferred` — exactly as
+ * `metrics/review-evidence.mjs` states the same rule beside `maxRequests`. The
+ * freeze below still matters on the paths the stamp does reach — it is what
+ * keeps a `host`-graded verdict from being displaced by a stamp on a later
+ * pass.
  *
  * `next` ALSO CARRIES `unitOnRecord` — whether *this* pass saw the deciding
  * (`final`) unit in the host's dispatch record, the same fact the keep rule
@@ -499,6 +552,7 @@ function freezeReviewVerdict() {
 
 freezeReviewVerdict();
 enforceFinalReviewFloor();
+enforceReopenFloor();
 enforceDoneGate();
 
 // Host telemetry on finish/done, and it has to happen *here* — before the
@@ -548,11 +602,18 @@ if (phase === 'done' || phase === 'finish') {
 // LAST, AND THAT IS LOAD-BEARING. Every gate above refuses with `process.exit`,
 // so a refused pass writes nothing at all — not the phase, and not the review
 // verdict measured moments before it. That is what keeps a wrong positive from
-// becoming permanent: `reviewEvidence` can answer confidently from a partially
-// readable binding (F27, owned by `host.mjs`), and if that lands on `self` the
-// session is refused and the verdict is discarded unwritten, so the next pass
-// measures again instead of inheriting the mistake. Moving this above the gates
-// would pin it.
+// becoming permanent: `reviewEvidence` can still answer confidently from a
+// partial binding — a session bound to two host sessions whose older
+// transcript has been pruned answers `available: true` from the surviving
+// newer one alone (an *unreadable* binding is F27, owned by `host.mjs`, and is
+// refused rather than answered). A `final` unit simply missing from that
+// partial answer is where F12's dispatch stamp now gets a second read, one
+// layer up in `review-census.mjs` (D4): a valid stamp overrides that
+// absence-negative and grades `recorded`, so only a genuinely unstamped
+// partial binding can still land on `self` — and if it does, the session is
+// refused and the verdict is discarded unwritten, so the next pass measures
+// again instead of inheriting the mistake. Moving this above the gates would
+// pin it.
 // THE POINTER FOLLOWS THE WORK — but only once the transition has been allowed,
 // and never for work that is over.
 //

@@ -1,0 +1,33 @@
+{
+  "change": "findings-ledger-kinds",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "findings-ledger — kind and severity required on add; list/status headline is open bugs",
+      "library": "packages/cli/src/findings.mjs (KINDS, addFinding requires kind+severity, no defaults)",
+      "runtimeOwner": "packages/cli/src/findings-cli.mjs (add/list --kind/--severity/--all-kinds); packages/cli/src/session-status.mjs (openFindings.count = bugs, byKind)",
+      "writes": ".forge/findings.jsonl rows with kind + severity",
+      "reads": ".forge/findings.jsonl",
+      "uiConsumer": "forge finding list / forge status JSON",
+      "evidence": "packages/cli/src/findings.test.mjs (required flags, list filter, status count/byKind)"
+    },
+    {
+      "capability": "findings-ledger — dependsOn links; resolve surfaces open dependents without auto-closing",
+      "library": "packages/cli/src/findings.mjs (dependsOn on add/link; resolveFinding collects dependents)",
+      "runtimeOwner": "packages/cli/src/findings-cli.mjs (add --depends-on, link, resolve stdout)",
+      "writes": ".forge/findings.jsonl dependsOn arrays",
+      "reads": ".forge/findings.jsonl",
+      "uiConsumer": "forge finding resolve stdout (Re-check these…)",
+      "evidence": "packages/cli/src/findings.test.mjs (link, resolve lists dependents, dependents stay open)"
+    },
+    {
+      "capability": "findings-ledger — structured reopen; double-reopen can block phase done",
+      "library": "packages/cli/src/findings.mjs (reopenFinding: reopenedFrom, reopenCount)",
+      "runtimeOwner": "packages/cli/src/findings-cli.mjs (reopen); packages/cli/src/session-status.mjs (reopenedFindings); packages/cli/src/set-phase.mjs (reopenCount>=2 gate + --reopen-waived)",
+      "writes": ".forge/findings.jsonl reopen fields; phase done refusal / waiver",
+      "reads": ".forge/findings.jsonl; session openspecChange / change slug",
+      "uiConsumer": "forge finding list (↻N sort), forge status reopenedFindings, forge phase done",
+      "evidence": "packages/cli/src/findings.test.mjs + set-phase.test.mjs (block / waive)"
+    }
+  ]
+}

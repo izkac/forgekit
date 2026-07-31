@@ -24,8 +24,12 @@
  * closes the gap is `maxRequests` below, and the floor `review-census.mjs`
  * applies to it — a dispatch that did no work no longer certifies anything. A
  * dispatch that does enough work to clear the floor is still not proof that the
- * work was a review; that needs the review file stamped at dispatch time, which
- * is filed as F12 and not built.
+ * work was a review; that needs the review file stamped at dispatch time. F12
+ * built that stamp: `forge review-label` (`review-stamp.mjs`) writes it into
+ * `reviews/dispatches.json` when the label is printed, and `review-census.mjs`
+ * reads it back as the `recorded` grade. Read that grade honestly — it proves a
+ * label was issued, not that a reviewer ran, which is why the floor here still
+ * has to be the substance check for what this module can measure.
  *
  * It is nonetheless evidence the reviewed party cannot produce by *writing*,
  * which the review file is not. **Do not "simplify" this back into reading the
@@ -310,7 +314,9 @@ function scanSidecar(sidecarDir, options) {
     // Counted through the same collapse `transcript.mjs` owns, never
     // re-derived: a request is restated once per content block, and anything
     // that counts lines instead inflates by 2–3×.
-    const all = transcript ? readJsonl(transcript) : [];
+    // Advisory: an unreadable sidecar transcript is already handled at the
+    // meta layer above, so the error here is visibly discarded.
+    const all = transcript ? readJsonl(transcript).lines : [];
     const lines = filter ? all.filter((line) => filter(line)) : all;
     const at = earliest(lines);
 
@@ -406,13 +412,26 @@ export function readReviewerSidecars(sidecarDir, options) {
  * and `reason` are what distinguish this from having looked and found nothing.
  *
  * @param {string} reason
- * @returns {{ available: false, units: Record<string, never>, reason: string }}
+ * @returns {{ available: false, units: Record<string, never>, partial: false,
+ *   reason: string }}
  */
 function unavailable(reason) {
   // `seen` and `prescribed` are zero here in the same sense `units` is empty:
   // placeholders that keep the shape uniform, not measurements. Nothing was
   // counted, because nothing could be. Read `available` before any of them.
-  return { available: false, units: Object.create(null), seen: 0, prescribed: 0, reason };
+  //
+  // `partial` is a placeholder of exactly that kind and not a fourth kind of
+  // answer: `false` here says nothing was measured completely, only that
+  // nothing was measured. Reading it as "the binding was whole" is the same
+  // mistake as reading `prescribed: 0` as "nobody was dispatched".
+  return {
+    available: false,
+    units: Object.create(null),
+    seen: 0,
+    prescribed: 0,
+    partial: false,
+    reason,
+  };
 }
 
 
@@ -478,6 +497,19 @@ function unavailable(reason) {
  * is the discriminator. A caller that reads the tallies without it gets `self`
  * for a session nobody could measure.
  *
+ * THE FOURTH FACT — `partial` says whether an available answer was measured
+ * from the whole binding or from part of it. A session bound to two host
+ * conversations whose older transcript has been pruned still answers
+ * `available: true` from the surviving half, deliberately (the
+ * `sidecarDirs.length === 0` guard argues why refusing instead is worse), and
+ * an absent unit measured that way is not the same measurement as an absent
+ * unit taken from a complete record. Only this module knows which it was, so it
+ * reports the fact; `review-census.mjs` is its reader, where a valid dispatch
+ * stamp decides over an absence measured from a partial binding (the full rule
+ * is stated beside the flag's own comment below).
+ * On an unavailable answer it is `false` as a placeholder, exactly like `seen`
+ * and `prescribed`.
+ *
  * A dispatch that is *unidentifiable* makes the answer unavailable: it may be
  * this session's own reviewer, and once any of our dispatches is on record a
  * missing `final` refuses the change.
@@ -492,14 +524,18 @@ function unavailable(reason) {
  * @returns {{ available: boolean,
  *   units: Record<string, { dispatched: number, stopped: number, requests: number,
  *     maxRequests: number }>,
- *   seen: number, prescribed: number, reason?: string }} `units` is
+ *   seen: number, prescribed: number, partial: boolean, reason?: string }} `units` is
  *   prototype-less and keyed by review unit. `requests` is the sum across all of
  *   the unit's dispatches, stopped or not; `maxRequests` is the largest of any
  *   single dispatch the operator did *not* stop, and `0` when every one was
  *   stopped. `seen` is every identifiable
  *   dispatch in this host conversation and `prescribed` only those naming *this*
- *   session, so `prescribed <= seen` always. `reason` is present only when `available` is
- *   false, and `units`, `seen` and `prescribed` are then placeholders — zero
+ *   session, so `prescribed <= seen` always. `partial` is true when one or more
+ *   of the session's bound host session ids resolved to no transcript on disk,
+ *   so the counts above were measured from part of the binding rather than all
+ *   of it. `reason` is present only when `available` is
+ *   false, and `units`, `seen`, `prescribed` and `partial` are then
+ *   placeholders — zero and false
  *   because nothing could be counted, not because nothing was there.
  */
 export function reviewEvidence(options) {
@@ -514,7 +550,30 @@ export function reviewEvidence(options) {
       return unavailable('no host session bound to this Forge session — nothing to read');
     }
 
-    const bound = findTranscripts(sessionIds, { configDir: opts.configDir, env: opts.env });
+    const { found: bound, unreadable } = findTranscripts(sessionIds, {
+      configDir: opts.configDir,
+      env: opts.env,
+    });
+    // A binding this module could only read in part must not decide the gate.
+    // `findTranscripts` distinguishes a `subagents` path it could not stat, or
+    // one that exists and is not a directory, from the ordinary case of no
+    // subagents dispatched at all (the ENOENT split) — and reports the former
+    // here by session id and path rather than folding it into `sidecarDir:
+    // null`. This must be checked before the `sidecarDirs.length === 0` guard
+    // below: an unreadable sidecar sitting beside one or more resolvable ones
+    // would otherwise slip past it and answer confidently from the readable
+    // half, which is the exact defect that guard's own comment used to
+    // describe. It must equally precede the `bound.length === 0` guard right
+    // below this one: when every bound id is blocked at the locating layer
+    // (a sidecar-layer block leaves the id in `found` as well), `bound` is empty,
+    // and checking emptiness first reads a fully-blocked binding as pruned —
+    // blocked must be diagnosed before absent (F57).
+    if (unreadable.length > 0) {
+      const detail = unreadable
+        .map((u) => `host session ${u.sessionId} (${u.path}): ${u.reason}`)
+        .join('; ');
+      return unavailable(`could not read host session data — ${detail}`);
+    }
     if (bound.length === 0) {
       return unavailable(
         `no transcript on disk for host session ${sessionIds.join(', ')} — pruned or written elsewhere`,
@@ -524,22 +583,65 @@ export function reviewEvidence(options) {
     const sidecarDirs = bound
       .map((entry) => entry.sidecarDir)
       .filter((dir) => typeof dir === 'string' && dir);
-    // KNOWN HOLE, owner elsewhere. This is all-or-nothing: the answer is
-    // unavailable only when *every* bound host session's sidecar directory is
-    // unresolvable. A session bound to two host sessions (ordinary — `bindHost`
-    // appends an id on resume) whose *second* directory cannot be read still
-    // answers confidently from the first, and a reviewer that ran in the
-    // unreachable half is simply absent from `units`. That is worse than the
-    // silent negatives fixed above: `prescribed > 0` tells the caller the
-    // convention is in use, so prose is not consulted and the verdict is `self`
-    // at the money/auth gate — a confidently wrong positive.
+    // THE FIX ABOVE, AND ITS DELIBERATE LIMIT. This guard used to describe a
+    // known hole: a `subagents` path that could not be stat-ed, or that existed
+    // and was not a directory, came back from `findTranscripts` as
+    // `sidecarDir: null` — byte-identical to a session that dispatched no
+    // subagents. A session bound to two host sessions (ordinary; `bindHost`
+    // appends an id on resume) whose second such path was blocked still
+    // answered confidently from the first, and a reviewer dispatched in the
+    // unreachable half was simply absent from `units` — a confidently wrong
+    // positive, worse than the silent negatives the rest of this module exists
+    // to prevent. The `unreadable` guard above now closes that: `host.mjs`'s
+    // ENOENT split reports a blocked or non-directory sidecar by name and path
+    // instead of collapsing it into absence, and this module refuses to answer
+    // rather than reading only the resolvable half.
     //
-    // The clean fix belongs in `host.mjs`, which must distinguish "this session
-    // has no subagents/" from "I could not stat it". The in-module half-fix
-    // (`bound.length < sessionIds.length` → unavailable) trades a rare wrong
-    // answer for frequent unavailability on every resumed session whose older
-    // transcript has expired — measured in days. Group 3's freeze must not
-    // preserve a verdict computed from a partially readable binding.
+    // What this did NOT buy, on purpose, is the pruned-transcript residual. A
+    // session bound to two host sessions where the *older* transcript is
+    // genuinely gone from disk — pruned, not blocked — still answers from the
+    // surviving newer one, and a reviewer that ran in the pruned half stays
+    // invisible to this module. The Scenario this spec requires ("A transcript
+    // that was pruned, not blocked") demands exactly that answer stay
+    // available: reporting unavailable whenever `bound.length <
+    // sessionIds.length`, which would also catch the residual, is the
+    // in-module half-fix this comment rejected before the ENOENT split
+    // existed, and rejects again now — it would make *every* resumed session
+    // unavailable the instant its older transcript ages out of the host's
+    // retention window, which is a matter of days, not an edge case. The
+    // residual's real fix, F12, now exists outside this module: a dispatch-time
+    // stamp written into the review artefact itself. `review-census.mjs` reads
+    // that stamp — under the rule stated in full below — so a reviewer stamped
+    // in the pruned half is no longer erased: the stamp is read from the
+    // artefact this module is verifying, not reconstructed from a transcript
+    // that may no longer be on disk, so it survives the pruning this module
+    // cannot see past.
+    //
+    // WHAT THE STAMP ALONE COULD NOT REACH, and what the flag below supplies.
+    // The pruned residual answers *available*, so an absent `final` unit
+    // measured from the surviving half read exactly like one measured from the
+    // whole record, and the gate refused a session whose reviewer ran in the
+    // pruned half. This module is the only layer that knows the binding was
+    // partial. It now says so: the available answer carries `partial`, true
+    // when a bound host session id resolved to no transcript.
+    //
+    // THE CENSUS'S WHOLE RULE FOR THE STAMP, stated once here because three
+    // comments used to state a narrower version of it — "the census consults
+    // the stamp precisely when this module answers unavailable", which was
+    // never the whole rule and is now not even the larger half:
+    //   - the stamp DECIDES (`independent`, graded `recorded`) wherever the
+    //     host cannot answer at all: this module unavailable, no evidence
+    //     passed to the census, the adoption gate (`seen > 0, prescribed === 0`),
+    //     or a `final` bucket too malformed to read;
+    //   - it also OVERRIDES the host's absence-negative — `final` missing from
+    //     `units` — when that absence was measured from a partial binding. That
+    //     is D4, and it is the case this flag exists for;
+    //   - it never touches a measured stop (every recorded dispatch of the unit
+    //     stopped by the operator), nor a complete binding's absence-negative,
+    //     nor a well-formed but below-floor bucket, which routes to the review
+    //     file's prose exactly as review-dispatch-substance shipped it.
+    // Nothing else in this answer changes with the flag; refusing outright is
+    // still the half-fix rejected above.
     if (sidecarDirs.length === 0) {
       // The host wrote no `subagents/` directory. That is *probably* a session
       // that dispatched nothing, but "probably" is not evidence: the directory
@@ -658,10 +760,25 @@ export function reviewEvidence(options) {
       }
     }
 
+    // WAS THIS THE WHOLE BINDING? An id whose transcript resolved is one this
+    // answer was measured from; an id that resolved to nothing was pruned, and
+    // whatever ran in it is missing from the counts above. Blocked ids never
+    // reach here — the `unreadable` guard refuses those outright — so the only
+    // thing left for this to report is the pruned residual the
+    // `sidecarDirs.length === 0` comment describes.
+    //
+    // Compared by id, not by list length: `findTranscripts` resolves a
+    // repeated id once per occurrence and this module does not dedupe
+    // `host.sessionIds` (`bindHost` is what keeps it duplicate-free), so a
+    // length test would be sound only by coincidence of the two lists growing
+    // together.
+    const measured = new Set(bound.map((entry) => entry.sessionId));
+    const partial = sessionIds.some((boundId) => !measured.has(boundId));
+
     // No `reason` key at all on the way out: an empty `units` here is a
     // measurement, not an excuse, and a caller must be able to tell the two
     // apart by presence alone.
-    return { available: true, units, seen, prescribed };
+    return { available: true, units, seen, prescribed, partial };
   } catch (error) {
     return unavailable(`review evidence collection failed: ${error?.message ?? error}`);
   }

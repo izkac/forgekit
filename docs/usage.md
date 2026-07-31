@@ -440,6 +440,7 @@ forge fleet view <session>              # detail; --transcript N tails the
                                         # Claude Code conversation live
 forge fleet send <session> "message"    # delivered on the session's next turn
 forge fleet send --all "status report"  # broadcast
+forge fleet sync      # re-register every session under this project's .forge/
 ```
 
 `<session>` matches by slug, session id, or project name (must be unique).
@@ -593,10 +594,11 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge checkpoint` refuses — default branch | Forge work belongs on a branch; create one, or `--allow-default-branch` / `git.allowDefaultBranch: true` |
 | `forge phase done` refuses — final review | High-risk change needs an independent final review; dispatch one, or `--final-review-waived "<reason>"` (recorded on the session and in the ledger) |
 | Verify passes but the suite is flaky | `forge e2e run --repeat 5 --record-baseline` — a non-zero baseline makes every verify a coin flip |
-| A finding keeps reappearing in reports | `forge finding add "<text>" --change <slug>` — then open that change, or mark it `--severity note` |
+| A finding keeps reappearing in reports | `forge finding add "<text>" --kind bug --severity major --change <slug>` — then open that change, or use `--kind process` / `--severity note` |
 | Session shows `RED` / `STALE` | `forge status` → `health.reasons`: fix the failing e2e step, re-run `forge e2e run`, or resume the idle phase. Progress for openspec/specs comes from `tasks.md` checkboxes (not a separate counter you must bump by hand). |
 | Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
 | `forge fleet send` seems ignored | Delivery is next-turn via the reminder hook — idle sessions read it when they wake |
+| Cursor Forge sessions missing from `forge fleet` | Cursor's agent sandbox blocks writes to `~/.forgekit`. Re-run `forge` with unrestricted shell (`required_permissions: ["all"]`), or `forge fleet sync` from a normal terminal. Pending stamps live at `.forge/sessions/<id>/fleet-pending.json`. |
 | Session reminder missing | Merge `forge-hooks.snippet.json` from init into agent settings |
 | Wrong pace (`brisk` on a big change) | `forge prefs --session-set standard` or ensure `--tasks-total` ≥ 15 |
 
@@ -875,8 +877,9 @@ forge status                      # includes health: healthy | stale | red | don
 forge brief stamp && forge brief check
 forge checkpoint --group 02-api --tasks 2.1-2.4   # opt-in: .forge/config.json → git.checkpoint
 forge checkpoint --range --last   # {DIFF_RANGE} for the group reviewer
-forge finding add "smoke suite race is never fixed" --change fix-e2e-race
-forge finding list                # open findings (also shown by forge status)
+forge finding add "smoke suite race is never fixed" --kind bug --severity major --change fix-e2e-race
+forge finding list                # open bugs by default; --all-kinds for the rest (also in forge status)
+# Findings rules: fix beats file; kind+severity required; re-check dependents on resolve; corpus before narrowing heuristics
 forge fleet report                # cross-project trend (scores, reviews, carried debt)
 forge e2e run --repeat 5 --record-baseline   # is the harness baseline actually zero?
 forge spine init && forge spine check

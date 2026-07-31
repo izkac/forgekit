@@ -1,0 +1,139 @@
+<!-- forge-brief-specs-hash:616310db8c60c213 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — finish the ENOENT split</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5;
+       padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  .bad { background: #fdf0f0; border-left: 3px solid #c0392b; padding: .8rem 1rem;
+         margin: 1.25rem 0; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .8rem 1rem;
+             margin: 1.25rem 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #e5e5e5;
+           vertical-align: top; }
+  th { background: #fafafa; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Finish the ENOENT split</h1>
+<p class="sub">Findings F56 &amp; F57 &middot; change <code>finish-the-enoent-split</code></p>
+
+<h2>TL;DR</h2>
+<p>
+The previous change taught Forge to stop confusing "this file isn't here" with
+"I couldn't open this file" when it <em>looks for</em> a conversation's records.
+Its own reviewers then found the same confusion surviving in two smaller places:
+the function that <em>reads</em> a found file still swallows every failure into
+"the file was empty", and when <em>nothing at all</em> can be opened, Forge
+still tells you the records were "pruned" when they were actually blocked. This
+change finishes the job. No decision Forge makes changes — only how honestly it
+reports what it saw.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A session whose history file exists but can't be read no longer silently
+      vanishes from the token totals — it's named in the metrics document, every
+      time, not just when something else already looked suspicious.</li>
+  <li>When Forge stands aside at the review gate because it couldn't read
+      anything, the message tells you what was blocked and where — instead of
+      claiming the records were cleaned up.</li>
+  <li>Less code: the previous change worked <em>around</em> the reading problem
+      with a second, duplicate file-read. That workaround is deleted, because
+      the read itself now answers.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+Reading a session's history has two steps: <strong>find</strong> the file, then
+<strong>read</strong> it. The previous change fixed honesty at the finding step.
+This one fixes the reading step: instead of returning "no lines" for a missing
+file, a blocked file, and a genuinely empty file alike, the reader now says
+which of those happened.
+</p>
+
+<pre class="mermaid">
+flowchart TD
+    A[Read the found file] --> B{What happened?}
+    B -->|Read fine, has lines| C[Count them]
+    B -->|Read fine, empty| D[Count nothing — honestly nothing there]
+    B -->|Could not read| E[Say so: which file, what error]
+    E --> F[Metrics name the session as uncounted]
+    E --> G[Gate messages say blocked, not pruned]
+</pre>
+
+<p>
+One judgment call worth knowing about: at the <em>finding</em> step, a missing
+file is normal — old conversations get cleaned up routinely, and the search
+probes many places where a file simply isn't. At the <em>reading</em> step, the
+file was located a moment ago, so "suddenly missing" is not normal and is
+reported like any other failure. The two layers deliberately have different
+rules, and the code says so.
+</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>No new commands, no new flags, and <strong>no gate decision changes</strong> —
+      only the wording of "why" messages and the completeness of the metrics
+      record.</li>
+  <li>A metrics document may now name a session as uncounted in cases that were
+      previously invisible.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<table>
+  <tr><th>Risk</th><th>Where it stands</th></tr>
+  <tr>
+    <td>The reading function sits on the <code>forge phase done</code> path</td>
+    <td>Its shape changes. All five users of it are in this repo and updated
+        together; a missed one fails loudly (a crash), not quietly (a wrong
+        number). The identical move was made for the finding step last change
+        and shipped clean.</td>
+  </tr>
+  <tr>
+    <td>"Empty" must not start reading as "failed"</td>
+    <td>A genuinely empty history file is a successful read of nothing. The
+        previous change pinned this with a test that must stay green untouched,
+        and the audit will attack it with a mutation that deliberately confuses
+        the two.</td>
+  </tr>
+</table>
+
+<div class="callout">
+<strong>Deliberately out of scope:</strong> nothing yet <em>displays</em> the
+uncounted-sessions record (<code>forge analyze</code> and the fleet report don't
+show it); the cleaned-up-records limit from the previous change stays with its
+owner (F12).
+</div>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>Size</th><th>What</th></tr>
+  <tr><td>The reader says what happened</td><td>3 tasks</td>
+      <td>Failing tests first, the shape change, then deleting the workaround</td></tr>
+  <tr><td>Blocked is diagnosed before absent</td><td>3 tasks</td>
+      <td>Failing tests first, then the guard reorder in both consumers</td></tr>
+  <tr><td>Verification</td><td>3 tasks</td>
+      <td>Full suite, the executable product loop, and a mutation audit of every
+          spec scenario</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+
+</body>
+</html>

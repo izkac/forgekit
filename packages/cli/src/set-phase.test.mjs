@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { runE2eSteps, writeE2eResults } from './integrity.mjs';
 import { readLedger } from './ledger.mjs';
 import { FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
+import { writeStamp } from './review-stamp.mjs';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 
@@ -906,6 +907,225 @@ test('an operator declining the final reviewer is measured, frozen and recorded'
   }
 });
 
+// ---------------------------------------------------------------------------
+// The dispatch stamp, at the gate. `forge review-label` writes one stamp into
+// `reviews/dispatches.json` when it prints the label a reviewer subagent is
+// dispatched with; `review-census.mjs` reads it back as `finalReviewEvidence:
+// 'recorded'` when the host cannot answer and no stamp-eligible `final` bucket
+// was measured. `review-census.test.mjs` pins the census function directly;
+// these three pin the same grade through the real gate — `set-phase.mjs` →
+// `reviewEvidence` → `reviewCensus` → `readStamps` — with the real `writeStamp`
+// from `review-stamp.mjs`, never hand-rolled JSON.
+// ---------------------------------------------------------------------------
+
+test('phase done freezes independent/recorded from a dispatch stamp when host evidence cannot answer — and the same fixture refuses without it', () => {
+  // THE DISCRIMINATING CONTROL is built into this one test rather than left to
+  // a neighbour: the fixture's prose is a self-declaration (`self-check` in
+  // the attribution region), so a census that merely read the file and agreed
+  // with it would grade `inferred`, not `recorded` — the A/B below pins that
+  // the grade the stamped pass reaches is not that one. And without the
+  // stamp, this exact fixture — high-risk, no host, self-declaring prose —
+  // refuses, which is what makes the stamped pass a measurement rather than a
+  // gate that would have passed regardless. What this test does NOT pin is
+  // that the prose goes entirely unread on the stamped path: a mutant that
+  // uses the stamp as a tiebreak alongside the prose, rather than letting it
+  // decide outright, still passes this exact test — this fixture's
+  // self-declaring prose happens to land the tiebreak branch on the same
+  // verdict the real one reaches. `review-census.test.mjs`'s "the stamp
+  // DECIDES — it is not a tiebreak applied to the prose" pins that stronger
+  // property directly, with a fixture built to tell the two apart.
+  const dir = tmp('forge-verdict-recorded-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-recorded');
+    writeFinalReview(sessionDir, SELF_PROSE);
+    assert.equal(reviewCensus(sessionDir).finalReview, 'self', 'fixture: prose alone says self');
+
+    // No host bound (runSetPhase strips it) and no stamp yet: the census falls
+    // straight to the self-declaring prose, and the floor refuses.
+    assert.throws(() => runSetPhase(dir, ['done']), /self-authored/);
+    assert.equal(
+      JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase,
+      'plan',
+      'the refused control must not have transitioned',
+    );
+
+    // The real writer: `forge review-label` calls this at dispatch time, before
+    // any subagent exists.
+    writeStamp(sessionDir, {
+      unit: 'final',
+      label: 'forge-review final sess-recorded',
+      sessionId: 'sess-recorded',
+    });
+
+    runSetPhase(dir, ['done']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.deepEqual(session.reviewVerdict, {
+      final: 'independent',
+      evidence: 'recorded',
+      stoppedByOperator: false,
+      // Host evidence was never available on either pass, so no `final` unit
+      // was ever on record to see — the stamp answered instead.
+      unitOnRecord: false,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a frozen recorded verdict refreshes when a later pass sees the host record an all-stopped final dispatch', () => {
+  // "The host's answer outranks the stamp" surviving the freeze. Derived from
+  // the code, not asserted from the brief: the keep rule is `measured &&
+  // !remeasured && !sawTheUnit`, and `sawTheUnit` is this pass's own reading —
+  // whether the host's record has a `final` unit at all, independent of
+  // `measured` or of what froze earlier. The second pass here binds a host
+  // whose `final` dispatch was stopped, so `sawTheUnit` is true and
+  // `!sawTheUnit` alone sinks the keep condition: a pass that sees the
+  // deciding unit on the host's own record always refreshes, because seeing
+  // it is new information about the thing being judged, regardless of what
+  // `measured` would have evaluated to. The frozen verdict here does carry
+  // `unitOnRecord: false` — true of the shape a stamp-only freeze leaves,
+  // since there was no unit on record for that earlier pass to see — but it
+  // is description, not the operative cause of this refresh: `sawTheUnit`
+  // decides it on this pass alone. A `recorded` grade fits the same asymmetry
+  // `freezeReviewVerdict`'s own comment draws between a stale negative (never
+  // protected) and a stale positive measured on `host` (protected) — it
+  // substituted for a record the host had not yet answered, not for one it
+  // measured.
+  const dir = tmp('forge-verdict-recorded-refresh-');
+  const configDir = tmp('forge-verdict-recorded-refresh-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-recorded-refresh');
+    writeFinalReview(sessionDir, SELF_PROSE);
+    writeStamp(sessionDir, {
+      unit: 'final',
+      label: 'forge-review final sess-recorded-refresh',
+      sessionId: 'sess-recorded-refresh',
+    });
+
+    // No host bound at `finish`: the stamp is the only evidence, and the
+    // self-declaring prose is never read.
+    runSetPhase(dir, ['finish']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'recorded',
+      stoppedByOperator: false,
+      unitOnRecord: false,
+    });
+
+    // A host is now bound, and its record shows the final reviewer's only
+    // dispatch was stopped by the operator — `hostFinalReview`'s one genuine
+    // negative, reached by measurement rather than absence.
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-recorded-refresh', createdAt);
+    writeReviewerSidecars(
+      configDir,
+      'host-recorded-refresh',
+      createdAt,
+      { r1: { description: 'forge-review final', stoppedByUser: true } },
+      'sess-recorded-refresh',
+    );
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-recorded-refresh', CLAUDE_CONFIG_DIR: configDir };
+
+    assert.throws(() => runSetPhase(dir, ['done'], env), /self-authored/);
+    assert.equal(
+      JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase,
+      'finish',
+      'the refusal did not persist',
+    );
+
+    // The operator owns the decision themselves; what gets recorded is the
+    // re-frozen verdict — host, not the stamp's recorded grade.
+    runSetPhase(
+      dir,
+      ['done', '--final-review-waived', 'host now shows the reviewer was stopped'],
+      env,
+    );
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'self',
+      evidence: 'host',
+      stoppedByOperator: true,
+      // r1's unit is `final`, on record, even though it was stopped.
+      unitOnRecord: true,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('a frozen host independent verdict is kept — not downgraded to recorded — when the host fixture is gone but the stamp survives', () => {
+  // The mirror of the two tests above: a verdict measured on `host` grade must
+  // stay `host`, never quietly re-graded `recorded` because a stamp happens to
+  // be sitting on disk too — the ordinary case, since `forge review-label`
+  // writes the stamp before the subagent it names ever runs. The keep rule
+  // fires here (`measured && !remeasured && !sawTheUnit`) precisely because
+  // this frozen verdict has `unitOnRecord: true`, unlike the `recorded`-frozen
+  // shape above.
+  const dir = tmp('forge-verdict-host-keep-stamp-');
+  const configDir = tmp('forge-verdict-host-keep-stamp-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-host-keep-stamp');
+    const { createdAt } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    writeHostTranscript(configDir, 'host-keep-stamp', createdAt);
+    writeReviewerSidecars(
+      configDir,
+      'host-keep-stamp',
+      createdAt,
+      { r1: { description: 'forge-review final' } },
+      'sess-host-keep-stamp',
+    );
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    // The same dispatch was stamped too, as `forge review-label` would.
+    writeStamp(sessionDir, {
+      unit: 'final',
+      label: 'forge-review final sess-host-keep-stamp',
+      sessionId: 'sess-host-keep-stamp',
+    });
+    const env = { CLAUDE_CODE_SESSION_ID: 'host-keep-stamp', CLAUDE_CONFIG_DIR: configDir };
+
+    runSetPhase(dir, ['finish'], env);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).reviewVerdict, {
+      final: 'independent',
+      evidence: 'host',
+      stoppedByOperator: false,
+      unitOnRecord: true,
+    });
+
+    // The host fixture is gone entirely at `done` — pruned exactly as in "the
+    // frozen verdict … survive the host pruning the transcript" above — but
+    // the stamp lives under the session directory and survives it.
+    fs.rmSync(configDir, { recursive: true, force: true });
+
+    const base = { ...process.env };
+    delete base.CLAUDE_CODE_SESSION_ID;
+    delete base.CLAUDE_CONFIG_DIR;
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...base, ...env },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /Kept the review verdict/);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'done');
+    assert.deepEqual(
+      after.reviewVerdict,
+      {
+        final: 'independent',
+        evidence: 'host',
+        stoppedByOperator: false,
+        unitOnRecord: true,
+      },
+      'a still-surviving stamp answering `recorded` must never replace a verdict already measured on `host`',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
 test('a failing review measurement warns, invents no verdict, and still finishes the transition', () => {
   // Telemetry may cost a session its measurement, never its transition — the
   // rule the metrics block beneath the gate already follows.
@@ -1266,6 +1486,103 @@ test('phase done accepts with verify-evidence, complete tasks, and notApplicable
   }
 });
 
+test('phase done refuses a double-reopened finding for the session change', () => {
+  const dir = tmp('forge-reopen-gate-refuse-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-reopen-refuse');
+    const sessionDir = path.dirname(sessionFile);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    session.openspecChange = 'fix-parser';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+    makeDoneable(sessionDir);
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'findings.jsonl'),
+      `${JSON.stringify({
+        id: 'F11',
+        status: 'open',
+        change: 'fix-parser',
+        reopenCount: 2,
+        text: 'parser regression returned',
+      })}\n`,
+      'utf8',
+    );
+
+    assert.throws(() => runSetPhase(dir, ['done']), /F11/);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'plan');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done records a reopen waiver for a double-reopened finding', () => {
+  const dir = tmp('forge-reopen-gate-waive-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-reopen-waive');
+    const sessionDir = path.dirname(sessionFile);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    session.openspecChange = 'fix-parser';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+    makeDoneable(sessionDir);
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'findings.jsonl'),
+      `${JSON.stringify({
+        id: 'F11',
+        status: 'open',
+        change: 'fix-parser',
+        reopenCount: 2,
+        text: 'parser regression returned',
+      })}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done', '--reopen-waived', 'root cause accepted for follow-up']);
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'done');
+    assert.equal(after.reopenWaived, 'root cause accepted for follow-up');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done ignores findings reopened only once or without a change', () => {
+  const dir = tmp('forge-reopen-gate-narrow-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-reopen-narrow');
+    const sessionDir = path.dirname(sessionFile);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    session.slug = 'fix-parser';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+    makeDoneable(sessionDir);
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'findings.jsonl'),
+      `${[
+        {
+          id: 'F11',
+          status: 'open',
+          change: 'fix-parser',
+          reopenCount: 1,
+          text: 'parser regression returned once',
+        },
+        {
+          id: 'F12',
+          status: 'open',
+          change: null,
+          reopenCount: 2,
+          text: 'unscoped regression',
+        },
+      ]
+        .map((finding) => JSON.stringify(finding))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'done');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('phase done refuses with an unresolved deferral', () => {
   const dir = tmp('forge-set-phase-defer-');
   try {
@@ -1558,9 +1875,17 @@ test('a refused transition persists nothing — not the phase, and not the verdi
   // is not a review.
   //
   // NOTHING IS WRITTEN ON A REFUSAL, because the gate exits before
-  // `saveSession`. That is what keeps F27 — a verdict built on a partially
-  // readable binding — from being pinned to the session for good: a refused
-  // pass leaves the session exactly as it was, so the next one measures again.
+  // `saveSession`. That is what keeps a wrong positive from being pinned to
+  // the session for good — for example a verdict `reviewEvidence` still
+  // answers confidently from a partial binding, such as a session bound to two
+  // host sessions whose older transcript has been pruned (an *unreadable*
+  // binding is F27, owned by `host.mjs`, and is refused rather than answered;
+  // a genuinely pruned one answers `available: true` with the `final` unit
+  // simply missing, and F12's dispatch stamp, where a valid one exists,
+  // overrides that absence-negative one layer up in `review-census.mjs` (D4),
+  // grading `recorded` — see "the done gate does not refuse a stamped session
+  // whose absence-negative came from half a binding" below): a refused pass
+  // leaves the session exactly as it was, so the next one measures again.
   // Move `saveSession` above the gates and that wrong positive becomes
   // permanent.
   const dir = tmp('forge-refuse-nosave-');
@@ -1640,6 +1965,97 @@ test('a stopped dispatch is reported at the gate, never turned into a refusal', 
     const { reviews } = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
     assert.equal(reviews.final, 'independent');
     assert.equal(reviews.stoppedByOperator, true, 'the fact is still reported');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test('the done gate does not refuse a stamped session whose absence-negative came from half a binding', () => {
+  // D4, end to end, and the only test that proves `partial` reaches the census
+  // at all: `freezeReviewVerdict()` builds the evidence object and hands it
+  // straight to `reviewCensus` by reference, so the flag `reviewEvidence` added
+  // arrives with no wiring of its own — this is what shows it actually does.
+  //
+  // The reproduced F58 residual: the session is bound to two host sessions (the
+  // ordinary shape — `bindHost` appends an id every time the work is resumed)
+  // and the older transcript has been pruned. The surviving half answers
+  // `available: true`, carries a prescribed `group-01` dispatch so the adoption
+  // gate is defeated and the convention reads as in use, and has no `final`
+  // unit — because the final reviewer ran in the pruned half. Before this
+  // change that read as `hostFinalReview`'s one genuine negative, the gate
+  // refused, and the remedy it printed had already been followed.
+  //
+  // The prose is a self-check on purpose. It makes the fixture discriminate in
+  // both wrong directions: falling through to the file answers `self`/`inferred`
+  // and still refuses, so only the stamp deciding gets this session through.
+  const SESSION_ID = 'sess-partial-stamp';
+  const LIVE_HOST_ID = 'host-partial-live';
+  const PRUNED_HOST_ID = 'host-partial-pruned';
+  const dir = tmp('forge-partial-stamp-');
+  const configDir = tmp('forge-partial-stamp-cfg-');
+  try {
+    const { sessionFile, sessionDir } = makeHighRiskFixture(dir, SESSION_ID);
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    // Bound to both, oldest first — `bindHost` will find the live id already
+    // present and leave the binding alone.
+    raw.host = {
+      agent: 'claude-code',
+      sessionIds: [PRUNED_HOST_ID, LIVE_HOST_ID],
+      boundAt: raw.createdAt,
+    };
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    // Only the newer transcript is on disk. PRUNED_HOST_ID is never written
+    // anywhere under `projects/` — pruned, not blocked, which is the case
+    // `reviewEvidence` answers from the surviving half rather than refusing.
+    writeHostTranscript(configDir, LIVE_HOST_ID, raw.createdAt);
+    writeReviewerSidecars(
+      configDir,
+      LIVE_HOST_ID,
+      raw.createdAt,
+      { g1: { description: 'forge-review group-01' } },
+      SESSION_ID,
+    );
+    assert.equal(
+      fs.existsSync(path.join(configDir, 'projects', '-scratch', `${PRUNED_HOST_ID}.jsonl`)),
+      false,
+      'fixture: the older half really is gone',
+    );
+
+    writeFinalReview(sessionDir, SELF_PROSE);
+    assert.equal(reviewCensus(sessionDir).finalReview, 'self', 'fixture: prose alone says self');
+
+    // The real writer, at the time `forge review-label` printed the label —
+    // in the half of the conversation that has since been pruned.
+    writeStamp(sessionDir, {
+      unit: 'final',
+      label: `forge-review final ${SESSION_ID}`,
+      sessionId: SESSION_ID,
+    });
+
+    runSetPhase(dir, ['done'], {
+      CLAUDE_CODE_SESSION_ID: LIVE_HOST_ID,
+      CLAUDE_CONFIG_DIR: configDir,
+    });
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'done');
+    assert.deepEqual(session.reviewVerdict, {
+      final: 'independent',
+      evidence: 'recorded',
+      stoppedByOperator: false,
+      // The surviving half's record has no `final` unit in it — that absence
+      // IS the negative this override answered over, so nothing was on record
+      // for this pass to see.
+      unitOnRecord: false,
+    });
+    assert.equal(session.finalReviewWaived, undefined, 'and no waiver was applied for it');
+    assert.deepEqual(
+      session.host.sessionIds,
+      [PRUNED_HOST_ID, LIVE_HOST_ID],
+      'fixture: the binding really was partial at the moment of measurement',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(configDir, { recursive: true, force: true });

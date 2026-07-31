@@ -1,0 +1,33 @@
+{
+  "change": "cursor-fleet-sandbox-register",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "fleet-registry",
+      "library": "packages/cli/src/lib/fleet.mjs",
+      "runtimeOwner": "forge new / forge phase (saveSession) → registerSession; forge reminder; forge fleet sync",
+      "writes": "~/.forgekit/fleet/sessions/*.json; .forge/sessions/<id>/fleet-pending.json",
+      "reads": "session.json; fleet registry dir",
+      "uiConsumer": "forge fleet list|watch|view|send",
+      "evidence": "packages/cli/src/fleet.test.mjs"
+    },
+    {
+      "capability": "session-metrics (Cursor host bind)",
+      "library": "packages/cli/src/metrics/host.mjs",
+      "runtimeOwner": "forge new / forge phase → bindHost",
+      "writes": "session.json host + cursorChatId",
+      "reads": "CURSOR_CONVERSATION_ID / CURSOR_TRACE_ID / CLAUDE_CODE_SESSION_ID",
+      "uiConsumer": "forge metrics collect; forge analyze",
+      "evidence": "packages/cli/src/metrics/host.test.mjs"
+    },
+    {
+      "capability": "fleet-registry (Cursor hooks init)",
+      "library": "packages/cli/src/init.mjs",
+      "runtimeOwner": "forge init --cursor",
+      "writes": ".cursor/hooks.json",
+      "reads": "N/A",
+      "uiConsumer": "Cursor sessionStart → forge reminder",
+      "evidence": "packages/cli/src/init.test.mjs"
+    }
+  ]
+}

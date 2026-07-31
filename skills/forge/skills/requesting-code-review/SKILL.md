@@ -33,7 +33,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 Use Task tool with forge/skills/code-reviewer type, fill template at `code-reviewer.md`.
 
-   **Under Forge, dispatch the *final* reviewer with the Task tool's `description` parameter set to exactly what `forge review-label final` prints** (`forge-review final <session-id>`) — the dispatch parameter, *not* the `{DESCRIPTION}` placeholder listed below, which fills the report body (and a group reviewer with `forge review-label <group>`). Forge reads the host's record of that dispatch to decide whether an outside reader saw the change; free-form prose in the description produces no record. See [forge/phases/review.md](../../phases/review.md).
+   **Under Forge, dispatch the *final* reviewer with the Task tool's `description` parameter set to exactly what `forge review-label final` prints** (`forge-review final <session-id>`) — the dispatch parameter, *not* the `{DESCRIPTION}` placeholder listed below, which fills the report body (and a group reviewer with `forge review-label <group>`). Forge reads the host's record of that dispatch to decide whether an outside reader saw the change; free-form prose in the description produces no record. Running the command also writes a dispatch stamp into the session's own directory, which outlives the host's record — see [forge/phases/review.md](../../phases/review.md) for the full rule.
 
 **Placeholders:**
 - `{WHAT_WAS_IMPLEMENTED}` - What you just built

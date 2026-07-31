@@ -209,6 +209,41 @@ test('forge new seeds phaseHistory with the triage phase it starts in', () => {
   assert.deepEqual(session.phaseHistory, [{ phase: 'triage', at: session.createdAt }]);
 });
 
+test('forge new lists related open bugs for the slug without blocking', () => {
+  const root = tmp('forge-new-related-');
+  fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, '.forge', 'findings.jsonl'),
+    `${JSON.stringify({
+      id: 'F1',
+      text: 'parser drops empty flags',
+      kind: 'bug',
+      severity: 'major',
+      status: 'open',
+      change: 'fix-parser',
+      createdAt: new Date().toISOString(),
+    })}\n`,
+  );
+  const env = {
+    ...process.env,
+    FORGEKIT_FLEET_DIR: path.join(tmp('forge-new-fleet-'), 's'),
+  };
+  delete env.CLAUDE_CODE_SESSION_ID;
+  delete env.CURSOR_CONVERSATION_ID;
+  delete env.CURSOR_TRACE_ID;
+  const res = spawnSync(process.execPath, [FORGE_BIN, 'new', 'fix-parser'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  });
+  assert.equal(res.status, 0, res.stderr);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.relatedFindings.length, 1);
+  assert.equal(out.relatedFindings[0].id, 'F1');
+  assert.match(res.stderr, /F1/);
+  assert.ok(out.sessionId, 'session still created');
+});
+
 test('forge new then forge phase triage records one triage row, not two', () => {
   const root = tmp('forge-new-history-idem-');
   const dir = JSON.parse(runForge(root, ['new', 'telemetry-probe'])).dir;

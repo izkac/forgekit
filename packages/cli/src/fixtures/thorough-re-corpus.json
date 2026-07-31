@@ -1,0 +1,131 @@
+{
+  "_comment": "Pins CURRENT isHighRiskText behaviour. Changing expect requires a measured corpus review — do not \"fix\" F11 by editing labels.",
+  "sentences": [
+    {
+      "id": "F11-risky-public-contract",
+      "source": "F11",
+      "text": "alters the public contract of the /v1/orders endpoint",
+      "expect": "risky"
+    },
+    {
+      "id": "F11-risky-data-contract",
+      "source": "F11",
+      "text": "breaking change to the data contract",
+      "expect": "risky"
+    },
+    {
+      "id": "F11-risky-openapi-contract",
+      "source": "F11",
+      "text": "the OpenAPI contract gains two required fields",
+      "expect": "risky"
+    },
+    {
+      "id": "F11-wrap-public-contract",
+      "source": "F11-hardwrap",
+      "text": "alters the public\ncontract of the /v1/orders endpoint",
+      "expect": "risky"
+    },
+    {
+      "id": "F11-wrap-data-contract",
+      "source": "F11-hardwrap",
+      "text": "breaking change to the data\ncontract",
+      "expect": "risky"
+    },
+    {
+      "id": "F11-wrap-openapi-contract",
+      "source": "F11-hardwrap",
+      "text": "the OpenAPI\ncontract gains two required fields",
+      "expect": "risky"
+    },
+    {
+      "id": "F1-harness-comment-contract",
+      "source": "F1",
+      "text": "the sole trigger was a source comment reading 'the public contract of this helper'",
+      "expect": "risky"
+    },
+    {
+      "id": "benign-function-promise",
+      "source": "F11-benign",
+      "text": "documents a function's promise to its callers without changing any API",
+      "expect": "benign"
+    },
+    {
+      "id": "benign-checkout-git",
+      "source": "archive/2026-07-26-harness-setup-probe/proposal.md",
+      "text": "On the operator's own checkout, npm run test:e2e failed",
+      "expect": "benign"
+    },
+    {
+      "id": "benign-per-checkout",
+      "source": "archive/2026-07-26-harness-setup-probe/tasks.md",
+      "text": "short \"(this machine, once per checkout)\" qualifier",
+      "expect": "benign"
+    },
+    {
+      "id": "benign-suspicion-checkout",
+      "source": "archive/2026-07-26-harness-setup-probe/design.md",
+      "text": "word it as a suspicion tied to *this checkout* (\"if you have not run it here\")",
+      "expect": "benign"
+    },
+    {
+      "id": "arch-transcript-not-public-contract",
+      "source": "archive/2026-07-28-session-telemetry/design.md",
+      "text": "The transcript layout is not a public contract",
+      "expect": "risky"
+    },
+    {
+      "id": "arch-never-block-contract",
+      "source": "archive/2026-07-28-session-telemetry/tasks.md",
+      "text": "byte-identical (the existing \"must never block work\" contract)",
+      "expect": "risky"
+    },
+    {
+      "id": "arch-money-auth-gate",
+      "source": "archive/2026-07-29-review-authorship-evidence/proposal.md",
+      "text": "It drives the money/auth forge phase done gate",
+      "expect": "risky"
+    },
+    {
+      "id": "arch-cli-contract-change",
+      "source": "archive/2026-07-31-findings-ledger-kinds/proposal.md",
+      "text": "Risk: medium — CLI contract change for agents that file findings; reopen",
+      "expect": "risky"
+    },
+    {
+      "id": "arch-money-auth-verdict",
+      "source": "archive/2026-07-31-review-stamp-at-dispatch/proposal.md",
+      "text": "The money/auth final-review verdict rests on two evidence sources, and both",
+      "expect": "risky"
+    },
+    {
+      "id": "arch-stripe-refund",
+      "source": "packages/cli/src/preferences.test.mjs",
+      "text": "add stripe refund flow",
+      "expect": "risky"
+    },
+    {
+      "id": "arch-oidc-auth",
+      "source": "packages/cli/src/preferences.test.mjs",
+      "text": "OIDC auth hardening",
+      "expect": "risky"
+    },
+    {
+      "id": "arch-mongo-migration",
+      "source": "packages/cli/src/preferences.test.mjs",
+      "text": "mongo migration for orders",
+      "expect": "risky"
+    },
+    {
+      "id": "benign-readme-wording",
+      "source": "packages/cli/src/preferences.test.mjs",
+      "text": "update README wording",
+      "expect": "benign"
+    },
+    {
+      "id": "benign-toolbar",
+      "source": "packages/cli/src/preferences.test.mjs",
+      "text": "fix toolbar alignment",
+      "expect": "benign"
+    }
+  ]
+}
