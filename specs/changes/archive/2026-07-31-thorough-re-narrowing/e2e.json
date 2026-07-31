@@ -1,0 +1,15 @@
+{
+  "change": "thorough-re-narrowing",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "thorough-re-narrowing",
+      "cmd": "node scripts/e2e/thorough-re-narrowing.mjs",
+      "expect": "NARROWING f11=risky wrap=risky bare=benign corpus=ok"
+    }
+  ]
+}

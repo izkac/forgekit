@@ -170,29 +170,21 @@ test('isHighRiskText: bare "checkout" is git vocabulary, not a payment signal', 
   assert.equal(isHighRiskText('cart totals at checkout with billing address'), true);
 });
 
-test('isHighRiskText: "contract" stays unqualified — the floor fails closed', () => {
-  // 0.3.24 required a qualifier (api/wire/schema/... contract) to stop ordinary
-  // software English about a function's promise escalating pace. An independent
-  // review measured the cost: eight of twelve genuinely risky sentences stopped
-  // matching, and the surviving qualifiers needed a single space or hyphen, so a
-  // plan hard-wrapped at 80 columns disarmed them at a line break. Reverted.
-  //
-  // The asymmetry is the whole point of this regex: a false positive costs one
-  // dispatched reviewer, a false negative ships an unreviewed money/auth change.
-  // Finding F3 (bare "contract" over-escalates) is reopened, and narrowing it
-  // again needs the split measured against a real corpus first.
+test('isHighRiskText: qualified contract / F11 narrowing — qualifier+\\s+ only', () => {
+  // F11 policy: contract risk requires a qualifier with \\s+. Bare "contract"
+  // no longer escalates; hard-wrapped qualifier+newline+contract still does.
   assert.equal(isHighRiskText('alters the public contract of the /v1/orders endpoint'), true);
   assert.equal(isHighRiskText('breaking change to the data contract on the events topic'), true);
   assert.equal(isHighRiskText('the OpenAPI contract gains two required fields'), true);
-  assert.equal(isHighRiskText('renegotiate the contract between scheduler and executor'), true);
-  // Hard-wrapped prose, the case the qualified form silently missed.
   assert.equal(isHighRiskText('update the wire\ncontract for consumers'), true);
+  assert.equal(isHighRiskText('alters the public\ncontract of the /v1/orders endpoint'), true);
 
-  // Known and accepted cost of failing closed (F3): prose about a function's
-  // own promise still escalates. Recorded here so the trade-off is explicit
-  // rather than rediscovered.
-  assert.equal(isHighRiskText('the same contract as readLedger'), true);
-
+  assert.equal(isHighRiskText('the same contract as readLedger'), false);
+  assert.equal(
+    isHighRiskText('byte-identical (the existing "must never block work" contract)'),
+    false,
+  );
+  assert.equal(isHighRiskText('renegotiate the contract between scheduler and executor'), false);
   assert.equal(isHighRiskText('toolbar padding'), false);
 });
 
