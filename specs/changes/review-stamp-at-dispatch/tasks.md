@@ -122,7 +122,7 @@
 
 ## 5. Product loop acceptance
 
-- [ ] 5.1 `scripts/e2e/harness-portability.mjs`: new scenario
+- [x] 5.1 `scripts/e2e/harness-portability.mjs`: new scenario
       `review-stamp-decides` — in a scratch project: control first (no
       stamp, pruned host, self-declaring file → `self`/`inferred`,
       high-risk gate refuses), then `forge review-label final` (assert

@@ -68,6 +68,24 @@
  *                             so: a refusal-shaped assertion would pass both
  *                             before and after the fix.
  *
+ * Review-stamp-at-dispatch loop (specs/changes/review-stamp-at-dispatch/
+ * e2e.json), also layering on `boot`, and on the same review fixture:
+ *   review-stamp-decides      ONE session, driven three times, with exactly one
+ *                             thing changed between each pair of runs. First
+ *                             the control: a high-risk change whose review file
+ *                             says self-check, whose host record has been
+ *                             pruned off disk, and which has never been
+ *                             stamped — `self`/`inferred`, and the money/auth
+ *                             gate refuses. Then `forge review-label final`
+ *                             writes the stamp and NOTHING ELSE moves: same
+ *                             file bytes, same pruned host — and the same gate
+ *                             passes on `independent`/`recorded`. Then the
+ *                             D3 guard: the same stamped session with a
+ *                             below-floor `final` dispatch planted back on the
+ *                             host record refuses again, because a stamp must
+ *                             not resurrect the token-dispatch forgery
+ *                             `review-evidence-substance` closed.
+ *
  * `all` deliberately stays the harness-setup-probe rig's own five phases: it is
  * that change's recorded probe and its verdict must keep meaning what it meant.
  */
@@ -524,6 +542,25 @@ function lastDigest(file) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The dispatch stamps `forge review-label` wrote for a scratch session.
+ *
+ * Deliberately NOT `readStamps` from `review-stamp.mjs`. That module is half of
+ * the mechanism under test, and importing it here would let a reader that
+ * agrees with a broken writer pass this loop — the same reason every other
+ * phase reads the CLI's own artefacts off disk with `JSON.parse` rather than
+ * through the code that produced them. Returns `null` for "no file", which is
+ * a state `review-stamp-decides`' control asserts, distinct from `[]`.
+ *
+ * @param {string} sessionDir
+ * @returns {{ file: string, doc: Record<string, any> | null }}
+ */
+function stampsOf(sessionDir) {
+  const file = path.join(sessionDir, 'reviews', 'dispatches.json');
+  if (!fs.existsSync(file)) return { file, doc: null };
+  return { file, doc: JSON.parse(fs.readFileSync(file, 'utf8')) };
 }
 
 /** The frozen verdict on a scratch session, or null. */
@@ -1388,6 +1425,292 @@ if (phase === 'boot') {
   // not a measurement, and `evidence` is read back from assertion 2's own
   // verdict rather than hard-coded, so a regression there still shows up here.
   process.stdout.write(`PARTIAL binding=half-read gate=accepted evidence=${verdict.evidence}\n`);
+} else if (phase === 'review-stamp-decides') {
+  // THE STAMP IS THE VARIABLE. This step drives the chain
+  // `review-label-cli.mjs` → `review-stamp.mjs` → (host record absent, then
+  // planted below the floor) → `review-census.mjs` → `set-phase.mjs`'s
+  // money/auth gate, through the shipped binary, three times over ONE session —
+  // and between each pair of runs exactly one thing changes.
+  //
+  // ONE SESSION RATHER THAN TWO PROJECTS, unlike `review-evidence-decides`,
+  // and deliberately. That step's variable is a host record, which lives
+  // outside the project and can therefore be given to one copy and withheld
+  // from another. This step's variable is a file INSIDE the session directory,
+  // written by a command that has to run in the project it is stamping. Two
+  // projects would have made "the stamp" and "the project" vary together, and
+  // no assertion here could then tell which one flipped the gate. Re-running
+  // the same session is the harness's established move for that
+  // (`review-evidence-survives`, `review-evidence-partial-binding`'s
+  // counter-fixture), and the freeze's keep rule permits it: nothing this step
+  // freezes is `independent` with `unitOnRecord` true, so every pass
+  // re-measures rather than keeping a stale grade.
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  const at = new Date(Date.now() - 60_000).toISOString();
+
+  const fixture = layerReviewFixture(SCRATCH, { createdAt, hostId: REVIEW_HOST_ID });
+  const reviewFile = path.join(fixture.sessionDir, 'reviews', 'final-review.md');
+  const digestFile = path.join(SCRATCH, '.forge', 'sessions.jsonl');
+  // The session id the stamp has to name, read off the session rather than
+  // spelled out: `stampedFinalReview` compares the stamp's `sessionId` against
+  // the session directory's own basename, and a literal here would still match
+  // if both drifted.
+  const sessionId = JSON.parse(fs.readFileSync(path.join(fixture.sessionDir, 'session.json'), 'utf8')).id;
+
+  // THE PRUNE, AND IT HAPPENS BEFORE THE CONTROL. The spec's GIVEN is a session
+  // "whose host transcript has since been pruned from disk" — *since*, so the
+  // record has to have existed. Planted at full substance (it would have
+  // cleared the floor and graded `host`) and then removed outright, so what the
+  // control and the stamped run below both face is a genuine pruned residual:
+  // `reviewEvidence` answers unavailable ("no transcript on disk … pruned or
+  // written elsewhere") and the host cannot speak for either of them.
+  const planted = plantReviewerDispatch(at, FINAL_REVIEW_REQUEST_FLOOR);
+  const transcript = path.join(planted.projectDir, `${REVIEW_HOST_ID}.jsonl`);
+  if (!fs.existsSync(transcript)) fail('the host record was never planted, so nothing is being pruned', transcript);
+  unlockTree(REVIEW_HOST_CFG);
+  fs.rmSync(REVIEW_HOST_CFG, { recursive: true, force: true });
+  if (fs.existsSync(transcript)) fail('the prune did not remove the host transcript', transcript);
+  process.stdout.write(`PRUNED ${REVIEW_HOST_CFG}\n`);
+
+  // --- 1. the control, and it runs FIRST, for the reason the comment in
+  // `review-evidence-partial-binding` gives and `review-evidence-decides`
+  // gives before it. The stamped run below is the identical session with the
+  // identical file and the identical pruned host; if this fixture already
+  // cleared the money/auth gate, that run would prove nothing about the stamp,
+  // because it would have passed with or without one.
+  const { file: stampFile, doc: noStamp } = stampsOf(fixture.sessionDir);
+  if (noStamp !== null) {
+    fail(
+      'a dispatch stamp already exists before `forge review-label` has been run — the control is not ' +
+        'the unstamped half of this comparison',
+      stampFile,
+    );
+  }
+
+  const refused = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (refused.code === 0) {
+    // Trimmed for the runner's 30-line tail, as every refusal-shaped assertion
+    // in this file is: a passing `phase done` prints the whole session JSON and
+    // would push this message off the top.
+    fail(
+      'THE CONTROL IS THE TEST: the money/auth done gate ACCEPTED an unstamped, unreviewed, high-risk ' +
+        'change — the stamped run below would then pass whether or not the stamp decided anything',
+      tail(refused.out, 8),
+    );
+  }
+  // WHY it refused, not merely that it did. A step that greps for a non-zero
+  // exit passes against a gate refusing for an unrelated reason — a missing
+  // verify-evidence file, an integrity failure — and would keep passing with
+  // the whole floor deleted.
+  if (!refused.out.includes('self-authored')) {
+    fail('the gate refused the control for some reason other than a self-authored final review', tail(refused.out, 20));
+  }
+
+  // Record the refusal so the transition completes and the verdict it refused
+  // on lands where it can be read back — the move `review-evidence-decides`'
+  // control and `review-evidence-substance` both make, for the same reason:
+  // the refused pass exits before `saveSession`, so it freezes nothing.
+  const waived = forge(
+    SCRATCH,
+    ['phase', 'done', '--final-review-waived', 'e2e control: measuring the unstamped reading'],
+    { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG },
+  );
+  if (waived.code !== 0) fail(`control forge phase done exited ${waived.code}`, tail(waived.out, 8));
+  const prose = frozenVerdictOf(fixture.sessionDir);
+  if (!prose) fail('no verdict was frozen onto the control run', tail(waived.out, 8));
+  if (prose.final !== 'self' || prose.evidence !== 'inferred') {
+    fail(
+      `THE CONTROL IS THE TEST: unstamped, with the host pruned, this session reads ` +
+        `${prose.final}/${prose.evidence}, not self/inferred. A fixture that already reads independent — ` +
+        'or one whose host still answers — makes the stamped run below pass for free.',
+      SELF_CHECK_REVIEW,
+    );
+  }
+
+  // --- 2. the stamp, and it is the ONLY thing that changes. Run the real
+  // command; assert its artefact; change nothing else.
+  const label = forge(SCRATCH, ['review-label', 'final'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (label.code !== 0) fail(`forge review-label final exited ${label.code}`, tail(label.out, 20));
+  // BYTE-IDENTICAL ON STDOUT. This string is dispatched as a Task description
+  // and matched back character for character by `reviewEvidence`; a stray
+  // advisory line on stdout makes every copy-pasted dispatch unattributable.
+  // The command writes its notes to stderr precisely so this holds, and
+  // `forge()` keeps the two streams apart so this can be asserted.
+  const expectedLabel = `forge-review final ${sessionId}\n`;
+  if (label.stdout !== expectedLabel) {
+    fail(
+      `forge review-label final printed ${JSON.stringify(label.stdout)} on stdout, expected exactly ` +
+        `${JSON.stringify(expectedLabel)}`,
+      tail(label.out, 20),
+    );
+  }
+
+  const { doc: stamped } = stampsOf(fixture.sessionDir);
+  if (stamped === null) fail('forge review-label final wrote no dispatch stamp', stampFile);
+  if (!Array.isArray(stamped.stamps) || stamped.stamps.length !== 1) {
+    fail(
+      `the stamp file holds ${Array.isArray(stamped.stamps) ? stamped.stamps.length : 'no'} stamps, expected 1`,
+      JSON.stringify(stamped),
+    );
+  }
+  const stamp = stamped.stamps[0];
+  if (stamp.unit !== 'final') fail(`the stamp records unit ${JSON.stringify(stamp.unit)}, expected final`, JSON.stringify(stamp));
+  // The copy guard, and the reason a stamp cannot certify every directory it is
+  // copied into: the census compares this field against the session directory's
+  // own name. A stamp naming another session decides nothing.
+  if (stamp.sessionId !== sessionId) {
+    fail(`the stamp names session ${JSON.stringify(stamp.sessionId)}, expected ${sessionId}`, JSON.stringify(stamp));
+  }
+  // The stamp's own copy of what stdout said, so a reviewer dispatched from
+  // this label can be joined back to the record of it being issued.
+  if (`${stamp.label}\n` !== expectedLabel) {
+    fail(`the stamp records label ${JSON.stringify(stamp.label)}, expected ${JSON.stringify(expectedLabel.trim())}`, JSON.stringify(stamp));
+  }
+  if (typeof stamp.at !== 'string' || !stamp.at) fail('the stamp carries no timestamp', JSON.stringify(stamp));
+  // The model is informative context, never load-bearing for the gate — but it
+  // is resolved in-process at the reviewer's tier, and a `null` here means the
+  // resolver failed and the stamp records nothing about what would have run.
+  if (!stamp.model || typeof stamp.model !== 'object' || !stamp.model.tier) {
+    fail(
+      'the stamp carries no resolved model with a tier — `forge review-label` resolved the reviewer ' +
+        'model at dispatch time and lost it',
+      JSON.stringify(stamp),
+    );
+  }
+
+  // AND NOTHING ELSE MOVED. Both halves of this are load-bearing: a review file
+  // rewritten between the two runs would flip the prose rule on its own, and a
+  // host record that came back would grade `host` rather than `recorded` —
+  // either would let this step pass with the stamp doing nothing.
+  if (fs.readFileSync(reviewFile, 'utf8') !== SELF_CHECK_REVIEW) {
+    fail('the review file changed between the control and the stamped run — the stamp is not the variable', reviewFile);
+  }
+  if (fs.existsSync(REVIEW_HOST_CFG)) {
+    fail('a host record reappeared after the prune — the stamp is not the variable', REVIEW_HOST_CFG);
+  }
+
+  // The real money/auth gate: no --allow-incomplete, no waiver, a high-risk
+  // change whose review file still says in plain English that its author wrote
+  // it. The only thing that has happened since the control refused is the file
+  // asserted above.
+  const done = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (done.code !== 0) {
+    fail(
+      'forge phase done refused a session whose final reviewer was stamped at dispatch time and whose ' +
+        'host transcript has since been pruned — the pruned transcript still erases the reviewer',
+      tail(done.out, 20),
+    );
+  }
+  const verdict = frozenVerdictOf(fixture.sessionDir);
+  if (!verdict) fail('no verdict was frozen onto the stamped run', tail(done.out, 8));
+  if (verdict.final !== 'independent') {
+    fail(`verdict ${verdict.final} on ${verdict.evidence} evidence, expected independent`, JSON.stringify(verdict));
+  }
+  // THE LOAD-BEARING HALF. `independent` alone is also what a review file whose
+  // prose happened to read independent produces, and `host` would mean a
+  // dispatch record answered after all. `recorded` is the one grade that says
+  // THE STAMP decided — the whole claim of this step.
+  if (verdict.evidence !== 'recorded') {
+    fail(
+      `verdict graded ${verdict.evidence}, expected recorded — the stamp is not what carried this ` +
+        'session through the gate',
+      JSON.stringify(verdict),
+    );
+  }
+  // AND IT REACHED THE DURABLE LINE. The session directory is deleted by
+  // `forge cleanup`; `.forge/sessions.jsonl` is what outlives it, and a verdict
+  // that decided a gate but never landed there is unauditable afterwards.
+  const digest = lastDigest(digestFile);
+  if (digest?.reviews?.final !== 'independent' || digest?.reviews?.evidence !== 'recorded') {
+    fail(
+      'the durable digest line did not carry the stamped verdict',
+      JSON.stringify(digest?.reviews),
+    );
+  }
+
+  // --- 3. the D3 guard, and it is what stops this whole mechanism from
+  // reopening F33. Same session, same stamp, same review file; the one thing
+  // that changes is that the host now has a WELL-FORMED `final` bucket whose
+  // busiest unstopped dispatch made one request — the token-dispatch forgery
+  // `review-evidence-substance` closed. That `null` is the one the host
+  // *measured*, so the stamp must not answer over it: the forger runs
+  // `forge review-label` too, and a stamp written before the token dispatch
+  // even existed would hand the forgery its `independent` straight back.
+  //
+  // The fixture has to still straddle the floor, guarded exactly as
+  // `review-evidence-substance` and `review-evidence-pruned-record` guard
+  // theirs: nothing else here would notice a floor lowered to 1, and the
+  // failure would then read as a product regression rather than as a fixture
+  // that stopped describing a forgery.
+  if (TOKEN_DISPATCH_REQUESTS >= FINAL_REVIEW_REQUEST_FLOOR) {
+    fail(
+      `this step plants a ${TOKEN_DISPATCH_REQUESTS}-request dispatch, which a floor of ` +
+        `${FINAL_REVIEW_REQUEST_FLOOR} accepts — the fixture is no longer a forgery`,
+    );
+  }
+  plantReviewerDispatch(at, TOKEN_DISPATCH_REQUESTS);
+  const beforeSubfloor = JSON.stringify(lastDigest(digestFile));
+
+  const subfloor = forge(SCRATCH, ['phase', 'done'], { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG });
+  if (subfloor.code === 0) {
+    fail(
+      'the money/auth done gate ACCEPTED a stamped session whose only reviewer on record made ' +
+        `${TOKEN_DISPATCH_REQUESTS} request — the stamp resurrected the token-dispatch forgery`,
+      tail(subfloor.out, 8),
+    );
+  }
+  if (!subfloor.out.includes('self-authored')) {
+    fail('the gate refused the sub-floor run for some reason other than a self-authored final review', tail(subfloor.out, 20));
+  }
+  // AND THE STAMP IS STILL THERE. Without this, a refusal caused by the stamp
+  // file having been lost or overwritten between runs would satisfy the
+  // assertion above, and the step would be proving the wrong thing entirely.
+  const { doc: stillStamped } = stampsOf(fixture.sessionDir);
+  if (!stillStamped?.stamps?.some((s) => s.unit === 'final' && s.sessionId === sessionId)) {
+    fail(
+      'the final-unit stamp is gone by the sub-floor run — this refusal is the stamp missing, not the ' +
+        'floor holding',
+      JSON.stringify(stillStamped),
+    );
+  }
+  // AND NOTHING MOVED. `saveSession` runs after every gate's exit, so a refusal
+  // that still filed a durable line would be the worse half of this defect:
+  // judged, refused, and recorded as done anyway.
+  if (JSON.stringify(lastDigest(digestFile)) !== beforeSubfloor) {
+    fail('the refused sub-floor gate wrote a durable ledger line', tail(subfloor.out, 8));
+  }
+
+  // Record that refusal too, so the verdict it refused on can be read back —
+  // and it must be the PROSE's reading, `self`/`inferred`, not the `recorded`
+  // grade the same stamp earned two runs ago. That is the difference between
+  // "the gate refused" and "the stamp was kept out of a measurement the host
+  // made".
+  const subfloorWaived = forge(
+    SCRATCH,
+    ['phase', 'done', '--final-review-waived', 'e2e subfloor: recording the refusal to read the verdict back'],
+    { CLAUDE_CONFIG_DIR: REVIEW_HOST_CFG },
+  );
+  if (subfloorWaived.code !== 0) fail(`forge phase done --final-review-waived exited ${subfloorWaived.code}`, tail(subfloorWaived.out, 8));
+  const subfloorVerdict = frozenVerdictOf(fixture.sessionDir);
+  if (subfloorVerdict?.final !== 'self' || subfloorVerdict?.evidence !== 'inferred') {
+    fail(
+      `the sub-floor run froze ${subfloorVerdict?.final}/${subfloorVerdict?.evidence}, expected ` +
+        'self/inferred — the verdict did not route to the review file\'s prose, so the stamp answered ' +
+        'over a bucket the host measured',
+      JSON.stringify(subfloorVerdict),
+    );
+  }
+
+  // Derived, never spelled out: every field is read back from the session, the
+  // durable digest and the gates' own exit codes, so a loosened assertion above
+  // still shows up as the wrong answer on this line — which is what the step's
+  // `expect` in e2e.json matches.
+  process.stdout.write(
+    `REVIEW stamped final=${verdict.final} evidence=${verdict.evidence} ` +
+      `gate=${done.code === 0 ? 'passed' : 'refused'}; ` +
+      `control final=${prose.final} evidence=${prose.evidence} ` +
+      `gate=${refused.code === 0 ? 'passed' : 'refused'}; ` +
+      `subfloor gate=${subfloor.code === 0 ? 'passed' : 'refused'}\n`,
+  );
 } else if (phase === 'session-ambiguity') {
   // THE REGRESSION THAT MUST NEVER COME BACK. `.forge/active.json` is written by
   // `forge new` alone, so "active" means *most recently created*. Before this
@@ -1465,7 +1788,7 @@ if (phase === 'boot') {
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
-      'session-ambiguity\n',
+      'review-stamp-decides|session-ambiguity\n',
   );
   process.exit(1);
 }
