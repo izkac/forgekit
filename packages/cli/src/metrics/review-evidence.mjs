@@ -310,7 +310,9 @@ function scanSidecar(sidecarDir, options) {
     // Counted through the same collapse `transcript.mjs` owns, never
     // re-derived: a request is restated once per content block, and anything
     // that counts lines instead inflates by 2–3×.
-    const all = transcript ? readJsonl(transcript) : [];
+    // Advisory: an unreadable sidecar transcript is already handled at the
+    // meta layer above, so the error here is visibly discarded.
+    const all = transcript ? readJsonl(transcript).lines : [];
     const lines = filter ? all.filter((line) => filter(line)) : all;
     const at = earliest(lines);
 
@@ -518,12 +520,6 @@ export function reviewEvidence(options) {
       configDir: opts.configDir,
       env: opts.env,
     });
-    if (bound.length === 0) {
-      return unavailable(
-        `no transcript on disk for host session ${sessionIds.join(', ')} — pruned or written elsewhere`,
-      );
-    }
-
     // A binding this module could only read in part must not decide the gate.
     // `findTranscripts` distinguishes a `subagents` path it could not stat, or
     // one that exists and is not a directory, from the ordinary case of no
@@ -533,12 +529,21 @@ export function reviewEvidence(options) {
     // below: an unreadable sidecar sitting beside one or more resolvable ones
     // would otherwise slip past it and answer confidently from the readable
     // half, which is the exact defect that guard's own comment used to
-    // describe.
+    // describe. It must equally precede the `bound.length === 0` guard right
+    // below this one: when every bound id is blocked at the locating layer
+    // (a sidecar-layer block leaves the id in `found` as well), `bound` is empty,
+    // and checking emptiness first reads a fully-blocked binding as pruned —
+    // blocked must be diagnosed before absent (F57).
     if (unreadable.length > 0) {
       const detail = unreadable
         .map((u) => `host session ${u.sessionId} (${u.path}): ${u.reason}`)
         .join('; ');
       return unavailable(`could not read host session data — ${detail}`);
+    }
+    if (bound.length === 0) {
+      return unavailable(
+        `no transcript on disk for host session ${sessionIds.join(', ')} — pruned or written elsewhere`,
+      );
     }
 
     const sidecarDirs = bound

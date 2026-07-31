@@ -180,7 +180,9 @@ function attributeByPhase(entries, phaseHistory) {
  */
 function observedHostVersion(bound) {
   for (const { transcript } of bound) {
-    const version = aggregateTokens(usageByRequest(readJsonl(transcript))).hostVersion;
+    // Advisory: an unreadable transcript here just moves on to the next bound
+    // id, same as before — the error is visibly discarded.
+    const version = aggregateTokens(usageByRequest(readJsonl(transcript).lines)).hostVersion;
     if (version !== null) return version;
   }
   return null;
@@ -264,24 +266,28 @@ export function collectMetrics(options) {
     // totals are in but under-detailed" (its sidecar was blocked, its
     // transcript was not) from "this session is missing entirely" (nothing of
     // it could be located). A bare id cannot say which happened — `counted`
-    // is meant to.
+    // is meant to. It is derived below, once the parent-transcript loop has
+    // run, from `readErrors` — the outcome of the one read that also feeds
+    // the totals — rather than from a second, standalone read of the same
+    // file: two reads of one file can disagree with each other on a race, and
+    // the read that decides what got counted is the only witness whose answer
+    // means anything.
     //
-    // It cannot be inferred from `found` membership: `found` only means
-    // `fs.statSync(transcript).isFile()` succeeded (host.mjs's own docs say
-    // "located", never "readable"), and a file with its read bit stripped —
-    // `chmod 000` on the transcript itself, directory untouched — still
-    // passes that stat. `readJsonl` then swallows the resulting EACCES into
-    // `[]`, indistinguishable from a transcript that is readable and simply
-    // empty. So `counted` has to be settled by an actual read, done once per
-    // id that lands in `unreadable` (the only ids `unread` ever reports on —
-    // reading every other bound transcript twice to answer a question nobody
-    // asked would cost real time on the sessions that need it least).
-    // `readJsonl`'s blanket swallow is filed as F56; this is a narrow,
-    // local check, not that deeper fix.
-    const flaggedIds = new Set(unreadable.map((entry) => entry.sessionId));
-    /** @type {Set<string>} ids in `flaggedIds` whose transcript content was
-     * actually read, as opposed to merely located. */
-    const readSucceeded = new Set();
+    // Blocked must be diagnosed before absent (F57): when every bound id is
+    // blocked at the locating layer, `bound` is empty too, and checking
+    // emptiness first would read a fully-blocked binding as an ordinary prune.
+    // This deliberately differs from `reviewEvidence`, which refuses on ANY
+    // unreadable id — evidence must be whole, or it cannot decide a gate.
+    // Metrics harvest what they can: a *partially* readable binding (some
+    // found, some blocked) keeps collecting below, with the loss recorded in
+    // `source.unread` — only a binding with nothing found at all degrades
+    // here. Do not "unify" the two guards; they answer different questions.
+    if (unreadable.length > 0 && bound.length === 0) {
+      const detail = unreadable
+        .map((u) => `host session ${u.sessionId} (${u.path}): ${u.reason}`)
+        .join('; ');
+      return degraded(collectedAt, `could not read host session data — ${detail}`, dispatches);
+    }
     if (bound.length === 0) {
       return degraded(
         collectedAt,
@@ -319,19 +325,17 @@ export function collectMetrics(options) {
     let rawLineCount = 0;
     /** @type {Record<string, any>[]} */
     const parentLines = [];
+    // Keyed by sessionId: which bound ids' parent-transcript read itself
+    // failed, and why. This is the single read that also produces
+    // `parentLines`, so it is the only honest witness to "was this session's
+    // transcript actually read" — `unread` and `counted` below are derived
+    // from it rather than from a second, separate read of the same file.
+    /** @type {Map<string, { code: string, message: string }>} */
+    const readErrors = new Map();
     for (const { sessionId, transcript } of bound) {
-      if (flaggedIds.has(sessionId)) {
-        // Only this id's own read outcome decides its `counted` flag below —
-        // a genuinely empty, readable file must not read as a failure.
-        try {
-          fs.readFileSync(transcript, 'utf8');
-          readSucceeded.add(sessionId);
-        } catch {
-          // Left out of `readSucceeded`: this is the file-content EACCES the
-          // stat that produced `found` could not see.
-        }
-      }
-      for (const line of readJsonl(transcript)) {
+      const { lines, error } = readJsonl(transcript);
+      if (error) readErrors.set(sessionId, error);
+      for (const line of lines) {
         rawLineCount += 1;
         if (inWindow(line)) parentLines.push(line);
       }
@@ -343,7 +347,9 @@ export function collectMetrics(options) {
     const subagents = [];
     for (const { sidecarDir } of bound) {
       for (const file of sidecarTranscripts(sidecarDir)) {
-        for (const line of readJsonl(file)) {
+        // Advisory, same as every other sidecar read here: an unreadable
+        // sidecar transcript just contributes no lines.
+        for (const line of readJsonl(file).lines) {
           rawLineCount += 1;
           if (inWindow(line)) sidecarLines.push(line);
         }
@@ -360,6 +366,29 @@ export function collectMetrics(options) {
     }
 
     if (rawLineCount === 0) {
+      // `readErrors` is the same read that produced `rawLineCount`, so when it
+      // is non-empty the zero is not "genuinely empty transcripts" — every
+      // parent read actually failed, and the reason must say so by id and
+      // error code rather than repeat the generic wording that a truly empty
+      // transcript still deserves untouched.
+      if (readErrors.size > 0) {
+        const failed = bound.filter((entry) => readErrors.has(entry.sessionId));
+        const detail = failed
+          .map((entry) => {
+            const err = readErrors.get(entry.sessionId);
+            return `host session ${entry.sessionId} (${entry.transcript}): ${err.message || err.code}`;
+          })
+          .join('; ');
+        // Pluralised off the transcripts that actually errored, not off
+        // `bound`: a binding mixing one empty-but-readable transcript with one
+        // blocked one failed to read exactly one transcript, and the header
+        // noun must not claim more than the detail enumerates.
+        return degraded(
+          collectedAt,
+          `${failed.length === 1 ? 'a bound transcript' : 'bound transcripts'} could not be read — ${detail}`,
+          dispatches,
+        );
+      }
       return degraded(
         collectedAt,
         `the bound transcript${bound.length === 1 ? '' : 's'} held no readable lines`,
@@ -393,6 +422,30 @@ export function collectMetrics(options) {
     const total = aggregateTokens(allEntries);
     const tools = aggregateTools(parentLines.concat(sidecarLines));
 
+    // The union of `unreadable` (sidecar-blocked *or* wholly unlocated — the
+    // two shapes `findTranscripts`' own docs call out) and `readErrors`
+    // (transcript read itself failed, whether or not `findTranscripts` ever
+    // flagged the id) — as a `Set` so an id present in both surfaces once,
+    // not twice.
+    //
+    // `counted` needs both `bound` and `readErrors`, not `readErrors` alone:
+    // the parent-transcript loop above only ever visits ids in `bound`, so an
+    // `unreadable` id that never made it that far (its transcript was never
+    // even located, only a blocked project directory stood in for it) is
+    // absent from `readErrors` for the same reason a genuinely successful
+    // read would be — silence there does not mean success. `bound` is what
+    // tells the two apart: present and no error is a real success; absent
+    // never got the chance.
+    const boundIds = new Set(bound.map((entry) => entry.sessionId));
+    const unreadIds = new Set([
+      ...unreadable.map((entry) => entry.sessionId),
+      ...readErrors.keys(),
+    ]);
+    const unread = [...unreadIds].map((sessionId) => ({
+      sessionId,
+      counted: boundIds.has(sessionId) && !readErrors.has(sessionId),
+    }));
+
     return {
       available: true,
       collectedAt,
@@ -408,14 +461,7 @@ export function collectMetrics(options) {
         // Absent, not `[]`, when every bound id was fully readable — the same
         // reason the rest of `source` carries no other empty markers: an empty
         // array on a clean document makes a reader wonder what it meant.
-        ...(unreadable.length > 0
-          ? {
-              unread: unreadable.map(({ sessionId }) => ({
-                sessionId,
-                counted: readSucceeded.has(sessionId),
-              })),
-            }
-          : {}),
+        ...(unread.length > 0 ? { unread } : {}),
       },
       window: { from: session.createdAt, to: collectedAt },
       requests: total.requests,

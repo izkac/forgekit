@@ -57,18 +57,37 @@ import path from 'node:path';
  *
  * Unparseable lines are skipped rather than fatal: a transcript is appended to
  * live, so the last line of a session killed mid-write is routinely half
- * written, and that must not hide the 500 good lines above it.
+ * written, and that must not hide the 500 good lines above it. That is
+ * line-level damage, tolerated by design; `error` below is about the file as
+ * a whole being unreadable, which is not tolerated silently.
+ *
+ * `error` is `null` on success — a genuinely empty file included, since
+ * reading nothing is still a successful read — and `{ code, message }` from
+ * the thrown error otherwise, `ENOENT` included. This is a deliberate
+ * divergence from `findTranscripts` in `host.mjs`, which treats `ENOENT` as
+ * routine: that function *searches*, probing every project directory for
+ * every session id, so nearly every probe misses and absence is the routine
+ * outcome there. This function *reads a path located moments ago* — absence
+ * here is a race or a bug, never routine — so the searching layer's
+ * ENOENT-is-ordinary policy does not transfer to this reading layer. Do not
+ * "fix" this into agreement with `host.mjs`.
  *
  * @param {string} filePath
- * @returns {Record<string, any>[]} `[]` if the file is missing or unreadable
+ * @returns {{ lines: Record<string, any>[], error: { code: string, message: string } | null }}
+ *   `lines` is `[]` whenever `error` is set; malformed individual lines are
+ *   still skipped rather than failing the whole read.
  */
 export function readJsonl(filePath) {
   /** @type {string} */
   let raw;
   try {
     raw = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return []; // missing, unreadable, or a directory — advisory
+  } catch (err) {
+    // `err.code` and `err.message` are present on every real fs error, but the
+    // access must survive an exotic throw that carries neither — hence `?.`
+    // and, for message, `||` rather than `??` so an empty string still falls
+    // through to `String(err)` instead of standing as the whole answer.
+    return { lines: [], error: { code: err?.code, message: err?.message || String(err) } };
   }
 
   /** @type {Record<string, any>[]} */
@@ -81,7 +100,7 @@ export function readJsonl(filePath) {
       // A half-written line from a killed process must not hide the rest.
     }
   }
-  return out;
+  return { lines: out, error: null };
 }
 
 /**
@@ -506,7 +525,9 @@ export function readSubagents(sidecarDir, options) {
   for (const [agentId, { transcript, meta }] of agents) {
     const parsed = readMeta(meta);
     // Read once: the token roll-up and the tool counts walk the same lines.
-    const all = transcript ? readJsonl(transcript) : [];
+    // Advisory here too: a subagent record degrades to zero counts rather than
+    // surfacing a transcript-unreadable error, same as it always has.
+    const all = transcript ? readJsonl(transcript).lines : [];
     const lines = filter ? all.filter((line) => filter(line)) : all;
     const entries = usageByRequest(lines);
     const summary = aggregateTokens(entries);

@@ -267,6 +267,64 @@ test('collectMetrics harvests only the readable session, and names the other as 
   }
 });
 
+test('collectMetrics names the blocked id, not "pruned", when the sole bound session is blocked at the locating layer', () => {
+  // F57, locating-layer arm. Companion to the review-evidence version of this
+  // same fixture. `collectMetrics` checks `bound.length === 0` *before* the
+  // `unreadable` guard, so a binding whose only host session is blocked —
+  // never even reaching `found` — falls through to the generic
+  // "pruned or written elsewhere" branch, same as a session that was simply
+  // never written. The diagnoses differ; today's code cannot tell them apart.
+  //
+  // Fixture: a project directory holding exactly one bound id's transcript,
+  // `chmod 000`'d whole. `statSync` on a path *inside* a `000` directory
+  // throws EACCES — unlike `chmod 000` on the host-session directory (used by
+  // the sidecar-only test above), which leaves the sibling transcript file
+  // readable and only blocks `subagents/` one level down. With no other
+  // project directory to find this id in, `findTranscripts` promotes it to
+  // `unreadable` and it never reaches `found` — `bound.length === 0`, exactly
+  // the branch this guard-order bug hits.
+  const configDir = plantHost({ sessionId: HOST_ID, lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z' })] });
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const transcript = transcriptPath(configDir, HOST_ID);
+  fs.chmodSync(project, 0o000);
+  try {
+    // The fixture is only meaningful if the process genuinely cannot see
+    // inside the directory — or the assertions below pass for free.
+    assert.throws(() => fs.statSync(transcript), /EACCES/);
+
+    const doc = collectMetrics({
+      session: boundSession(),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    // The decision was already correct before this change — pinned as
+    // sanity, not as the defect.
+    assert.equal(doc.available, false);
+    // THE DIAGNOSIS. Today's reason is the literal pruned message, `no
+    // transcript on disk for host session ${HOST_ID} — pruned or written
+    // elsewhere`: for a single-session binding `sessionIds.join(', ')`
+    // happens to equal `HOST_ID`, so this id assertion alone already passes
+    // today — a spec requirement to keep true after the fix, not itself
+    // proof of the bug. `HOST_ID` is the fixture's own constant.
+    assert.match(doc.reason, new RegExp(HOST_ID));
+    // The path does NOT appear in today's message — this is where it dies.
+    // Escaped since a tmp path can contain regex metacharacters.
+    assert.match(doc.reason, new RegExp(transcript.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    // Today's reason IS "pruned or written elsewhere" verbatim — dies here
+    // too, on the same wrong-diagnosis message the path assertion just
+    // caught missing its path.
+    assert.doesNotMatch(doc.reason, /pruned or written elsewhere/);
+    // The delta spec is explicit that a degraded document carries no `unread`
+    // record — no totals, nothing for `counted` to qualify. `degraded()`
+    // never populates the field today either way; pinned here so 2.3 is not
+    // tempted to add it while fixing the reason above.
+    assert.equal('unread' in doc, false);
+  } finally {
+    fs.chmodSync(project, 0o755);
+  }
+});
+
 test('collectMetrics does not count a session whose transcript was located but could not actually be read', () => {
   // `found` membership means only that `fs.statSync(transcript).isFile()`
   // succeeded — host.mjs's own docs say "located", never "readable". `chmod
@@ -328,6 +386,65 @@ test('collectMetrics does not count a session whose transcript was located but c
   }
 });
 
+// ---------------------------------------------------------------------------
+// F56 — an unflagged id whose transcript content cannot be read. The test
+// above ("...could not actually be read") reproduces the reviewer's original
+// find, but its fixture *also* blocks the second host session's directory, so
+// the id is already flagged unreadable for a sidecar reason before
+// `collectMetrics` ever inspects the transcript's own read outcome. This test
+// differs in exactly the one load-bearing way the spec calls out: nothing
+// else flags the id. Both sessions are located cleanly — no sidecar problem,
+// no directory chmod anywhere — and only the second transcript *file* is
+// unreadable. Today `readJsonl` swallows that EACCES into `[]`, and because
+// the id was never in `unreadable` to begin with, `collectMetrics` never even
+// runs the local read-outcome check: the session simply vanishes from the
+// totals with no `unread` entry and no degrade — see the delta spec,
+// session-metrics, "An unflagged id whose transcript content cannot be read".
+// ---------------------------------------------------------------------------
+test('collectMetrics reports an unflagged id as unread, not counted, when its transcript content alone is unreadable', () => {
+  const r1 = { input: 10, output: 100, cacheRead: 1000, cacheCreate: 5 };
+  // Distinct token block so a leak of the second session's lines into the
+  // totals cannot pass by accident.
+  const r2 = { input: 900, output: 9000, cacheRead: 90000, cacheCreate: 90 };
+
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z', tokens: r1 })],
+  });
+  // No `subagents` option here — unlike the flagged-sidecar tests above, this
+  // id must be located cleanly with nothing else to flag it. A planted
+  // subagents dir (even an empty one) is exactly the sidecar problem this
+  // test must NOT have.
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })],
+  });
+
+  const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
+  fs.chmodSync(secondTranscript, 0o000);
+  try {
+    // Guard: prove the fixture is genuinely unreadable where it matters — or
+    // the assertions below pass for free.
+    assert.equal(fs.statSync(secondTranscript).isFile(), true, 'stat alone must still succeed');
+    assert.throws(() => fs.readFileSync(secondTranscript, 'utf8'), /EACCES/);
+
+    const doc = collectMetrics({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(doc.available, true);
+    // Only the first session's lines were ever readable.
+    assert.equal(doc.requests, 1);
+    assert.deepEqual(doc.tokens, sumTokens(r1));
+    assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: false }]);
+  } finally {
+    fs.chmodSync(secondTranscript, 0o644);
+  }
+});
+
 test('collectMetrics still counts a session whose transcript is readable but genuinely empty', () => {
   // The companion case to the one above: `readJsonl` returns `[]` for both an
   // unreadable file and an empty one, so `counted` must not conflate them —
@@ -367,6 +484,95 @@ test('collectMetrics still counts a session whose transcript is readable but gen
     assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: true }]);
   } finally {
     fs.chmodSync(secondHostDir, 0o755);
+  }
+});
+
+test('collectMetrics surfaces a doubly-flagged id once — sidecar-blocked AND content-unreadable is one unread entry, not two', () => {
+  // THE MEMBERSHIP THIS PINS. `unread` is derived from the union of two
+  // independent witnesses: `findTranscripts`' `unreadable` (the locating
+  // layer's complaint — here, a sidecar it could not stat) and `readErrors`
+  // (the reading layer's — here, a transcript file it could not open). One id
+  // can be in *both* at once, and the derivation folds them through a `Set`
+  // precisely so it surfaces once. Group 1's review constructed this state by
+  // hand and observed the right answer, but nothing pinned it: a derivation
+  // that concatenated the two lists, or that decided `counted` from whichever
+  // witness it read first, would still have passed every test in this file.
+  //
+  // The fixture blocks both layers on the same id, and each `chmod` is doing
+  // one specific job:
+  //   - `000` on the host *session* directory: `statSync` on `subagents/`
+  //     inside it throws EACCES, so the id lands in `unreadable`. The
+  //     transcript is a *sibling* of that directory, not a child, so it still
+  //     stats — the id lands in `found` too, and therefore reaches the
+  //     parent-transcript loop.
+  //   - `000` on the transcript *file*: `readFileSync` then throws EACCES
+  //     inside that loop, so the id also lands in `readErrors`.
+  const r1 = { input: 10, output: 100, cacheRead: 1000, cacheCreate: 5 };
+  // Distinct and large, so a leak of the blocked session's figures into the
+  // totals cannot pass by coincidence.
+  const r2 = { input: 900, output: 9000, cacheRead: 90000, cacheCreate: 90 };
+
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z', tokens: r1 })],
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })],
+    // An (empty) subagents directory, so there is a host session directory to
+    // chmod — a session that dispatched nothing has no such directory at all.
+    subagents: {},
+  });
+
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const secondHostDir = path.join(project, SECOND_HOST_ID);
+  const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
+  fs.chmodSync(secondHostDir, 0o000);
+  fs.chmodSync(secondTranscript, 0o000);
+  try {
+    // Guards for BOTH memberships — without these the assertions below could
+    // pass for free on a fixture that only ever blocked one layer.
+    assert.throws(
+      () => fs.statSync(path.join(secondHostDir, 'subagents')),
+      /EACCES/,
+      'the sidecar stat must genuinely fail — this is what puts the id in `unreadable`',
+    );
+    assert.equal(
+      fs.statSync(secondTranscript).isFile(),
+      true,
+      'the transcript must still stat — this is what keeps the id in `found`',
+    );
+    assert.throws(
+      () => fs.readFileSync(secondTranscript, 'utf8'),
+      /EACCES/,
+      'the transcript read must genuinely fail — this is what puts the id in `readErrors`',
+    );
+
+    const doc = collectMetrics({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    // Not degraded: one bound session read fine, so there are real totals to
+    // report and the loss belongs in `source.unread`, not in a reason.
+    assert.equal(doc.available, true);
+    assert.equal('reason' in doc, false);
+    // Exactly one entry — the union is a set, not a concatenation. Asserted
+    // on the length as well as the contents so a duplicate fails on the count
+    // rather than on a deep-diff of two identical-looking objects.
+    assert.equal(doc.source.unread.length, 1);
+    assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: false }]);
+    // Totals from the readable session alone: nothing of the blocked one was
+    // ever parsed, which is what `counted: false` above claims.
+    assert.equal(doc.requests, 1);
+    assert.deepEqual(doc.tokens, sumTokens(r1));
+  } finally {
+    // Restored even if an assertion above throws: a stuck `000` directory
+    // breaks every test that runs after this one.
+    fs.chmodSync(secondHostDir, 0o755);
+    fs.chmodSync(secondTranscript, 0o644);
   }
 });
 
@@ -677,6 +883,99 @@ test('collectMetrics degrades when the transcript holds no readable lines', () =
   assert.equal(doc.available, false);
   assert.match(doc.reason, /no readable lines/i);
   assert.equal(doc.hostVersion, null);
+});
+
+test('collectMetrics names the read failure, not merely "no readable lines", when the sole bound transcript is content-blocked', () => {
+  // F57, reading-layer arm — the companion to the locating-layer test above,
+  // and the boundary the test right above THIS one (genuinely malformed
+  // content, no chmod anywhere) must keep passing untouched: that one stays
+  // on "no readable lines" deliberately, because nothing there actually
+  // failed to read.
+  //
+  // Here the transcript is *found* cleanly — `findTranscripts` never flags it,
+  // `bound.length` is 1 — but the file's own content cannot be read: `chmod
+  // 000` on the transcript **file**, not its directory, leaves
+  // `statSync(...).isFile()` true (so the id lands in `found`, never
+  // `unreadable`) while `readFileSync` throws. `readJsonl` (task 1.2/1.3,
+  // already landed) now reports that as `{ lines: [], error: { code:
+  // 'EACCES', ... } }`, threaded into `collect.mjs`'s `readErrors` map — but
+  // the `rawLineCount === 0` guard that fires next still only ever emits "the
+  // bound transcript held no readable lines", never consulting `readErrors`
+  // for the id it just recorded. True, but no longer as vague as it has to
+  // be: the whole reason `readJsonl` was taught to report the error was so
+  // this branch could name it.
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z' })],
+  });
+  const transcript = transcriptPath(configDir, HOST_ID);
+  fs.chmodSync(transcript, 0o000);
+  try {
+    // The fixture is only meaningful if the read genuinely fails, and the
+    // file is genuinely still there — or the assertion below passes for free.
+    assert.throws(() => fs.readFileSync(transcript, 'utf8'), /EACCES/);
+    assert.equal(fs.statSync(transcript).isFile(), true);
+
+    const doc = collectMetrics({
+      session: boundSession(),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(doc.available, false);
+    // An operator reading this needs to know the transcript was *blocked*,
+    // not that it happened to be empty of parsable content — `EACCES` is what
+    // tells them "fix a permission", where the id alone (already implied by
+    // there being exactly one bound session) would not add that. Matches
+    // `readErrors`' own error code, not a typed guess: `readJsonl` surfaces
+    // `err.code` verbatim, and Node's own EACCES always carries that code.
+    assert.match(doc.reason, /EACCES/);
+  } finally {
+    fs.chmodSync(transcript, 0o644);
+  }
+});
+
+test('the read-failure header counts the transcripts that failed, not the transcripts bound', () => {
+  // Pins the pluralisation fix from group 2's review: a binding mixing one
+  // empty-but-readable transcript with one content-blocked one failed to read
+  // exactly ONE transcript, and the header noun must not claim more than the
+  // detail enumerates. Pluralising off `bound.length` (2 here) rendered "the
+  // bound transcripts could not be read" over a detail naming a single id —
+  // an overclaim the group-2 reviewer observed and the 3.3 audit then found
+  // unpinned: flipping the plural back to `bound.length` left the whole suite
+  // green. This test is what makes that mutation red.
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    // Readable and genuinely empty: a successful read of nothing, which must
+    // not be named as a failure — only the blocked sibling below is one.
+    lines: [],
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z' })],
+  });
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const blocked = path.join(project, `${SECOND_HOST_ID}.jsonl`);
+  fs.chmodSync(blocked, 0o000);
+  try {
+    assert.throws(() => fs.readFileSync(blocked, 'utf8'), /EACCES/);
+    assert.equal(fs.statSync(blocked).isFile(), true);
+
+    const doc = collectMetrics({
+      session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+      now: () => new Date('2026-07-27T11:00:00.000Z'),
+      configDir,
+    });
+
+    assert.equal(doc.available, false);
+    // Singular: one transcript failed. The detail names exactly that one.
+    assert.match(doc.reason, /^a bound transcript could not be read/);
+    assert.match(doc.reason, new RegExp(SECOND_HOST_ID));
+    assert.doesNotMatch(doc.reason, new RegExp(`${HOST_ID}[^;]*EACCES`));
+  } finally {
+    fs.chmodSync(blocked, 0o644);
+  }
 });
 
 test('collectMetrics degrades, but still reports the host version, when nothing falls in the window', () => {

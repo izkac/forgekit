@@ -906,6 +906,64 @@ test('reviewEvidence stays unavailable when only one of two bound host sessions 
   }
 });
 
+test('reviewEvidence names the blocked id and path, not "pruned", when every bound session is blocked', () => {
+  // F57. `findTranscripts`'s own `unreadable` split (prior change) already
+  // tells "located but sidecar-blocked" apart from "never found at all" — but
+  // `reviewEvidence` checks `bound.length === 0` *before* `unreadable.length >
+  // 0`, so a binding where the sole host session is blocked at the *locating*
+  // layer (not sidecar, the transcript stat itself) still falls through to the
+  // `bound.length === 0` branch and answers with the pruned-or-elsewhere
+  // message — an operator reading it as "cleaned up by the host" instead of
+  // "we could not look at it".
+  //
+  // The fixture: a project directory holding exactly one bound id's
+  // transcript, `chmod 000`. `statSync` on a path *inside* a `000` directory
+  // throws EACCES (unlike `chmod 000` on the host-session directory used
+  // above, which only blocks the *sidecar* one level down and leaves the
+  // sibling transcript file readable). With no other project directory to
+  // find it in, the id is promoted to `unreadable` and never reaches `found` —
+  // this is the locating-layer block, distinct from the reading-layer block
+  // task (c) in `collect.test.mjs` pins.
+  const configDir = plantHost({ sessionId: HOST_ID, lines: PARENT, subagents: null });
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  const transcript = path.join(project, `${HOST_ID}.jsonl`);
+  fs.chmodSync(project, 0o000);
+  try {
+    // The fixture is only meaningful if the process genuinely cannot see
+    // inside the directory, and genuinely could locate the file before it was
+    // blocked — or the assertions below would be passing for free.
+    assert.throws(() => fs.statSync(transcript), /EACCES/);
+
+    const result = reviewEvidence({
+      session: boundSession(),
+      now: () => new Date('2026-07-28T12:00:00.000Z'),
+      configDir,
+    });
+
+    // The decision was already correct before this change — pinned here as
+    // sanity, not as the defect.
+    assert.equal(result.available, false);
+    // THE DIAGNOSIS, not the decision. Today's reason is the literal pruned
+    // message, `no transcript on disk for host session ${HOST_ID} — pruned or
+    // written elsewhere`: `sessionIds.join(', ')` happens to equal `HOST_ID`
+    // for a single-session binding, so this id assertion alone already
+    // passes today — id-match is a spec requirement to keep true after the
+    // fix, not by itself proof of the bug. `HOST_ID` is the fixture's own
+    // constant.
+    assert.match(result.reason, new RegExp(HOST_ID));
+    // The path does NOT appear in today's message — this is where it dies.
+    // Built from the same `configDir`/`HOST_ID` the fixture used, not typed,
+    // and escaped since a tmp path can contain regex metacharacters.
+    assert.match(result.reason, new RegExp(transcript.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    // Today's reason IS "pruned or written elsewhere" verbatim — this also
+    // dies, on the same wrong-diagnosis message the path assertion just
+    // caught missing its path.
+    assert.doesNotMatch(result.reason, /pruned or written elsewhere/);
+  } finally {
+    fs.chmodSync(project, 0o755);
+  }
+});
+
 test('reviewEvidence cannot tell when a dispatch record in the window cannot be read', () => {
   // One level finer than the directory case: the meta is there and unreadable,
   // so we know a subagent ran and cannot know whether it was the reviewer.
