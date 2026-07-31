@@ -321,6 +321,11 @@ A binding SHALL NOT be reported as readable because *some* of it was read. The
 absence of a reviewer from a partially read binding is not evidence that no
 reviewer ran.
 
+**Unreadable SHALL be diagnosed before absent.** Where every bound host session
+is unreadable, the unavailable reason SHALL name the ids and paths that could
+not be read; the reason reserved for transcripts absent from disk ("pruned or
+written elsewhere") SHALL be used only when nothing was blocked.
+
 #### Scenario: A reviewer that ran in the unreachable half
 
 - **GIVEN** a session bound to two host sessions
@@ -350,11 +355,16 @@ reviewer ran.
 - **THEN** host evidence is available and answers from the readable session
 - **AND** the answer is unchanged from before this change
 
-This last scenario is the known limit and is specified as such: a pruned half
-still yields a confident answer. Making it unavailable would make every resumed
-session unavailable once its older transcript expires. The reviewer that ran in
-a pruned half remains invisible until a dispatch-time stamp is written into the
-review artefact itself.
+#### Scenario: Every bound host session blocked, none absent
+
+- **GIVEN** a session bound to one host session whose transcript cannot be
+  examined — the directory holding it cannot be searched, so the id is reported
+  unreadable and never found
+- **WHEN** the census runs
+- **THEN** host evidence is unavailable
+- **AND** the reason names the blocked id and path
+- **AND** the reason does not claim the transcript was pruned or written
+  elsewhere
 
 ### Requirement: Locating a host transcript distinguishes absent from unreadable
 The helper that locates transcripts and dispatch-record directories on disk
