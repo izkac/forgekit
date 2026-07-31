@@ -7,21 +7,10 @@ Describe this capability.
 ## Requirements
 
 ### Requirement: Finding kind is required and enumerated
-The system SHALL require every new finding to carry a `kind` drawn from
-exactly `bug`, `debt`, `tradeoff`, `idea`, `process`. Adding a finding
-without `--kind`, or with an unknown kind, SHALL fail with an error that
-names the five allowed values. The system SHALL NOT default `kind`.
-
-#### Scenario: Add without kind is refused
-- GIVEN a project with a findings ledger
-- WHEN `forge finding add "something broke" --severity major` runs with no `--kind`
-- THEN the command exits non-zero and the error text lists `bug`, `debt`, `tradeoff`, `idea`, `process`
-- AND no new ledger row is written
-
-#### Scenario: Add with kind persists it
-- GIVEN a project with a findings ledger
-- WHEN `forge finding add "null deref in parse" --kind bug --severity major` runs
-- THEN a new open finding is written with `kind: "bug"` and `severity: "major"`
+(Documentation consumers) Agent-facing docs SHALL instruct that `--kind` and
+`--severity` are required on `forge finding add`, and SHALL state the
+guardrails: fix beats file; re-check dependents on resolve; never narrow a
+heuristic without a measured corpus.
 
 ### Requirement: Finding severity is required
 The system SHALL require `--severity` on `forge finding add` (values
@@ -101,3 +90,26 @@ NOT trigger this gate.
 - GIVEN the same session and finding
 - WHEN `forge phase done --reopen-waived` runs
 - THEN the reopen gate does not refuse (other gates may still apply)
+
+### Requirement: Related open bugs surface on session create
+When `forge new <slug>` creates a session, the system SHALL include open
+findings of kind `bug` whose `change` equals the slug or whose `change`/`text`
+matches a slug token of length at least 4. The result SHALL appear as
+`relatedFindings` on the command's JSON output. Session creation SHALL NOT
+fail because related findings exist.
+
+#### Scenario: Matching bug is listed
+- GIVEN an open bug with `change: "fix-parser"`
+- WHEN `forge new fix-parser` runs
+- THEN the JSON includes that finding under `relatedFindings`
+- AND the session is created successfully
+
+### Requirement: Stale open bugs appear on status
+`forge status` JSON SHALL include `staleFindings`: open bugs whose
+`createdAt` is more than 7 days before now, each with `id`, `ageDays`, and
+`text`.
+
+#### Scenario: Seven-day-old bug is stale
+- GIVEN an open bug with `createdAt` eight days ago
+- WHEN `forge status` runs
+- THEN `staleFindings` contains that finding with `ageDays` ≥ 7

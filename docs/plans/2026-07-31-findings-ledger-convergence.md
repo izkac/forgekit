@@ -1,7 +1,7 @@
 # Plan — make the findings ledger converge
 
-**Status:** W1–W5 shipped 2026-07-31. Remaining: W6 routing, W7 docs.
-  W5: thorough-re-corpus (F11 corpus pin; F11 stays open until measured narrowing).
+**Status:** W1–W7 complete 2026-07-31. Convergence plan finished.
+  Open bugs headline is the honest number; corpus pins THOROUGH_RE; routing+docs land.
 **Created:** 2026-07-31
 **Owner:** whoever picks it up next — this document is the brief; follow it in order.
 
