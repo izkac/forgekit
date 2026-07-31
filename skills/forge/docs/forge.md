@@ -302,9 +302,11 @@ forge checkpoint --group <name> [--tasks <ids>]
                                   # commit this group's work (opt-in; never pushes)
 forge checkpoint --dry-run        # what a checkpoint would commit
 forge checkpoint --range [--last] # diff range for a reviewer brief ({DIFF_RANGE})
-forge finding add "<text>" [--change <slug>] [--severity blocker|major|minor|note]
-                                  # findings ledger (.forge/findings.jsonl)
-forge finding list|resolve <id>   # open findings appear in forge status
+forge finding add "<text>" --kind <bug|debt|tradeoff|idea|process> --severity <blocker|major|minor|note> [--change <slug>]
+                                  # findings ledger (.forge/findings.jsonl); kind+severity required
+forge finding list|resolve|link|reopen
+                                  # list defaults to open bugs; status shows stale/reopened
+                                  # Rules: fix beats file; re-check dependents; corpus before narrowing heuristics
 forge fleet report [--json]       # cross-project trend from the durable ledgers
 forge e2e run --repeat 5 [--record-baseline]
                                   # measure harness flakiness; write e2e.baseline

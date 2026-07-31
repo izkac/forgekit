@@ -229,3 +229,66 @@ export function reopenFinding(opts) {
   writeAll(opts.forgeDir, entries);
   return entries[idx];
 }
+
+/**
+ * Slug tokens long enough to match subjects without noise (`fix`, `add`, …).
+ * @param {string} slug
+ * @returns {string[]}
+ */
+export function slugTokens(slug) {
+  return String(slug ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((t) => t.length >= 4);
+}
+
+/**
+ * Whether an open finding relates to a new session slug.
+ * Exact `change === slug`, or any ≥4-char slug token in `change` / `text`.
+ * @param {Record<string, any>} finding
+ * @param {string} slug
+ */
+export function findingMatchesSlug(finding, slug) {
+  if (!finding || finding.status !== 'open' || finding.kind !== 'bug') return false;
+  const needle = String(slug ?? '').trim().toLowerCase();
+  if (!needle) return false;
+  const change = String(finding.change ?? '').toLowerCase();
+  if (change && change === needle) return true;
+  const text = String(finding.text ?? '').toLowerCase();
+  for (const token of slugTokens(needle)) {
+    if (change.includes(token) || text.includes(token)) return true;
+  }
+  return false;
+}
+
+/**
+ * Open bugs related to a slug (advisory for `forge new`).
+ * @param {string} forgeDir
+ * @param {string} slug
+ */
+export function matchingOpenBugs(forgeDir, slug) {
+  return openFindings(forgeDir)
+    .filter((f) => findingMatchesSlug(f, slug))
+    .map(({ id, severity, text, change }) => ({ id, severity, text, change }));
+}
+
+/**
+ * Open bugs older than `maxAgeDays` (default 7).
+ * @param {string} forgeDir
+ * @param {{ now?: Date | (() => Date), maxAgeDays?: number }} [opts]
+ */
+export function staleOpenBugs(forgeDir, opts = {}) {
+  const maxAgeDays = opts.maxAgeDays ?? 7;
+  const nowValue = typeof opts.now === 'function' ? opts.now() : opts.now;
+  const nowMs = (nowValue instanceof Date ? nowValue : new Date()).getTime();
+  const out = [];
+  for (const finding of openFindings(forgeDir)) {
+    if (finding.kind !== 'bug') continue;
+    const created = Date.parse(finding.createdAt);
+    if (Number.isNaN(created)) continue;
+    const ageDays = Math.floor((nowMs - created) / 86_400_000);
+    if (ageDays < maxAgeDays) continue;
+    out.push({ id: finding.id, ageDays, text: finding.text });
+  }
+  return out;
+}

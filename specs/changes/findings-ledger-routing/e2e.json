@@ -1,0 +1,5 @@
+{
+  "change": "findings-ledger-routing",
+  "notApplicable": "CLI advisory fields + docs — covered by unit tests; no separate service loop",
+  "steps": []
+}

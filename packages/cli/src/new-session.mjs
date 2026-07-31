@@ -25,6 +25,7 @@ import { bindHost } from './metrics/host.mjs';
 import { resolveSessionPaceFields } from './preferences.mjs';
 import { warnIfDoctorFails } from './doctor.mjs';
 import { liveOverlaps, queueMessage, sessionDirFor } from './lib/fleet.mjs';
+import { matchingOpenBugs } from './findings.mjs';
 
 function usage() {
   process.stderr.write(
@@ -125,4 +126,15 @@ if (overlaps.length > 0) {
   out.overlapAdvice =
     'Other live sessions are working in this project. Tell the user and ask: continue anyway, use a git worktree, or pause one session.';
 }
+
+const relatedFindings = matchingOpenBugs(FORGE_DIR, slug);
+if (relatedFindings.length > 0) {
+  out.relatedFindings = relatedFindings;
+  process.stderr.write(
+    `[forge] ${relatedFindings.length} open bug(s) look related to "${slug}": ${relatedFindings
+      .map((f) => f.id)
+      .join(', ')} — advisory only.\n`,
+  );
+}
+
 process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);

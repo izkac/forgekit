@@ -5,7 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { addFinding, KINDS } from './findings.mjs';
+import { addFinding, KINDS, matchingOpenBugs, staleOpenBugs } from './findings.mjs';
 
 const FINDINGS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'findings-cli.mjs');
 
@@ -481,4 +481,121 @@ test('link merges dependencies without duplicate edges', () => {
   const emptyTarget = run(cwd, ['link', source.out.id, '--depends-on', `${firstTarget.out.id},`]);
   assert.equal(emptyTarget.status, 1);
   assert.match(emptyTarget.stderr, /empty/i);
+});
+
+test('matchingOpenBugs: exact change and token-in-text; non-bugs ignored', () => {
+  const forgeDir = path.join(tmp('forge-match-'), '.forge');
+  fs.mkdirSync(forgeDir, { recursive: true });
+  addFinding({
+    forgeDir,
+    text: 'null deref in the parser when flags are empty',
+    kind: 'bug',
+    severity: 'major',
+    change: 'fix-parser',
+  });
+  addFinding({
+    forgeDir,
+    text: 'consider extracting shared parser fixtures',
+    kind: 'debt',
+    severity: 'minor',
+    change: 'fix-parser',
+  });
+  addFinding({
+    forgeDir,
+    text: 'unrelated ledger caption is wrong',
+    kind: 'bug',
+    severity: 'minor',
+    change: 'analyze-caption',
+  });
+
+  const byChange = matchingOpenBugs(forgeDir, 'fix-parser');
+  assert.equal(byChange.length, 1);
+  assert.match(byChange[0].text, /null deref/);
+
+  const byToken = matchingOpenBugs(forgeDir, 'harden-parser-paths');
+  assert.equal(byToken.length, 1, 'token "parser" in text should match');
+  assert.match(byToken[0].text, /null deref/);
+
+  assert.deepEqual(matchingOpenBugs(forgeDir, 'nope'), []);
+});
+
+test('staleOpenBugs: age boundary at 7 days; non-bugs ignored', () => {
+  const forgeDir = path.join(tmp('forge-stale-'), '.forge');
+  fs.mkdirSync(forgeDir, { recursive: true });
+  const now = new Date('2026-07-31T12:00:00.000Z');
+  const eightDaysAgo = new Date(now.getTime() - 8 * 86_400_000).toISOString();
+  const sixDaysAgo = new Date(now.getTime() - 6 * 86_400_000).toISOString();
+
+  const oldBug = addFinding({
+    forgeDir,
+    text: 'old open bug',
+    kind: 'bug',
+    severity: 'major',
+    now: () => new Date(eightDaysAgo),
+  });
+  addFinding({
+    forgeDir,
+    text: 'fresh open bug',
+    kind: 'bug',
+    severity: 'minor',
+    now: () => new Date(sixDaysAgo),
+  });
+  addFinding({
+    forgeDir,
+    text: 'old debt should not stale-headline',
+    kind: 'debt',
+    severity: 'minor',
+    now: () => new Date(eightDaysAgo),
+  });
+
+  const stale = staleOpenBugs(forgeDir, { now });
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].id, oldBug.id);
+  assert.equal(stale[0].ageDays, 8);
+});
+
+test('forge status reports staleFindings for bugs older than 7 days', () => {
+  const cwd = makeProject();
+  const forgeDir = path.join(cwd, '.forge');
+  const now = new Date('2026-07-31T12:00:00.000Z');
+  const eightDaysAgo = new Date(now.getTime() - 8 * 86_400_000);
+  addFinding({
+    forgeDir,
+    text: 'ancient open bug about routing',
+    kind: 'bug',
+    severity: 'major',
+    now: () => eightDaysAgo,
+  });
+  addFinding({
+    forgeDir,
+    text: 'brand new bug',
+    kind: 'bug',
+    severity: 'minor',
+    now: () => now,
+  });
+
+  // session-status uses Date.now(); plant createdAt directly for the stale one
+  // already done via now(). Force clock by rewriting createdAt on disk then
+  // invoking status — status uses real Date.now(), so rewrite to be 8 days
+  // before *actual* now.
+  const ledger = path.join(forgeDir, 'findings.jsonl');
+  const rows = fs
+    .readFileSync(ledger, 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+  const realNow = Date.now();
+  rows[0].createdAt = new Date(realNow - 8 * 86_400_000).toISOString();
+  rows[1].createdAt = new Date(realNow).toISOString();
+  fs.writeFileSync(ledger, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+
+  const statusScript = path.join(path.dirname(FINDINGS), 'session-status.mjs');
+  const stdout = execFileSync(process.execPath, [statusScript], {
+    cwd,
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('finding-fleet-'), 's') },
+  }).toString();
+  const status = JSON.parse(stdout);
+  assert.equal(status.staleFindings.length, 1);
+  assert.equal(status.staleFindings[0].id, rows[0].id);
+  assert.ok(status.staleFindings[0].ageDays >= 7);
 });

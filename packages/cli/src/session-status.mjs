@@ -17,7 +17,7 @@ import {
 } from './lib.mjs';
 import { resolveEffectivePreferences } from './preferences.mjs';
 import { sessionHealth } from './health.mjs';
-import { KINDS, openFindings } from './findings.mjs';
+import { KINDS, openFindings, staleOpenBugs } from './findings.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
 
 const args = process.argv.slice(2);
@@ -87,6 +87,7 @@ const openBugs = findings.filter((finding) => finding.kind === 'bug');
 const reopenedFindings = findings
   .filter((finding) => finding.reopenCount >= 1)
   .map(({ id, reopenCount, text }) => ({ id, reopenCount, text }));
+const staleFindings = staleOpenBugs(FORGE_DIR);
 
 process.stdout.write(
   JSON.stringify(
@@ -106,6 +107,7 @@ process.stdout.write(
         latest: openBugs.slice(-5).map((f) => ({ id: f.id, severity: f.severity, text: f.text, change: f.change })),
       },
       reopenedFindings,
+      staleFindings,
       session,
       progress: status,
       pace: {
