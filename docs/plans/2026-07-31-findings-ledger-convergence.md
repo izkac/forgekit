@@ -1,6 +1,7 @@
 # Plan — make the findings ledger converge
 
-**Status:** in progress — W1 done 2026-07-31 (F18/F19 resolved; F11 kept+amended; F51 residual amended, major→minor). Open 26→24.
+**Status:** W2–W4 shipped 2026-07-31 (session findings-ledger-kinds, score 87/B).
+  W1 done earlier same day. Remaining: W5 corpus, W6 routing, W7 docs.
 **Created:** 2026-07-31
 **Owner:** whoever picks it up next — this document is the brief; follow it in order.
 
