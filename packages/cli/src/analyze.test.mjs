@@ -229,6 +229,90 @@ test('phase attribution is summed across the sessions that still have it', () =>
   assert.equal(analysis.byPhase.verify.sessions, 1);
 });
 
+test('digest byModel/byPhase fill per-model rows when metrics.json is gone', () => {
+  // After cleanup only the compact splits remain — they must not read as zeros.
+  const byModel = {
+    'claude-opus-5': { requests: 40, input: 40, output: 2000, cacheRead: 300000, cacheCreate: 1500 },
+    'claude-fable-5': { requests: 7, input: 7, output: 350, cacheRead: 40000, cacheCreate: 200 },
+  };
+  const byPhase = {
+    implement: { requests: 30, input: 30, output: 1500, cacheRead: 250000, cacheCreate: 1200 },
+    verify: { requests: 17, input: 17, output: 850, cacheRead: 90000, cacheCreate: 500 },
+  };
+  const analysis = buildAnalysis({
+    cwd: project({
+      digests: [
+        digest('s-pruned', {
+          metrics: compact({
+            models: Object.keys(byModel).sort(),
+            byModel,
+            byPhase,
+          }),
+        }),
+      ],
+    }),
+  });
+
+  const opus = analysis.byModel['claude-opus-5'];
+  assert.equal(opus.sessions, 1);
+  assert.equal(opus.detailed, 1, 'digest splits count as a detailed contribution');
+  assert.equal(opus.requests, byModel['claude-opus-5'].requests);
+  assert.equal(opus.output, byModel['claude-opus-5'].output);
+  assert.equal(opus.input, byModel['claude-opus-5'].input);
+  assert.equal(opus.cacheRead, byModel['claude-opus-5'].cacheRead);
+  assert.equal(opus.cacheCreate, byModel['claude-opus-5'].cacheCreate);
+
+  const fable = analysis.byModel['claude-fable-5'];
+  assert.equal(fable.requests, byModel['claude-fable-5'].requests);
+  assert.equal(fable.output, byModel['claude-fable-5'].output);
+
+  assert.equal(analysis.byPhase.implement.requests, byPhase.implement.requests);
+  assert.equal(analysis.byPhase.implement.output, byPhase.implement.output);
+  assert.equal(analysis.byPhase.verify.requests, byPhase.verify.requests);
+  assert.equal(analysis.byPhase.verify.sessions, 1);
+});
+
+test('live metrics.json wins over digest byModel/byPhase splits', () => {
+  // Discriminating fixture: digest cells differ from the live doc so a wrong
+  // preference would still produce non-zero numbers — and fail these asserts.
+  const live = doc({
+    byModel: {
+      'claude-opus-5': { requests: 90, input: 90, output: 4500, cacheRead: 800000, cacheCreate: 4000 },
+    },
+    byPhase: {
+      implement: { requests: 80, input: 80, output: 4000, cacheRead: 700000, cacheCreate: 4000 },
+    },
+  });
+  const digestSplit = {
+    byModel: {
+      'claude-opus-5': { requests: 1, input: 1, output: 1, cacheRead: 1, cacheCreate: 1 },
+    },
+    byPhase: {
+      implement: { requests: 2, input: 2, output: 2, cacheRead: 2, cacheCreate: 2 },
+    },
+  };
+  const analysis = buildAnalysis({
+    cwd: project({
+      digests: [
+        digest('s-both', {
+          metrics: compact({
+            models: ['claude-opus-5'],
+            ...digestSplit,
+          }),
+        }),
+      ],
+      docs: { 's-both': live },
+    }),
+  });
+
+  const opus = analysis.byModel['claude-opus-5'];
+  assert.equal(opus.requests, live.byModel['claude-opus-5'].requests);
+  assert.equal(opus.output, live.byModel['claude-opus-5'].output);
+  assert.notEqual(opus.requests, digestSplit.byModel['claude-opus-5'].requests);
+  assert.equal(analysis.byPhase.implement.requests, live.byPhase.implement.requests);
+  assert.notEqual(analysis.byPhase.implement.requests, digestSplit.byPhase.implement.requests);
+});
+
 test('the skip rate answers how often forge resolve-model was bypassed', () => {
   const a = doc({ dispatches: { total: 5, allowed: 3, rewritten: 1, denied: 1, skipped: 2 } });
   const b = doc({ dispatches: { total: 3, allowed: 3, rewritten: 0, denied: 0, skipped: 0 } });

@@ -16,13 +16,13 @@
 
 ## 2. Durable byModel / byPhase in digest (F66)
 
-- [ ] 2.1 RED: `compactMetrics` / ledger tests expect `byModel`/`byPhase`
+- [x] 2.1 RED: `compactMetrics` / ledger tests expect `byModel`/`byPhase`
       compact maps when `metrics.json` is available; `buildAnalysis` with
       digest splits and **no** live `metrics.json` fills per-model requests
       and tokens from the digest (not zeros). Verify RED on
       `ledger` + `analyze` tests.
 
-- [ ] 2.2 GREEN: extend `compactMetrics` in `packages/cli/src/ledger.mjs`;
+- [x] 2.2 GREEN: extend `compactMetrics` in `packages/cli/src/ledger.mjs`;
       ensure phase-done digest path uses it; update `buildAnalysis` to prefer
       live doc then digest splits. Resolve F66.
 

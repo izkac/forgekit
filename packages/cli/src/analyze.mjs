@@ -8,14 +8,16 @@
  * models actually doing".
  *
  * TWO TIERS OF EVIDENCE, and the difference is the point. A digest survives
- * `forge cleanup` but carries only totals — request and token counts, the model
- * *names*, an error rate. The per-model token split, the per-phase attribution
- * and the full dispatch breakdown live in `metrics.json`, which dies with the
- * directory. So `byModel` counts a model's *sessions* from every digest that
- * names it and sums its *tokens* only from the documents still on disk, and
- * says so: each row carries both `sessions` and `detailed`. A row claiming
- * fewer tokens than were really spent is far worse than one that admits how
- * much of its history it can still see.
+ * `forge cleanup` and carries totals plus compact `byModel` / `byPhase`
+ * splits (when the session finished after that schema landed). The live
+ * `metrics.json` is preferred when still on disk — freshest, and it still
+ * holds tool tables and error counts the digest does not. When only the
+ * digest remains, its splits fill per-model and per-phase request/token
+ * rows. Sessions that predate digest splits still contribute model *names*
+ * and grades from the digest, with `detailed` counting only sessions that
+ * actually contributed a split. A row claiming fewer tokens than were really
+ * spent is far worse than one that admits how much of its history it can
+ * still see.
  *
  * COVERAGE IS STATED FIRST for the same reason. A project six of whose nine
  * sessions predate telemetry has a real answer and a partial one, and the
@@ -131,7 +133,6 @@ export function buildAnalysis(options = {}) {
     const compact = entry.metrics && typeof entry.metrics === 'object' ? entry.metrics : null;
     const hasMetrics = compact?.available === true;
     const doc = readSessionDoc(forgeDir, entry.sessionId);
-    const detailed = doc?.available === true;
     const grade = entry.grade ?? card?.grade ?? null;
 
     if (hasMetrics) {
@@ -143,10 +144,25 @@ export function buildAnalysis(options = {}) {
     }
     if (typeof grade === 'string' && grade) grades[grade] = (grades[grade] ?? 0) + 1;
 
-    // Model names come from whichever source has them; the per-model token
-    // split only from a document still on disk.
-    const named = detailed
-      ? Object.keys(doc.byModel ?? {})
+    // Prefer live metrics.json splits; else digest compact byModel/byPhase.
+    // Name-only historical digests still contribute sessions/grades only.
+    const live = doc?.available === true;
+    const modelSplit = live
+      ? doc.byModel && typeof doc.byModel === 'object'
+        ? doc.byModel
+        : null
+      : compact?.byModel && typeof compact.byModel === 'object'
+        ? compact.byModel
+        : null;
+    const phaseSplit = live
+      ? doc.byPhase && typeof doc.byPhase === 'object'
+        ? doc.byPhase
+        : null
+      : compact?.byPhase && typeof compact.byPhase === 'object'
+        ? compact.byPhase
+        : null;
+    const named = modelSplit
+      ? Object.keys(modelSplit)
       : Array.isArray(compact?.models)
         ? compact.models
         : [];
@@ -167,20 +183,23 @@ export function buildAnalysis(options = {}) {
       });
       row.sessions += 1;
       if (typeof grade === 'string' && grade) row.grades.push(grade);
-      if (!detailed) continue;
+      if (!modelSplit) continue;
       row.detailed += 1;
-      const cell = doc.byModel?.[model] ?? {};
+      const cell = modelSplit[model] ?? {};
       row.requests += num(cell.requests);
       for (const field of TOKEN_FIELDS) row[field] += num(cell[field]);
       // The host does not attribute a tool result to a model, so a model's
       // error rate can only be the rate of the sessions it ran in. Named
-      // `sessionErrorRate` so nobody reads it as anything sharper.
-      row.toolResults += num(doc.errors?.toolResults);
-      row.errorResults += num(doc.errors?.errorResults);
+      // `sessionErrorRate` so nobody reads it as anything sharper. Only a
+      // live document carries the raw tool/error counts.
+      if (live) {
+        row.toolResults += num(doc.errors?.toolResults);
+        row.errorResults += num(doc.errors?.errorResults);
+      }
     }
 
-    if (detailed) {
-      for (const [phase, cell] of Object.entries(doc.byPhase ?? {})) {
+    if (phaseSplit) {
+      for (const [phase, cell] of Object.entries(phaseSplit)) {
         const row = (byPhase[phase] ??= {
           sessions: 0,
           requests: 0,
@@ -193,13 +212,15 @@ export function buildAnalysis(options = {}) {
         row.requests += num(cell?.requests);
         for (const field of TOKEN_FIELDS) row[field] += num(cell?.[field]);
       }
+    }
+    if (live) {
       toolResults += num(doc.errors?.toolResults);
       errorResults += num(doc.errors?.errorResults);
     }
 
     // Prefer the document, fall back to the digest's own copy — which is the
     // only one left once `forge cleanup` has run.
-    const table = (detailed ? doc.dispatches : null) ?? entry.dispatches ?? null;
+    const table = (live ? doc.dispatches : null) ?? entry.dispatches ?? null;
     if (table && typeof table === 'object') {
       dispatches.sessions += 1;
       for (const key of ['total', 'allowed', 'rewritten', 'denied', 'skipped']) {
@@ -220,7 +241,7 @@ export function buildAnalysis(options = {}) {
       durationHours: entry.durationHours ?? null,
       endedAt: entry.endedAt ?? null,
       hasMetrics,
-      detailed,
+      detailed: live,
       requests: hasMetrics ? num(compact.requests) : null,
       outputTokens: hasMetrics ? num(compact.outputTokens) : null,
       totalTokens: hasMetrics ? num(compact.totalTokens) : null,
