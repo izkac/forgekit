@@ -192,3 +192,40 @@ export function resolveFinding(opts) {
   writeAll(opts.forgeDir, entries);
   return { entry: entries[idx], dependents };
 }
+
+/**
+ * @param {{ forgeDir: string, id: string, from: string, note: string, now?: () => Date }} opts
+ */
+export function reopenFinding(opts) {
+  const entries = readFindings(opts.forgeDir);
+  const idx = entries.findIndex((entry) => entry.id === opts.id);
+  if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
+  if (entries[idx].status === 'open') {
+    throw new Error(`Finding ${opts.id} is already open.`);
+  }
+  if (entries[idx].status !== 'resolved') {
+    throw new Error(`Finding ${opts.id} is ${entries[idx].status}; only resolved findings can be reopened.`);
+  }
+
+  const from = String(opts.from ?? '').trim();
+  if (!from) throw new Error('A reopened finding needs --from <oldId>.');
+  const note = String(opts.note ?? '').trim();
+  if (!note) throw new Error('A reopened finding needs --note "<text>".');
+
+  const previous = entries[idx].note;
+  const reopenCount = typeof entries[idx].reopenCount === 'number' ? entries[idx].reopenCount : 0;
+  entries[idx] = {
+    ...entries[idx],
+    status: 'open',
+    reopenedFrom: from,
+    reopenCount: reopenCount + 1,
+    note,
+    noteHistory: [
+      ...(Array.isArray(entries[idx].noteHistory) ? entries[idx].noteHistory : []),
+      ...(typeof previous === 'string' && previous.trim() !== '' ? [previous] : []),
+    ],
+    reopenedAt: (opts.now?.() ?? new Date()).toISOString(),
+  };
+  writeAll(opts.forgeDir, entries);
+  return entries[idx];
+}

@@ -1486,6 +1486,103 @@ test('phase done accepts with verify-evidence, complete tasks, and notApplicable
   }
 });
 
+test('phase done refuses a double-reopened finding for the session change', () => {
+  const dir = tmp('forge-reopen-gate-refuse-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-reopen-refuse');
+    const sessionDir = path.dirname(sessionFile);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    session.openspecChange = 'fix-parser';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+    makeDoneable(sessionDir);
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'findings.jsonl'),
+      `${JSON.stringify({
+        id: 'F11',
+        status: 'open',
+        change: 'fix-parser',
+        reopenCount: 2,
+        text: 'parser regression returned',
+      })}\n`,
+      'utf8',
+    );
+
+    assert.throws(() => runSetPhase(dir, ['done']), /F11/);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'plan');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done records a reopen waiver for a double-reopened finding', () => {
+  const dir = tmp('forge-reopen-gate-waive-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-reopen-waive');
+    const sessionDir = path.dirname(sessionFile);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    session.openspecChange = 'fix-parser';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+    makeDoneable(sessionDir);
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'findings.jsonl'),
+      `${JSON.stringify({
+        id: 'F11',
+        status: 'open',
+        change: 'fix-parser',
+        reopenCount: 2,
+        text: 'parser regression returned',
+      })}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done', '--reopen-waived', 'root cause accepted for follow-up']);
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'done');
+    assert.equal(after.reopenWaived, 'root cause accepted for follow-up');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done ignores findings reopened only once or without a change', () => {
+  const dir = tmp('forge-reopen-gate-narrow-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-reopen-narrow');
+    const sessionDir = path.dirname(sessionFile);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    session.slug = 'fix-parser';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+    makeDoneable(sessionDir);
+    fs.writeFileSync(
+      path.join(dir, '.forge', 'findings.jsonl'),
+      `${[
+        {
+          id: 'F11',
+          status: 'open',
+          change: 'fix-parser',
+          reopenCount: 1,
+          text: 'parser regression returned once',
+        },
+        {
+          id: 'F12',
+          status: 'open',
+          change: null,
+          reopenCount: 2,
+          text: 'unscoped regression',
+        },
+      ]
+        .map((finding) => JSON.stringify(finding))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+    assert.equal(JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase, 'done');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('phase done refuses with an unresolved deferral', () => {
   const dir = tmp('forge-set-phase-defer-');
   try {

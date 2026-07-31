@@ -32,6 +32,7 @@ import { writeSessionScorecard } from './score.mjs';
 import { bindHost } from './metrics/host.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
+import { openFindings } from './findings.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -51,7 +52,7 @@ export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--reopen-waived "<reason>"] [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -70,6 +71,7 @@ let tasksComplete = null;
 let subagentsDispatched = null;
 let allowIncomplete = null;
 let finalReviewWaived = null;
+let reopenWaived = null;
 
 for (let i = 1; i < args.length; i += 1) {
   const flag = args[i];
@@ -94,6 +96,9 @@ for (let i = 1; i < args.length; i += 1) {
     i += 1;
   } else if (flag === '--final-review-waived' && next) {
     finalReviewWaived = next;
+    i += 1;
+  } else if (flag === '--reopen-waived' && next) {
+    reopenWaived = next;
     i += 1;
   } else if (flag === '--allow-incomplete' && next) {
     allowIncomplete = next;
@@ -337,6 +342,36 @@ function enforceFinalReviewFloor() {
 }
 
 /**
+ * A finding that has returned twice for this change needs an explicit operator
+ * decision before the session can be marked complete.
+ */
+function enforceReopenFloor() {
+  if (phase !== 'done' && phase !== 'finish') return;
+  if (reopenWaived) {
+    session.reopenWaived = reopenWaived;
+    return;
+  }
+
+  const changeSlugs = new Set(
+    [session.openspecChange, session.slug].filter((slug) => typeof slug === 'string' && slug !== ''),
+  );
+  const blocking = openFindings(path.join(process.cwd(), '.forge')).filter(
+    (finding) => finding.reopenCount >= 2 && changeSlugs.has(finding.change),
+  );
+  if (blocking.length === 0) {
+    delete session.reopenWaived;
+    return;
+  }
+
+  process.stderr.write(
+    `Cannot enter phase "${phase}": findings reopened twice remain open for this change:\n` +
+      `${blocking.map((finding) => `  - ${finding.id}`).join('\n')}\n` +
+      'Resolve the findings, or record the decision: --reopen-waived "<reason>".\n',
+  );
+  process.exit(1);
+}
+
+/**
  * Measure who wrote the final review, once, and freeze the answer.
  *
  * BEFORE THE GATE, NOT MERELY BEFORE THE SCORECARD. `enforceFinalReviewFloor`
@@ -517,6 +552,7 @@ function freezeReviewVerdict() {
 
 freezeReviewVerdict();
 enforceFinalReviewFloor();
+enforceReopenFloor();
 enforceDoneGate();
 
 // Host telemetry on finish/done, and it has to happen *here* — before the

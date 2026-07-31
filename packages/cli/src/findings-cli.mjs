@@ -7,10 +7,11 @@
  *   forge finding link <id> --depends-on <ids>
  *   forge finding list [--json] [--all] [--all-kinds]
  *   forge finding resolve <id> [--note "<text>"]
+ *   forge finding reopen <id> --from <oldId> --note "<text>"
  */
 
 import { FORGE_DIR, loadSession, readActive } from './lib.mjs';
-import { addFinding, linkFinding, readFindings, resolveFinding } from './findings.mjs';
+import { addFinding, linkFinding, readFindings, reopenFinding, resolveFinding } from './findings.mjs';
 
 function usage() {
   process.stderr.write(
@@ -19,6 +20,7 @@ function usage() {
   forge finding link <id> --depends-on <ids>
   forge finding list [--json] [--all] [--all-kinds]
   forge finding resolve <id> [--note "<text>"]
+  forge finding reopen <id> --from <oldId> --note "<text>"
 `,
   );
 }
@@ -43,6 +45,18 @@ function parseDependencyIds(value) {
   const ids = value.split(',').map((id) => id.trim());
   if (ids.some((id) => id === '')) fail('Dependency ids must not be empty.');
   return ids;
+}
+
+function reopenedFirst(entries) {
+  return [...entries].sort((left, right) => {
+    const leftReopened = left.reopenCount >= 1;
+    const rightReopened = right.reopenCount >= 1;
+    return Number(rightReopened) - Number(leftReopened);
+  });
+}
+
+function reopenMarker(entry) {
+  return entry.reopenCount >= 1 ? `↻${entry.reopenCount}` : '  ';
 }
 
 /**
@@ -133,7 +147,7 @@ if (cmd === 'list') {
   const entries = readFindings(FORGE_DIR);
   const open = entries.filter((e) => e.status === 'open');
   const resolved = entries.filter((e) => e.status !== 'open');
-  const visibleOpen = allKinds ? open : open.filter((e) => e.kind === 'bug');
+  const visibleOpen = reopenedFirst(allKinds ? open : open.filter((e) => e.kind === 'bug'));
   const visibleResolved = allKinds ? resolved : resolved.filter((e) => e.kind === 'bug');
   const hiddenOpenNonBugs = allKinds ? 0 : open.length - visibleOpen.length;
   if (argv.includes('--json')) {
@@ -150,7 +164,7 @@ if (cmd === 'list') {
   }
   const rows = (all ? [...visibleOpen, ...visibleResolved] : visibleOpen).map(
     (e) =>
-      `${e.id}  ${String(e.kind ?? 'unknown').padEnd(9)} ${String(e.severity ?? 'major').padEnd(7)} ${
+      `${e.id}  ${String(e.kind ?? 'unknown').padEnd(9)} ${String(e.severity ?? 'major').padEnd(7)} ${reopenMarker(e)} ${
         e.status === 'open' ? ' ' : '✓'
       } ${e.text}${e.change ? `  → ${e.change}` : ''}`,
   );
@@ -174,6 +188,25 @@ if (cmd === 'resolve') {
     const { entry, dependents } = resolveFinding({ forgeDir: FORGE_DIR, id, note });
     emit({ ok: true, ...entry, dependents });
     warnDependents(dependents);
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+  process.exit(0);
+}
+
+if (cmd === 'reopen') {
+  const id = argv[1];
+  if (!id) fail('Usage: forge finding reopen <id> --from <oldId> --note "<text>"');
+  let from;
+  let note;
+  for (let i = 2; i < argv.length; i += 1) {
+    if (argv[i] === '--from' && argv[i + 1]) from = argv[(i += 1)];
+    else if (argv[i] === '--note' && argv[i + 1]) note = argv[(i += 1)];
+    else fail(`Unknown argument: ${argv[i]}`);
+  }
+  if (!from || !note) fail('Usage: forge finding reopen <id> --from <oldId> --note "<text>"');
+  try {
+    emit({ ok: true, ...reopenFinding({ forgeDir: FORGE_DIR, id, from, note }) });
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   }

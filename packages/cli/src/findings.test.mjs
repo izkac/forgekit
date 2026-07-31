@@ -224,6 +224,68 @@ test('a resolution note can be corrected, and the superseded text is kept', () =
   assert.match(bare.stderr, /--note/, 'and the refusal names the way to correct it');
 });
 
+test('reopen restores a resolved finding and keeps its prior resolution note', () => {
+  const cwd = makeProject();
+  const finding = run(cwd, ['add', 'retry the broken import', '--kind', 'bug', '--severity', 'major']);
+  run(cwd, ['resolve', finding.out.id, '--note', 'fixed the import path']);
+
+  const reopened = run(cwd, [
+    'reopen',
+    finding.out.id,
+    '--from',
+    'F0',
+    '--note',
+    'the package still fails under ESM',
+  ]);
+
+  assert.equal(reopened.status, 0, reopened.stderr);
+  assert.equal(reopened.out.status, 'open');
+  assert.equal(reopened.out.reopenedFrom, 'F0');
+  assert.equal(reopened.out.reopenCount, 1);
+  assert.equal(reopened.out.note, 'the package still fails under ESM');
+  assert.deepEqual(reopened.out.noteHistory, ['fixed the import path']);
+});
+
+test('reopen increments the count each time a finding returns to open', () => {
+  const cwd = makeProject();
+  const finding = run(cwd, ['add', 'retry the broken import', '--kind', 'bug', '--severity', 'major']);
+  run(cwd, ['resolve', finding.out.id, '--note', 'first fix']);
+  run(cwd, ['reopen', finding.out.id, '--from', 'F0', '--note', 'first regression']);
+  run(cwd, ['resolve', finding.out.id, '--note', 'second fix']);
+
+  const reopened = run(cwd, ['reopen', finding.out.id, '--from', 'F1', '--note', 'second regression']);
+
+  assert.equal(reopened.status, 0, reopened.stderr);
+  assert.equal(reopened.out.reopenCount, 2);
+  assert.equal(reopened.out.reopenedFrom, 'F1');
+  assert.deepEqual(reopened.out.noteHistory, ['first fix', 'second fix']);
+});
+
+test('reopen refuses a finding that is already open', () => {
+  const cwd = makeProject();
+  const finding = run(cwd, ['add', 'retry the broken import', '--kind', 'bug', '--severity', 'major']);
+
+  const reopened = run(cwd, ['reopen', finding.out.id, '--from', 'F0', '--note', 'still broken']);
+
+  assert.equal(reopened.status, 1);
+  assert.match(reopened.stderr, /already open/);
+});
+
+test('list puts reopened open findings first and marks their reopen count', () => {
+  const cwd = makeProject();
+  const first = run(cwd, ['add', 'first ordinary bug', '--kind', 'bug', '--severity', 'major']);
+  const reopened = run(cwd, ['add', 'reopened debt', '--kind', 'debt', '--severity', 'minor']);
+  run(cwd, ['add', 'last ordinary bug', '--kind', 'bug', '--severity', 'major']);
+  run(cwd, ['resolve', reopened.out.id, '--note', 'closed initially']);
+  run(cwd, ['reopen', reopened.out.id, '--from', first.out.id, '--note', 'still needs work']);
+
+  const json = run(cwd, ['list', '--json', '--all-kinds']);
+  assert.deepEqual(json.out.open.map((entry) => entry.id), [reopened.out.id, first.out.id, 'F3']);
+
+  const text = run(cwd, ['list', '--all-kinds']);
+  assert.match(text.text, new RegExp(`${reopened.out.id}.*minor\\s+↻1`));
+});
+
 test('resolving an unknown id fails loudly instead of silently succeeding', () => {
   const cwd = makeProject();
   const { status, stderr } = run(cwd, ['resolve', 'F999']);
@@ -284,6 +346,32 @@ test('forge status headlines open bugs and groups open findings by kind', () => 
     process: 1,
   });
   assert.match(status.openFindings.latest[0].text, /parallel race/);
+  assert.deepEqual(status.reopenedFindings, []);
+});
+
+test('forge status reports all open reopened findings separately', () => {
+  const cwd = makeProject();
+  const reopenedBug = run(cwd, ['add', 'bug returned', '--kind', 'bug', '--severity', 'major']);
+  const reopenedIdea = run(cwd, ['add', 'idea returned', '--kind', 'idea', '--severity', 'note']);
+  const resolvedReopened = run(cwd, ['add', 'resolved return', '--kind', 'debt', '--severity', 'minor']);
+  for (const finding of [reopenedBug, reopenedIdea, resolvedReopened]) {
+    run(cwd, ['resolve', finding.out.id, '--note', 'initially resolved']);
+    run(cwd, ['reopen', finding.out.id, '--from', 'F0', '--note', 'regressed']);
+  }
+  run(cwd, ['resolve', resolvedReopened.out.id, '--note', 'fixed finally']);
+
+  const statusScript = path.join(path.dirname(FINDINGS), 'session-status.mjs');
+  const stdout = execFileSync(process.execPath, [statusScript], {
+    cwd,
+    env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('finding-fleet-'), 's') },
+  }).toString();
+  const status = JSON.parse(stdout);
+
+  assert.equal(status.openFindings.count, 1);
+  assert.deepEqual(status.reopenedFindings, [
+    { id: reopenedBug.out.id, reopenCount: 1, text: 'bug returned' },
+    { id: reopenedIdea.out.id, reopenCount: 1, text: 'idea returned' },
+  ]);
 });
 
 test('addFinding requires a kind from the five allowed values', () => {

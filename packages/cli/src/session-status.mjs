@@ -84,6 +84,9 @@ for (const finding of findings) {
   if (KINDS.includes(finding.kind)) findingsByKind[finding.kind] += 1;
 }
 const openBugs = findings.filter((finding) => finding.kind === 'bug');
+const reopenedFindings = findings
+  .filter((finding) => finding.reopenCount >= 1)
+  .map(({ id, reopenCount, text }) => ({ id, reopenCount, text }));
 
 process.stdout.write(
   JSON.stringify(
@@ -102,6 +105,7 @@ process.stdout.write(
         byKind: findingsByKind,
         latest: openBugs.slice(-5).map((f) => ({ id: f.id, severity: f.severity, text: f.text, change: f.change })),
       },
+      reopenedFindings,
       session,
       progress: status,
       pace: {

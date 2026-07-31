@@ -34,16 +34,16 @@
 
 ## 3. Reopen (W4)
 
-- [ ] 3.1 `forge finding reopen <id> --from <oldId> --note "…"`: resolved
+- [x] 3.1 `forge finding reopen <id> --from <oldId> --note "…"`: resolved
       → open, set `reopenedFrom`, increment `reopenCount` (from 0), keep
       history (`noteHistory` / prior resolve note). Refuse reopen of an
       already-open finding. Tests: reopen transition; reopenCount
       increments on second reopen; open finding refused.
-- [ ] 3.2 `list` sorts any `reopenCount >= 1` first and marks them (e.g.
+- [x] 3.2 `list` sorts any `reopenCount >= 1` first and marks them (e.g.
       `↻N`); `session-status` adds `reopenedFindings: [{ id, reopenCount,
       text }]` separate from `openFindings`. Tests cover sort order and
       status field.
-- [ ] 3.3 `set-phase.mjs` `phase done`: if the session's change slug
+- [x] 3.3 `set-phase.mjs` `phase done`: if the session's change slug
       matches an open finding's `change` with `reopenCount >= 2`, refuse
       unless `--reopen-waived` (stderr names the findings). Test: blocked;
       waived passes; reopenCount 1 does not block.
