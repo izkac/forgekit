@@ -37,11 +37,11 @@
 
 ## 4. Product loop + findings
 
-- [ ] 4.1 Author `scripts/e2e/stamp-follow-ups.mjs` (and `e2e.json` steps):
+- [x] 4.1 Author `scripts/e2e/stamp-follow-ups.mjs` (and `e2e.json` steps):
       write two stamps via `writeStamp` and assert a valid live file with no
       required leftover `.tmp`; plant a duplicate `sessionIds` binding and
       assert `reviewEvidence` reports `dispatched === 1` for the final unit;
       plant a chmod'd sidecar and assert the unavailable reason names id and
       path. Wire `forge e2e init` / steps so `forge e2e run` is green.
-- [ ] 4.2 Resolve findings F60, F61, F62 with short notes pointing at this
+- [x] 4.2 Resolve findings F60, F61, F62 with short notes pointing at this
       change.
