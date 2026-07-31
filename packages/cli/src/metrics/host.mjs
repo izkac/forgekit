@@ -159,9 +159,13 @@ function resolveConfigDir(opts) {
  *   unreadable: { sessionId: string, path: string, reason: string }[] }}
  */
 export function findTranscripts(sessionIds, opts = {}) {
-  const ids = (Array.isArray(sessionIds) ? sessionIds : []).filter(
-    (id) => typeof id === 'string' && id,
-  );
+  const ids = [
+    ...new Set(
+      (Array.isArray(sessionIds) ? sessionIds : []).filter(
+        (id) => typeof id === 'string' && id,
+      ),
+    ),
+  ];
   if (ids.length === 0) return { found: [], unreadable: [] };
 
   let projectsDir;

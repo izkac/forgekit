@@ -265,6 +265,17 @@ test('findTranscripts finds transcripts across project directories', () => {
   });
 });
 
+test('findTranscripts returns one found entry when the same id is listed twice', () => {
+  const { configDir, projA, sidecar } = fixture('forge-host-dedupe-');
+
+  const { found, unreadable } = findTranscripts([ID_A, ID_A], { configDir });
+
+  assert.deepEqual(found, [
+    { sessionId: ID_A, transcript: path.join(projA, `${ID_A}.jsonl`), sidecarDir: sidecar },
+  ]);
+  assert.deepEqual(unreadable, []);
+});
+
 test('findTranscripts omits ids with no transcript on disk', () => {
   const { configDir } = fixture('forge-host-miss-');
 

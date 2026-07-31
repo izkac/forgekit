@@ -14,12 +14,12 @@
 
 ## 2. Dedupe sessionIds (F61)
 
-- [ ] 2.1 RED: tighten
+- [x] 2.1 RED: tighten
       `packages/cli/src/metrics/review-evidence.test.mjs` ("a bound host id
       repeated…") so `units.final.dispatched === 1` (and seen/prescribed do not
       double). Add a `host.test.mjs` case that `findTranscripts([id, id], …)`
       returns one `found` entry. Verify the new assertions fail on current code.
-- [ ] 2.2 GREEN: order-preserving dedupe of non-empty string ids at the start
+- [x] 2.2 GREEN: order-preserving dedupe of non-empty string ids at the start
       of `findTranscripts` in `packages/cli/src/metrics/host.mjs`. Both new
       assertions green; existing host / review-evidence suites stay green.
 
