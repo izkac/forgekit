@@ -28,11 +28,11 @@
 
 ## 3. Model policy copy + renderer honesty (F65, F67, F68)
 
-- [ ] 3.1 RED: `formatAnalysis` / analyze tests — `sessions>0 && total===0`
+- [x] 3.1 RED: `formatAnalysis` / analyze tests — `sessions>0 && total===0`
       does not tell the operator to wire the hook; By-model caption marks
       detailed-only columns; column header is `sess err` not `err`.
 
-- [ ] 3.2 GREEN: implement in `packages/cli/src/analyze.mjs`. Resolve
+- [x] 3.2 GREEN: implement in `packages/cli/src/analyze.mjs`. Resolve
       F65, F67, F68.
 
 ## 4. Dogfood Claude hooks in forgekit (F64)

@@ -350,11 +350,13 @@ export function formatAnalysis(analysis) {
   const models = Object.entries(a.byModel ?? {});
   if (models.length) {
     out.push('');
-    out.push('By model  (tokens cover the sessions whose metrics.json still exists)');
+    out.push(
+      'By model  (requests, tokens, sess err: detailed-split sessions only; sessions, grades: digest-wide)',
+    );
     out.push(
       table(
         [
-          ['model', 'sessions', 'detailed', 'requests', 'output', 'total', 'err', 'grades'],
+          ['model', 'sessions', 'detailed', 'requests', 'output', 'total', 'sess err', 'grades'],
           ...models
             .sort((x, y) => y[1].requests - x[1].requests || x[0].localeCompare(y[0]))
             .map(([model, row]) => [
@@ -404,6 +406,8 @@ export function formatAnalysis(analysis) {
         `${big(d.allowed)} allowed, ${big(d.rewritten)} rewritten, ${big(d.denied)} denied. ` +
         `forge resolve-model bypassed on ${pct(d.skipRate)}.`,
     );
+  } else if (num(d.sessions) > 0) {
+    out.push(`Model policy: ${big(d.sessions)} sessions reported no dispatches.`);
   } else {
     out.push(
       'Model policy: no dispatches recorded. Wire the PreToolUse hook (forge init) to measure them.',

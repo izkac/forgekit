@@ -462,6 +462,96 @@ test('the rendered table leads with coverage and survives an empty history', () 
   assert.doesNotThrow(() => formatAnalysis({}));
 });
 
+/** Minimal analysis object for `formatAnalysis` — coverage must be non-zero to reach later sections. */
+function analysisStub(over = {}) {
+  return {
+    coverage: { sessionsTotal: 1, sessionsWithMetrics: 1, ratio: 1 },
+    totals: { requests: 0, totalTokens: 0, outputTokens: 0, subagents: 0, errorRate: 0 },
+    byModel: {},
+    byPhase: {},
+    dispatches: {
+      total: 0,
+      sessions: 0,
+      allowed: 0,
+      rewritten: 0,
+      denied: 0,
+      skipped: 0,
+      skipRate: 0,
+    },
+    sessions: [],
+    ...over,
+  };
+}
+
+test('model policy: empty tables on sessions do not solely advise wiring the hook', () => {
+  const sessions = 9;
+  const text = formatAnalysis(
+    analysisStub({
+      dispatches: {
+        total: 0,
+        sessions,
+        allowed: 0,
+        rewritten: 0,
+        denied: 0,
+        skipped: 0,
+        skipRate: 0,
+      },
+    }),
+  );
+  assert.match(text, new RegExp(`${sessions} sessions reported no dispatches`, 'i'));
+  assert.doesNotMatch(text, /Wire the PreToolUse hook/);
+});
+
+test('model policy: zero dispatch sessions still advise wiring the hook', () => {
+  const text = formatAnalysis(
+    analysisStub({
+      dispatches: {
+        total: 0,
+        sessions: 0,
+        allowed: 0,
+        rewritten: 0,
+        denied: 0,
+        skipped: 0,
+        skipRate: 0,
+      },
+    }),
+  );
+  assert.match(text, /Wire the PreToolUse hook/);
+});
+
+test('by-model caption marks requests as detailed-only and header is sess err', () => {
+  const text = formatAnalysis(
+    analysisStub({
+      byModel: {
+        'claude-opus-5': {
+          sessions: 2,
+          detailed: 1,
+          requests: 10,
+          input: 1,
+          output: 2,
+          cacheRead: 3,
+          cacheCreate: 4,
+          sessionErrorRate: 0.01,
+          grades: ['A'],
+        },
+      },
+    }),
+  );
+  const caption = text.split('\n').find((l) => /^By model/.test(l));
+  assert.ok(caption, 'By model caption present');
+  assert.match(caption, /request/i);
+  assert.match(caption, /detailed/i);
+  assert.doesNotMatch(caption, /tokens cover the sessions whose metrics\.json still exists/);
+
+  const header = text
+    .split('\n')
+    .find((l) => /^model\b/.test(l.trim()) && /\bsessions\b/.test(l) && /\brequests\b/.test(l));
+  assert.ok(header, 'By model header present');
+  const cols = header.trim().split(/\s{2,}/);
+  assert.ok(cols.includes('sess err'), `expected sess err in ${JSON.stringify(cols)}`);
+  assert.ok(!cols.includes('err'), `bare err must not be a column: ${JSON.stringify(cols)}`);
+});
+
 /* ---------- the CLI ---------- */
 
 test('forge analyze is registered, prints a table, and --json emits the object', () => {
