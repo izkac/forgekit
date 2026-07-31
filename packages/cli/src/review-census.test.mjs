@@ -311,9 +311,16 @@ test('the real corpus case that forced the revert', () => {
  * `undefined < FINAL_REVIEW_REQUEST_FLOOR` is `false`. The deliberately
  * malformed buckets below are the exception and say so.
  *
+ * `partial` defaults to `false` for the same reason the tallies are derived:
+ * `reviewEvidence` writes it on every answer it returns, available or not, so a
+ * fixture that simply omitted it would describe a shape that reader no longer
+ * emits. A test that wants the *pre-flag* shape — an evidence object frozen or
+ * written before the flag existed — deletes the field by hand and says so.
+ *
  * @param {{ units?: Record<string, {dispatched: number, stopped: number, requests: number,
  *     maxRequests: number}>,
- *   seen?: number, prescribed?: number, available?: boolean, reason?: string }} [spec]
+ *   seen?: number, prescribed?: number, available?: boolean, partial?: boolean,
+ *   reason?: string }} [spec]
  */
 function evidence(spec = {}) {
   const units = spec.units ?? {};
@@ -325,6 +332,7 @@ function evidence(spec = {}) {
     units,
     seen: spec.seen ?? dispatches,
     prescribed: spec.prescribed ?? dispatches,
+    partial: spec.partial ?? false,
   };
   if (spec.reason !== undefined) answer.reason = spec.reason;
   return answer;
@@ -1193,6 +1201,31 @@ test('the host answer outranks the stamp, in both directions', () => {
   });
   assert.equal(measured.finalReview, 'independent');
   assert.equal(measured.finalReviewEvidence, 'host');
+
+  // AND THE SAME POSITIVE MEASURED FROM HALF A BINDING. D4's override reaches
+  // only the host's absence-negative, so a partial binding must not touch this
+  // row either — the host measured a dispatch that ran, and where it can answer
+  // it answers, whichever half of the conversation survived.
+  //
+  // Pinned because the shipped guard is `host.fromAbsence`, which today only
+  // ever rides on a `self` answer: a widening to `host.fromAbsence ||
+  // host.finalReview === 'independent'` survives the whole suite without this
+  // row, and it would quietly re-grade a host-MEASURED positive as `recorded`.
+  // The verdict would not move — which is exactly why only the grade catches
+  // it, and the grade is what `CENSUS_RULE` and `fleet-report` reason about.
+  const halfMeasured = reviewCensus(dir, {
+    evidence: evidence({
+      units: { final: { dispatched: 1, stopped: 0, requests, maxRequests: requests } },
+      partial: true,
+    }),
+  });
+  assert.equal(halfMeasured.finalReview, 'independent');
+  assert.equal(
+    halfMeasured.finalReviewEvidence,
+    'host',
+    'a partial binding does not downgrade a positive the host measured to the stamp that agrees with it',
+  );
+  assert.deepEqual(halfMeasured, measured, 'the flag changed nothing on a measured positive');
 });
 
 // ---------------------------------------------------------------------------
@@ -1437,6 +1470,195 @@ test('the recorded grade is a new classifier, so it carries a new rule number', 
   const census = reviewCensus(dir);
   assert.equal(census.finalReviewEvidence, 'recorded', 'fixture: the stamp decided this one');
   assert.equal(census.rule, CENSUS_RULE);
+});
+
+// ---------------------------------------------------------------------------
+// The partial binding bounds the host's absence-negative (design D4).
+//
+// `reviewEvidence` answers `available: true` from the surviving half of a
+// binding whose other host transcript has been pruned — deliberately, because
+// refusing instead would make every resumed session unmeasurable within days.
+// An absent `final` unit read from that half then reaches `hostFinalReview` as
+// the "one genuine negative", indistinguishable from one measured over the
+// whole conversation, and the gate refuses a session whose reviewer ran in the
+// pruned half. That is the F58 residual 3.2's reviewer reproduced. Task 4.1
+// gave the answer a `partial` flag; these tests pin what this module does with
+// it, and — as much — what it does NOT.
+// ---------------------------------------------------------------------------
+
+/**
+ * The reproduced scenario's host answer: measured from half a binding, the
+ * convention in use (a prescribed `group-01` dispatch defeats the adoption
+ * gate, so `prescribed > 0`), and no `final` unit in the table.
+ *
+ * The group dispatch clears the substance floor on purpose. It is not the unit
+ * under judgement, so the floor never looks at it — but a fixture describing a
+ * token dispatch would be describing a different scenario than the one this
+ * section is named for.
+ */
+function halfReadBinding(spec = {}) {
+  const requests = FINAL_REVIEW_REQUEST_FLOOR * 2;
+  const answer = evidence({
+    units: { 'group-01': { dispatched: 1, stopped: 0, requests, maxRequests: requests } },
+    partial: true,
+    ...spec,
+  });
+  assert.equal(answer.available, true, 'fixture: the surviving half still answers');
+  assert.ok(answer.prescribed > 0, `fixture: the convention is in use (${answer.prescribed})`);
+  assert.equal(answer.units.final, undefined, 'fixture: no final unit in the table');
+  return answer;
+}
+
+test('an absence measured from a partial binding does not erase a stamped reviewer', () => {
+  // D4. The host's `bucket === undefined` negative is a confident `self` built
+  // on an absence — and here the absence was read from half a conversation, so
+  // it is not a complete measurement. The stamp is the record the pruned half
+  // left behind, and it decides.
+  //
+  // The prose says `self-check`, so a lazy implementation that falls through to
+  // the file answers `self`/`inferred` and goes red rather than passing on the
+  // right verdict for the wrong reason.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'self', 'fixture: prose alone says self');
+
+  const halfRead = halfReadBinding();
+  const bare = reviewCensus(dir, { evidence: halfRead });
+  assert.equal(bare.finalReview, 'self', 'fixture: without a stamp the host still answers self');
+  assert.equal(bare.finalReviewEvidence, 'host', 'fixture: and it is the HOST answering');
+
+  stampDispatch(dir);
+  const census = reviewCensus(dir, { evidence: halfRead });
+  assert.equal(census.finalReview, 'independent');
+  assert.equal(census.finalReviewEvidence, 'recorded');
+  // Nothing measured a stop here, and the stamp is not the kind of record that
+  // could: the host's absence-negative carries `false` and the override leaves
+  // it exactly as it found it.
+  assert.equal(census.stoppedByOperator, false);
+});
+
+test('the partial flag alone decides nothing — without a stamp the absence still answers', () => {
+  // The regression net for the override's first conjunct read from the other
+  // side. A partial binding is not itself a reason to doubt the host: with no
+  // stamp on disk there is no second record to prefer, and the verdict must be
+  // byte-for-byte the one a complete binding produces. An implementation that
+  // routed partial absences to the prose "to be safe" would hand this session's
+  // gate back to the file under suspicion — and this fixture's prose says the
+  // opposite of the host, so it would go red rather than quietly agreeing.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'independent', 'fixture: prose alone says independent');
+  assert.equal(
+    fs.existsSync(path.join(dir, 'reviews', 'dispatches.json')),
+    false,
+    'fixture: nothing was stamped',
+  );
+
+  const census = reviewCensus(dir, { evidence: halfReadBinding() });
+  assert.equal(census.finalReview, 'self');
+  assert.equal(census.finalReviewEvidence, 'host');
+  assert.deepEqual(
+    census,
+    reviewCensus(dir, { evidence: halfReadBinding({ partial: false }) }),
+    'the same absence over a complete binding — the flag changed nothing on its own',
+  );
+});
+
+test('a measured stop wins even over a partial binding', () => {
+  // The first boundary: absence only. Every recorded dispatch of the final unit
+  // was stopped by the operator — a fact about dispatches that exist, on the
+  // half of the binding that survived — and the stamp was written before any of
+  // them ran. The operator's refusal is the host's record of a decision, and no
+  // stamp and no pruning gives the census standing to overturn it.
+  //
+  // The prose reads independent, so an implementation that widened the override
+  // to any partial `self` would answer `independent` here on `recorded`, and one
+  // that fell through to the file would answer `independent` on `inferred`:
+  // both distinguishable from the required `self`/`host`.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'independent', 'fixture: prose alone says independent');
+  stampDispatch(dir);
+  assert.equal(
+    reviewCensus(dir).finalReviewEvidence,
+    'recorded',
+    'fixture: the stamp alone does decide this session',
+  );
+
+  const stoppedBucket = { dispatched: 2, stopped: 2, requests: FINAL_REVIEW_REQUEST_FLOOR * 4, maxRequests: 0 };
+  assert.ok(
+    stoppedBucket.stopped >= stoppedBucket.dispatched,
+    'fixture: every recorded dispatch of the unit was stopped — the measured negative',
+  );
+  const halfRead = evidence({ units: { final: stoppedBucket }, partial: true });
+  assert.equal(halfRead.partial, true, 'fixture: and it was measured from half a binding');
+
+  const census = reviewCensus(dir, { evidence: halfRead });
+  assert.equal(census.finalReview, 'self');
+  assert.equal(census.finalReviewEvidence, 'host');
+  assert.equal(census.stoppedByOperator, true, 'the fact the host recorded is still reported');
+});
+
+test("a complete binding's absence stands against the stamp, and so does one that never said", () => {
+  // The second boundary: partial only. The host saw the whole conversation and
+  // this session's final reviewer is not in it — a label `forge review-label`
+  // printed but no dispatch ever carried is not a review, and this is the
+  // negative rule 5 shipped and D4 deliberately left standing.
+  //
+  // The second row is the same absence on an evidence object with NO `partial`
+  // field at all: the shape every caller passed before task 4.1, and the shape a
+  // foreign or JSON-round-tripped answer can still carry. A missing flag is not
+  // a claim that the binding was partial, so it must read exactly like `false`.
+  const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
+  assert.equal(reviewCensus(dir).finalReview, 'independent', 'fixture: prose alone says independent');
+  stampDispatch(dir);
+  assert.equal(
+    reviewCensus(dir).finalReviewEvidence,
+    'recorded',
+    'fixture: the stamp alone does decide this session',
+  );
+
+  const complete = halfReadBinding({ partial: false });
+  const preFlag = halfReadBinding({ partial: false });
+  // Hand-deleted rather than never written: the helper mirrors what
+  // `reviewEvidence` emits today, and the point of this row is the shape that
+  // reader used to emit and no longer does.
+  delete preFlag.partial;
+  assert.equal(Object.hasOwn(preFlag, 'partial'), false, 'fixture: the field is absent, not false');
+
+  for (const [why, answer] of [
+    ['a complete binding says `partial: false`', complete],
+    ['an evidence object written before the flag existed', preFlag],
+  ]) {
+    const census = reviewCensus(dir, { evidence: answer });
+    assert.equal(census.finalReview, 'self', why);
+    assert.equal(census.finalReviewEvidence, 'host', why);
+    assert.equal(census.stoppedByOperator, false, why);
+  }
+});
+
+test('the substance floor is untouched by the partial flag — a below-floor bucket is not an absence', () => {
+  // The third boundary: D3 stands. A well-formed `final` bucket below
+  // `FINAL_REVIEW_REQUEST_FLOOR` is the one `null` the host *measured* — a
+  // dispatch nobody stopped that did no work — and `finalBucketWellFormed`
+  // routes it to the prose so the stamp cannot hand F33's one-request forgery
+  // its `independent` back. That guard reads the bucket, never the binding, and
+  // a partial binding must not open a second door into it: the forger's own
+  // session is resumed as often as anyone's.
+  const dir = sessionWith({}, 'Reviewer: coordinator — self-check\n\n**Verdict: APPROVED**\n');
+  const bare = reviewCensus(dir);
+  assert.equal(bare.finalReview, 'self', 'fixture: prose alone says self');
+
+  const halfReadToken = evidence({ units: { final: tokenBucket() }, partial: true });
+  assert.equal(halfReadToken.partial, true, 'fixture: measured from half a binding');
+  assert.equal(
+    reviewCensus(dir, { evidence: halfReadToken }).finalReviewEvidence,
+    'inferred',
+    'fixture: below the floor the host does not answer, partial or not',
+  );
+
+  stampDispatch(dir);
+  const census = reviewCensus(dir, { evidence: halfReadToken });
+  assert.equal(census.finalReview, 'self');
+  assert.equal(census.finalReviewEvidence, 'inferred', 'the stamp contributed nothing');
+  assert.deepEqual(census, bare, 'exactly what the prose rule alone returns');
 });
 
 // ---------------------------------------------------------------------------

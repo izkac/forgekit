@@ -1,4 +1,4 @@
-<!-- forge-brief-specs-hash:c1605f6d0c000d2e -->
+<!-- forge-brief-specs-hash:c3da105be6095c11 -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -52,7 +52,12 @@ model and appends a small JSON record — unit, label, session id, time, model
 — into the session's own folder, which the host never prunes. When the
 final verdict is measured, evidence is consulted strongest-first: the host's
 live records if they can answer; otherwise the stamp; only then the report's
-wording.</p>
+wording. One refinement, added after review caught a gap: when the host's
+"no reviewer here" answer was measured from only <em>part</em> of the
+session's conversations (the older part already deleted), that half-blind
+negative no longer outranks the stamp — a real "the operator stopped the
+reviewer" record, or a negative measured from the complete record, still
+does.</p>
 
 <pre class="mermaid">
 flowchart TD
@@ -104,7 +109,11 @@ flowchart TD
       with the anti-forgery floor preserved (2 tasks).</li>
   <li><strong>3. Gate and consumers</strong> — pin the money/auth gate on the
       new grade; update ledgers, comments and the skill docs (3 tasks).</li>
-  <li><strong>4. Product-loop acceptance</strong> — end-to-end proof against
+  <li><strong>4. The partial-binding fix</strong> — the half-deleted
+      conversation case caught in review: the evidence reader now says when
+      it could only see part of the record, and the stamp wins over a
+      negative measured from half of it (2 tasks).</li>
+  <li><strong>5. Product-loop acceptance</strong> — end-to-end proof against
       the shipped binary, pruning included (1 task).</li>
 </ul>
 

@@ -24,7 +24,18 @@ group reviewer may carry `forge review-label <group-dir>`, but that is optional
 and feeds no number; see the end of this section before you decide to use it.
 The host records the description against the subagent it actually ran, and
 `forge phase done` reads that record rather than the **final** review file's
-wording.
+wording. Running the command also writes a **dispatch stamp** —
+`.forge/sessions/<id>/reviews/dispatches.json`, unit, label, session id,
+timestamp, the reviewer model it resolved in-process (`--tier` overrides the
+default `capable`) — and reports the stamp path and model on stderr. That
+stamp lives in the session's own directory rather than the host's transcript,
+so it outlives host-transcript pruning that erases the host's own record: a
+reviewer stamped at dispatch time is no longer lost the day its host
+conversation ages out, and `forge score` reads the stamp back as the
+`recorded` grade wherever the host itself cannot answer. It is not a second
+source of the same evidence — it proves a label was *issued*, not that a
+review *ran* — so it never outranks the host's own record, only stands in
+where the host has none.
 
 The label carries the **session id**, and that is the load-bearing part. Without
 it the join was "a review dispatch somewhere in this conversation while this
@@ -44,8 +55,11 @@ money/auth gate against a review file that said in plain words no subagent had
 read it. Forge now asks what the dispatch did: a unit whose busiest single
 dispatch you did not stop made fewer than five requests certifies nothing, and
 the wording decides instead. That ends the one-line forgery and nothing more —
-someone who knows the floor can pad past it. Still a check on the honest, not a
-defence against the deliberate.
+someone who knows the floor can pad past it. The dispatch stamp above does not
+reopen it either: a below-floor dispatch is the host having *measured* thin
+work, not an absent record, and the stamp only ever substitutes for a record
+the host lost, never for work a reviewer didn't do. Still a check on the
+honest, not a defence against the deliberate.
 
 The match is **exact** for a reason. `forge-review implement group 1` and
 `talk about forge-review implementation details` both matched an earlier, looser
@@ -68,6 +82,28 @@ That was reproduced against this very change's session, which had labelled eight
 group reviews and no final one. **Partial adoption is worse than none.** The
 final reviewer is dispatched from [review.md](./review.md), which carries the
 same rule as a hard gate.
+
+The dispatch stamp does not soften this rule — it only narrows one way it used
+to bite. A missing `final` bucket the host read from a **complete** binding is
+still a measured negative and still refuses at `forge phase done`; no stamp
+overrides it, because a label printed with no dispatch ever carrying it is not
+a review. A host-recorded **stop** — the operator declining the reviewer — is
+the same story on a partial binding as on a complete one, *provided the stop
+itself is on record in a surviving bound transcript*: it is a fact about a
+dispatch that exists, not an absence, and the stamp only ever stands in for
+an absence, so it never overrides a recorded stop. (The narrower, disclosed
+gap — a dispatch whose own transcript, stop included, is entirely pruned,
+which then reads as a plain absence the stamp can recover — is the
+mechanism's accepted over-credit direction; see [review.md](./review.md) for
+that trade-off stated in full.) What changed here is narrower than either of
+those: the session whose *older* host transcript has since been pruned and
+whose `final` bucket is *missing*, not stopped. There, the same missing
+bucket used to be indistinguishable from the
+complete-binding case above and refused a change that genuinely had a
+labelled final reviewer. Now, if that dispatch left a stamp, the stamp is
+read from the session's own directory rather than the pruned transcript and
+the reviewer is no longer lost. Group labels still buy nothing beyond arming
+the rule above — this only affects the *final* unit's own dispatch record.
 
 **Head every review file with who wrote it as well.** A dispatched reviewer names
 its resolved model (`Reviewer: claude-opus-5 (task-reviewer)`); a review you wrote

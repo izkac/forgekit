@@ -54,7 +54,7 @@
 
 ## 3. Gate, freeze and consumers
 
-- [ ] 3.1 `packages/cli/src/set-phase.test.mjs`: pin the gate and freeze on
+- [x] 3.1 `packages/cli/src/set-phase.test.mjs`: pin the gate and freeze on
       the new grade (expect no production change in `set-phase.mjs` beyond
       comments — the floor tests `final === 'independent'` only). Tests: a
       high-risk session with a stamp, a final review file and no host
@@ -64,7 +64,7 @@
       the host record of an all-stopped dispatch; a frozen `host`
       `independent` verdict is kept (not downgraded to `recorded`) on a
       second pass whose host evidence is gone but whose stamp survives.
-- [ ] 3.2 Consumer audit + the F58 comment contract: update the four
+- [x] 3.2 Consumer audit + the F58 comment contract: update the four
       comment blocks that name F12 as unbuilt owner —
       `metrics/review-evidence.mjs` (pruned-residual block),
       `set-phase.mjs` at `freezeReviewVerdict` and at the below-the-gates
@@ -78,7 +78,7 @@
       `recorded` sensibly (expected: pass-through; verify with one
       assertion each where a grade string is printed). Run the full
       workspace test suite.
-- [ ] 3.3 Skill docs (repo `skills/forge/`): `phases/review.md` — the
+- [x] 3.3 Skill docs (repo `skills/forge/`): `phases/review.md` — the
       HARD-GATE describes the stamp (what `review-label` now writes, that
       it survives host pruning and decides when the host cannot answer,
       and that the below-floor branch still reads the file), and the "When
@@ -89,9 +89,40 @@
       decides" paragraph updated. Verification: `rg 'review-label'
       skills/forge` shows no page describing the label as print-only.
 
-## 4. Product loop acceptance
+## 4. The partial-binding negative (D4 — added 2026-07-31, user-approved)
 
-- [ ] 4.1 `scripts/e2e/harness-portability.mjs`: new scenario
+- [x] 4.1 `packages/cli/src/metrics/review-evidence.mjs` with
+      `metrics/review-evidence.test.mjs` (test-first): `reviewEvidence`
+      reports `partial: true` on an available answer when one or more of
+      the session's bound host session ids resolved to no transcript on
+      disk (`found` shorter than the deduped bound ids), `false`
+      otherwise; unavailable answers carry `partial: false` as a
+      placeholder for shape uniformity (read `available` first, as ever).
+      The existing guards are untouched: unreadable bindings still refuse
+      (F27), a fully-pruned binding still answers unavailable. Tests:
+      two-bound-sessions fixture with older transcript deleted →
+      `available: true, partial: true`; both on disk → `partial: false`;
+      all pruned → unavailable (unchanged); update the module-header
+      pruned-residual paragraph to name the flag.
+- [x] 4.2 `packages/cli/src/review-census.mjs` +
+      `review-census.test.mjs`, and one gate pin in
+      `set-phase.test.mjs`: `hostFinalReview`'s absence-negative (bucket
+      undefined — "the one genuine negative") is distinguished from the
+      measured-stop negative; the census lets a valid `final` stamp
+      override ONLY the absence-negative and ONLY when
+      `evidence.partial === true`, answering `independent`/`recorded`.
+      Tests: partial + absence-negative + stamp → `recorded` (prose
+      untouched); partial + all-stopped final bucket + stamp → `self`/
+      `host` (measured stop wins); complete binding + absence-negative +
+      stamp → `self`/`host` (printed label with no dispatch is not a
+      review); partial + absence-negative + NO stamp → `self`/`host`
+      (unchanged). Gate pin: partial-binding fixture (two bound ids, one
+      transcript on disk) + stamp + final review file → `forge phase
+      done` passes with frozen `{independent, recorded}`.
+
+## 5. Product loop acceptance
+
+- [ ] 5.1 `scripts/e2e/harness-portability.mjs`: new scenario
       `review-stamp-decides` — in a scratch project: control first (no
       stamp, pruned host, self-declaring file → `self`/`inferred`,
       high-risk gate refuses), then `forge review-label final` (assert

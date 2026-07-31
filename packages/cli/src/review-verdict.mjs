@@ -53,9 +53,10 @@ const FINAL = new Set(['independent', 'self']);
 
 /**
  * The evidence grades, strongest first: `host` — the host's dispatch record;
- * `recorded` — reserved for a signed attestation, not yet produced by
- * anything; `inferred` — read off the review file's prose; `none` — there is
- * no final review to judge.
+ * `recorded` — a dispatch stamp `forge review-label` writes into
+ * `reviews/dispatches.json` when it prints the label (F12), read back by rule
+ * 5's census reading when host evidence cannot answer; `inferred` — read off
+ * the review file's prose; `none` — there is no final review to judge.
  */
 const EVIDENCE = new Set(['host', 'recorded', 'inferred', 'none']);
 

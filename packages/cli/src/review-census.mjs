@@ -49,7 +49,12 @@
  *     not change that: it records a dispatch, not a review
  *
  * Only "the host looked and this session's reviewer is not there" is a negative,
- * and it is the one that produces `self` on host evidence.
+ * and it is the one that produces `self` on host evidence — with the one
+ * qualification D4 added: when the host looked at only *part* of the record
+ * (`evidence.partial`, a binding whose other transcript has been pruned), that
+ * absence is not a complete measurement either, and a valid stamp decides over
+ * it. A stop the host measured, and an absence read from a whole binding, still
+ * stand against any stamp. The rule is stated in full at the override itself.
  *
  * Scope is `finalReview` alone. The per-group `independent` / `selfChecks`
  * counts stay on prose deliberately: they are worth ~2 scorecard points, and
@@ -198,6 +203,22 @@ function attributionRegion(body) {
  *   5  this change: a dispatch stamp written by `forge review-label` at dispatch
  *      time decides `finalReview` (`recorded`) when the host cannot answer;
  *      prose remains the last fallback
+ *      5a — the same change, D4: that stamp also overrides the host's
+ *      absence-negative when the absence was measured from a partial binding.
+ *      A NOTE AND NOT A BUMP, deliberately. The number exists so `fleet-report`
+ *      can refuse to add verdicts different classifiers produced, and 5a is not
+ *      a different classifier: same record (the stamp), same reader, same
+ *      `recorded` grade, one more state it is reached from. No rule-5 row can
+ *      carry a verdict 5a would have graded differently either — 5a moves only
+ *      an `evidence: 'host'` absence-negative measured from a partial binding,
+ *      and the rule-5 rows already on this machine (two, in another project's
+ *      `.forge/sessions.jsonl`) are `recorded` verdicts decided where the host
+ *      could not answer at all, which 5a does not touch. "Unreleased" is NOT
+ *      part of that argument and was struck from it: the global `forge` is
+ *      npm-linked to this checkout, so unreleased classifier code writes
+ *      durable rows in every project it runs in — it bounds the released
+ *      population, never the ledger. Bump instead of noting the day a stamp
+ *      starts overriding something else, or a fourth record joins the three.
  *
  * Rule 4 is the first that is not a prose rule at all on its primary path, so a
  * rule-3 `independent` and a rule-4 `independent` are not the same measurement
@@ -242,7 +263,12 @@ const FINAL_REVIEW_UNIT = 'final';
  * Not a security boundary, and not claimed as one: a forger who reads this can
  * pad to five. It ends the one-line forgery — the cost of faking a review
  * becomes a subagent that genuinely runs — and F12's stamp written at dispatch
- * time is still the real fix.
+ * time is the other half, for the record the host itself cannot supply. The
+ * two do not compete: this floor guards `host`, measured from a dispatch that
+ * ran, and `finalBucketWellFormed` below deliberately keeps the stamp off this
+ * exact branch, because a below-floor dispatch is a *measurement* that the
+ * work fell short, not an absent record the stamp may substitute for. The
+ * stamp answers only where the host has nothing to measure at all.
  */
 export const FINAL_REVIEW_REQUEST_FLOOR = 5;
 
@@ -289,8 +315,19 @@ export const FINAL_REVIEW_REQUEST_FLOOR = 5;
  * block a transition. A malformed evidence object is treated as one that cannot
  * decide, which lands on prose — the side that cannot refuse correct work.
  *
+ * TWO NEGATIVES, AND ONLY ONE OF THEM IS A MEASUREMENT OF THE UNIT. Both answer
+ * `self`, and `fromAbsence` is what tells them apart for the caller: the
+ * bucket-undefined branch below infers the negative from the unit's *absence*
+ * from the table, while the stop branch read a record of the unit and found
+ * every dispatch of it stopped. `reviewCensus` needs the distinction because an
+ * absence measured from a partial binding is an absence over part of the record
+ * (see the override there, D4); a stop is a fact about dispatches that exist.
+ * The field is additive and set on that one branch only — the `null` contract
+ * and every other answer are unchanged.
+ *
  * @param {unknown} evidence the object `reviewEvidence` returns
- * @returns {{ finalReview: 'independent' | 'self', stoppedByOperator: boolean } | null}
+ * @returns {{ finalReview: 'independent' | 'self', stoppedByOperator: boolean,
+ *   fromAbsence?: true } | null}
  *   `null` means "the host cannot answer" and never "no reviewer ran" — the
  *   fourth way to reach it is a dispatch below `FINAL_REVIEW_REQUEST_FLOOR`,
  *   at the end of this function
@@ -309,8 +346,11 @@ function hostFinalReview(evidence) {
   const bucket = units[FINAL_REVIEW_UNIT];
   if (bucket === undefined) {
     // The host looked, the convention is in use, and this session's final
-    // reviewer is not in the table. The one genuine negative in this function.
-    return { finalReview: 'self', stoppedByOperator: false };
+    // reviewer is not in the table. The one genuine negative in this function
+    // — and it is inferred from an absence, which is what `fromAbsence` says.
+    // Whether the record it is absent from is the whole conversation is a
+    // question this function cannot answer; `reviewCensus` asks `partial`.
+    return { finalReview: 'self', stoppedByOperator: false, fromAbsence: true };
   }
   // PRESENT AND UNREADABLE IS NOT ABSENT — the same distinction three layers
   // above, one layer down. A record that exists but whose counts cannot be read
@@ -536,11 +576,54 @@ export function reviewCensus(sessionDir, options) {
     const body = read(path.join(sessionDir, 'reviews', name));
     if (body === null) continue;
     if (host) {
-      // `body` is deliberately untouched here. Evaluating the prose and then
-      // discarding it would still be consulting the file under suspicion, and
-      // the two tests that pin this path are written so they go red if it is.
-      census.finalReview = host.finalReview;
-      census.finalReviewEvidence = 'host';
+      if (
+        host.fromAbsence &&
+        /** @type {any} */ (options?.evidence)?.partial === true &&
+        stampedFinalReview(sessionDir)
+      ) {
+        // AN ABSENCE MEASURED FROM HALF A CONVERSATION IS NOT A COMPLETE
+        // MEASUREMENT (design D4, user-approved). `reviewEvidence` answers
+        // `available: true` from the surviving half of a binding whose other
+        // host transcript has been pruned — the alternative, refusing, would
+        // make every resumed session unmeasurable the day its older transcript
+        // ages out — so a `final` unit missing from the table may simply be
+        // missing from the half that survived. 3.2's reviewer reproduced
+        // exactly that: the reviewer ran in the pruned half, the surviving half
+        // yielded `available: true` with no `final` bucket, `hostFinalReview`
+        // answered a confident `self`, and the money/auth gate refused a
+        // genuinely reviewed session. The stamp is the record the pruned half
+        // left behind, so here it decides — the same doctrine as the branch
+        // below, reached from the other side.
+        //
+        // THREE BOUNDARIES, ALL LOAD-BEARING, and each has its own test:
+        //   - ABSENCE ONLY (`fromAbsence`). A measured stop — every recorded
+        //     dispatch of the final unit stopped by the operator — is a fact
+        //     about dispatches that exist, and it stands over any stamp on any
+        //     binding. The stamp is written before a subagent exists; only the
+        //     host can say what became of one.
+        //   - PARTIAL ONLY (`partial === true`, read defensively: an evidence
+        //     object written before task 4.1, or round-tripped through JSON by
+        //     a foreign caller, may carry no such field, and `!== false` would
+        //     hand the override to every complete binding). On a complete
+        //     binding the host saw the whole conversation, and a label that was
+        //     printed but never carried by a dispatch is not a review.
+        //   - THE D3 FLOOR IS UNTOUCHED. A well-formed but below-floor bucket
+        //     is not an absence at all: `hostFinalReview` answers `null` there
+        //     and the verdict routes to prose exactly as
+        //     review-dispatch-substance shipped it, partial binding or not.
+        //
+        // `body` IS UNTOUCHED here too, and `stoppedByOperator` keeps the
+        // `false` the absence-negative carried: the override changes which
+        // record decided, not what any record said.
+        census.finalReview = 'independent';
+        census.finalReviewEvidence = 'recorded';
+      } else {
+        // `body` is deliberately untouched here. Evaluating the prose and then
+        // discarding it would still be consulting the file under suspicion, and
+        // the two tests that pin this path are written so they go red if it is.
+        census.finalReview = host.finalReview;
+        census.finalReviewEvidence = 'host';
+      }
     } else if (!finalBucketWellFormed(options?.evidence) && stampedFinalReview(sessionDir)) {
       // THE STAMP SUBSTITUTES FOR A RECORD THE HOST LOST, NEVER FOR WORK THE
       // REVIEWER DIDN'T DO. Reaching here means the host could not answer, and

@@ -53,7 +53,27 @@ Brainstorm artefacts:
     stamp may answer there (same over-credit direction as the prose that
     branch falls to today).
 
-- **Stamp shape and placement.** `reviews/dispatches.json` in the session
+- **D4 — a partial binding's confident negative does not outrank the stamp**
+  (added 2026-07-31, user-approved, after task 3.2's reviewer reproduced the
+  gap). The host's genuine-negative branch (`final` unit absent from the
+  record) is only as complete as the binding it was measured from: a session
+  bound to two host transcripts whose older half — the one the reviewer ran
+  in — has been pruned still yields `available: true` from the surviving
+  half, and that negative refused a genuinely reviewed session with the
+  stamp never consulted. The exact confidently-wrong answer F58 describes.
+  - Mechanism: `reviewEvidence` reports `partial: true` when some bound
+    session ids resolved to no transcript on disk (it already refuses
+    entirely on *unreadable* ones — F27 — and on *all* pruned —
+    `bound.length === 0`); `hostFinalReview` marks the absence-negative as
+    distinct from the measured-stop negative; the census lets a valid stamp
+    override only the absence-negative, and only under a partial binding.
+  - Boundaries that hold: a measured stop always wins (a real record of the
+    operator declining); a complete binding's negative always wins (the
+    host saw everything — a printed label with no dispatch is not a
+    review); the below-substance-floor branch is untouched (D3).
+  - Alternative rejected: reporting the whole answer unavailable on any
+    partial binding — the evidence module's own comment rejects it twice;
+    it would blind every resumed session within days. `reviews/dispatches.json` in the session
   directory: `{ version: 1, stamps: [{ unit, label, sessionId, at,
   model: { tier, model, omitModel, billing, agent } }] }`, append-only.
   Read/write live in one new module (`review-stamp.mjs`) so the CLI writer

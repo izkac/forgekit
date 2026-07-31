@@ -32,6 +32,12 @@ time, in a place the host cannot prune.
   `final` bucket with `maxRequests < FINAL_REVIEW_REQUEST_FLOOR` keeps
   routing to prose, so the stamp cannot resurrect the one-request forgery
   that review-dispatch-substance killed (F33).
+- A **partial binding's** confident negative (final unit absent from a
+  record measured with one or more bound transcripts pruned from disk) no
+  longer outranks the stamp — `reviewEvidence` reports `partial`, and the
+  census lets a valid stamp answer `recorded` over an absence-negative
+  measured from half a conversation. A measured stop and a complete
+  binding's negative still win (D4).
 - Gate, freeze, scorecard and ledger consume the new grade without
   structural change; the four comment blocks that name F12 as an unbuilt
   owner (per F58) are updated to point at the shipped mechanism.

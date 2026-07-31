@@ -368,10 +368,25 @@ function enforceFinalReviewFloor() {
  * NOT A CLAIM THAT THE MEASUREMENT IS COMPLETE. `reviewEvidence` answers from
  * whatever bound host sessions it can read, and a session bound to two whose
  * older transcript has since been pruned from disk still answers confidently
- * from the surviving newer one — a reviewer that ran in the pruned half stays
- * invisible (the residual is F12, not yet built; an *unreadable* second
- * binding is F27, owned by `host.mjs`, and is refused rather than answered).
- * This freezes what was measured, no more.
+ * from the surviving newer one (an *unreadable* second binding is a different
+ * case, F27, owned by `host.mjs`, and is refused rather than answered). F12's
+ * dispatch stamp is what closes that gap, one layer up in `review-census.mjs`,
+ * and it does it two ways, not one: where `reviewEvidence` cannot answer at
+ * all — unavailable, or available with no well-formed `final` bucket — the
+ * stamp DECIDES, grading `recorded`; where it answers `available: true` from
+ * that same partial binding and the `final` unit is simply missing (D4:
+ * `reviewEvidence`'s `partial` flag, `hostFinalReview`'s `fromAbsence`), the
+ * stamp OVERRIDES that absence-negative instead of leaving a reviewer who ran
+ * in the pruned half invisible. Neither path touches a measured stop or a
+ * complete binding's own absence-negative — both stay `host`, and outrank a
+ * stamp. A well-formed bucket below the request floor is a third thing again,
+ * never a `host` answer at all: `hostFinalReview` returns `null` there (D3's
+ * whole point is "the host looked and cannot say"), so the verdict routes to
+ * the review file's prose, graded `inferred` — exactly as
+ * `metrics/review-evidence.mjs` states the same rule beside `maxRequests`. The
+ * freeze below still matters on the paths the stamp does reach — it is what
+ * keeps a `host`-graded verdict from being displaced by a stamp on a later
+ * pass.
  *
  * `next` ALSO CARRIES `unitOnRecord` — whether *this* pass saw the deciding
  * (`final`) unit in the host's dispatch record, the same fact the keep rule
@@ -553,9 +568,13 @@ if (phase === 'done' || phase === 'finish') {
 // verdict measured moments before it. That is what keeps a wrong positive from
 // becoming permanent: `reviewEvidence` can still answer confidently from a
 // partial binding — a session bound to two host sessions whose older
-// transcript has been pruned answers from the surviving newer one alone (F12,
-// not yet built; an *unreadable* binding is F27, owned by `host.mjs`, and is
-// refused rather than answered) — and if that lands on `self` the session is
+// transcript has been pruned answers `available: true` from the surviving
+// newer one alone (an *unreadable* binding is F27, owned by `host.mjs`, and is
+// refused rather than answered). A `final` unit simply missing from that
+// partial answer is where F12's dispatch stamp now gets a second read, one
+// layer up in `review-census.mjs` (D4): a valid stamp overrides that
+// absence-negative and grades `recorded`, so only a genuinely unstamped
+// partial binding can still land on `self` — and if it does, the session is
 // refused and the verdict is discarded unwritten, so the next pass measures
 // again instead of inheriting the mistake. Moving this above the gates would
 // pin it.

@@ -35,8 +35,18 @@ carrying no well-formed record of that unit — a structurally valid stamp
 for the final unit naming this session SHALL decide the verdict
 `independent` with evidence `recorded`, and the review file's prose SHALL
 NOT be consulted for it. Where host evidence can answer, it SHALL answer,
-and the stamp SHALL NOT override it. A stamp SHALL NOT conjure a review: a
-session with no final review file remains `none` regardless of stamps.
+and the stamp SHALL NOT override it — with one exception: a negative
+answer built on absence (the final unit missing from the record) that was
+measured from a **partial binding** (one or more of the session's bound
+host transcripts no longer on disk) is not a complete measurement, and a
+valid stamp SHALL decide `independent` with evidence `recorded` over it.
+A negative built on a measured record — every recorded dispatch of the
+final unit stopped by the operator — SHALL stand regardless of stamps or
+partial bindings, and a negative measured from a **complete** binding
+SHALL stand: the host saw the whole conversation, and a label that was
+printed but never carried by a dispatch is not a review. A stamp SHALL
+NOT conjure a review: a session with no final review file remains `none`
+regardless of stamps.
 
 #### Scenario: A pruned transcript no longer erases the reviewer
 
@@ -55,6 +65,33 @@ session with no final review file remains `none` regardless of stamps.
 - **WHEN** the census runs
 - **THEN** the final review is `self` with evidence `host`
 - **AND** `stoppedByOperator` is true
+
+#### Scenario: A partial binding's confident negative does not erase a stamped reviewer
+
+- **GIVEN** a session bound to two host sessions whose older transcript has
+  been pruned from disk
+- **AND** the surviving half's record carries no dispatch of the final unit
+- **AND** a valid stamp for the final unit names this session
+- **WHEN** the census runs
+- **THEN** the final review is `independent` with evidence `recorded`
+
+#### Scenario: A measured stop wins even over a partial binding
+
+- **GIVEN** the same partial binding
+- **AND** the surviving half records a final-unit dispatch whose every run
+  was stopped by the operator
+- **WHEN** the census runs
+- **THEN** the final review is `self` with evidence `host`
+- **AND** `stoppedByOperator` is true
+
+#### Scenario: A complete binding's negative stands against the stamp
+
+- **GIVEN** a session whose every bound host transcript is on disk
+- **AND** the record carries no dispatch of the final unit
+- **AND** a valid stamp for the final unit names this session
+- **WHEN** the census runs
+- **THEN** the final review is `self` with evidence `host` — the label was
+  printed, but no dispatch ever carried it
 
 #### Scenario: A stamp naming a different session credits nothing
 

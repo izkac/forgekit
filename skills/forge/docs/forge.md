@@ -198,7 +198,9 @@ See the Forge skill’s [references/plan-routing.md](../references/plan-routing.
 `.forge/active.json` decides and the command **says so on stderr** — except the
 ones that write a permanent record, which **refuse** and list the candidates:
 `forge phase done|finish`, `forge checkpoint`, `forge score --write`,
-`forge brief stamp` and `forge review-label`.
+`forge brief stamp` and `forge review-label` — the last of these also writes a
+dispatch stamp (`reviews/dispatches.json`) alongside the printed label, so an
+ambiguous session refuses before that write too, not only before the label.
 
 Severity follows what the invocation writes, not the command's name, so
 `forge checkpoint --dry-run|--range`, `forge score` without `--write` and
@@ -606,7 +608,7 @@ Each implementation task:
 2. **Implementer** subagent — must follow `skills/test-driven-development` first.
 3. **Task reviewer** subagent (spec then quality) — unless pace skips low-risk tasks.
 4. Mark task complete (`tasks.md` checkbox or session progress).
-5. After all tasks: **verify** (tier 3 scope from pace) → **final reviewer** (unless pace skips; dispatch it with the Task description exactly what `forge review-label final` prints — see [phases/review.md](../phases/review.md)) → finish.
+5. After all tasks: **verify** (tier 3 scope from pace) → **final reviewer** (unless pace skips; dispatch it with the Task description exactly what `forge review-label final` prints, which also stamps the dispatch into `reviews/dispatches.json` so the evidence survives host-transcript pruning — see [phases/review.md](../phases/review.md)) → finish.
 
 Test tiers: [test-strategy.md](../references/test-strategy.md) — scoped TDD per task, narrow evidence per task, full workspace **once** at verify when pace requires it (not every task).
 

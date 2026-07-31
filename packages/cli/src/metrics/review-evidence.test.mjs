@@ -357,6 +357,9 @@ const DEMO_ID = '20260728T100000Z-demo-abc123';
 
 const HOST_ID = 'f8447a2f-eb56-41b8-8cc1-16606b862780';
 
+/** The second host conversation a resumed session binds to. */
+const SECOND_HOST_ID = '11111111-2222-3333-4444-555555555555';
+
 /**
  * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
  * (the value this same function returned) to plant a second host session
@@ -714,6 +717,14 @@ test('reviewEvidence gives the pruned-transcript and absent-sidecar cases distin
   assert.equal(/no sidecar directory/i.test(pruned.reason), false);
 
   assert.notEqual(pruned.reason, noSidecar.reason);
+
+  // Every bound transcript pruned is not a partial measurement — it is no
+  // measurement at all, and `partial` is a placeholder here in exactly the
+  // sense `seen` and `prescribed` are. `available` is what discriminates; a
+  // caller reading `partial: false` off an unavailable answer as "complete"
+  // has already made the mistake this module's whole shape warns about.
+  assert.equal(pruned.partial, false);
+  assert.equal(noSidecar.partial, false);
 });
 
 test('reviewEvidence cannot tell when the sidecar directory exists but cannot be read', () => {
@@ -765,7 +776,16 @@ test('reviewEvidence answers from the surviving half when a bound session has no
   // out of the host's retention window, which is a matter of days. The real
   // fix is a dispatch-time stamp written into the review artefact itself —
   // read from the artefact this module verifies, not reconstructed from a
-  // transcript that may no longer be on disk — tracked as F12 and not built.
+  // transcript that may no longer be on disk. That stamp is built and shipped
+  // (F12, `review-stamp.mjs`), and the rule the census applies to it is stated
+  // in full beside the `partial` flag in `review-evidence.mjs`: it decides
+  // wherever the host cannot answer — which includes this module answering
+  // unavailable but is not limited to it — and it additionally overrides an
+  // absence-negative measured from a partial binding, which is what covers
+  // *this* case. A measured stop and a complete binding's absence always win.
+  // `partial` is reported on the available answer below and pinned by the tests
+  // under the `partial` heading: the answer stays available and now says it was
+  // measured from half the binding.
   const ABSENT_ID = '00000000-1111-2222-3333-444444444444';
 
   const configDir = plantHost({
@@ -795,6 +815,171 @@ test('reviewEvidence answers from the surviving half when a bound session has no
   // than a TypeError from reading `dispatched` of undefined.
   assert.equal(result.available, true);
   assert.equal(result.units.final?.dispatched, 1);
+  // The limit is unchanged and now audible: the same permissive answer, with
+  // the fact that half the binding went unmeasured attached to it. This is the
+  // shape the retention window produces in production — an id that was never
+  // written to this tree at all, not one deleted from it.
+  assert.equal(result.partial, true);
+});
+
+// ---------------------------------------------------------------------------
+// partial — was this answer measured from the whole binding, or half of it?
+//
+// The residual the test above pins deliberately in the permissive direction:
+// a session bound to two host conversations whose older transcript has been
+// pruned still answers `available: true`, from half the record. The answer is
+// right to stay available; what was missing is that it never said it was half.
+// A negative measured that way — no `final` unit in `units` — reads at the
+// census exactly like a complete measurement of a session nobody reviewed, and
+// the money/auth gate refuses on it. `partial` is the fact that distinguishes
+// them, and `review-census.mjs` reads it: a valid dispatch stamp now overrides
+// that absence-negative when the flag says the binding was partial, so the
+// stamped reviewer who ran in the pruned half is no longer erased. Only that
+// one negative — a measured stop and a complete binding's absence both still
+// stand against any stamp.
+// ---------------------------------------------------------------------------
+
+/**
+ * The two-bound-session tree: both host sessions on disk, each with a sidecar
+ * holding one dispatch — a *group* review in the first, the `final` reviewer in
+ * the second, so the two halves are distinguishable in `units` and a reader
+ * that opens only one of them is caught.
+ */
+function plantTwoBound() {
+  const configDir = plantHost({
+    sessionId: HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review group-01 ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+  plantHost({
+    configDir,
+    sessionId: SECOND_HOST_ID,
+    lines: PARENT,
+    subagents: {
+      a2: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
+      },
+    },
+  });
+  return configDir;
+}
+
+test('reviewEvidence reports a two-session binding it could read in full as not partial', () => {
+  const configDir = plantTwoBound();
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  // Strictly `false`, never `undefined`: a field that does not exist is not a
+  // report that the binding was complete.
+  assert.equal(result.partial, false);
+  // Both halves were genuinely read, or "not partial" would be true for a
+  // reader that never opened the second one.
+  assert.deepEqual(Object.getOwnPropertyNames(result.units).sort(), ['final', 'group-01']);
+});
+
+test('reviewEvidence reports a single bound session on disk as not partial', () => {
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({ session: boundSession(), configDir });
+
+  assert.equal(result.available, true);
+  assert.equal(result.partial, false);
+});
+
+test('reviewEvidence reports an answer measured over a pruned bound session as partial', () => {
+  // The F58 residual, now audible. The older host session's transcript is
+  // genuinely gone — deleted, not chmod'd, the ordinary ENOENT case
+  // `findTranscripts` omits from both its lists — and the answer still comes
+  // back available, from the surviving half alone. That much is the deliberate
+  // limit pinned above. What is new is that the answer now says so.
+  const configDir = plantTwoBound();
+  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
+  fs.rmSync(path.join(project, `${HOST_ID}.jsonl`));
+  fs.rmSync(path.join(project, HOST_ID), { recursive: true });
+  // The fixture only means anything if the older half is really unresolvable
+  // and the newer one really is not.
+  assert.equal(fs.existsSync(path.join(project, `${HOST_ID}.jsonl`)), false);
+  assert.equal(fs.existsSync(path.join(project, `${SECOND_HOST_ID}.jsonl`)), true);
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [HOST_ID, SECOND_HOST_ID] }),
+    configDir,
+  });
+  // What the surviving half alone says, measured rather than retyped: binding
+  // only the id whose transcript is still there, against the same tree.
+  const survivor = reviewEvidence({
+    session: boundSession({ sessionIds: [SECOND_HOST_ID] }),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.partial, true);
+
+  // Everything else is the surviving half's answer, unchanged: `partial` adds
+  // a fact, it does not alter the measurement. The survivor must actually have
+  // measured something, or this pair agrees on emptiness and proves nothing.
+  assert.deepEqual(plain(result.units), plain(survivor.units));
+  assert.equal(result.seen, survivor.seen);
+  assert.equal(result.prescribed, survivor.prescribed);
+  assert.equal(survivor.units.final?.dispatched, 1);
+  // ...and the survivor, bound to nothing else, is a complete measurement. The
+  // same tree answers both ways depending only on what was bound, so `partial`
+  // cannot be a constant.
+  assert.equal(survivor.partial, false);
+  // The pruned half's own dispatch is absent, which is exactly why `partial`
+  // has to be reported: this negative is not a complete measurement.
+  assert.equal('group-01' in plain(result.units), false);
+});
+
+test('a bound host id repeated in the binding is not a partial binding', () => {
+  // WHAT WAS FOUND, since the answer decides the shape of this test: neither
+  // `reviewEvidence` nor `findTranscripts` dedupes `host.sessionIds`.
+  // `findTranscripts` resolves a repeated id once per occurrence, so `found`
+  // grows in step with the ids and a length comparison happens to survive —
+  // but only by coincidence, and `reviewEvidence` scans the repeated sidecar
+  // directory twice, which double-counts the units (pre-existing, out of this
+  // task's scope, and unreachable through `bindHost`, which appends an id only
+  // when it is not already present).
+  //
+  // So the guard here is narrow and exact: a repeat must never read as an id
+  // that resolved to nothing. It is the id, not the count, that decides.
+  const configDir = plantHost({
+    lines: PARENT,
+    subagents: {
+      a1: {
+        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
+        lines: [assistantLine({ requestId: 'rev_1', at: '2026-07-28T10:30:00.000Z' })],
+      },
+    },
+  });
+
+  const result = reviewEvidence({
+    session: boundSession({ sessionIds: [HOST_ID, HOST_ID] }),
+    configDir,
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.partial, false, 'the same id twice is one resolved id, not one missing');
+  // The dispatch was found, so this is not passing over an empty answer.
+  assert.ok(result.units.final?.dispatched >= 1);
 });
 
 test('reviewEvidence cannot tell when the sidecar path exists and is not a directory', () => {
@@ -841,38 +1026,15 @@ test('reviewEvidence stays unavailable when only one of two bound host sessions 
   // directory throws `EACCES` — which `findTranscripts` now reports in
   // `unreadable` rather than discarding, and this test pins that it stays
   // that way.
-  const SECOND_HOST_ID = '11111111-2222-3333-4444-555555555555';
-
-  // First host session: fully readable, and its one dispatch is a *group*
-  // review — not `final` — so this session alone can supply `prescribed > 0`
-  // but cannot supply the final reviewer. A buggy reader that stops at the
-  // first resolvable session reports `available: true` with `final` absent
-  // from `units`, which is exactly the false "no independent reviewer" the
-  // gate must not act on.
-  const configDir = plantHost({
-    sessionId: HOST_ID,
-    lines: PARENT,
-    subagents: {
-      a1: {
-        meta: meta({ description: `forge-review group-01 ${DEMO_ID}` }),
-        lines: [assistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
-      },
-    },
-  });
-
-  // Second host session: the final reviewer ran here. Its session directory
-  // is about to be made unsearchable.
-  plantHost({
-    configDir,
-    sessionId: SECOND_HOST_ID,
-    lines: PARENT,
-    subagents: {
-      a2: {
-        meta: meta({ description: `forge-review final ${DEMO_ID}` }),
-        lines: [assistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
-      },
-    },
-  });
+  // The two-bound tree `plantTwoBound` builds, whose shape is the argument:
+  // the first host session is fully readable and its one dispatch is a *group*
+  // review — not `final` — so it alone can supply `prescribed > 0` but cannot
+  // supply the final reviewer, while the final reviewer ran in the second,
+  // whose session directory is about to be made unsearchable. A buggy reader
+  // that stops at the first resolvable session reports `available: true` with
+  // `final` absent from `units`, which is exactly the false "no independent
+  // reviewer" the gate must not act on.
+  const configDir = plantTwoBound();
 
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const secondHostDir = path.join(project, SECOND_HOST_ID);
@@ -901,6 +1063,10 @@ test('reviewEvidence stays unavailable when only one of two bound host sessions 
     // the fixture's own constant, not retyped from anywhere else.
     assert.match(result.reason, new RegExp(SECOND_HOST_ID));
     assert.match(result.reason, /subagents/);
+    // A blocked binding is refused, never reported as a partial measurement:
+    // the F27 guard fires before anything is counted, so `partial` is the same
+    // placeholder every unavailable answer carries.
+    assert.equal(result.partial, false);
   } finally {
     fs.chmodSync(secondHostDir, 0o755);
   }
