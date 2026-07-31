@@ -755,6 +755,12 @@ test('reviewEvidence cannot tell when the sidecar directory exists but cannot be
 
     assert.equal(result.available, false);
     assert.match(result.reason, /could not be read/i);
+    // THE REASON NAMES THE HOST SESSION ID AND THE DIRECTORY PATH — same
+    // identifying bar the un-stat-able and not-a-directory shapes already
+    // meet. Today's reason is like `sidecar directory could not be read:
+    // EACCES — cannot tell…` without id/path in those positions.
+    assert.match(result.reason, new RegExp(HOST_ID));
+    assert.match(result.reason, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally {
     fs.chmodSync(dir, 0o755);
   }

@@ -25,11 +25,11 @@
 
 ## 3. Named readdir-blocked reason (F60)
 
-- [ ] 3.1 RED: tighten
+- [x] 3.1 RED: tighten
       `packages/cli/src/metrics/review-evidence.test.mjs` ("sidecar directory
       exists but cannot be read") to assert the reason includes the host
       session id and the sidecar directory path. Verify it fails today.
-- [ ] 3.2 GREEN: include the directory path in `scanSidecar`'s readdir-blocked
+- [x] 3.2 GREEN: include the directory path in `scanSidecar`'s readdir-blocked
       reason in `packages/cli/src/metrics/review-evidence.mjs`; when
       `reviewEvidence` surfaces that unavailable answer, include the owning
       host session id (same naming shape as other blocked-sidecar reasons).
