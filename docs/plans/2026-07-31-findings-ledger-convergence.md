@@ -1,7 +1,7 @@
 # Plan — make the findings ledger converge
 
-**Status:** W2–W4 shipped 2026-07-31 (session findings-ledger-kinds, score 87/B).
-  W1 done earlier same day. Remaining: W5 corpus, W6 routing, W7 docs.
+**Status:** W1–W5 shipped 2026-07-31. Remaining: W6 routing, W7 docs.
+  W5: thorough-re-corpus (F11 corpus pin; F11 stays open until measured narrowing).
 **Created:** 2026-07-31
 **Owner:** whoever picks it up next — this document is the brief; follow it in order.
 
