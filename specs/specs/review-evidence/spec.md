@@ -326,6 +326,11 @@ is unreadable, the unavailable reason SHALL name the ids and paths that could
 not be read; the reason reserved for transcripts absent from disk ("pruned or
 written elsewhere") SHALL be used only when nothing was blocked.
 
+Where the dispatch-record directory stats as a directory but cannot be listed
+(`readdir` fails), the unavailable reason SHALL name the host session id and
+the directory path — the same identifying bar the un-stat-able and
+not-a-directory shapes already meet.
+
 #### Scenario: A reviewer that ran in the unreachable half
 
 - **GIVEN** a session bound to two host sessions
@@ -345,6 +350,14 @@ written elsewhere") SHALL be used only when nothing was blocked.
 - **WHEN** the census runs
 - **THEN** host evidence is unavailable
 - **AND** the reason names the host session id and the path
+
+#### Scenario: A dispatch-record directory that cannot be listed
+
+- **GIVEN** a session whose bound host session has a `subagents` directory
+  that stats as a directory but cannot be read (`readdir` fails)
+- **WHEN** the census runs
+- **THEN** host evidence is unavailable
+- **AND** the reason names the host session id and the directory path
 
 #### Scenario: A transcript that was pruned, not blocked
 
@@ -404,9 +417,13 @@ a different project directory could not be examined while searching for it.
 dispatch stamp into the session's own directory
 (`reviews/dispatches.json`) recording the unit, the exact label, the
 session id, the time, and the model resolved in-process at the reviewer's
-tier. The stamp SHALL be appended, never overwritten. Failure to write the
-stamp SHALL NOT block the label: the label is still printed, the failure
-is reported on stderr, and stdout SHALL remain exactly the label.
+tier. The stamp SHALL be appended, never overwritten. The write SHALL replace
+the live file atomically (write a sibling temporary file in the same
+directory, then rename onto `dispatches.json`) so a process killed mid-write
+cannot leave a truncated live document that then refuses every later stamp.
+Failure to write the stamp SHALL NOT block the label: the label is still
+printed, the failure is reported on stderr, and stdout SHALL remain exactly
+the label.
 
 #### Scenario: Labelling the final reviewer writes the stamp
 
@@ -423,6 +440,14 @@ is reported on stderr, and stdout SHALL remain exactly the label.
 - **WHEN** `forge review-label final` runs
 - **THEN** the label is still printed on stdout and the exit code is 0
 - **AND** the failure is reported on stderr
+
+#### Scenario: A killed mid-write cannot trap later stamps
+
+- **GIVEN** a session whose live `reviews/dispatches.json` is already valid
+- **WHEN** a stamp write is interrupted after the temporary sibling is
+  written but before the rename completes
+- **THEN** the live `dispatches.json` remains the previous valid document
+- **AND** a subsequent stamp write succeeds and appends to that document
 
 ### Requirement: The stamp decides when the host cannot answer
 Where host evidence cannot answer for the final unit — unavailable, or
@@ -517,3 +542,18 @@ fall back to the review file's prose and the stamp SHALL NOT be consulted.
 - **THEN** the verdict is read from the review file's prose, graded
   `inferred`
 - **AND** the stamp contributes nothing
+
+### Requirement: A repeated bound host id is measured once
+Where `host.sessionIds` lists the same non-empty id more than once, host
+evidence SHALL treat it as one binding: the dispatch-record directory is
+scanned once, and unit counts (`dispatched`, `seen`, `prescribed`) SHALL NOT
+inflate from the repetition. A repeated id SHALL NOT be reported as a partial
+binding.
+
+#### Scenario: Duplicate id does not double-count the final unit
+
+- **GIVEN** a session whose `host.sessionIds` is `[id, id]` for one readable
+  host session that carries one final-unit dispatch
+- **WHEN** host evidence is collected
+- **THEN** host evidence is available and not partial
+- **AND** `units.final.dispatched` is 1

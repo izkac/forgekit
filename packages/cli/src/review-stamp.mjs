@@ -151,7 +151,9 @@ export function writeStamp(sessionDir, { unit, label, sessionId, model } = {}) {
 
     fs.mkdirSync(dir, { recursive: true });
     const doc = { version: 1, stamps: [...existing.stamps, entry] };
-    fs.writeFileSync(file, `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
+    const temporaryFile = `${file}.tmp`;
+    fs.writeFileSync(temporaryFile, `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
+    fs.renameSync(temporaryFile, file);
     return { ok: true, path: file };
   } catch (error) {
     return { ok: false, reason: error?.message ?? String(error) };

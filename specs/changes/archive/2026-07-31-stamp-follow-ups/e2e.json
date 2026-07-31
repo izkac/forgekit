@@ -1,0 +1,20 @@
+{
+  "change": "stamp-follow-ups",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "review-stamp-regression",
+      "cmd": "node scripts/e2e/harness-portability.mjs review-stamp-decides",
+      "expect": "REVIEW stamped final=independent evidence=recorded gate=passed; control final=self evidence=inferred gate=refused; subfloor gate=refused"
+    },
+    {
+      "name": "stamp-follow-ups",
+      "cmd": "node scripts/e2e/stamp-follow-ups.mjs",
+      "expect": "FOLLOW-UPS atomic=ok dedupe=ok named=ok"
+    }
+  ]
+}

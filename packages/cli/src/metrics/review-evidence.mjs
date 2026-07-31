@@ -286,7 +286,7 @@ function scanSidecar(sidecarDir, options) {
     // for a directory it never managed to open.
     return {
       readable: false,
-      reason: `sidecar directory could not be read: ${error?.code ?? error?.message ?? error}`,
+      reason: `sidecar directory could not be read (${sidecarDir}): ${error?.code ?? error?.message ?? error}`,
       records: [],
       problems: [],
     };
@@ -501,7 +501,7 @@ function unavailable(reason) {
  * from the whole binding or from part of it. A session bound to two host
  * conversations whose older transcript has been pruned still answers
  * `available: true` from the surviving half, deliberately (the
- * `sidecarDirs.length === 0` guard argues why refusing instead is worse), and
+ * `withSidecar.length === 0` guard argues why refusing instead is worse), and
  * an absent unit measured that way is not the same measurement as an absent
  * unit taken from a complete record. Only this module knows which it was, so it
  * reports the fact; `review-census.mjs` is its reader, where a valid dispatch
@@ -559,7 +559,7 @@ export function reviewEvidence(options) {
     // one that exists and is not a directory, from the ordinary case of no
     // subagents dispatched at all (the ENOENT split) — and reports the former
     // here by session id and path rather than folding it into `sidecarDir:
-    // null`. This must be checked before the `sidecarDirs.length === 0` guard
+    // null`. This must be checked before the `withSidecar.length === 0` guard
     // below: an unreadable sidecar sitting beside one or more resolvable ones
     // would otherwise slip past it and answer confidently from the readable
     // half, which is the exact defect that guard's own comment used to
@@ -580,9 +580,12 @@ export function reviewEvidence(options) {
       );
     }
 
-    const sidecarDirs = bound
-      .map((entry) => entry.sidecarDir)
-      .filter((dir) => typeof dir === 'string' && dir);
+    // Bound entries that still carry a string `sidecarDir` — iterated as
+    // entries (not a path-only list) so a readdir-blocked reason can name the
+    // owning host session id at the call site below.
+    const withSidecar = bound.filter(
+      (entry) => typeof entry.sidecarDir === 'string' && entry.sidecarDir,
+    );
     // THE FIX ABOVE, AND ITS DELIBERATE LIMIT. This guard used to describe a
     // known hole: a `subagents` path that could not be stat-ed, or that existed
     // and was not a directory, came back from `findTranscripts` as
@@ -642,7 +645,7 @@ export function reviewEvidence(options) {
     //     file's prose exactly as review-dispatch-substance shipped it.
     // Nothing else in this answer changes with the flag; refusing outright is
     // still the half-fix rejected above.
-    if (sidecarDirs.length === 0) {
+    if (withSidecar.length === 0) {
       // The host wrote no `subagents/` directory. That is *probably* a session
       // that dispatched nothing, but "probably" is not evidence: the directory
       // is also absent when the host never wrote sidecars at all. Reported as
@@ -680,10 +683,12 @@ export function reviewEvidence(options) {
     let seen = 0;
     let prescribed = 0;
 
-    for (const dir of sidecarDirs) {
-      const scan = scanSidecar(dir);
+    for (const { sessionId, sidecarDir } of withSidecar) {
+      const scan = scanSidecar(sidecarDir);
       if (!scan.readable) {
-        return unavailable(`${scan.reason} — cannot tell whether a reviewer was dispatched`);
+        return unavailable(
+          `host session ${sessionId}: ${scan.reason} — cannot tell whether a reviewer was dispatched`,
+        );
       }
 
       // AN UNIDENTIFIABLE DISPATCH IS UNAVAILABILITY, and it no longer matters
@@ -765,7 +770,7 @@ export function reviewEvidence(options) {
     // whatever ran in it is missing from the counts above. Blocked ids never
     // reach here — the `unreadable` guard refuses those outright — so the only
     // thing left for this to report is the pruned residual the
-    // `sidecarDirs.length === 0` comment describes.
+    // `withSidecar.length === 0` comment describes.
     //
     // Compared by id, not by list length: `findTranscripts` resolves a
     // repeated id once per occurrence and this module does not dedupe

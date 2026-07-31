@@ -755,6 +755,12 @@ test('reviewEvidence cannot tell when the sidecar directory exists but cannot be
 
     assert.equal(result.available, false);
     assert.match(result.reason, /could not be read/i);
+    // THE REASON NAMES THE HOST SESSION ID AND THE DIRECTORY PATH — same
+    // identifying bar the un-stat-able and not-a-directory shapes already
+    // meet. Today's reason is like `sidecar directory could not be read:
+    // EACCES — cannot tell…` without id/path in those positions.
+    assert.match(result.reason, new RegExp(HOST_ID));
+    assert.match(result.reason, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally {
     fs.chmodSync(dir, 0o755);
   }
@@ -950,17 +956,8 @@ test('reviewEvidence reports an answer measured over a pruned bound session as p
 });
 
 test('a bound host id repeated in the binding is not a partial binding', () => {
-  // WHAT WAS FOUND, since the answer decides the shape of this test: neither
-  // `reviewEvidence` nor `findTranscripts` dedupes `host.sessionIds`.
-  // `findTranscripts` resolves a repeated id once per occurrence, so `found`
-  // grows in step with the ids and a length comparison happens to survive —
-  // but only by coincidence, and `reviewEvidence` scans the repeated sidecar
-  // directory twice, which double-counts the units (pre-existing, out of this
-  // task's scope, and unreachable through `bindHost`, which appends an id only
-  // when it is not already present).
-  //
-  // So the guard here is narrow and exact: a repeat must never read as an id
-  // that resolved to nothing. It is the id, not the count, that decides.
+  // One final dispatch planted once. A repeated id in the binding must locate
+  // that sidecar once: available, not partial, and counts must not double.
   const configDir = plantHost({
     lines: PARENT,
     subagents: {
@@ -970,6 +967,10 @@ test('a bound host id repeated in the binding is not a partial binding', () => {
       },
     },
   });
+  // Fixture truth: one identifiable dispatch, and it is prescribed.
+  const expectedSeen = 1;
+  const expectedPrescribed = 1;
+  const expectedDispatched = 1;
 
   const result = reviewEvidence({
     session: boundSession({ sessionIds: [HOST_ID, HOST_ID] }),
@@ -978,8 +979,9 @@ test('a bound host id repeated in the binding is not a partial binding', () => {
 
   assert.equal(result.available, true);
   assert.equal(result.partial, false, 'the same id twice is one resolved id, not one missing');
-  // The dispatch was found, so this is not passing over an empty answer.
-  assert.ok(result.units.final?.dispatched >= 1);
+  assert.equal(result.units.final.dispatched, expectedDispatched);
+  assert.equal(result.seen, expectedSeen, 'a repeated id must not double-count seen');
+  assert.equal(result.prescribed, expectedPrescribed, 'a repeated id must not double-count prescribed');
 });
 
 test('reviewEvidence cannot tell when the sidecar path exists and is not a directory', () => {
