@@ -1,0 +1,15 @@
+{
+  "change": "score-rejection-count",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — structural rejection markers only (F59)",
+      "library": "packages/cli/src/review-census.mjs",
+      "runtimeOwner": "forge score / ledger via reviewCensus",
+      "writes": "none (read-only census)",
+      "reads": "session reviews/*.md task reviews",
+      "uiConsumer": "forge score review-depth notes",
+      "evidence": "packages/cli/src/review-census.test.mjs; scripts/e2e/score-rejection-count.mjs"
+    }
+  ]
+}

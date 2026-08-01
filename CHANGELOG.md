@@ -1,5 +1,10 @@
 ## Unreleased
 
+### Score rejection count honesty (F59)
+
+`reviewCensus` only counts structural rejection markers (`Round <n> … REJECTED`
+or `**Verdict: REJECTED**`), not instructional "REJECT if …" prose.
+
 ### Cleanup OpenSpec plan root (F73)
 
 `hasLiveChangeDir` now uses `resolveProjectPlanEngine` so OpenSpec projects

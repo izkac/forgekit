@@ -231,7 +231,7 @@ function attributionRegion(body) {
 export const CENSUS_RULE = 5;
 
 /** A round that sent work back: proof the review was not a rubber stamp. */
-const REJECTION_RE = /\bREJECT(ED)?\b/;
+const REJECTION_RE = /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*)/i;
 
 /**
  * The unit a final-review dispatch carries: `forge-review final`.
