@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Review guidance doc contract (F36)
+
+A regression test extracts the closed self-declaration phrase list from
+`skills/forge/phases/implement.md` and asserts each still grades as self in
+`reviewCensus`.
+
 ### Shared host-tree test fixtures (F55)
 
 Claude host-tree planters for review-evidence, collect, and review-census tests
