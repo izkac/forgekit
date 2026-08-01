@@ -20,8 +20,10 @@ import { isHighRiskText } from './preferences.mjs';
 
 /** A tasks.md checkbox line. */
 const TASK_LINE_RE = /^\s*-\s*\[[ xX]\]\s+/;
-/** A tasks.md group heading. */
-const GROUP_RE = /^##\s+\S/;
+/** Numbered task-group heading: `## 1. …` or `## 2) …`. */
+const GROUP_RE = /^##\s+\d+[.)]\s+\S/;
+/** Fenced code block (opening fence through closing fence, inclusive). */
+const FENCE_RE = /^```[\s\S]*?^```/gm;
 
 /**
  * @param {string} file
@@ -33,6 +35,15 @@ function readOrEmpty(file) {
   } catch {
     return '';
   }
+}
+
+/**
+ * Strip markdown fenced code blocks so sample headings/tasks do not count.
+ * @param {string} body
+ * @returns {string}
+ */
+function stripFencedBlocks(body) {
+  return body.replace(FENCE_RE, '');
 }
 
 /**
@@ -62,7 +73,7 @@ export function collectPlanFacts(opts) {
   const designBody = readOrEmpty(path.join(changeDir, 'design.md'));
   facts.readable = Boolean(tasksBody || proposalBody);
 
-  for (const line of tasksBody.split('\n')) {
+  for (const line of stripFencedBlocks(tasksBody).split('\n')) {
     if (TASK_LINE_RE.test(line)) facts.tasks += 1;
     else if (GROUP_RE.test(line)) facts.groups += 1;
   }

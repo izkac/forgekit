@@ -1,0 +1,24 @@
+{
+  "change": "score-coverage-denominator",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "plan-facts — numbered groups only; fences stripped (F16)",
+      "library": "packages/cli/src/plan-facts.mjs",
+      "runtimeOwner": "forge score / suggestPaceFromPlan via collectPlanFacts",
+      "writes": "none (read-only facts)",
+      "reads": "tasks.md under change dir",
+      "uiConsumer": "forge score review-depth notes; pace suggestion",
+      "evidence": "packages/cli/src/plan-facts.test.mjs; scripts/e2e/score-coverage-denominator.mjs"
+    },
+    {
+      "capability": "session-score — structured caps applied vs noted (F14)",
+      "library": "packages/cli/src/score.mjs",
+      "runtimeOwner": "forge score; forge fleet report",
+      "writes": "scorecard.json caps[]; scorecards.jsonl",
+      "reads": "session + plan facts",
+      "uiConsumer": "forge score / forge fleet report capped totals",
+      "evidence": "packages/cli/src/score.test.mjs; fleet-report tests; scripts/e2e/score-coverage-denominator.mjs"
+    }
+  ]
+}

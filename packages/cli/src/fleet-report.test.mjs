@@ -59,6 +59,68 @@ test('caps are counted, because a capped session is a process failure worth tren
   assert.match(report.totals.capReasons[0], /self-authored/);
 });
 
+/**
+ * F14 — structured caps: only `applied: true` (and legacy strings) mark a
+ * session capped. A note recorded when the score was already ≤ the ceiling
+ * must not inflate fleet `totals.capped`.
+ */
+test('F14: noted caps (applied:false) do not mark the session capped in fleet aggregation', () => {
+  const p = makeProject('volo', {
+    scores: [
+      {
+        sessionId: 's-noted',
+        score: 59,
+        grade: 'D',
+        caps: [
+          {
+            id: 'high-risk',
+            applied: false,
+            before: 59,
+            after: 59,
+            text: 'high-risk session with no independent final review',
+          },
+        ],
+        deductions: [],
+      },
+      {
+        sessionId: 's-applied',
+        score: 69,
+        grade: 'C',
+        caps: [
+          {
+            id: 'high-risk',
+            applied: true,
+            before: 95,
+            after: 69,
+            text: 'high-risk session with no independent final review — score capped at 69 (was 95)',
+          },
+        ],
+        deductions: [],
+      },
+      {
+        sessionId: 's-legacy',
+        score: 69,
+        grade: 'C',
+        caps: ['legacy string cap from an old ledger line'],
+        deductions: [],
+      },
+    ],
+  });
+  const report = buildFleetReport([p]);
+  assert.equal(report.totals.capped, 2, 'only applied:true and legacy strings count');
+  const noted = report.projects[0].sessions.find((s) => s.sessionId === 's-noted');
+  const applied = report.projects[0].sessions.find((s) => s.sessionId === 's-applied');
+  const legacy = report.projects[0].sessions.find((s) => s.sessionId === 's-legacy');
+  assert.equal(noted.capped, false);
+  assert.equal(applied.capped, true);
+  assert.equal(legacy.capped, true);
+  assert.ok(report.totals.capReasons.every((r) => typeof r === 'string'));
+  assert.equal(report.totals.capReasons.length, 2);
+  assert.match(report.totals.capReasons.join(' '), /score capped at 69/);
+  assert.match(report.totals.capReasons.join(' '), /legacy string cap/);
+  assert.doesNotMatch(report.totals.capReasons.join(' '), /^high-risk session with no independent final review$/m);
+});
+
 test('digests surface review coverage and rejection rounds next to the grade', () => {
   const p = makeProject('helm', {
     scores: [{ sessionId: 's1', score: 97, grade: 'A', caps: [], deductions: [] }],

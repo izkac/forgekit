@@ -15,6 +15,26 @@ import path from 'node:path';
 import { readLedger } from './ledger.mjs';
 
 /**
+ * Legacy ledger strings count as applied (fail closed). Structured entries use
+ * `applied === true` only — F14 notes (`applied: false`) are not process failures.
+ * @param {unknown} c
+ */
+function capIsApplied(c) {
+  return typeof c === 'string' || (c != null && typeof c === 'object' && /** @type {{ applied?: unknown }} */ (c).applied === true);
+}
+
+/**
+ * @param {unknown} c
+ */
+function capText(c) {
+  if (typeof c === 'string') return c;
+  if (c != null && typeof c === 'object' && typeof /** @type {{ text?: unknown }} */ (c).text === 'string') {
+    return /** @type {{ text: string }} */ (c).text;
+  }
+  return '';
+}
+
+/**
  * @param {Array<{ project: string, projectName: string }>} entries fleet registry rows (deduped by project)
  */
 export function buildFleetReport(entries) {
@@ -78,7 +98,7 @@ export function buildFleetReport(entries) {
         slug: s.slug ?? digest?.slug ?? null,
         score: typeof s.score === 'number' ? s.score : null,
         grade: s.grade ?? null,
-        capped: Array.isArray(s.caps) && s.caps.length > 0,
+        capped: Array.isArray(s.caps) && s.caps.some(capIsApplied),
         caps: s.caps ?? [],
         scoredAt: s.scoredAt ?? null,
         reviews: digest?.reviews ?? null,
@@ -101,7 +121,7 @@ export function buildFleetReport(entries) {
       if (s.grade) out.totals.grades[s.grade] = (out.totals.grades[s.grade] ?? 0) + 1;
       if (s.capped) {
         out.totals.capped += 1;
-        out.totals.capReasons.push(...s.caps);
+        out.totals.capReasons.push(...s.caps.filter(capIsApplied).map(capText));
       }
       if (s.reviews) {
         // A line written before the field existed is rule 0, not "no rule".

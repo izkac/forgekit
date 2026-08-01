@@ -1,0 +1,15 @@
+{
+  "change": "review-coverage-cap",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence: prescribed review coverage that never happened caps the grade",
+      "library": "packages/cli/src/score.mjs :: reviewCoverageCap()",
+      "runtimeOwner": "packages/cli/src/score.mjs :: scoreSession(), called by writeSessionScorecard() from the `forge score` CLI and from `forge phase done`",
+      "writes": "scorecard.json / scorecard.md `score` + `caps[]` in the session dir; the `score`, `grade` and `caps` fields of the durable .forge/scorecards.jsonl row; session.json cached score via healCachedScore()",
+      "reads": "the merged review census (reviewCensus() live + frozenReviewVerdict(session) override), session.resolvedPace, collectPlanFacts().tasks with session.tasksTotal as fallback",
+      "uiConsumer": "`forge score` stdout and scorecard.md; `.forge/scorecards.jsonl` read by fleet-report.mjs and by /forge:analyze trend reporting",
+      "evidence": "packages/cli/src/score.test.mjs — zero-review fixture (task 1.1), monotonicity regression (1.2), tier/exemption cases (3.1-3.3); corpus replay over .forge/sessions.jsonl recorded in verify-evidence.md (4.1)"
+    }
+  ]
+}

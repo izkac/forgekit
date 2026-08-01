@@ -32,7 +32,10 @@ const session = { planType: 'specs', openspecChange: 'my-change', slug: 'my-chan
 
 function tasksMd(groups) {
   return groups
-    .map(([title, n]) => `## ${title}\n${Array.from({ length: n }, (_, i) => `- [ ] ${i + 1}.1 do it`).join('\n')}`)
+    .map(
+      ([title, n], idx) =>
+        `## ${idx + 1}. ${title}\n${Array.from({ length: n }, (_, i) => `- [ ] ${i + 1}.1 do it`).join('\n')}`,
+    )
     .join('\n\n');
 }
 
@@ -173,4 +176,41 @@ test('an unreadable plan fails closed to standard, never to brisk', () => {
   const { pace, reason } = suggestPaceFromPlan(facts);
   assert.equal(pace, 'standard');
   assert.match(reason, /could not read|fail/i);
+});
+
+test('Notes and fenced headings do not inflate groups; numbered ## N. / ## N) do', () => {
+  const root = tmp('forge-facts-groups-');
+  makeChange(root, {
+    tasks: [
+      '## 1. Protect the denominator',
+      '- [ ] 1.1 strip fences',
+      '- [ ] 1.2 numbered GROUP_RE',
+      '',
+      '## Notes',
+      '- leftover thoughts',
+      '',
+      '```md',
+      '## 99. Fake group inside fence',
+      '- [ ] should not count as a task either if fenced',
+      '```',
+      '',
+      '## 2) Product loop',
+      '- [ ] 2.1 e2e plant',
+    ].join('\n'),
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.groups, 2);
+  assert.equal(facts.tasks, 3);
+});
+
+test('headingless tasks.md with checkboxes reports groups: 0', () => {
+  const root = tmp('forge-facts-headingless-');
+  makeChange(root, {
+    tasks: ['- [ ] do the thing', '- [ ] and another'].join('\n'),
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.tasks, 2);
+  assert.equal(facts.groups, 0);
 });

@@ -1,6 +1,106 @@
 # Changelog
 
-## 0.3.35 — 2026-07-30
+## Unreleased
+
+### Cleanup keeps plan-phase sessions with a live change dir (F48)
+
+Bare `forge cleanup` no longer deletes an unfinished triage/plan session whose
+only session-dir contents are Forge scaffold, when `openspecChange` still names
+a live `<plan.dir>/changes/<name>/` directory. That change dir is held work.
+`--include-unfinished --session <id>` still deletes it; archive-only paths do
+not protect.
+
+### Score group denominator and structured caps (F16, F14)
+
+`collectPlanFacts` strips fenced code blocks and counts only numbered task-group
+headings (`## 1. …` / `## 2) …`), so `## Notes` and sample headings inside fences
+no longer inflate review-depth coverage notes. Scorecard `caps` are now
+`{ id, applied, before, after, text }`; fleet totals count a session as capped
+only when at least one entry has `applied: true` (legacy string caps still
+count as applied).
+
+### Review coverage caps the grade
+
+Review depth was **5 points of ~100** — it could not move a grade, so the
+scorecard, the one record that outlives session cleanup, said nothing
+consequential about whether anyone but the author read the work. Measured
+against this project's own 18 recorded sessions, three that dispatched **no
+per-group reviewer at all** were graded A: `sync-tasks-md-progress` 97,
+`harness-setup-probe` 94, and `session-resolution` 90 — the last on `thorough`
+pace, which prescribes a reviewer after *every task*, with no review artifacts
+of any kind and a final-review verdict graded `inferred` (read off prose in a
+file written by the party being judged).
+
+`forge score` now applies a fourth cap, in the same **outcomes outrank
+artifacts** idiom as the other three:
+
+| Condition | Ceiling |
+| --------- | ------- |
+| zero independent per-group reviews, no independent final review | 69 (C) |
+| zero independent per-group reviews, independent final review exists | 89 (B) |
+| at least one independent per-group review | no cap |
+
+It fires only where reviewers were prescribed — `thorough` or `standard` pace,
+at least 5 planned tasks. `brisk` and `lite` set `review.perTask` to
+`high-risk-only`/`never` and are never capped for obeying their own pace, which
+is the failure class 0.3.24 shipped and 0.3.26 reverted. An independent final
+review **softens** the cap without removing it: reading the finished whole
+answers a different question than review cadence during implementation.
+
+Measured effect on the recorded corpus: exactly **three** sessions move, all
+A→B (94→89, 97→89, 90→89); thirteen are untouched; two qualify for a cap that
+changes nothing because they already score below it. Historical scores are not
+rewritten — only sessions scored after this ships are affected.
+
+### This is finding F13, and why this attempt is not 0.3.25's
+
+**0.3.25 shipped this cap backwards and 0.3.26 reverted it.** Its guard read
+`reviewUnits`, a variable assigned only inside the else-branch of the
+no-reviews case: a session with **zero** reviews kept `0`, failed the `>= 3`
+guard, and scored 95/A uncapped — while a session with one independent review
+across six groups capped at 69/C. The cap that existed because "nobody outside
+the author read this" gave full marks to exactly that session. F13 was reopened
+from F10 with two binding constraints, both honored here.
+
+*Driven by the census directly.* `reviewCoverageCap()` is a pure function whose
+every input is a parameter, keyed on `census.independent` — a field
+`reviewCensus` initialises to `0` at construction and returns on every path,
+including the one where no review files exist. There is no branch that can skip
+assigning it. It also uses **no group denominator**, so it does not inherit the
+open defects in that count (F16).
+
+*Zero-review fixture first.* It was the first test written, red, before any
+production code, and it failed at exactly the 95 F13 records. A monotonicity
+regression pins the inversion directly: a session with zero reviews must never
+outscore an otherwise-identical one with a review.
+
+The cap reads the **same merged census** the high-risk floor reads — live
+census with the frozen verdict layered over it — so it and the `forge phase
+done` gate cannot reach different answers, the defect shipped in 0.3.22.
+
+### Three defects caught during development, all the same shape
+
+Recorded because the shape is the subject: **a value that one path never
+populates, read as though it had been measured.**
+
+- The first corpus simulation read per-group review counts out of scorecard
+  `deductions`. A check scoring full marks has no deduction entry, so four
+  A-grade sessions parsed as zero-review. Caught before any code was written.
+- `planFacts.readable` is true when *either* `tasks.md` or `proposal.md` has
+  content, but `planFacts.tasks` counts only `tasks.md` checkboxes. A change
+  with a proposal and no task checkboxes yielded `tasks = 0`, silently defeating
+  the 5-task floor and disabling the cap entirely — reproduced at 95 with an
+  empty `caps` array. Found by an independent reviewer, now guarded and pinned.
+- The softened tier was **79**, and said so in its own message: "cap softened to
+  a B". `gradeForScore` puts B at `>= 80`, so 79 graded **C** — the same band as
+  the harsh tier. The softening was invisible in the grade, which is the literal
+  complaint F13 was filed about. The whole suite was green across it, because
+  every assertion pinned the score and none pinned the band. Now 89, with the
+  grade bands themselves under test.
+
+The last one is the general lesson: **when a threshold feeds a banded output,
+pin the band** — an assertion on the raw value passes for every wrong value
+inside the same band.
 
 ### The freeze qualifier now protects an `inferred` verdict too
 
