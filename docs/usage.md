@@ -600,6 +600,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase implement` refuses — brief missing/stale | Agent writes/updates `brief.html`, then `forge brief stamp` (or `--allow-incomplete "<reason>"`) |
 | `forge checkpoint` says checkpoints are off | Opt in: `.forge/config.json` → `{ "git": { "checkpoint": "per-group" } }` |
 | `forge checkpoint` refuses — default branch | Forge work belongs on a branch; create one, or `--allow-default-branch` / `git.allowDefaultBranch: true` |
+| `forge checkpoint` refuses — foreign change dir | Untracked files under another `<plan.dir>/changes/<other>/` would be swept in — remove/move them, finish that change, or don't leave sibling scaffolds untracked |
 | `forge phase done` refuses — final review | High-risk change needs an independent final review; dispatch one, or `--final-review-waived "<reason>"` (recorded on the session and in the ledger) |
 | Verify passes but the suite is flaky | `forge e2e run --repeat 5 --record-baseline` — a non-zero baseline makes every verify a coin flip |
 | A finding keeps reappearing in reports | `forge finding add "<text>" --kind bug --severity major --change <slug>` — then open that change, or use `--kind process` / `--severity note` |

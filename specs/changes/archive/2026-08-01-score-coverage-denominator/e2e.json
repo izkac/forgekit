@@ -1,0 +1,15 @@
+{
+  "change": "score-coverage-denominator",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "score-coverage-denominator",
+      "cmd": "node scripts/e2e/score-coverage-denominator.mjs",
+      "expect": "DENOM groups=1 noted-cap=ok applied-cap=ok"
+    }
+  ]
+}

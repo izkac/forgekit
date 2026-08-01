@@ -1,0 +1,147 @@
+<!-- forge-brief-specs-hash:855a714643d3d47c -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Review coverage caps the grade</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+<style>
+  body { max-width: 48rem; margin: 2.5rem auto; padding: 0 1.25rem;
+         font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.7rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; border-bottom: 1px solid #e5e5e5; padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; }
+  th, td { border: 1px solid #ddd; padding: .45rem .6rem; text-align: left; }
+  th { background: #f6f6f6; }
+  code { background: #f4f4f4; padding: .1rem .35rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 4px solid #e0a800; padding: .8rem 1rem; margin: 1.2rem 0; }
+  .good { color: #1a7f37; font-weight: 600; }
+  .bad { color: #b32626; font-weight: 600; }
+  pre.mermaid { text-align: center; margin: 1.5rem 0; }
+  ul { padding-left: 1.3rem; }
+  li { margin: .35rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Review coverage caps the grade</h1>
+<p class="sub">Operator brief — change <code>review-coverage-cap</code></p>
+
+<h2>TL;DR</h2>
+<p>
+Right now a Forge session can score an <strong>A</strong> even when nobody except its
+own author ever read the work. Reviewing is worth only 5 points out of 100, so it
+can't move a grade. This change makes missing review coverage a <em>ceiling</em> on
+the score instead of a rounding error &mdash; the same way a failing product loop or an
+unfinished session already caps a grade today.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A session that dispatched <strong>no reviewer at all</strong>, on a pace that asked for
+      one, can no longer score above a <strong>B</strong> &mdash; and no higher than a
+      <strong>C</strong> if it also had no independent final review.</li>
+  <li>The scorecard, which outlives the session after cleanup, now records that
+      absence in plain language instead of staying silent about it.</li>
+  <li>Sessions that <em>did</em> get reviewed are completely unaffected &mdash; 12 of this
+      project's 18 past sessions don't move at all.</li>
+  <li>A guarantee, pinned by a test: doing <em>more</em> review can never score
+      <em>worse</em> than doing less. That is the exact bug that forced the last
+      attempt to be pulled.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+After the score is totalled, one extra question gets asked: <em>did anyone outside the
+author actually review this, and was review even expected?</em> If review was expected
+and none happened, the score is pulled down to a ceiling. An independent final
+reviewer &mdash; someone who read the finished change as a whole &mdash; softens the
+ceiling but doesn't remove it, because reading the finished result is a different
+job from reviewing the work as it's built.
+</p>
+
+<pre class="mermaid">
+flowchart TD
+  A[Session scored normally] --> B{Was review expected?<br/>review.perTask is always or per-group,<br/>5+ tasks}
+  B -- No --> Z[No cap<br/>paces told to skip reviewers, or<br/>an explicit review.perTask override]
+  B -- Yes --> C{Any reviewer dispatched<br/>during the work?}
+  C -- Yes --> Z2[No cap]
+  C -- No --> D{Independent final review<br/>of the whole change?}
+  D -- Yes --> E[Ceiling: 89 &mdash; grade B]
+  D -- No --> F[Ceiling: 69 &mdash; grade C]
+</pre>
+
+<div class="callout">
+<strong>Why this can't repeat last time's failure.</strong> The previous attempt (0.3.25)
+was pulled because it was backwards: a session with <em>zero</em> reviews slipped past
+the check entirely and scored 95/A, while a session that <em>did</em> get reviewed was
+capped at 69/C. The cause was a counter that one code path never filled in. This
+version asks a question that is always answered on every path, and the very first
+test written is the zero-review case that broke last time.
+</div>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>If you have deliberately turned per-group reviewers off (<code>forge prefs -- --set review.perTask=never</code>), you are never capped for it.</li>
+  <li>Nothing new to run. <code>forge score</code> and <code>forge phase done</code>
+      behave as before; only the number and the explanation change.</li>
+  <li>When a cap applies you'll see a line in the scorecard's <strong>Caps</strong>
+      section saying which reviewers were missing and which ceiling was applied.</li>
+  <li><strong>Past scores are not rewritten.</strong> Only sessions scored after this
+      ships are affected.</li>
+  <li>Nothing is <em>blocked</em>. This costs a grade; it never refuses a transition.</li>
+</ul>
+
+<h2>Effect on this project's own history</h2>
+<p>Replayed against all 18 recorded sessions, three move and the rest don't:</p>
+<table>
+  <tr><th>Session</th><th>Pace</th><th>Reviewers dispatched</th><th>Before</th><th>After</th></tr>
+  <tr><td><code>sync-tasks-md-progress</code></td><td>standard</td><td>none (3 self-checks)</td><td class="good">97 / A</td><td class="bad">89 / B</td></tr>
+  <tr><td><code>harness-setup-probe</code></td><td>standard</td><td>none</td><td class="good">94 / A</td><td class="bad">89 / B</td></tr>
+  <tr><td><code>session-resolution</code></td><td>thorough</td><td>none</td><td class="good">90 / A</td><td class="bad">89 / B</td></tr>
+  <tr><td colspan="5">12 sessions unchanged &middot; 3 already scored below their ceiling</td></tr>
+</table>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li><strong>Whether a review counts as "independent" is still judged by reading its
+      text.</strong> If that reading is wrong in the strict direction, a session that was
+      genuinely reviewed could lose a grade it deserved. Accepted knowingly: the cost is
+      a grade, never a blocked transition &mdash; and the stricter alternative has already
+      been tried and reverted twice for refusing correct work.</li>
+  <li><strong>The 5-task floor is a judgement call.</strong> Below it, small changes are
+      exempt, so a genuinely unreviewed 4-task change escapes. Chosen because Forge's
+      automatic pace guess falls back to "standard" whenever it can't classify the work,
+      and small unclassified changes shouldn't be punished for that.</li>
+  <li><strong>Watch the first few sessions after this ships.</strong> If a session you
+      believe was properly reviewed gets capped, that's a defect worth reporting, not a
+      verdict to accept.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Counting <em>how much</em> of a change was reviewed. The cap only asks whether any
+      reviewer was dispatched, deliberately &mdash; the existing "how many groups were
+      covered" measurement has its own known defects (tracked separately) and this change
+      is built so it doesn't depend on them.</li>
+  <li>Reworking how caps are recorded so an applied cap is distinguishable from a noted
+      one. Known issue, tracked separately, unchanged here.</li>
+  <li>Rescoring or rewriting any historical session.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What</th><th>Size</th></tr>
+  <tr><td>1</td><td>Write the failing zero-review test and the "more review never scores worse" regression &mdash; before any code</td><td>2 tasks</td></tr>
+  <tr><td>2</td><td>Add the ceiling logic as one self-contained function and connect it to the scorer</td><td>2 tasks</td></tr>
+  <tr><td>3</td><td>Test the exemptions (paces told to skip reviewers, small changes) and the softened tier</td><td>3 tasks</td></tr>
+  <tr><td>4</td><td>End-to-end check driving the real <code>forge</code> binary against throwaway sessions</td><td>1 task</td></tr>
+  <tr><td>5</td><td>Replay against all 18 past sessions, changelog, close the finding</td><td>3 tasks</td></tr>
+</table>
+
+</body>
+</html>

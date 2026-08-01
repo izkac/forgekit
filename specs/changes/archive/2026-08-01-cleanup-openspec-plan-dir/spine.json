@@ -1,0 +1,15 @@
+{
+  "change": "cleanup-openspec-plan-dir",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-lifecycle — cleanup plan root via resolveProjectPlanEngine (F73)",
+      "library": "packages/cli/src/cleanup-sessions.mjs",
+      "runtimeOwner": "forge cleanup",
+      "writes": "deletes .forge/sessions/<id> only when allowed",
+      "reads": "session.json; resolveProjectPlanEngine; <engine.dir>/changes/<name>/",
+      "uiConsumer": "operator cleanup",
+      "evidence": "packages/cli/src/lib.test.mjs; scripts/e2e/cleanup-openspec-plan-dir.mjs"
+    }
+  ]
+}

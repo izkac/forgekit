@@ -1,0 +1,11 @@
+{
+  "_comment": "Also written into .cursor/hooks.json by forge init. Requires Node on PATH.",
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "node .cursor/hooks/forge-session-start.mjs"
+      }
+    ]
+  }
+}

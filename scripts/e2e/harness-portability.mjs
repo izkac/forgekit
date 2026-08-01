@@ -1030,8 +1030,9 @@ if (phase === 'boot') {
   if (!notes.includes('independent final review')) {
     fail('the scorecard fell back to the review file once the evidence was gone', notes);
   }
-  const cap = (card.caps ?? []).find((c) => String(c).includes('self-authored'));
-  if (cap) fail('the high-risk cap was applied to an independently reviewed session', String(cap));
+  const capText = (c) => (typeof c === 'string' ? c : (c?.text ?? ''));
+  const cap = (card.caps ?? []).find((c) => capText(c).includes('self-authored'));
+  if (cap) fail('the high-risk cap was applied to an independently reviewed session', capText(cap));
 
   const unchanged = JSON.stringify(after.reviews) === JSON.stringify(before.reviews);
   process.stdout.write(

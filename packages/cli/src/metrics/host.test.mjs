@@ -333,11 +333,21 @@ test('findTranscripts falls back to <homedir>/.claude', () => {
 
 test('findTranscripts returns [] when projects/ is missing rather than throwing', () => {
   const configDir = tmp('forge-host-empty-');
-  assert.deepEqual(findTranscripts([ID_A], { configDir }), { found: [], unreadable: [] });
-  assert.deepEqual(findTranscripts([ID_A], { configDir: path.join(configDir, 'nope') }), {
+  const cursorProjectsDir = tmp('forge-host-empty-cursor-');
+  assert.deepEqual(findTranscripts([ID_A], { configDir, cursorProjectsDir }), {
     found: [],
     unreadable: [],
   });
+  assert.deepEqual(
+    findTranscripts([ID_A], {
+      configDir: path.join(configDir, 'nope'),
+      cursorProjectsDir,
+    }),
+    {
+      found: [],
+      unreadable: [],
+    },
+  );
 });
 
 test('findTranscripts finds a transcript in the second project directory after an EACCES in the first', () => {
@@ -469,4 +479,81 @@ test('findTranscripts reports a sidecar path that exists but is not a directory 
   assert.equal(unreadable[0].sessionId, ID_A);
   assert.equal(unreadable[0].path, sidecar);
   assert.match(unreadable[0].reason, /not a directory/i);
+});
+
+// --- Cursor agent-transcripts (F71) ----------------------------------------
+
+/**
+ * Plant `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`
+ * (+ optional subagents sidecar). Returns the cursor projects root.
+ */
+function plantCursor({
+  sessionId = ID_A,
+  slug = 'home-iztok-Projects-forgekit',
+  withSidecar = false,
+  cursorProjectsDir = tmp('forge-host-cursor-'),
+} = {}) {
+  const dir = path.join(cursorProjectsDir, slug, 'agent-transcripts', sessionId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), '{"role":"user"}\n', 'utf8');
+  let sidecarDir = null;
+  if (withSidecar) {
+    sidecarDir = path.join(dir, 'subagents');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+  }
+  return {
+    cursorProjectsDir,
+    transcript: path.join(dir, `${sessionId}.jsonl`),
+    sidecarDir,
+  };
+}
+
+test('findTranscripts finds a Cursor agent-transcripts layout when Claude has no match', () => {
+  const configDir = tmp('forge-host-cursor-only-claude-');
+  fs.mkdirSync(path.join(configDir, 'projects'), { recursive: true });
+  const { cursorProjectsDir, transcript, sidecarDir } = plantCursor({
+    sessionId: ID_A,
+    withSidecar: true,
+  });
+
+  assert.deepEqual(findTranscripts([ID_A], { configDir, cursorProjectsDir }), {
+    found: [{ sessionId: ID_A, transcript, sidecarDir }],
+    unreadable: [],
+  });
+});
+
+test('findTranscripts prefers Claude when the same id exists under both hosts', () => {
+  const { configDir, projA, sidecar } = fixture('forge-host-cursor-prefer-claude-');
+  const { cursorProjectsDir } = plantCursor({ sessionId: ID_A, withSidecar: true });
+
+  assert.deepEqual(findTranscripts([ID_A], { configDir, cursorProjectsDir }), {
+    found: [
+      {
+        sessionId: ID_A,
+        transcript: path.join(projA, `${ID_A}.jsonl`),
+        sidecarDir: sidecar,
+      },
+    ],
+    unreadable: [],
+  });
+});
+
+test('findTranscripts resolves Cursor projects from <homedir>/.cursor/projects', () => {
+  const home = tmp('forge-host-cursor-home-');
+  const cursorProjectsDir = path.join(home, '.cursor', 'projects');
+  const { transcript } = plantCursor({
+    sessionId: ID_B,
+    cursorProjectsDir,
+    withSidecar: false,
+  });
+  const configDir = tmp('forge-host-cursor-home-claude-');
+  fs.mkdirSync(path.join(configDir, 'projects'), { recursive: true });
+
+  assert.deepEqual(
+    findTranscripts([ID_B], { configDir, env: {}, homedir: () => home }),
+    {
+      found: [{ sessionId: ID_B, transcript, sidecarDir: null }],
+      unreadable: [],
+    },
+  );
 });

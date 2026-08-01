@@ -19,6 +19,7 @@ import {
   sessionAgeDays,
 } from './lib.mjs';
 import { isTerminalPhase, unregisterSession } from './lib/fleet.mjs';
+import { resolveProjectPlanEngine } from './plan-engine.mjs';
 import { appendScorecardLedger } from './score.mjs';
 
 const args = new Set(process.argv.slice(2));
@@ -147,7 +148,22 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
     }
     return false;
   };
-  const hasWork = !isDone && holdsWork(dir);
+  // Plan-phase work lives under <plan.dir>/changes/<name>/, not the session
+  // dir. A live change dir (not under changes/archive/) is held work even
+  // when the session only has Forge scaffold files (F48).
+  const hasLiveChangeDir = (change) => {
+    if (typeof change !== 'string' || !change || change.includes('/') || change.includes('\\')) {
+      return false;
+    }
+    const planDir = resolveProjectPlanEngine(process.cwd(), { useUserDefault: false }).dir;
+    const live = path.join(process.cwd(), planDir, 'changes', change);
+    try {
+      return fs.statSync(live).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  const hasWork = !isDone && (holdsWork(dir) || hasLiveChangeDir(session.openspecChange));
   // Named explicitly, `--include-unfinished` means it: the operator typed this
   // session's id after a flag that says it deletes work. Before, the pointer's
   // own protection still applied — so the printed remedy silently no-opped on

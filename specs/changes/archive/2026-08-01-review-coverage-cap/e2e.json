@@ -1,0 +1,15 @@
+{
+  "change": "review-coverage-cap",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "review-coverage-cap",
+      "cmd": "node scripts/e2e/review-coverage-cap.mjs",
+      "expect": "COVERAGE-CAP zero=capped69 finalOnly=capped89 reviewed=uncapped brisk=uncapped small=uncapped monotone=ok"
+    }
+  ]
+}

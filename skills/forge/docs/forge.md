@@ -679,6 +679,10 @@ Guarantees — the reason this is safe to automate:
   `--allow-default-branch` or `git.allowDefaultBranch: true`.
 - **Refuses mid-merge / rebase / cherry-pick / revert / bisect.**
 - **Excludes `.forge/`** — session scratch never lands in project history.
+- **Refuses foreign untracked change dirs** — untracked paths under
+  `<plan.dir>/changes/<other>/` (not this session's `openspecChange`, not
+  `archive/`) block the checkpoint with a listed refuse; they are not swept
+  into this change's commit.
 - Nothing to commit is success, not an error, and never makes an empty commit.
 - Records `{ sha, group, tasks, at }` on the session, so reviewers get a real
   range: `groupRange` (this group) and `range` (whole session, from
@@ -703,9 +707,11 @@ Use the `reviewTarget` field from `forge checkpoint --range --last`:
 design. `--last` scopes to the current group, without it the base is
 `session.baseCommit` (the whole session).
 
-Caveat: a checkpoint stages **everything outside `.forge/`**, including
-unrelated edits sitting in the tree. Check `--dry-run` when the working tree
-was not clean before the session started.
+Caveat: a checkpoint still stages tracked edits and untracked files outside
+`.forge/` (including new package files). It will **not** silently include
+another change's untracked `<plan.dir>/changes/<other>/` tree — that refuses
+with a path list. Check `--dry-run` when the working tree was not clean before
+the session started.
 
 ---
 

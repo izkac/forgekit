@@ -1,0 +1,58 @@
+<!-- forge-brief-specs-hash:8c09f1efe24a175a -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — score coverage denominator</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5;
+       padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Honest score denominators and caps</h1>
+<p class="sub">Findings F16 + F14 &middot; change <code>score-coverage-denominator</code></p>
+
+<h2>TL;DR</h2>
+<p>
+<code>forge score</code> will count task groups the way the skill actually writes
+them (numbered <code>## 1.</code> headings), ignoring Notes sections and
+headings stuck inside code fences. Cap notes that did not lower the score will
+stop looking like real caps in fleet reports.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Review-depth notes like "1 of N groups" match real task groups.</li>
+  <li>Fleet "capped" totals only count sessions whose score was actually reduced.</li>
+</ul>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Nothing new to type — scoring and fleet report become more accurate.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Rejection over-count (F59), census evidence fallback (F63).</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>Plan-facts group counting — 2 tasks</li>
+  <li>Structured caps — 2 tasks</li>
+  <li>Product-loop e2e — 1 task</li>
+</ul>
+
+</body>
+</html>

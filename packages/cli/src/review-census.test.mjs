@@ -250,6 +250,23 @@ test('rejection rounds are still counted, on either kind of review', () => {
   assert.equal(census.finalReview, 'self');
 });
 
+test('instructional REJECT if prose with APPROVED does not count as a rejection', () => {
+  // F59: reviewers recite "REJECT if any of: …" then APPROVE; the old token
+  // matcher counted that as a rejection round. Only structural Round/Verdict
+  // REJECTED markers should increment.
+  const instructThenApprove = sessionWith({
+    '01-a/group-review.md':
+      '# Group review\n\nREJECT if any of: missing tests, broken API.\n\n**Verdict: APPROVED**\n',
+  });
+  assert.equal(reviewCensus(instructThenApprove).rejections, 0);
+
+  const realRound = sessionWith({
+    '01-a/group-review.md':
+      '# Group review\n\n**Verdict: APPROVED**\n\n## Round 1 — REJECTED\n',
+  });
+  assert.equal(reviewCensus(realRound).rejections, 1);
+});
+
 test('a session with no review artifacts at all counts nothing', () => {
   // The rule is stamped even when there is nothing to judge — a digest line
   // with counts of zero still needs to say which classifier produced them.

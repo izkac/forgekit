@@ -1,0 +1,15 @@
+{
+  "change": "cursor-transcript-paths",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-metrics — locate Cursor agent-transcripts (F71)",
+      "library": "packages/cli/src/metrics/host.mjs",
+      "runtimeOwner": "findTranscripts → collectMetrics / reviewEvidence",
+      "writes": "metrics.json reason / found transcript path",
+      "reads": "~/.cursor/projects/*/agent-transcripts",
+      "uiConsumer": "forge phase done metrics; forge analyze coverage",
+      "evidence": "packages/cli/src/metrics/host.test.mjs; packages/cli/src/metrics/collect.test.mjs; scripts/e2e/cursor-transcript-paths.mjs"
+    }
+  ]
+}

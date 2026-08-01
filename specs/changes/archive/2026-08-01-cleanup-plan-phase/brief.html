@@ -1,0 +1,55 @@
+<!-- forge-brief-specs-hash:05b54fa6a2584b65 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — cleanup plan-phase</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5;
+       padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .8rem 1rem;
+             margin: 1.25rem 0; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Cleanup plan-phase sessions</h1>
+<p class="sub">Finding F48 &middot; change <code>cleanup-plan-phase</code></p>
+
+<h2>TL;DR</h2>
+<p>
+Bare <code>forge cleanup</code> will no longer delete an unfinished triage/plan
+session whose change directory still exists under
+<code>specs/changes/&lt;name&gt;/</code>. That change dir is treated as held
+work, same as files inside the session directory.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Plan-phase sessions with a live change keep their session record
+      (phase history, host binding) until you finish or explicitly delete.</li>
+  <li>Escape hatch unchanged:
+      <code>forge cleanup --include-unfinished --session &lt;id&gt;</code>.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Analyze-report honesty (F64–F69) — separate change.</li>
+</ul>
+
+<div class="callout">
+Only <em>active</em> change dirs count. An archived change under
+<code>changes/archive/</code> does not protect the session.
+</div>
+
+</body>
+</html>

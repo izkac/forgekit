@@ -1,0 +1,15 @@
+{
+  "change": "checkpoint-scoped-staging",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "checkpoint-scoped-staging",
+      "cmd": "node scripts/e2e/checkpoint-scoped-staging.mjs",
+      "expect": "CHECKPOINT foreign-blocked=1"
+    }
+  ]
+}

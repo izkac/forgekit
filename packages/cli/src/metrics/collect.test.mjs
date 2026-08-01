@@ -153,6 +153,68 @@ test('collectMetrics degrades when the bound transcript is not on disk', () => {
   assert.match(doc.reason, new RegExp(HOST_ID));
 });
 
+/**
+ * Plant Cursor's agent-transcripts layout and return the projects root.
+ * Lines are Cursor `{role,message}` JSONL — no type/usage/timestamp.
+ */
+function plantCursorTranscript({
+  sessionId = HOST_ID,
+  slug = 'home-iztok-Projects-forgekit',
+  lines = [
+    { role: 'user', message: { content: [{ type: 'text', text: 'hi' }] } },
+    { role: 'assistant', message: { content: [{ type: 'text', text: 'hello' }] } },
+  ],
+  cursorProjectsDir = tmp('forge-collect-cursor-'),
+} = {}) {
+  const dir = path.join(cursorProjectsDir, slug, 'agent-transcripts', sessionId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), jsonl(lines));
+  return {
+    cursorProjectsDir,
+    transcript: path.join(dir, `${sessionId}.jsonl`),
+  };
+}
+
+test('collectMetrics degrades honestly for a found Cursor role/message transcript (F71)', () => {
+  // Located under Cursor, readable, but not Claude-format usage — must not
+  // claim the file was pruned, and must not pretend the session window alone
+  // is why nothing was counted.
+  const configDir = tmp('forge-collect-cursor-claude-empty-');
+  fs.mkdirSync(path.join(configDir, 'projects'), { recursive: true });
+  const { cursorProjectsDir, transcript } = plantCursorTranscript();
+
+  const doc = collectMetrics({
+    session: boundSession({
+      sessionIds: [HOST_ID],
+    }),
+    now: () => new Date('2026-07-27T11:00:00.000Z'),
+    configDir,
+    cursorProjectsDir,
+  });
+
+  assert.equal(doc.available, false);
+  assert.match(doc.reason, new RegExp(transcript.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(doc.reason, /token usage|no .*usage|lacks .*usage|host format/i);
+  assert.doesNotMatch(doc.reason, /pruned or written elsewhere/i);
+  assert.doesNotMatch(doc.reason, /falls inside the session window/i);
+});
+
+test('collectMetrics still says pruned when the Cursor path is missing too', () => {
+  const configDir = tmp('forge-collect-cursor-miss-claude-');
+  fs.mkdirSync(path.join(configDir, 'projects'), { recursive: true });
+  const cursorProjectsDir = tmp('forge-collect-cursor-miss-');
+
+  const doc = collectMetrics({
+    session: boundSession(),
+    now: () => new Date('2026-07-27T11:00:00.000Z'),
+    configDir,
+    cursorProjectsDir,
+  });
+
+  assert.equal(doc.available, false);
+  assert.match(doc.reason, /pruned or written elsewhere/i);
+});
+
 /* ---------- partial binding: one of several host sessions unreadable ---------- */
 
 const SECOND_HOST_ID = '11111111-2222-3333-4444-555555555555';

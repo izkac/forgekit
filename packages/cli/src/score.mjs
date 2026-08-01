@@ -24,8 +24,9 @@ import {
 } from './integrity.mjs';
 import { sessionHealth } from './health.mjs';
 import { collectPlanFacts } from './plan-facts.mjs';
-import { isHighRiskText } from './preferences.mjs';
+import { isHighRiskText, resolveEffectivePreferences } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
+import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { appendDeferralLedger, appendSessionDigest } from './ledger.mjs';
 
@@ -34,6 +35,28 @@ const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 
 /** Ceiling (grade C) for sessions whose outcome is unproven or unreviewed. */
 const OUTCOME_CAP = 69;
+
+/**
+ * Structured scorecard cap (F14). Legacy ledger lines may still be plain strings.
+ * @typedef {{ id: string, applied: boolean, before: number | null, after: number | null, text: string }} CapEntry
+ */
+
+/**
+ * Render text for a cap entry (structured object or legacy string).
+ * @param {CapEntry | string | null | undefined} c
+ */
+export function capText(c) {
+  return typeof c === 'string' ? c : (c?.text ?? '');
+}
+
+/**
+ * Whether a cap entry counts as an applied reduction. Legacy strings fail closed
+ * (treated as applied) — historical lines almost always meant a real cap.
+ * @param {CapEntry | string | null | undefined} c
+ */
+export function capIsApplied(c) {
+  return typeof c === 'string' || c?.applied === true;
+}
 
 /**
  * @param {unknown} value
@@ -184,6 +207,91 @@ function scoreProductLoopBody(body, executedGreen = false) {
     notes.push('multi-step loop listed');
   }
   return { points: Math.min(pts, max), max, notes };
+}
+
+/**
+ * Cap the score when the effective `review.perTask` knob prescribed per-group
+ * reviewers and none showed up — F13 (specs/changes/review-coverage-cap).
+ * Review depth is worth 5 of ~100 points, too little to ever move a grade on
+ * its own; three sessions in this project's own recorded history that
+ * dispatched no reviewer at all scored 94/A, 97/A and 90/A.
+ *
+ * GATES ON THE KNOB, NOT THE PACE. `review.perTask` is an independently
+ * overridable knob (preferences.mjs) — `forge prefs -- --set
+ * review.perTask=never` sets it regardless of pace. This cap originally
+ * gated on `resolvedPace` being `thorough`/`standard` directly, so a
+ * `standard`-pace session correctly told (via the knob) to skip per-group
+ * reviewers was still capped 69/C, with a message asserting reviewers were
+ * prescribed — punishing the exact obedience this cap exists to reward, the
+ * same failure class 0.3.24 shipped and 0.3.26 reverted, reached through the
+ * knob instead of the pace. The four paces still map onto these knob values
+ * 1:1 (thorough->always, standard->per-group, brisk->high-risk-only,
+ * lite->never — preferences.defaults.json's presets), so gating on the knob
+ * subsumes the old pace gate for any session that never touched the knob,
+ * rather than changing behaviour for it.
+ *
+ * PURE. `perTaskReview` arrives pre-resolved as a parameter — this function
+ * does no preferences/filesystem access itself and shares no mutable state
+ * with the scoring path, so there is no branch here for a defect like
+ * 0.3.25's to hide in. `scoreSession` resolves the effective knob via
+ * `resolveEffectivePreferences` and fails safe (does not cap) if that
+ * resolution throws or returns something unusable.
+ *
+ * DRIVEN BY `census.independent` DIRECTLY, and only that field, never by a
+ * variable a no-review code path could leave unassigned. 0.3.25 (reverted in
+ * 0.3.26) shipped this cap reading `reviewUnits`, a variable assigned only
+ * inside the has-at-least-one-review branch: a session with zero reviews kept
+ * `reviewUnits = 0`, failed the guard, and scored uncapped — while a session
+ * with one thin review met the guard and was capped. The exact session the
+ * cap existed to catch was the one it could never see. `census.independent`
+ * has no such branch to skip: `reviewCensus` initialises it to 0 at
+ * construction and returns it on every path (review-census.mjs), including
+ * the one where no review files exist at all.
+ *
+ * NO GROUP DENOMINATOR. Both tiers ask only whether `independent` is zero,
+ * never a coverage *ratio* against a task-group count: that denominator has
+ * its own open defects (finding F16) and this cap is built not to depend on
+ * them.
+ *
+ * A MALFORMED CENSUS DOES NOT CAP. `independent` missing, or not a finite
+ * number, reads as "cannot tell" and returns `null` — never as zero. Reading
+ * an absence as zero would cap a session on missing data, the same failure
+ * direction this subsystem has been reverted for twice, just moved one field
+ * over.
+ *
+ * @param {{ census: { independent?: unknown, finalReview?: unknown } | null | undefined,
+ *   perTaskReview: unknown, tasks: unknown }} args
+ * @returns {{ cap: number, reason: string } | null}
+ */
+export function reviewCoverageCap({ census, perTaskReview, tasks }) {
+  // Only `always` and `per-group` prescribe per-group reviewers.
+  // `high-risk-only` and `never` never do, whatever the pace; anything else
+  // (missing, unrecognised) is "cannot tell" and must not cap — same
+  // fail-safe direction as the malformed-census guard below.
+  if (perTaskReview !== 'always' && perTaskReview !== 'per-group') return null;
+  if (typeof tasks !== 'number' || tasks < 5) return null;
+  if (!census || typeof census !== 'object') return null;
+  const independent = census.independent;
+  if (typeof independent !== 'number' || !Number.isFinite(independent)) return null;
+  if (independent > 0) return null;
+  if (census.finalReview === 'independent') {
+    // 89, NOT 79, AND THE DIFFERENCE IS THE WHOLE POINT OF THIS TIER. Grade
+    // bands (`gradeForScore`) put B at >= 80, so a 79 ceiling lands in C —
+    // the same grade as the harsh tier above it. This shipped as 79 in
+    // development, said "softened to a B" in its own message, and was caught
+    // only by replaying the corpus and reading the *grades* rather than the
+    // scores: every test asserted the number and none asserted the band. A
+    // tier whose softening is invisible in the grade is the exact complaint
+    // F13 was filed about — review depth that cannot move a grade.
+    return {
+      cap: 89,
+      reason: 'no per-group reviewers were dispatched, though an independent final review exists — cap softened to a B',
+    };
+  }
+  return {
+    cap: 69,
+    reason: 'no per-group reviewers were dispatched — nobody outside the author read this as it was built',
+  };
 }
 
 /**
@@ -424,9 +532,11 @@ export function scoreSession(opts) {
   // same value the gate read. Not re-measured: the evidence expires, and this
   // function also runs from `forge score` long after the fact. A session with
   // no frozen verdict — anything that finished before this change, or a
-  // scorecard taken mid-session — falls back to the prose reading, graded
-  // `inferred`. The per-group counts stay on prose by design.
-  const live = reviewCensus(sessionDir);
+  // scorecard taken mid-session — falls back to a live census that consults
+  // host evidence the same way the freeze does (F63), so a stamp alone cannot
+  // outrank a measured stop. The per-group counts stay on prose by design.
+  const evidence = reviewEvidence({ session, env: process.env });
+  const live = reviewCensus(sessionDir, { evidence });
   const frozen = frozenReviewVerdict(session);
   const census = frozen
     ? {
@@ -497,15 +607,19 @@ export function scoreSession(opts) {
 
   let score = checks.reduce((s, c) => s + c.points, 0);
   const maxScore = checks.reduce((s, c) => s + c.max, 0);
-  /** @type {string[]} */
+  /** @type {CapEntry[]} */
   const caps = [];
 
   if (isNonEmptyString(session.incompleteReason)) {
     const before = score;
     score = Math.min(score, 59);
-    caps.push(
-      `incompleteReason set ("${session.incompleteReason}") — score capped at 59 (was ${before})`,
-    );
+    caps.push({
+      id: 'incomplete',
+      applied: true,
+      before,
+      after: score,
+      text: `incompleteReason set ("${session.incompleteReason}") — score capped at 59 (was ${before})`,
+    });
   }
 
   // A failing product loop is an outcome, and outcomes outrank artifacts: no
@@ -514,9 +628,25 @@ export function scoreSession(opts) {
   const health = sessionHealth({ cwd, sessionDir, session });
   if (health.state === 'red') {
     const before = score;
+    const reason = health.reasons.join('; ');
     if (score > OUTCOME_CAP) {
       score = OUTCOME_CAP;
-      caps.push(`${health.reasons.join('; ')} — score capped at ${OUTCOME_CAP} (was ${before})`);
+      caps.push({
+        id: 'health-red',
+        applied: true,
+        before,
+        after: score,
+        text: `${reason} — score capped at ${OUTCOME_CAP} (was ${before})`,
+      });
+    } else {
+      // F14: condition observed but score already ≤ ceiling — note only.
+      caps.push({
+        id: 'health-red',
+        applied: false,
+        before,
+        after: score,
+        text: reason,
+      });
     }
   }
 
@@ -553,12 +683,79 @@ export function scoreSession(opts) {
         : 'high-risk session with no independent final review';
     if (score > OUTCOME_CAP) {
       score = OUTCOME_CAP;
-      caps.push(
-        `${what} — score capped at ${OUTCOME_CAP} (was ${before}); dispatch a final reviewer, or record the refusal with --final-review-waived, which now survives cleanup in the digest`,
-      );
+      caps.push({
+        id: 'high-risk',
+        applied: true,
+        before,
+        after: score,
+        text: `${what} — score capped at ${OUTCOME_CAP} (was ${before}); dispatch a final reviewer, or record the refusal with --final-review-waived, which now survives cleanup in the digest`,
+      });
     } else {
-      caps.push(what);
+      // F14: already ≤ OUTCOME_CAP — record the condition without marking applied.
+      caps.push({
+        id: 'high-risk',
+        applied: false,
+        before,
+        after: score,
+        text: what,
+      });
     }
+  }
+
+  // Review coverage floor (F13): the effective review.perTask knob prescribed
+  // per-group reviewers and none showed up. Reads the SAME merged `census`
+  // the high-risk cap above just read — never a fresh `reviewCensus(sessionDir)`
+  // call — because re-measuring here would let this cap and the `forge phase
+  // done` gate (which freezes its verdict onto the session) disagree, the
+  // exact defect recorded in the comment above `census`'s construction. Task
+  // count mirrors the gate's own source: `planFacts.tasks` when the plan is
+  // readable, `session.tasksTotal` (already read into `total` above)
+  // otherwise — no second read of the plan for this.
+  //
+  // `planFacts.tasks > 0`, not just `planFacts?.readable`, guards the same
+  // absence-as-zero shape the `groups` denominator above guards with
+  // `Math.max(planFacts.groups, 1)`: `collectPlanFacts` sets `readable` when
+  // EITHER tasks.md OR proposal.md has content, but only ever counts `tasks`
+  // from tasks.md checkbox lines. A change dir with a proposal and no
+  // tasks.md — or a tasks.md with no checkboxes — is `readable: true,
+  // tasks: 0`, and reading that 0 as a measurement defeated this cap's own
+  // `tasks >= 5` guard, silently disabling F13 on any such session. Falling
+  // back to `total` here, exactly as the unreadable branch already does, is
+  // what treats "the plan didn't say" as unmeasured rather than as zero.
+  const coverageTasks = planFacts?.readable && planFacts.tasks > 0 ? planFacts.tasks : total;
+  // `review.perTask` is an independently overridable knob (preferences.mjs),
+  // not derived from pace: `forge prefs -- --set review.perTask=never` sets
+  // it at ANY pace, and gating this cap on `resolvedPace` alone (the first
+  // shipped version) capped sessions that had correctly been told, via the
+  // knob, to skip per-group reviewers — punishing the exact obedience this
+  // cap exists to reward. Resolution is wrapped and defaulted to a
+  // non-capping value (`null`) on any failure: an unreadable
+  // `preferences.local.json` (or any other resolution problem) must not
+  // throw here, and must not cap — an absence is not a measurement, the same
+  // rule `reviewCoverageCap`'s own malformed-census guard follows.
+  let perTaskReview = null;
+  try {
+    const effectivePrefs = resolveEffectivePreferences({ cwd, session });
+    perTaskReview = effectivePrefs?.effective?.review?.perTask ?? null;
+  } catch {
+    perTaskReview = null;
+  }
+  const coverageCap = reviewCoverageCap({ census, perTaskReview, tasks: coverageTasks });
+  // `coverageCap.cap` is a CEILING, never a floor: this must only ever lower
+  // the score, never raise it. Deleting `score > coverageCap.cap` here left
+  // all tests green while promoting a 59/D incomplete session (already
+  // capped lower by `incompleteReason` above) to 89/B — the worst thing a
+  // "cap" could do. See the paired invariant test in score.test.mjs.
+  if (coverageCap && score > coverageCap.cap) {
+    const before = score;
+    score = coverageCap.cap;
+    caps.push({
+      id: 'review-coverage',
+      applied: true,
+      before,
+      after: score,
+      text: `${coverageCap.reason} — score capped at ${coverageCap.cap} (was ${before})`,
+    });
   }
 
   const grade = gradeForScore(score);
@@ -620,7 +817,7 @@ export function formatScorecardMarkdown(card) {
   lines.push('');
   if (card.caps.length) {
     lines.push('## Caps');
-    for (const c of card.caps) lines.push(`- ${c}`);
+    for (const c of card.caps) lines.push(`- ${capText(c)}`);
     lines.push('');
   }
   lines.push('## Checks');

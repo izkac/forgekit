@@ -1,0 +1,15 @@
+{
+  "change": "score-rejection-count",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "score-rejection-count",
+      "cmd": "node scripts/e2e/score-rejection-count.mjs",
+      "expect": "REJECTIONS instructional=0 structural=1"
+    }
+  ]
+}

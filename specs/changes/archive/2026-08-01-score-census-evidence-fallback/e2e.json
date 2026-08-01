@@ -1,0 +1,15 @@
+{
+  "change": "score-census-evidence-fallback",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "score-census-evidence-fallback",
+      "cmd": "node scripts/e2e/score-census-evidence-fallback.mjs",
+      "expect": "CENSUS-EVIDENCE live-stop=ok"
+    }
+  ]
+}

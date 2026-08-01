@@ -8,11 +8,14 @@ import { fileURLToPath } from 'node:url';
 import {
   formatScorecardMarkdown,
   gradeForScore,
+  reviewCoverageCap,
   scoreSession,
   writeSessionScorecard,
 } from './score.mjs';
 import { e2eStepsHash } from './integrity.mjs';
 import { collectPlanFacts } from './plan-facts.mjs';
+import { FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
+import { writeStamp } from './review-stamp.mjs';
 
 const PHASE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 const SCORE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'score-cli.mjs');
@@ -149,6 +152,349 @@ test('review depth: no reviewer artifacts at all scores zero, not full marks', (
   }
 });
 
+/**
+ * F13 (this change) — a session with no reviews of any kind must be capped,
+ * not merely docked 5 review points. 0.3.25 (reverted in 0.3.26) tried this
+ * and shipped it backwards: its guard read `reviewUnits`, a variable assigned
+ * only in the has-at-least-one-review branch, so a session with *zero*
+ * reviews always failed `reviewUnits >= 3` and scored uncapped, while a
+ * session with one thin review met the guard and was capped — the exact
+ * session the cap existed to catch was the one it could never see.
+ *
+ * Deliberately non-money/auth wording throughout (slug, paceSignal, spine):
+ * `makeReviewFixture`'s default slug is `'add-billing'`, which trips a
+ * SEPARATE, pre-existing high-risk final-review cap at 69
+ * (`isHighRiskText` / `THOROUGH_RE` in preferences.mjs). Building on that slug
+ * would let this test pass for the wrong reason — the high-risk floor doing
+ * the work, not the review-coverage cap this test exists to pin. The
+ * assertion right after the fixture is that trap-check: it fails loudly if
+ * the fixture is accidentally high-risk, before the real assertion below it
+ * ever runs.
+ */
+test('review depth: zero reviews of any kind caps a strong session at 69 (F13)', () => {
+  const root = tmp('forge-score-zero-review-cap-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'thorough',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+
+    // Trap check (see comment above): this fixture must not be high-risk, so
+    // any cap seen below can only be the F13 review-coverage cap, never the
+    // unrelated money/auth floor.
+    assert.equal(
+      card.caps.some((c) => /independent final review|self-authored/i.test(capText(c))),
+      false,
+      `fixture must not trip the unrelated high-risk cap: ${capsJoin(card.caps) || '(none)'}`,
+    );
+
+    assert.ok(card.score <= 69, `expected a cap at 69, got ${card.score}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * F13's paired regression: the exact pair 0.3.25 inverted. Two sessions
+ * identical except for review artifacts — one with none, one with a single
+ * independent per-group review — and review coverage must never make the
+ * score worse. This is the invariant 0.3.25's `reviewUnits` bug broke (see
+ * the test above): its cap fired for the reviewed session and never for the
+ * unreviewed one, so *more* review scored *worse*.
+ *
+ * Measured, not assumed (brief numbers are illustrative only): against
+ * today's checkout — which has no review-coverage cap of any kind, F13 or
+ * 0.3.25's, both fully absent since the 0.3.26 revert — this assertion holds
+ * trivially, because with no cap in play a review file can only ever add
+ * points, never remove them. I confirmed the assertion is not vacuous by
+ * temporarily reintroducing the exact 0.3.25 cap block (from
+ * `git show c031fdc:packages/cli/src/score.mjs`) into a scratch copy of
+ * score.mjs and re-running an equivalent fixture pair with 6 physical task
+ * groups: it reproduced the historical inversion exactly (95 uncapped vs 69
+ * capped), then I reverted the file by hand (`git diff` clean afterward) —
+ * see the task report for the transcript. So this pins a real invariant; it
+ * just is not the half of this batch that runs red before F13 lands.
+ */
+test('review depth: more review must never score worse than less (0.3.25 inversion regression)', () => {
+  const rootA = tmp('forge-score-inversion-zero-');
+  const rootB = tmp('forge-score-inversion-one-');
+  try {
+    const zeroFixture = makeReviewFixture(rootA, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'thorough',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    const zeroReview = scoreSession({
+      cwd: rootA,
+      sessionDir: zeroFixture.sessionDir,
+      session: zeroFixture.session,
+    });
+
+    const oneFixture = makeReviewFixture(rootB, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'thorough',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    fs.writeFileSync(
+      path.join(oneFixture.taskDir, 'group-review.md'),
+      '# Group review\n\n**Verdict: APPROVED** (opus reviewer 7c1)\n',
+      'utf8',
+    );
+    const oneReview = scoreSession({ cwd: rootB, sessionDir: oneFixture.sessionDir, session: oneFixture.session });
+
+    assert.ok(
+      zeroReview.score <= oneReview.score,
+      `zero-review session (${zeroReview.score}) must never score worse than the one-review session (${oneReview.score})`,
+    );
+  } finally {
+    fs.rmSync(rootA, { recursive: true, force: true });
+    fs.rmSync(rootB, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Direct unit tests for `reviewCoverageCap` — no session directory, just the
+ * function. Task 2.1's six branches: rules 1-5 plus the malformed-census
+ * guard. Every test below also asserts a NON-null result somewhere (either
+ * directly, for the two capping rules, or via a "witness" call that flips one
+ * field back to a capping shape) so that a stub which always returns `null`
+ * fails at least one assertion in every one of these tests — several of the
+ * six branches expect `null` as the *correct* answer, and without a witness
+ * those would pass against such a stub for the wrong reason.
+ */
+
+test('reviewCoverageCap: rule 1 — only applies when the effective review.perTask knob prescribes per-group reviewers', () => {
+  // Gates on the KNOB (`review.perTask`), not the pace: `review.perTask` is an
+  // independently overridable setting (preferences.mjs) — `forge prefs --
+  // --set review.perTask=never` sets it at ANY pace. `reviewCoverageCap` stays
+  // pure — no filesystem access — so `perTaskReview` arrives pre-resolved as a
+  // parameter; the call site (`scoreSession`) is responsible for resolving it
+  // via `resolveEffectivePreferences`. The four paces still map onto these
+  // knob values 1:1 (thorough->always, standard->per-group,
+  // brisk->high-risk-only, lite->never), so this subsumes the old pace check
+  // for any session that never touched the knob.
+  const census = { independent: 0, finalReview: null };
+  for (const knob of ['high-risk-only', 'never', undefined, null, 'bogus']) {
+    assert.equal(
+      reviewCoverageCap({ census, perTaskReview: knob, tasks: 10 }),
+      null,
+      `perTaskReview=${knob} must not cap`,
+    );
+  }
+  // Witness: flipping only the knob to 'per-group' must cap. Proves the nulls
+  // above came from the knob guard, not from a stub that always returns null.
+  assert.notEqual(reviewCoverageCap({ census, perTaskReview: 'per-group', tasks: 10 }), null);
+});
+
+test('reviewCoverageCap: rule 1b — both knob values that prescribe per-group reviewers ("always", "per-group") cap', () => {
+  const census = { independent: 0, finalReview: null };
+  assert.notEqual(reviewCoverageCap({ census, perTaskReview: 'always', tasks: 10 }), null);
+  assert.notEqual(reviewCoverageCap({ census, perTaskReview: 'per-group', tasks: 10 }), null);
+});
+
+test('reviewCoverageCap: rule 2 — only applies at 5+ tasks', () => {
+  const census = { independent: 0, finalReview: null };
+  assert.equal(reviewCoverageCap({ census, perTaskReview: 'per-group', tasks: 4 }), null);
+  assert.equal(reviewCoverageCap({ census, perTaskReview: 'always', tasks: 0 }), null);
+  // Witness: same census and knob, tasks raised to 5 must cap.
+  assert.notEqual(reviewCoverageCap({ census, perTaskReview: 'per-group', tasks: 5 }), null);
+});
+
+test('reviewCoverageCap: rule 3 — zero independent reviews with no independent final review caps at 69', () => {
+  const noFinal = reviewCoverageCap({
+    census: { independent: 0, finalReview: null },
+    perTaskReview: 'per-group',
+    tasks: 6,
+  });
+  assert.equal(noFinal.cap, 69);
+  assert.match(noFinal.reason, /per-group review/i);
+
+  const selfFinal = reviewCoverageCap({
+    census: { independent: 0, finalReview: 'self' },
+    perTaskReview: 'always',
+    tasks: 6,
+  });
+  assert.equal(selfFinal.cap, 69, 'a self-authored final review is not an independent one — same tier');
+});
+
+test('reviewCoverageCap: rule 4 — an independent final review softens the cap to 89, with distinguishable wording', () => {
+  const noFinal = reviewCoverageCap({
+    census: { independent: 0, finalReview: null },
+    perTaskReview: 'per-group',
+    tasks: 6,
+  });
+  const independentFinal = reviewCoverageCap({
+    census: { independent: 0, finalReview: 'independent' },
+    perTaskReview: 'per-group',
+    tasks: 6,
+  });
+  assert.equal(independentFinal.cap, 89);
+  assert.notEqual(
+    noFinal.reason,
+    independentFinal.reason,
+    'a reader must be able to tell "nobody read this" from "an independent final review exists" from the wording alone',
+  );
+});
+
+test('reviewCoverageCap: rule 5 — any independent per-group review lifts the cap entirely', () => {
+  assert.equal(
+    reviewCoverageCap({ census: { independent: 1, finalReview: null }, perTaskReview: 'always', tasks: 20 }),
+    null,
+  );
+  assert.equal(
+    reviewCoverageCap({ census: { independent: 5, finalReview: 'self' }, perTaskReview: 'per-group', tasks: 20 }),
+    null,
+  );
+  // Witness: same knob/tasks, independent dropped back to 0 must cap. Proves
+  // the nulls above came from independent > 0, not a no-op stub.
+  assert.notEqual(
+    reviewCoverageCap({ census: { independent: 0, finalReview: null }, perTaskReview: 'always', tasks: 20 }),
+    null,
+  );
+});
+
+test('reviewCoverageCap: a malformed census must not read as zero — the safe direction is not to cap', () => {
+  // Missing/wrong-shaped `independent` must never be treated as 0: that would
+  // cap a session on an absence, the failure direction this subsystem has
+  // been reverted for twice (see the function's own comment).
+  assert.equal(reviewCoverageCap({ census: undefined, perTaskReview: 'per-group', tasks: 10 }), null);
+  assert.equal(reviewCoverageCap({ census: null, perTaskReview: 'per-group', tasks: 10 }), null);
+  assert.equal(reviewCoverageCap({ census: {}, perTaskReview: 'per-group', tasks: 10 }), null, 'independent missing');
+  assert.equal(
+    reviewCoverageCap({ census: { independent: 'zero' }, perTaskReview: 'per-group', tasks: 10 }),
+    null,
+    'independent non-numeric',
+  );
+  assert.equal(
+    reviewCoverageCap({ census: { independent: NaN }, perTaskReview: 'per-group', tasks: 10 }),
+    null,
+    'independent non-finite',
+  );
+  // Witness: same knob/tasks, a well-formed zero-independent census must cap.
+  assert.notEqual(
+    reviewCoverageCap({ census: { independent: 0, finalReview: null }, perTaskReview: 'per-group', tasks: 10 }),
+    null,
+  );
+});
+
+/**
+ * Fix 1 (final-review-fixes, MAJOR) — wired through `scoreSession()`, not just
+ * the pure `reviewCoverageCap` function above. `review.perTask` is an
+ * INDEPENDENTLY OVERRIDABLE knob (preferences.mjs): `forge prefs -- --set
+ * review.perTask=never` sets `.forge/preferences.local.json` regardless of
+ * pace, and `shouldRunPerTaskReview` then correctly told the coordinator to
+ * skip per-group reviewers. The first shipped version of this cap read
+ * `session.resolvedPace` directly and had no way to see that override, so a
+ * `standard`-pace session that obeyed `review.perTask=never` was still capped
+ * 69/C, with a message asserting reviewers were prescribed — punishing the
+ * exact obedience this cap exists to reward, the same failure class 0.3.24
+ * shipped and 0.3.26 reverted, reached through the knob instead of the pace.
+ * This is the independent final reviewer's exact repro.
+ */
+test('F13/review.perTask override: knob "never" at standard pace with zero reviews must not cap (reviewer\'s exact repro)', () => {
+  const root = tmp('forge-score-cov-knob-never-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'standard',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    fs.writeFileSync(
+      path.join(root, '.forge', 'preferences.local.json'),
+      `${JSON.stringify({ review: { perTask: 'never' } }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(
+      card.caps,
+      [],
+      `review.perTask=never told the coordinator to skip per-group reviewers — obeying that must not be capped: ${capsJoin(card.caps)}`,
+    );
+
+    // Witness: removing the override (still standard pace, still zero
+    // reviews) must cap — proves the empty caps array above came from the
+    // knob override specifically, not from a fixture that never caps.
+    fs.rmSync(path.join(root, '.forge', 'preferences.local.json'));
+    const withoutOverride = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(withoutOverride.caps.length, 1, capsJoin(withoutOverride.caps));
+    assert.equal(withoutOverride.score, 69);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('F13/review.perTask override: knob "high-risk-only" overrides a thorough pace that would otherwise cap', () => {
+  const root = tmp('forge-score-cov-knob-hro-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      // thorough's preset knob is 'always', which would cap without the
+      // override — proves this test exercises the KNOB overriding the pace,
+      // not merely a pace that happens not to cap.
+      resolvedPace: 'thorough',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    fs.writeFileSync(
+      path.join(root, '.forge', 'preferences.local.json'),
+      `${JSON.stringify({ review: { perTask: 'high-risk-only' } }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(card.caps, [], capsJoin(card.caps));
+
+    // Witness: same fixture without the override caps under the default
+    // thorough->always mapping.
+    fs.rmSync(path.join(root, '.forge', 'preferences.local.json'));
+    const withoutOverride = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(withoutOverride.caps.length, 1, capsJoin(withoutOverride.caps));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('F13/review.perTask resolution: an unreadable preferences file must not throw and must not cap (fail safe)', () => {
+  const root = tmp('forge-score-cov-badprefs-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'standard',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    // Malformed JSON: `loadJsonFile` (preferences.mjs) throws `JSON.parse`
+    // errors on read. An absence is not a measurement — the same principle
+    // the malformed-census guard above is built on — so this must not throw
+    // and must not cap.
+    fs.writeFileSync(path.join(root, '.forge', 'preferences.local.json'), '{ not valid json', 'utf8');
+
+    assert.doesNotThrow(() => scoreSession({ cwd: root, sessionDir, session }));
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(
+      card.caps,
+      [],
+      `an unreadable preferences file must fail safe (not cap): ${capsJoin(card.caps)}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('review depth: a dispatched reviewer beats a self-check', () => {
   const root = tmp('forge-score-dispatched-');
   try {
@@ -242,6 +588,66 @@ test('review depth scores coverage, not presence — 1 review across 8 groups is
   }
 });
 
+/**
+ * Cap entry text — structured `{ text }` or legacy ledger strings.
+ * F14 (score-coverage-denominator): caps are objects; keep probes readable.
+ */
+function capText(c) {
+  return typeof c === 'string' ? c : (c?.text ?? '');
+}
+function capsJoin(caps) {
+  return (caps ?? []).map(capText).join(' ');
+}
+
+/**
+ * F14 — when the score is already ≤ OUTCOME_CAP, a high-risk condition is
+ * recorded as a note (`applied: false`) rather than a real reduction. Fleet
+ * must not treat that note as a process-failure cap (see fleet-report tests).
+ */
+test('F14: high-risk note when score already ≤ OUTCOME_CAP has applied:false and does not lower further', () => {
+  const root = tmp('forge-score-f14-noted-');
+  try {
+    // incompleteReason lands at 59 — already under OUTCOME_CAP (69) — then
+    // the high-risk floor would have capped at 69 if the score were higher.
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'add-stripe-refund-auth',
+      paceSignal: 'payment refunds behind an authorization gate',
+      incompleteReason: 'E2E blocked',
+    });
+    const card = scoreSession({ cwd: root, sessionDir, session });
+
+    assert.equal(card.score, 59, `incompleteReason must keep the score at 59, got ${card.score}`);
+    const highRisk = card.caps.find((c) => (typeof c === 'object' ? c.id === 'high-risk' : /high-risk/i.test(capText(c))));
+    assert.ok(highRisk, `expected a high-risk caps entry, got: ${capsJoin(card.caps)}`);
+    assert.equal(typeof highRisk, 'object', 'F14: caps entries must be structured objects');
+    assert.equal(highRisk.applied, false, 'score already ≤ OUTCOME_CAP — note only, do not mark applied');
+    assert.match(capText(highRisk), /high-risk/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('F14: applied high-risk cap has applied:true, lowers score, and records before/after', () => {
+  const root = tmp('forge-score-f14-applied-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'add-stripe-refund-auth',
+      paceSignal: 'payment refunds behind an authorization gate',
+    });
+    const card = scoreSession({ cwd: root, sessionDir, session });
+
+    assert.equal(card.score, 69, `expected OUTCOME_CAP 69, got ${card.score}`);
+    const highRisk = card.caps.find((c) => (typeof c === 'object' ? c.id === 'high-risk' : false));
+    assert.ok(highRisk, `expected structured high-risk cap, got: ${capsJoin(card.caps)}`);
+    assert.equal(highRisk.applied, true);
+    assert.ok(typeof highRisk.before === 'number' && highRisk.before > 69, `before must exceed cap, got ${highRisk.before}`);
+    assert.equal(highRisk.after, 69);
+    assert.match(capText(highRisk), /independent final review|self-authored/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a high-risk session with no independent review is capped, however good its artifacts', () => {
   const root = tmp('forge-score-riskcap-');
   try {
@@ -254,7 +660,7 @@ test('a high-risk session with no independent review is capped, however good its
     const card = scoreSession({ cwd: root, sessionDir, session });
 
     assert.ok(card.score <= 69, `expected a cap at C, got ${card.score}`);
-    assert.match(card.caps.join(' '), /independent final review/i);
+    assert.match(capsJoin(card.caps), /independent final review/i);
 
     // Per-group reviews do NOT lift the cap: each saw one slice, and the floor
     // is an independent reader of the whole change.
@@ -275,7 +681,7 @@ test('a high-risk session with no independent review is capped, however good its
     );
     const selfFinal = scoreSession({ cwd: root, sessionDir, session });
     assert.ok(selfFinal.score <= 69);
-    assert.match(selfFinal.caps.join(' '), /self-authored/i);
+    assert.match(capsJoin(selfFinal.caps), /self-authored/i);
 
     // An independent final review lifts it.
     fs.writeFileSync(
@@ -284,10 +690,15 @@ test('a high-risk session with no independent review is capped, however good its
       'utf8',
     );
     const reviewed = scoreSession({ cwd: root, sessionDir, session });
-    assert.equal(
-      reviewed.caps.some((c) => /final review/i.test(c)),
-      false,
-    );
+    // Pin the actual caps array, not a substring probe: nothing should cap
+    // this session at all — the money/auth floor lifts because the final
+    // review is independent, and the separate F13 coverage floor does not
+    // apply either, because the group-review.md written above (line ~484)
+    // gives this session a genuine independent per-group reviewer
+    // (census.independent > 0). A `/final review/i` probe would have gone
+    // green by coincidence if F13's own cap text ever mentioned a final
+    // review — it says nothing about *this* fixture's caps being empty.
+    assert.deepEqual(reviewed.caps, [], capsJoin(reviewed.caps));
     assert.ok(reviewed.score > 69, `expected no cap, got ${reviewed.score}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -332,12 +743,24 @@ test('the high-risk cap and the review points both follow the frozen verdict', (
         },
       },
     });
+    // The money/auth high-risk floor must be lifted — assert on its own
+    // distinctive wording ("high-risk session"), not on any cap that merely
+    // mentions "final review". This fixture has zero per-group reviews (no
+    // group-review.md was ever written), so the separate F13 coverage floor
+    // legitimately fires here and holds the score at 89/B; a generic
+    // `/final review/i` probe would have matched F13's own cap text and
+    // passed by coincidence while hiding that a cap still applies.
     assert.equal(
-      measured.caps.some((c) => /final review/i.test(c)),
+      measured.caps.some((c) => /high-risk session/i.test(capText(c))),
       false,
-      measured.caps.join(' '),
+      capsJoin(measured.caps),
     );
-    assert.ok(measured.score > prose.score, `expected the cap lifted, got ${measured.score}`);
+    // Pin exactly which cap IS present, so a future change to either cap's
+    // firing conditions shows up here instead of slipping past.
+    assert.equal(measured.caps.length, 1, capsJoin(measured.caps));
+    assert.match(capText(measured.caps[0]), /per-group reviewers/i);
+    assert.ok(measured.score > prose.score, `expected the money/auth floor lifted, got ${measured.score}`);
+    assert.equal(measured.score, 89, 'F13: zero per-group reviews + independent final review caps at 89/B');
     assert.match(reviewCheck(measured).notes.join(' '), /independent final review/);
 
     // And the other direction: prose names an outside reader, the host says no
@@ -364,7 +787,7 @@ test('the high-risk cap and the review points both follow the frozen verdict', (
       },
     });
     assert.ok(refuted.score <= 69, `expected a cap at C, got ${refuted.score}`);
-    assert.match(refuted.caps.join(' '), /self-authored/i);
+    assert.match(capsJoin(refuted.caps), /self-authored/i);
     assert.match(reviewCheck(refuted).notes.join(' '), /self-authored/i);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -395,6 +818,14 @@ test('a frozen verdict read from prose is honoured too, not only a measured one'
 
     const live = scoreSession({ cwd: root, sessionDir, session });
     assert.ok(live.score <= 69, `fixture: prose alone caps, got ${live.score}`);
+    // Pin that it's specifically the money/auth high-risk floor doing the
+    // capping here — not F13's coverage floor shadowing it at the same
+    // threshold. This fixture has zero per-group reviews, so F13's own
+    // tier-3 cap (69) would fire on this shape too; without this assertion,
+    // disabling the high-risk cap entirely would leave `live.score <= 69`
+    // still true (F13 alone produces the same number) and this test would
+    // never notice the high-risk floor was gone.
+    assert.match(capsJoin(live.caps), /high-risk session/i, capsJoin(live.caps));
 
     const frozen = scoreSession({
       cwd: root,
@@ -415,12 +846,20 @@ test('a frozen verdict read from prose is honoured too, not only a measured one'
         },
       },
     });
+    // As above: assert the money/auth floor specifically ("high-risk
+    // session") is gone, not a generic "final review" probe. This fixture
+    // also has zero per-group reviews, so F13's own coverage floor legitimately
+    // caps the score at 89/B — a `/final review/i` probe would have matched
+    // that cap's text and hidden it.
     assert.equal(
-      frozen.caps.some((c) => /final review/i.test(c)),
+      frozen.caps.some((c) => /high-risk session/i.test(capText(c))),
       false,
-      frozen.caps.join(' '),
+      capsJoin(frozen.caps),
     );
-    assert.ok(frozen.score > live.score, `expected the cap lifted, got ${frozen.score}`);
+    assert.equal(frozen.caps.length, 1, capsJoin(frozen.caps));
+    assert.match(capText(frozen.caps[0]), /per-group reviewers/i);
+    assert.ok(frozen.score > live.score, `expected the money/auth floor lifted, got ${frozen.score}`);
+    assert.equal(frozen.score, 89, 'F13: zero per-group reviews + independent final review caps at 89/B');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -458,7 +897,7 @@ test('a frozen "there is no final review" keeps the cap on, whatever turned up a
       },
     });
     assert.ok(frozen.score <= 69, `expected a cap at C, got ${frozen.score}`);
-    assert.match(frozen.caps.join(' '), /no independent final review/i);
+    assert.match(capsJoin(frozen.caps), /no independent final review/i);
     // The review-depth check reads the same verdict as the cap, so it must lose
     // the points the file would otherwise have earned. Compared against the
     // prose run rather than a quoted number: the difference is the measurement.
@@ -468,6 +907,103 @@ test('a frozen "there is no final review" keeps the cap on, whatever turned up a
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('live score census consults host evidence — a stamp does not outrank a measured stop', () => {
+  // F63: mid-session `forge score` with no frozen verdict used to call
+  // reviewCensus without evidence, so a stamp alone graded the final review
+  // `recorded`/`independent` even when the host recorded a stop. Mirror of the
+  // ledger pin; scorecard notes are the observable (no evidence field on the card).
+  //
+  // `stampedFinalReview` matches stamp.sessionId to path.basename(sessionDir);
+  // makeSession hard-codes the dir as `sess-score`, so the stamp must name that.
+  const root = tmp('forge-score-live-stop-');
+  const configDir = tmp('forge-score-live-stop-cfg-');
+  const prevConfig = process.env.CLAUDE_CONFIG_DIR;
+  const hostId = 'host-score-live-stop';
+  try {
+    const createdAt = '2026-07-28T10:00:00.000Z';
+    const { sessionDir, session } = makeSession(root, {
+      createdAt,
+      updatedAt: '2026-07-28T14:00:00.000Z',
+      host: { agent: 'claude-code', sessionIds: [hostId], boundAt: createdAt },
+    });
+    assert.equal(session.id, path.basename(sessionDir), 'fixture: stamp id matches dir name');
+    const reviewFile = path.join(sessionDir, 'reviews', 'final-review.md');
+    fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+    fs.writeFileSync(
+      reviewFile,
+      '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n',
+      'utf8',
+    );
+    writeStamp(sessionDir, {
+      unit: 'final',
+      label: `forge-review final ${session.id}`,
+      sessionId: session.id,
+    });
+    const projectDir = path.join(configDir, 'projects', '-scratch');
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, `${hostId}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        requestId: 'parent_1',
+        timestamp: createdAt,
+        message: {
+          id: 'msg_parent_1',
+          model: 'claude-opus-5',
+          content: [{ type: 'text' }],
+          usage: { input_tokens: 1, output_tokens: 2 },
+        },
+      })}\n`,
+      'utf8',
+    );
+    const sidecarDir = path.join(projectDir, hostId, 'subagents');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sidecarDir, 'agent-r1.meta.json'),
+      JSON.stringify({
+        agentType: 'general-purpose',
+        description: `forge-review final ${session.id}`,
+        model: 'opus',
+        stoppedByUser: true,
+      }),
+      'utf8',
+    );
+    const lines = Array.from({ length: FINAL_REVIEW_REQUEST_FLOOR }, (_, i) => ({
+      type: 'assistant',
+      requestId: `req_r1_${i}`,
+      timestamp: createdAt,
+      message: {
+        id: `msg_r1_${i}`,
+        model: 'claude-opus-5',
+        content: [{ type: 'text' }],
+        usage: { input_tokens: 1, output_tokens: 2 },
+      },
+    }));
+    fs.writeFileSync(
+      path.join(sidecarDir, 'agent-r1.jsonl'),
+      `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
+      'utf8',
+    );
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+
+    assert.equal(
+      reviewCensus(sessionDir).finalReviewEvidence,
+      'recorded',
+      'fixture: stamp alone grades recorded',
+    );
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const notes = reviewCheck(card).notes.join(' ');
+    assert.match(notes, /self-authored/i, notes);
+    assert.doesNotMatch(notes, /independent final review/i, notes);
+  } finally {
+    if (prevConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevConfig;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
   }
 });
 
@@ -524,7 +1060,7 @@ test('the scorer reads risk from the same plan text the done gate does', () => {
 
     const card = scoreSession({ cwd: root, sessionDir, session });
     assert.ok(card.score <= 69, `the gate blocked this change; the scorer gave it ${card.score}`);
-    assert.match(card.caps.join(' '), /independent final review/i);
+    assert.match(capsJoin(card.caps), /independent final review/i);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -542,11 +1078,14 @@ test('a plan that says nothing risky is still not capped', () => {
 
     assert.equal(collectPlanFacts({ cwd: root, session }).highRisk, false);
     const bland = scoreSession({ cwd: root, sessionDir, session });
-    assert.equal(
-      bland.caps.some((c) => /final review/i.test(c)),
-      false,
-      `unexpected cap: ${bland.caps.join(' ')}`,
-    );
+    // Pin the actual caps array, not a substring probe: nothing should cap
+    // this session — not the money/auth floor (not high-risk) and not F13's
+    // coverage floor either, because this fixture's tasks.md carries only one
+    // checkbox (planFacts.tasks === 1 < 5, F13's own task-count gate). A
+    // `/final review/i` probe would have passed by coincidence even if some
+    // cap fired and happened to say "final review" — it says nothing about
+    // whether this session is actually uncapped.
+    assert.deepEqual(bland.caps, [], `unexpected cap: ${capsJoin(bland.caps)}`);
 
     // Same fixture, one risky sentence added: the cap appears and the score
     // drops. Comparing the two is what shows the union discriminates rather
@@ -557,7 +1096,7 @@ test('a plan that says nothing risky is still not capped', () => {
       'utf8',
     );
     const risky = scoreSession({ cwd: root, sessionDir, session });
-    assert.match(risky.caps.join(' '), /independent final review/i);
+    assert.match(capsJoin(risky.caps), /independent final review/i);
     assert.ok(
       bland.score > risky.score,
       `bland ${bland.score} should outscore risky-with-no-reviewer ${risky.score}`,
@@ -583,6 +1122,408 @@ test('an unreadable plan does not make the scorer less sensitive than it was', (
     assert.ok(card.score <= 69, `expected the slug-based cap to still fire, got ${card.score}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * F13 regression: `collectPlanFacts` sets `readable: true` when EITHER
+ * tasks.md OR proposal.md has content, but only ever counts `tasks` from
+ * tasks.md checkbox lines. A change dir with a proposal and no tasks.md is
+ * therefore `readable: true, tasks: 0` — and the F13 call site read that 0 as
+ * a measurement, which defeated its own `tasks >= 5` guard and silently
+ * disabled the whole cap on any such session (a thorough-pace session with
+ * zero review artifacts scored 95, caps: [], against unmodified code). This
+ * is 0.3.25's defect moved one field over: a value one code path leaves at
+ * zero, read by a guard as though it had been measured.
+ */
+test('F13: a plan with a proposal but no tasks.md must not exempt the session from the coverage cap', () => {
+  const root = tmp('forge-score-f13-planfacts-zero-');
+  try {
+    const { sessionDir, session } = makePlanFixture(
+      root,
+      {
+        'proposal.md': '# Proposal\n\nHarvest token counts from the host transcript and total them.\n',
+        // Deliberately no tasks.md: the shape that produced readable:true,
+        // tasks:0.
+      },
+      { resolvedPace: 'thorough' },
+    );
+
+    const facts = collectPlanFacts({ cwd: root, session });
+    assert.equal(facts.readable, true, 'precondition: a proposal alone makes the plan "readable"');
+    assert.equal(facts.tasks, 0, 'precondition: no tasks.md means zero counted tasks, not zero measured tasks');
+    assert.equal(facts.highRisk, false, 'precondition: bland proposal — must not be the money/auth floor doing the work');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.ok(card.score <= 69, `expected F13 to still cap at 69, got ${card.score}`);
+    assert.match(capsJoin(card.caps), /per-group reviewers/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * F13's lift, exemptions and softened tier, through `scoreSession()` — the
+ * wired path. Direct unit tests for `reviewCoverageCap` already prove the six
+ * rules in isolation (above); these prove the rules are actually *reached*
+ * with the right inputs when scoring a real session directory, per the task
+ * 03 brief (specs/changes/review-coverage-cap).
+ *
+ * Every fixture below stays deliberately bland (slug `telemetry-dashboard-rollup`,
+ * paceSignal about dashboard telemetry) so the pre-existing money/auth
+ * high-risk floor (`isHighRiskText` / `THOROUGH_RE`) never fires alongside
+ * F13 — `makeReviewFixture`'s default slug `add-billing` trips that floor,
+ * and building on it here would let a "not capped" assertion pass for the
+ * wrong reason, or a "capped" assertion prove nothing about F13 specifically.
+ * Every assertion below therefore checks the `caps` array's *contents*, or an
+ * exact score, rather than an inequality a different cap could also satisfy.
+ */
+
+/** Grade bands, worst to best, so a comparison survives re-tuning either grade cutoff. */
+const GRADE_ORDER = ['F', 'D', 'C', 'B', 'A'];
+function gradeRank(g) {
+  const i = GRADE_ORDER.indexOf(g);
+  assert.notEqual(i, -1, `unknown grade ${g}`);
+  return i;
+}
+
+/** The 89-tier shape: zero per-group reviews, an independent final review, on disk (no frozen verdict involved). */
+function make89TierFixture(root, overrides = {}) {
+  const { sessionDir, session } = makeReviewFixture(root, {
+    slug: 'telemetry-dashboard-rollup',
+    paceSignal: 'aggregate nightly dashboard telemetry counts',
+    resolvedPace: 'standard',
+    tasksTotal: 6,
+    tasksComplete: 6,
+    ...overrides,
+  });
+  fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, 'reviews', 'final-review.md'),
+    '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n',
+    'utf8',
+  );
+  return { sessionDir, session };
+}
+
+test('3.1 review-coverage cap (F13): one independent per-group review lifts the cap and beats the 89 tier', () => {
+  const roots = [];
+  try {
+    const rootLift = tmp('forge-score-cov-lift-');
+    roots.push(rootLift);
+    const lift = makeReviewFixture(rootLift, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'thorough',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    fs.writeFileSync(
+      path.join(lift.taskDir, 'group-review.md'),
+      '# Group review\n\n**Verdict: APPROVED** (opus reviewer 7c1)\n',
+      'utf8',
+    );
+    const liftCard = scoreSession({ cwd: rootLift, sessionDir: lift.sessionDir, session: lift.session });
+
+    // Assert the caps array directly (not a substring probe) — this file's
+    // deliberate style — so a newly introduced cap of any kind is visible
+    // here instead of slipping past.
+    assert.deepEqual(liftCard.caps, [], capsJoin(liftCard.caps));
+    assert.ok(liftCard.score > 89, `expected the lift to clear the 89 tier, got ${liftCard.score}`);
+
+    // Witness: the identical fixture minus the group review caps at 69 —
+    // proves the empty caps array above came from the review lifting the
+    // cap specifically, not from a fixture that would never cap regardless.
+    const rootZero = tmp('forge-score-cov-lift-zero-');
+    roots.push(rootZero);
+    const zero = makeReviewFixture(rootZero, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'thorough',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    const zeroCard = scoreSession({ cwd: rootZero, sessionDir: zero.sessionDir, session: zero.session });
+    assert.equal(zeroCard.caps.length, 1, capsJoin(zeroCard.caps));
+    assert.equal(zeroCard.score, 69);
+
+    // 3.4: the lift must land in a grade strictly better than the 89 tier's —
+    // not merely a higher number in the same band. Compared against the
+    // actual computed 89-tier grade (never a hardcoded 'B') so the pin
+    // survives future re-tuning of either threshold.
+    const root89 = tmp('forge-score-cov-lift-89-');
+    roots.push(root89);
+    const tier89 = make89TierFixture(root89);
+    const card89 = scoreSession({ cwd: root89, sessionDir: tier89.sessionDir, session: tier89.session });
+    assert.equal(card89.score, 89);
+    assert.ok(
+      gradeRank(liftCard.grade) > gradeRank(card89.grade),
+      `expected the lift (${liftCard.grade}) to strictly beat the 89 tier (${card89.grade})`,
+    );
+  } finally {
+    roots.forEach((r) => fs.rmSync(r, { recursive: true, force: true }));
+  }
+});
+
+test('3.2 review-coverage cap (F13): brisk pace with zero reviews is exempt — obeying the pace must not be punished', () => {
+  const root = tmp('forge-score-cov-brisk-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'brisk',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(card.caps, [], capsJoin(card.caps));
+
+    // Witness: the identical fixture at 'standard' pace (still zero reviews)
+    // must cap — proves the empty caps array above came from the brisk
+    // exemption specifically, not from a fixture that would never cap
+    // regardless of pace.
+    const standardTwin = scoreSession({ cwd: root, sessionDir, session: { ...session, resolvedPace: 'standard' } });
+    assert.equal(standardTwin.caps.length, 1, capsJoin(standardTwin.caps));
+    assert.equal(standardTwin.score, 69);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('3.2 review-coverage cap (F13): lite pace with zero reviews is exempt — obeying the pace must not be punished', () => {
+  const root = tmp('forge-score-cov-lite-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'lite',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(card.caps, [], capsJoin(card.caps));
+
+    // Witness: same fixture at 'standard' pace must cap.
+    const standardTwin = scoreSession({ cwd: root, sessionDir, session: { ...session, resolvedPace: 'standard' } });
+    assert.equal(standardTwin.caps.length, 1, capsJoin(standardTwin.caps));
+    assert.equal(standardTwin.score, 69);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('3.2 review-coverage cap (F13): a plan-derived task count under the floor is exempt at standard pace with zero reviews', () => {
+  const root = tmp('forge-score-cov-floor-plan-');
+  try {
+    const { sessionDir, session, changeDir } = makePlanFixture(
+      root,
+      {
+        'proposal.md': '# Proposal\n\nHarvest token counts from the host transcript and total them.\n',
+        'tasks.md': '# Tasks\n\n- [x] 1.1 read the jsonl\n- [x] 1.2 total it\n- [x] 1.3 write the digest\n',
+      },
+      { resolvedPace: 'standard' },
+    );
+    const facts = collectPlanFacts({ cwd: root, session });
+    assert.equal(facts.readable, true, 'precondition: the plan is readable');
+    assert.equal(facts.highRisk, false, 'precondition: bland plan — must not be the money/auth floor doing the work');
+    assert.equal(facts.tasks, 3, 'precondition: fewer than the 5-task floor, measured from the plan');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(card.caps, [], capsJoin(card.caps));
+
+    // Witness: two more tasks.md checkboxes cross the 5-task floor and the
+    // identical (still zero-review) session caps — proves the empty caps
+    // array above came from the task-count guard reading the plan-derived
+    // count specifically, not from a fixture that would never cap regardless.
+    fs.appendFileSync(path.join(changeDir, 'tasks.md'), '- [x] 1.4 ship it\n- [x] 1.5 verify it\n');
+    assert.equal(collectPlanFacts({ cwd: root, session }).tasks, 5);
+    const overFloor = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(overFloor.caps.length, 1, capsJoin(overFloor.caps));
+    assert.equal(overFloor.score, 69);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('3.2 review-coverage cap (F13): a below-floor tasksTotal is exempt too, when the plan is unreadable', () => {
+  const root = tmp('forge-score-cov-floor-total-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'standard',
+      tasksTotal: 3,
+      tasksComplete: 3,
+      openspecChange: null,
+    });
+    assert.equal(collectPlanFacts({ cwd: root, session }).readable, false, 'precondition: no plan to read');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(card.caps, [], capsJoin(card.caps));
+
+    // Witness: bumping session.tasksTotal to 5 (still zero reviews, still no
+    // plan) crosses the floor via the tasksTotal fallback specifically and
+    // must cap.
+    const overFloor = scoreSession({ cwd: root, sessionDir, session: { ...session, tasksTotal: 5 } });
+    assert.equal(overFloor.caps.length, 1, capsJoin(overFloor.caps));
+    assert.equal(overFloor.score, 69);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('3.3/3.4 review-coverage cap (F13): the 89 tier follows the frozen verdict, not self-authored prose, and grades a B', () => {
+  // The discriminating fixture the brief calls for: prose alone reads as
+  // self-authored, but the frozen verdict (the same shape `set-phase.mjs`
+  // freezes at the done-gate transition, and the same value the gate itself
+  // read) says independent. The cap must follow the verdict, because that
+  // verdict is the one record that outlives session cleanup.
+  const root = tmp('forge-score-cov-frozen89-');
+  try {
+    const { sessionDir, session } = makeReviewFixture(root, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'standard',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    const reviewFile = path.join(sessionDir, 'reviews', 'final-review.md');
+    fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+    fs.writeFileSync(reviewFile, '# Final review\n\nReviewer: the coordinator — a self-check.\n', 'utf8');
+
+    // Control: no frozen verdict — prose decides, harsh (69) tier, grade C.
+    const prose = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(prose.caps.length, 1, capsJoin(prose.caps));
+    assert.equal(prose.score, 69, 'fixture control: prose alone caps at the harsh tier');
+    assert.equal(prose.grade, 'C', '3.4: the 69 tier must land in grade C');
+
+    // A frozen verdict of `independent` overrides the prose.
+    const measured = scoreSession({
+      cwd: root,
+      sessionDir,
+      session: {
+        ...session,
+        reviewVerdict: {
+          final: 'independent',
+          evidence: 'host',
+          stoppedByOperator: false,
+          unitOnRecord: true,
+        },
+      },
+    });
+    assert.equal(measured.caps.length, 1, capsJoin(measured.caps));
+    assert.equal(measured.score, 89, 'F13: the frozen verdict, not the self-authored prose, must decide the tier');
+    assert.equal(measured.grade, 'B', "3.4: the 89 tier must land in grade B — the whole point of softening it");
+
+    // 3.4: the two tiers must land in different bands, asserted as a
+    // relationship (not just the two literals), so the pin survives
+    // re-tuning of either threshold.
+    assert.notEqual(gradeRank(prose.grade), gradeRank(measured.grade));
+    assert.ok(gradeRank(measured.grade) > gradeRank(prose.grade));
+    assert.equal(gradeForScore(measured.score), measured.grade);
+    assert.equal(gradeForScore(prose.score), prose.grade);
+
+    // The two cap texts must be distinguishable from each other — matched on
+    // a fragment, not the exact string, so a future rewording for clarity
+    // does not break this pin for no reason.
+    assert.notEqual(capText(prose.caps[0]), capText(measured.caps[0]));
+    assert.match(capText(prose.caps[0]), /per-group reviewers were dispatched/i);
+    assert.match(capText(measured.caps[0]), /per-group reviewers were dispatched/i);
+    assert.match(capText(measured.caps[0]), /softened to a B/i);
+    assert.doesNotMatch(capText(prose.caps[0]), /softened to a B/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Fix 2 (final-review-fixes, MEDIUM) — the call site reads
+ * `if (coverageCap && score > coverageCap.cap)`. A CAP IS A CEILING, NEVER A
+ * FLOOR: deleting `&& score > coverageCap.cap` left all 872 tests plus the
+ * e2e green, while a session already capped to 59/D by `incompleteReason`
+ * was unconditionally overwritten to 89/B by the (higher) review-coverage
+ * ceiling — the most damaging thing a "cap" in this file could do, since it
+ * would launder an incomplete/unreviewed session into a passing grade. This
+ * fixture combines both caps deliberately: `make89TierFixture` alone earns
+ * the 89 tier (proven by the 3.3/3.4 test above), and adding
+ * `incompleteReason` here makes the OTHER cap fire first and land lower —
+ * so if the guard is missing, the review-coverage cap's unconditional
+ * overwrite is the only way this test could see anything but 59.
+ */
+test('review-coverage cap: a cap already applied by incompleteReason must not be overwritten upward (F13 fix 2)', () => {
+  const root = tmp('forge-score-cov-never-raises-');
+  try {
+    const { sessionDir, session } = make89TierFixture(root, {
+      incompleteReason: 'E2E blocked',
+    });
+    const card = scoreSession({ cwd: root, sessionDir, session });
+
+    assert.equal(card.score, 59, `incompleteReason's lower cap must survive, got ${card.score}`);
+    assert.equal(card.grade, 'D');
+    assert.equal(
+      card.caps.filter((c) => /incompleteReason/.test(capText(c))).length,
+      1,
+      capsJoin(card.caps),
+    );
+    // The review-coverage cap must not add its own entry here: it never
+    // fired, because the score was already at or below its ceiling. A cap
+    // entry claiming to have "reduced" a score it actually raised is exactly
+    // the defect this test exists to catch.
+    assert.equal(
+      card.caps.some((c) => /per-group reviewers were dispatched/i.test(capText(c))),
+      false,
+      `the review-coverage cap must not appear when it would only raise the score: ${capsJoin(card.caps)}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('invariant: applying the review-coverage cap never increases the score, across several F13 fixtures', () => {
+  // Belt-and-suspenders for the fix above (brief: "consider also pinning the
+  // general invariant"). Replays several review-coverage-cap scenarios
+  // already established in this file and, wherever the cap actually fired
+  // (a caps[] entry naming it, which always records "(was N)"), asserts the
+  // resulting score never exceeds the pre-cap N — the shape any future
+  // variant of the missing-guard defect would also have to violate.
+  const roots = [];
+  try {
+    const cards = [];
+
+    const r1 = tmp('forge-score-cov-inv-fires-');
+    roots.push(r1);
+    const f1 = makeReviewFixture(r1, {
+      slug: 'telemetry-dashboard-rollup',
+      paceSignal: 'aggregate nightly dashboard telemetry counts',
+      resolvedPace: 'thorough',
+      tasksTotal: 6,
+      tasksComplete: 6,
+    });
+    cards.push(scoreSession({ cwd: r1, sessionDir: f1.sessionDir, session: f1.session }));
+
+    const r2 = tmp('forge-score-cov-inv-89-');
+    roots.push(r2);
+    const f2 = make89TierFixture(r2);
+    cards.push(scoreSession({ cwd: r2, sessionDir: f2.sessionDir, session: f2.session }));
+
+    const r3 = tmp('forge-score-cov-inv-incomplete-');
+    roots.push(r3);
+    const f3 = make89TierFixture(r3, { incompleteReason: 'E2E blocked' });
+    cards.push(scoreSession({ cwd: r3, sessionDir: f3.sessionDir, session: f3.session }));
+
+    let sawAFire = false;
+    for (const card of cards) {
+      const capEntry = card.caps.find((c) => /per-group reviewers were dispatched/i.test(capText(c)));
+      if (!capEntry) continue; // this scenario's coverage cap did not fire
+      sawAFire = true;
+      const m = capText(capEntry).match(/\(was (\d+)\)/);
+      assert.ok(m, `a firing cap entry must record its pre-cap score: ${capEntry}`);
+      const before = Number(m[1]);
+      assert.ok(card.score <= before, `coverage cap must never raise the score: ${before} -> ${card.score}`);
+    }
+    assert.ok(sawAFire, 'fixture setup problem: none of these scenarios exercised the coverage cap at all');
+  } finally {
+    roots.forEach((r) => fs.rmSync(r, { recursive: true, force: true }));
   }
 });
 
@@ -796,7 +1737,7 @@ test('a red e2e run caps the score — artifacts cannot outvote a failing produc
 
     const card = scoreSession({ cwd: root, sessionDir, session });
     assert.ok(card.score <= 69, `expected a cap at C, got ${card.score}`);
-    assert.match(card.caps.join(' '), /e2e|product loop/i);
+    assert.match(capsJoin(card.caps), /e2e|product loop/i);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -830,7 +1771,7 @@ test('scoreSession: incompleteReason caps score at 59', () => {
     fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
     const card = scoreSession({ cwd: root, sessionDir, session });
     assert.ok(card.score <= 59);
-    assert.ok(card.caps.some((c) => /incompleteReason/.test(c)));
+    assert.ok(card.caps.some((c) => /incompleteReason/.test(capText(c))));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

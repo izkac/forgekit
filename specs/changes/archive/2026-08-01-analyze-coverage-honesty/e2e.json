@@ -1,0 +1,15 @@
+{
+  "change": "analyze-coverage-honesty",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "analyze-coverage-honesty",
+      "cmd": "node scripts/e2e/analyze-coverage-honesty.mjs",
+      "expect": "COVERAGE measured="
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "change": "score-census-evidence-fallback",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — live score/ledger census gets host evidence (F63)",
+      "library": "packages/cli/src/score.mjs; packages/cli/src/ledger.mjs",
+      "runtimeOwner": "forge score; appendSessionDigest",
+      "writes": "scorecard / sessions.jsonl digest reviews fields",
+      "reads": "reviewEvidence + reviewCensus",
+      "uiConsumer": "forge score / forge fleet report digests",
+      "evidence": "packages/cli/src/score.test.mjs; packages/cli/src/ledger.test.mjs; scripts/e2e/score-census-evidence-fallback.mjs"
+    }
+  ]
+}
