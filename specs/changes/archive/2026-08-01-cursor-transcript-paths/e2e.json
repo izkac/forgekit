@@ -1,0 +1,15 @@
+{
+  "change": "cursor-transcript-paths",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "cursor-transcript-paths",
+      "cmd": "node scripts/e2e/cursor-transcript-paths.mjs",
+      "expect": "CURSOR-TRANSCRIPT found=1 prune-wording=0"
+    }
+  ]
+}

@@ -1,5 +1,12 @@
 ## Unreleased
 
+### Cursor transcript paths (F71)
+
+`findTranscripts` locates Cursor conversations under
+`~/.cursor/projects/*/agent-transcripts/`. When the file is found but has no
+Claude-format token usage, collection degrades with that path and reason
+instead of claiming the transcript was pruned or written elsewhere.
+
 ### Analyze coverage buckets (F70)
 
 `forge analyze` coverage now reports measured / predates-telemetry / collection-failed

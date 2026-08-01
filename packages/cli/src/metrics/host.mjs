@@ -16,11 +16,15 @@
  *   ~/.claude/projects/<munged-cwd>/<host-session-id>.jsonl      main
  *   ~/.claude/projects/<munged-cwd>/<host-session-id>/subagents/ sidecars
  *
- * `findTranscripts` globs `projects/*` rather than reconstructing the munged
- * directory name: that munging rule is undocumented, and host session ids are
- * unique anyway, so a scan is both exact and immune to the rule changing.
- * Cursor transcript harvest is not implemented yet — binding still records the
- * id for later adapters.
+ *   ~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl  Cursor main
+ *   ~/.cursor/projects/<slug>/agent-transcripts/<id>/subagents/  Cursor sidecars
+ *
+ * `findTranscripts` globs each host's `projects/*` rather than reconstructing
+ * the munged directory name: that munging rule is undocumented, and host
+ * session ids are unique anyway, so a scan is both exact and immune to the
+ * rule changing. Claude is searched first; ids still missing are then sought
+ * under Cursor's agent-transcripts layout. Locating Cursor files is
+ * implemented; parsing Cursor `{role,message}` lines into token usage is not.
  *
  * Everything here is advisory. Telemetry must never throw, never block a
  * phase transition, and never fail a command — a missing transcript or an
@@ -128,6 +132,94 @@ function resolveConfigDir(opts) {
 }
 
 /**
+ * @param {{ cursorProjectsDir?: string, homedir?: () => string }} opts
+ * @returns {string}
+ */
+function resolveCursorProjectsDir(opts) {
+  if (typeof opts.cursorProjectsDir === 'string' && opts.cursorProjectsDir) {
+    return path.resolve(opts.cursorProjectsDir);
+  }
+  const home = (opts.homedir ?? os.homedir)();
+  return path.join(path.resolve(home), '.cursor', 'projects');
+}
+
+/**
+ * List immediate child directory names under `projectsDir`, or null when the
+ * directory is missing / unreadable (advisory — caller treats that as "no
+ * projects to search", not as failure of the whole locate).
+ *
+ * @param {string} projectsDir
+ * @returns {string[] | null}
+ */
+function listProjectDirs(projectsDir) {
+  try {
+    return fs
+      .readdirSync(projectsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stat one transcript + optional sidecar under a single project slug, using
+ * the same found / unreadable / omit rules as the Claude layout.
+ *
+ * @param {string} sessionId
+ * @param {string} transcript
+ * @param {string} sidecar
+ * @param {{ found: { sessionId: string, transcript: string, sidecarDir: string | null }[],
+ *   unreadable: { sessionId: string, path: string, reason: string }[] }} out
+ * @param {{ path: string, reason: string } | null} blocked
+ * @returns {{ matched: boolean, blocked: { path: string, reason: string } | null }}
+ */
+function tryTranscript(sessionId, transcript, sidecar, out, blocked) {
+  try {
+    if (!fs.statSync(transcript).isFile()) return { matched: false, blocked };
+  } catch (err) {
+    if (err?.code === 'ENOENT') {
+      // Ordinary: this id's transcript is simply not in this project.
+    } else if (!blocked) {
+      // Blocked, not absent — keep the first such error for this id.
+      // `err.message` already leads with `err.code`, so do not prefix again.
+      blocked = {
+        path: transcript,
+        reason: err?.message || `${err?.code ?? 'error'}: ${err}`,
+      };
+    }
+    return { matched: false, blocked };
+  }
+
+  let sidecarDir = null;
+  try {
+    const stat = fs.statSync(sidecar);
+    if (stat.isDirectory()) {
+      sidecarDir = sidecar;
+    } else {
+      // Present and not a directory — distinct from "dispatched nothing".
+      out.unreadable.push({
+        sessionId,
+        path: sidecar,
+        reason: 'exists and is not a directory',
+      });
+    }
+  } catch (err) {
+    if (err?.code === 'ENOENT') {
+      // Ordinary: pruned transcript or a session that dispatched no subagents.
+    } else {
+      out.unreadable.push({
+        sessionId,
+        path: sidecar,
+        reason: err?.message || `${err?.code ?? 'error'}: ${err}`,
+      });
+    }
+  }
+  out.found.push({ sessionId, transcript, sidecarDir });
+  return { matched: true, blocked };
+}
+
+/**
  * Locate the transcript on disk for each host session id.
  *
  * Returns two lists rather than one: `found` for ids whose transcript was
@@ -153,8 +245,14 @@ function resolveConfigDir(opts) {
  * governs its own answer — `reviewEvidence` treats the second as
  * disqualifying, a plain token-count caller might not.
  *
+ * Claude's `~/.claude/projects` tree is searched first. Ids still unmatched
+ * are then sought under Cursor's agent-transcripts layout
+ * (`…/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`). A Claude hit
+ * always wins when both hosts have the same id.
+ *
  * @param {string[]} sessionIds
- * @param {{ configDir?: string, homedir?: () => string, env?: Record<string, string | undefined> }} [opts]
+ * @param {{ configDir?: string, cursorProjectsDir?: string, homedir?: () => string,
+ *   env?: Record<string, string | undefined> }} [opts]
  * @returns {{ found: { sessionId: string, transcript: string, sidecarDir: string | null }[],
  *   unreadable: { sessionId: string, path: string, reason: string }[] }}
  */
@@ -168,93 +266,81 @@ export function findTranscripts(sessionIds, opts = {}) {
   ];
   if (ids.length === 0) return { found: [], unreadable: [] };
 
-  let projectsDir;
-  /** @type {string[]} */
-  let projects;
-  try {
-    projectsDir = path.join(resolveConfigDir(opts ?? {}), 'projects');
-    projects = fs
-      .readdirSync(projectsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
-  } catch {
-    return { found: [], unreadable: [] }; // no projects dir, or it is unreadable — advisory
-  }
-
   /** @type {{ sessionId: string, transcript: string, sidecarDir: string | null }[]} */
   const found = [];
   /** @type {{ sessionId: string, path: string, reason: string }[]} */
   const unreadable = [];
-  for (const sessionId of ids) {
-    // Remembered, not acted on: an id blocked in one project directory may
-    // still resolve in another, and found-elsewhere must win. Promoted to
-    // `unreadable` only if the inner loop finishes without a match.
-    /** @type {{ path: string, reason: string } | null} */
-    let blocked = null;
-    let matched = false;
-    for (const project of projects) {
-      const transcript = path.join(projectsDir, project, `${sessionId}.jsonl`);
-      try {
-        if (!fs.statSync(transcript).isFile()) continue;
-      } catch (err) {
-        if (err?.code === 'ENOENT') {
-          // Ordinary: this id's transcript is simply not in this project
-          // directory — overwhelmingly the common case of this scan.
-        } else if (!blocked) {
-          // Blocked, not absent — keep the first such error for this id; one
-          // entry is enough, and the first is as informative as any other.
-          // `err.message` already leads with `err.code` (Node's own stat
-          // errors read "EACCES: permission denied, ..."), so this must not
-          // prefix the code again — that would render "EACCES: EACCES: ...".
-          blocked = {
-            path: transcript,
-            reason: err?.message || `${err?.code ?? 'error'}: ${err}`,
-          };
-        }
-        continue;
-      }
-      const sidecar = path.join(projectsDir, project, sessionId, 'subagents');
-      let sidecarDir = null;
-      try {
-        const stat = fs.statSync(sidecar);
-        if (stat.isDirectory()) {
-          sidecarDir = sidecar;
-        } else {
-          // Present and not a directory. Collapsing this to `null` alone would
-          // be byte-identical to "dispatched nothing" — the same collapse this
-          // module's own comments warn against elsewhere in the codebase.
-          // The path itself is not repeated here: `review-evidence.mjs`'s
-          // refusal message already prints it alongside this reason as
-          // `(<path>)`, so restating it here would say it twice in one line.
-          unreadable.push({ sessionId, path: sidecar, reason: 'exists and is not a directory' });
-        }
-      } catch (err) {
-        if (err?.code === 'ENOENT') {
-          // Ordinary: a pruned transcript or a session that dispatched no
-          // subagents looks exactly like this, and both are normal.
-        } else {
-          // Blocked, not absent — EACCES, a non-directory ancestor, ... The
-          // error's own code and message are the honest content; nothing here
-          // knows better than the error itself what went wrong. `err.message`
-          // already leads with `err.code`, so this must not prefix it again.
-          unreadable.push({
-            sessionId,
-            path: sidecar,
-            reason: err?.message || `${err?.code ?? 'error'}: ${err}`,
-          });
+  const out = { found, unreadable };
+
+  /**
+   * @param {string} projectsDir
+   * @param {string[]} projects
+   * @param {(projectsDir: string, project: string, sessionId: string) =>
+   *   { transcript: string, sidecar: string }} pathsFor
+   * @param {Set<string>} pending
+   * @param {Map<string, { path: string, reason: string }>} blockedById
+   */
+  function scanHost(projectsDir, projects, pathsFor, pending, blockedById) {
+    for (const sessionId of [...pending]) {
+      /** @type {{ path: string, reason: string } | null} */
+      let blocked = blockedById.get(sessionId) ?? null;
+      let matched = false;
+      for (const project of projects) {
+        const { transcript, sidecar } = pathsFor(projectsDir, project, sessionId);
+        const result = tryTranscript(sessionId, transcript, sidecar, out, blocked);
+        blocked = result.blocked;
+        if (result.matched) {
+          matched = true;
+          pending.delete(sessionId);
+          blockedById.delete(sessionId);
+          break;
         }
       }
-      found.push({ sessionId, transcript, sidecarDir });
-      matched = true;
-      break; // ids are unique; first hit wins
+      if (!matched && blocked) blockedById.set(sessionId, blocked);
     }
-    // Promotion happens here, once per id, after every project directory has
-    // had its chance: found-elsewhere wins over any blocked directory seen
-    // along the way, and only an id resolved nowhere carries its blocked
-    // reason forward.
-    if (!matched && blocked) {
+  }
+
+  /** @type {Set<string>} */
+  const pending = new Set(ids);
+  /** @type {Map<string, { path: string, reason: string }>} */
+  const blockedById = new Map();
+
+  const claudeProjectsDir = path.join(resolveConfigDir(opts ?? {}), 'projects');
+  scanHost(
+    claudeProjectsDir,
+    listProjectDirs(claudeProjectsDir) ?? [],
+    (dir, project, sessionId) => ({
+      transcript: path.join(dir, project, `${sessionId}.jsonl`),
+      sidecar: path.join(dir, project, sessionId, 'subagents'),
+    }),
+    pending,
+    blockedById,
+  );
+
+  if (pending.size > 0) {
+    const cursorProjectsDir = resolveCursorProjectsDir(opts ?? {});
+    scanHost(
+      cursorProjectsDir,
+      listProjectDirs(cursorProjectsDir) ?? [],
+      (dir, project, sessionId) => {
+        const base = path.join(dir, project, 'agent-transcripts', sessionId);
+        return {
+          transcript: path.join(base, `${sessionId}.jsonl`),
+          sidecar: path.join(base, 'subagents'),
+        };
+      },
+      pending,
+      blockedById,
+    );
+  }
+
+  // Promote per-id blocks only for ids still unresolved after every host.
+  for (const sessionId of pending) {
+    const blocked = blockedById.get(sessionId);
+    if (blocked) {
       unreadable.push({ sessionId, path: blocked.path, reason: blocked.reason });
     }
   }
+
   return { found, unreadable };
 }

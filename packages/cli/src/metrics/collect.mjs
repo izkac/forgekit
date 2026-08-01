@@ -213,6 +213,24 @@ function sidecarTranscripts(sidecarDir) {
 }
 
 /**
+ * Reason when bound transcripts are readable but carry no Claude-format usage
+ * (typical Cursor `{role,message}` JSONL). Names the path(s); never the prune
+ * wording.
+ *
+ * @param {{ transcript: string }[]} bound
+ * @returns {string}
+ */
+function noUsageReason(bound) {
+  const paths = bound.map((entry) => entry.transcript).join(', ');
+  const noun =
+    bound.length === 1 ? 'bound transcript' : 'bound transcripts';
+  return (
+    `${noun} ${paths} found but host format lacks token usage — ` +
+    `Claude-format usage fields are absent`
+  );
+}
+
+/**
  * Harvest token, model, tool and phase metrics for one Forge session.
  *
  * Counts only what happened inside `[session.createdAt, collectedAt]` on the
@@ -229,8 +247,9 @@ function sidecarTranscripts(sidecarDir) {
  *
  * @param {{ session?: Record<string, any>, sessionDir?: string,
  *   env?: Record<string, string | undefined>, now?: () => Date,
- *   configDir?: string }} [options] `now` is injectable so a test can pin the
- *   window's upper edge; `configDir` and `env` are passed through to
+ *   configDir?: string, cursorProjectsDir?: string, homedir?: () => string }} [options]
+ *   `now` is injectable so a test can pin the window's upper edge; `configDir`,
+ *   `cursorProjectsDir`, `homedir` and `env` are passed through to
  *   `findTranscripts`; `sessionDir` is where `dispatches.jsonl` lives — omit it
  *   and the dispatch counts are simply zero. Unknown keys are ignored.
  * @returns {Record<string, any>} the metrics document, `available: true` or
@@ -259,6 +278,8 @@ export function collectMetrics(options) {
 
     const { found: bound, unreadable } = findTranscripts(sessionIds, {
       configDir: opts.configDir,
+      cursorProjectsDir: opts.cursorProjectsDir,
+      homedir: opts.homedir,
       env: opts.env,
     });
     // `unreadable` entries land in the document as `unread`, which must let a
@@ -324,6 +345,8 @@ export function collectMetrics(options) {
     // majority has no reason to stay resident.
     let rawLineCount = 0;
     /** @type {Record<string, any>[]} */
+    const allReadableLines = [];
+    /** @type {Record<string, any>[]} */
     const parentLines = [];
     // Keyed by sessionId: which bound ids' parent-transcript read itself
     // failed, and why. This is the single read that also produces
@@ -337,6 +360,7 @@ export function collectMetrics(options) {
       if (error) readErrors.set(sessionId, error);
       for (const line of lines) {
         rawLineCount += 1;
+        allReadableLines.push(line);
         if (inWindow(line)) parentLines.push(line);
       }
     }
@@ -351,6 +375,7 @@ export function collectMetrics(options) {
         // sidecar transcript just contributes no lines.
         for (const line of readJsonl(file).lines) {
           rawLineCount += 1;
+          allReadableLines.push(line);
           if (inWindow(line)) sidecarLines.push(line);
         }
       }
@@ -395,6 +420,15 @@ export function collectMetrics(options) {
         dispatches,
       );
     }
+
+    // F71: Cursor (and any future host) may write readable JSONL without
+    // Claude's `type: assistant` + `message.usage` shape. Prefer naming that
+    // format gap over "outside the session window" (lines often lack
+    // timestamps too) or a false prune.
+    if (usageByRequest(allReadableLines).length === 0) {
+      return degraded(collectedAt, noUsageReason(bound), dispatches);
+    }
+
     if (parentLines.length + sidecarLines.length === 0) {
       // The files are fine, they just describe someone else's work. Told apart
       // from an unreadable transcript on purpose: one is a broken host, the
