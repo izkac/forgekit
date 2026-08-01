@@ -1,5 +1,11 @@
 ## Unreleased
 
+### Checkpoint refuses foreign change dirs (F72)
+
+`forge checkpoint` refuses when untracked paths sit under another
+`<plan.dir>/changes/<other>/` (not this session's change, not `archive/`),
+so a sibling scaffold cannot be swept into this change's checkpoint commit.
+
 ### Cursor transcript paths (F71)
 
 `findTranscripts` locates Cursor conversations under
