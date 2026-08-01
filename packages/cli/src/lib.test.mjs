@@ -344,6 +344,73 @@ test('cleanup will not age out a session with work in it', () => {
   assert.equal(fs.existsSync(withWork), false, 'naming it is how you say you mean it');
 });
 
+test('cleanup retains unfinished plan session with live change dir (F48)', () => {
+  // Plan-phase work lives under <plan.dir>/changes/, not the session dir.
+  // An aged unfinished session with only scaffold files must survive bare
+  // cleanup when openspecChange names a live change dir — and must still
+  // yield to an explicit --include-unfinished --session. An archived-only
+  // change does not protect.
+  const root = tmp('forge-cleanup-plan-');
+  const old = new Date(Date.now() - 30 * 864e5).toISOString();
+  const plantScaffold = (id, change) => {
+    const dir = path.join(root, '.forge', 'sessions', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      `${JSON.stringify({
+        id,
+        slug: id,
+        phase: 'plan',
+        planType: 'specs',
+        openspecChange: change,
+        createdAt: old,
+        updatedAt: old,
+      })}\n`,
+    );
+    fs.writeFileSync(path.join(dir, 'status.json'), '{}\n');
+    for (const d of ['tasks', 'reviews', 'brainstorm']) fs.mkdirSync(path.join(dir, d));
+    return dir;
+  };
+
+  const live = plantScaffold('live-plan', 'example-change');
+  fs.mkdirSync(path.join(root, 'specs', 'changes', 'example-change'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'specs', 'changes', 'example-change', 'proposal.md'), '# why\n');
+
+  const archivedOnly = plantScaffold('archived-plan', 'old-change');
+  fs.mkdirSync(path.join(root, 'specs', 'changes', 'archive', '2026-01-01-old-change'), {
+    recursive: true,
+  });
+  fs.writeFileSync(
+    path.join(root, 'specs', 'changes', 'archive', '2026-01-01-old-change', 'proposal.md'),
+    '# archived\n',
+  );
+
+  const cleanup = path.join(path.dirname(SESSION_STATUS), 'cleanup-sessions.mjs');
+  const fleet = () => ({
+    ...process.env,
+    FORGEKIT_FLEET_DIR: path.join(tmp('forge-cleanup-plan-fleet-'), 's'),
+  });
+
+  execFileSync(process.execPath, [cleanup], { cwd: root, env: fleet() });
+
+  assert.equal(
+    fs.existsSync(live),
+    true,
+    'live change dir is held work even when the session dir is scaffold-only',
+  );
+  assert.equal(
+    fs.existsSync(archivedOnly),
+    false,
+    'archive-only change does not protect a scaffold session',
+  );
+
+  execFileSync(process.execPath, [cleanup, '--include-unfinished', '--session', 'live-plan'], {
+    cwd: root,
+    env: fleet(),
+  });
+  assert.equal(fs.existsSync(live), false, 'naming it still deletes unfinished plan work');
+});
+
 test('a stray file in .forge/sessions is not an unreadable session', () => {
   // A `.DS_Store` produced ENOTDIR, which became an `unreadable: true`
   // candidate — so a one-session project's money gate refused *forever* and

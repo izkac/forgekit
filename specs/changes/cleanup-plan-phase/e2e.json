@@ -1,0 +1,15 @@
+{
+  "change": "cleanup-plan-phase",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "cleanup-plan-phase",
+      "cmd": "node scripts/e2e/cleanup-plan-phase.mjs",
+      "expect": "CLEANUP plan-retained=ok unfinished-delete=ok"
+    }
+  ]
+}

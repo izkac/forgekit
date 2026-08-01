@@ -1,0 +1,15 @@
+{
+  "change": "cleanup-plan-phase",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-lifecycle — cleanup respects live plan change dir (F48)",
+      "library": "packages/cli/src/cleanup-sessions.mjs",
+      "runtimeOwner": "forge cleanup / cleanup-sessions",
+      "writes": "deletes .forge/sessions/<id> only when allowed",
+      "reads": "session.json openspecChange; <plan.dir>/changes/<name>/; .forge/config.json plan.dir",
+      "uiConsumer": "operator cleanup; finish.md cleanup line",
+      "evidence": "packages/cli/src/lib.test.mjs cleanup cases; scripts/e2e/cleanup-plan-phase.mjs"
+    }
+  ]
+}

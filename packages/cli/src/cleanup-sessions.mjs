@@ -10,6 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadProjectConfig } from './config.mjs';
 import {
   clearActive,
   loadSession,
@@ -19,6 +20,7 @@ import {
   sessionAgeDays,
 } from './lib.mjs';
 import { isTerminalPhase, unregisterSession } from './lib/fleet.mjs';
+import { DEFAULT_SPECS_DIR } from './plan-engine.mjs';
 import { appendScorecardLedger } from './score.mjs';
 
 const args = new Set(process.argv.slice(2));
@@ -147,7 +149,25 @@ for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
     }
     return false;
   };
-  const hasWork = !isDone && holdsWork(dir);
+  // Plan-phase work lives under <plan.dir>/changes/<name>/, not the session
+  // dir. A live change dir (not under changes/archive/) is held work even
+  // when the session only has Forge scaffold files (F48).
+  const hasLiveChangeDir = (change) => {
+    if (typeof change !== 'string' || !change || change.includes('/') || change.includes('\\')) {
+      return false;
+    }
+    const cfg = loadProjectConfig(process.cwd());
+    const plan = cfg.plan && typeof cfg.plan === 'object' ? /** @type {Record<string, unknown>} */ (cfg.plan) : null;
+    const planDir =
+      plan && typeof plan.dir === 'string' && plan.dir.trim() ? plan.dir.trim() : DEFAULT_SPECS_DIR;
+    const live = path.join(process.cwd(), planDir, 'changes', change);
+    try {
+      return fs.statSync(live).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  const hasWork = !isDone && (holdsWork(dir) || hasLiveChangeDir(session.openspecChange));
   // Named explicitly, `--include-unfinished` means it: the operator typed this
   // session's id after a flag that says it deletes work. Before, the pointer's
   // own protection still applied — so the printed remedy silently no-opped on
