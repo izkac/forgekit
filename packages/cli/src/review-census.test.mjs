@@ -7,6 +7,11 @@ import { tmpdir } from 'node:os';
 import { CENSUS_RULE, FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
 import { writeStamp } from './review-stamp.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
+import {
+  assistantLine,
+  meta,
+  plantHost,
+} from './metrics/test-host-tree.mjs';
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -1687,80 +1692,15 @@ test('the substance floor is untouched by the partial flag — a below-floor buc
 // pins this module's half of the contract and nothing about the join itself —
 // it would keep passing even if `reviewEvidence` stopped producing
 // `available: false` for a half-read binding, because no `reviewEvidence`
-// ever runs in it. This fixture instead builds the on-disk host tree from
-// `metrics/review-evidence.test.mjs`'s "stays unavailable when only one of two
-// bound host sessions can be searched" fixture — read and followed, not
-// reinvented — and feeds `reviewEvidence`'s real return value into
+// ever runs in it. This fixture instead builds the on-disk host tree via the
+// shared `metrics/test-host-tree.mjs` helpers (same planter as review-evidence
+// / collect) and feeds `reviewEvidence`'s real return value into
 // `reviewCensus`. It is the only test in the suite that would catch the two
 // halves drifting apart.
-//
-// Duplicated rather than imported from the sibling test file. A shared
-// fixture helper across `review-census.test.mjs` and
-// `metrics/review-evidence.test.mjs` would be the right refactor, but the
-// brief for this task scoped it out — noted as a concern in the task report.
 // ---------------------------------------------------------------------------
 
-/** One assistant transcript line — i.e. one content block of one reply. */
-function hostAssistantLine({ requestId, at }) {
-  return {
-    type: 'assistant',
-    requestId,
-    timestamp: at,
-    isSidechain: true,
-    message: {
-      id: `msg_${requestId}`,
-      model: 'claude-opus-5',
-      content: [{ type: 'text' }],
-      usage: {
-        input_tokens: 0,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-        output_tokens: 0,
-      },
-    },
-  };
-}
-
-function hostJsonl(lines) {
-  return lines.map((line) => JSON.stringify(line)).join('\n');
-}
-
-/** A meta in the host's own shape. */
-function hostMeta({ description }) {
-  return {
-    agentType: 'general-purpose',
-    description,
-    toolUseId: 'toolu_017uFdNuuRF9FFhJk8oz15Gr',
-    spawnDepth: 1,
-    model: 'opus',
-  };
-}
-
-/** Lay out `agent-<id>.meta.json` / `agent-<id>.jsonl` pairs, as the host writes them. */
-function plantHostSidecars(agents, dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  for (const [agentId, { meta: agentMeta, lines }] of Object.entries(agents)) {
-    fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(agentMeta));
-    if (lines !== undefined) fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), hostJsonl(lines));
-  }
-}
-
-/**
- * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
- * (this same function's earlier return value) to plant a second host session
- * beside the first, under one project directory — a session bound to several
- * host ids has them all there.
- */
-function plantHostSession({ sessionId, subagents, configDir = fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), 'forge-census-join-host-'))) }) {
-  const project = path.join(configDir, 'projects', 'demo-project');
-  fs.mkdirSync(project, { recursive: true });
-  fs.writeFileSync(
-    path.join(project, `${sessionId}.jsonl`),
-    hostJsonl([hostAssistantLine({ requestId: 'parent_1', at: '2026-07-28T10:00:00.000Z' })]),
-  );
-  plantHostSidecars(subagents, path.join(project, sessionId, 'subagents'));
-  return configDir;
-}
+const PARENT_LINE = assistantLine({ requestId: 'parent_1', at: '2026-07-28T10:00:00.000Z' });
+const HOST_PROJECT = '-home-iztok-Projects-forgekit';
 
 test('the join: a half-read host binding does not reach the one genuine host self', () => {
   // The gate this pins, end to end: `bucket === undefined` in
@@ -1779,12 +1719,13 @@ test('the join: a half-read host binding does not reach the one genuine host sel
   // so `prescribed > 0` and the convention reads as in use here — the state in
   // which the final reviewer's absence from the table is supposed to mean
   // something.
-  const configDir = plantHostSession({
+  const configDir = plantHost({
     sessionId: FIRST_HOST_ID,
+    lines: [PARENT_LINE],
     subagents: {
       a1: {
-        meta: hostMeta({ description: `forge-review group-01 ${FORGE_SESSION_ID}` }),
-        lines: [hostAssistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
+        meta: meta({ description: `forge-review group-01 ${FORGE_SESSION_ID}` }),
+        lines: [assistantLine({ requestId: 'g_1', at: '2026-07-28T10:30:00.000Z' })],
       },
     },
   });
@@ -1795,18 +1736,19 @@ test('the join: a half-read host binding does not reach the one genuine host sel
   // directory, not on `subagents/` itself: `statSync` succeeds on a `000`
   // directory because stat reads the parent's entry, so only the outer
   // directory reproduces an unreadable sidecar.
-  plantHostSession({
+  plantHost({
     configDir,
     sessionId: SECOND_HOST_ID,
+    lines: [PARENT_LINE],
     subagents: {
       a2: {
-        meta: hostMeta({ description: `forge-review final ${FORGE_SESSION_ID}` }),
-        lines: [hostAssistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
+        meta: meta({ description: `forge-review final ${FORGE_SESSION_ID}` }),
+        lines: [assistantLine({ requestId: 'f_1', at: '2026-07-28T11:00:00.000Z' })],
       },
     },
   });
 
-  const secondHostDir = path.join(configDir, 'projects', 'demo-project', SECOND_HOST_ID);
+  const secondHostDir = path.join(configDir, 'projects', HOST_PROJECT, SECOND_HOST_ID);
   const secondSidecarPath = path.join(secondHostDir, 'subagents');
 
   // The Forge session directory: a final review whose prose reads
@@ -1873,15 +1815,16 @@ test('the pruned-transcript limit reaches the census as independent on host grad
   const READABLE_HOST_ID = '99999999-8888-7777-6666-444444444444';
   const ABSENT_HOST_ID = '00000000-1111-2222-3333-444444444444';
 
-  const configDir = plantHostSession({
+  const configDir = plantHost({
     sessionId: READABLE_HOST_ID,
+    lines: [PARENT_LINE],
     subagents: {
       a1: {
-        meta: hostMeta({ description: `forge-review final ${FORGE_SESSION_ID}` }),
+        meta: meta({ description: `forge-review final ${FORGE_SESSION_ID}` }),
         // At least FINAL_REVIEW_REQUEST_FLOOR requests, or the census's own
         // floor — not this scenario — would be what refuses the unit.
         lines: Array.from({ length: FINAL_REVIEW_REQUEST_FLOOR }, (_, n) =>
-          hostAssistantLine({ requestId: `f_${n}`, at: '2026-07-28T11:00:00.000Z' }),
+          assistantLine({ requestId: `f_${n}`, at: '2026-07-28T11:00:00.000Z' }),
         ),
       },
     },

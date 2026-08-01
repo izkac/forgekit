@@ -5,68 +5,16 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { readReviewerSidecars, reviewEvidence } from './review-evidence.mjs';
+import {
+  DEFAULT_HOST_ID,
+  assistantLine,
+  meta,
+  plantHost,
+  plantSidecars,
+} from './test-host-tree.mjs';
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
-}
-
-/** A `usage` object in the host's own field names. */
-function usage({ input = 0, output = 0, cacheRead = 0, cacheCreate = 0 } = {}) {
-  return {
-    input_tokens: input,
-    cache_creation_input_tokens: cacheCreate,
-    cache_read_input_tokens: cacheRead,
-    output_tokens: output,
-  };
-}
-
-/** One assistant transcript line — i.e. one content block of one reply. */
-function assistantLine({ requestId, at, model = 'claude-opus-5', tokens = {} } = {}) {
-  return {
-    type: 'assistant',
-    requestId,
-    timestamp: at,
-    isSidechain: true,
-    message: { id: `msg_${requestId}`, model, content: [{ type: 'text' }], usage: usage(tokens) },
-  };
-}
-
-function jsonl(lines) {
-  return lines.map((line) => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n');
-}
-
-/** A meta in the host's own shape; `stoppedByUser` is absent unless asked for. */
-function meta({ description, stoppedByUser } = {}) {
-  const out = {
-    agentType: 'general-purpose',
-    description,
-    toolUseId: 'toolu_017uFdNuuRF9FFhJk8oz15Gr',
-    spawnDepth: 1,
-    model: 'opus',
-  };
-  if (stoppedByUser !== undefined) out.stoppedByUser = stoppedByUser;
-  return out;
-}
-
-/**
- * Lay out `agent-<id>.meta.json` / `agent-<id>.jsonl` pairs in a fresh dir,
- * exactly as the host writes them. Omit either half to model a killed or
- * pruned dispatch.
- */
-function plantSidecars(agents, dir = tmp('forge-review-evidence-')) {
-  fs.mkdirSync(dir, { recursive: true });
-  for (const [agentId, { meta: agentMeta, lines }] of Object.entries(agents)) {
-    if (agentMeta !== undefined) {
-      fs.writeFileSync(
-        path.join(dir, `agent-${agentId}.meta.json`),
-        typeof agentMeta === 'string' ? agentMeta : JSON.stringify(agentMeta),
-      );
-    }
-    if (lines !== undefined) {
-      fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), jsonl(lines));
-    }
-  }
-  return dir;
 }
 
 test('readReviewerSidecars returns one record per dispatch carrying the prescribed token', () => {
@@ -355,29 +303,10 @@ test('readReviewerSidecars lets no description text reach its output', () => {
 /** The Forge session every fixture below dispatches as. */
 const DEMO_ID = '20260728T100000Z-demo-abc123';
 
-const HOST_ID = 'f8447a2f-eb56-41b8-8cc1-16606b862780';
+const HOST_ID = DEFAULT_HOST_ID;
 
 /** The second host conversation a resumed session binds to. */
 const SECOND_HOST_ID = '11111111-2222-3333-4444-555555555555';
-
-/**
- * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
- * (the value this same function returned) to plant a second host session
- * beside the first, rather than into a fresh tree of its own — a session
- * bound to several host ids has them all under one project directory.
- */
-function plantHost({
-  sessionId = HOST_ID,
-  lines = null,
-  subagents = null,
-  configDir = tmp('forge-review-evidence-host-'),
-} = {}) {
-  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
-  fs.mkdirSync(project, { recursive: true });
-  if (lines !== null) fs.writeFileSync(path.join(project, `${sessionId}.jsonl`), jsonl(lines));
-  if (subagents !== null) plantSidecars(subagents, path.join(project, sessionId, 'subagents'));
-  return configDir;
-}
 
 /** A session bound to one or more host ids, created at `createdAt`. */
 function boundSession({ createdAt = '2026-07-28T10:00:00.000Z', sessionIds = [HOST_ID] } = {}) {

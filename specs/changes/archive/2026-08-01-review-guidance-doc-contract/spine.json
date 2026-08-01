@@ -1,0 +1,15 @@
+{
+  "change": "review-guidance-doc-contract",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "review-evidence — published self-phrases stay true (F36)",
+      "library": "packages/cli/src/review-census.mjs",
+      "runtimeOwner": "reviewCensus (forge score / phase done)",
+      "writes": "n/a (test-only change)",
+      "reads": "skills/forge/phases/implement.md closed list",
+      "uiConsumer": "forge score review depth",
+      "evidence": "packages/cli/src/review-guidance-contract.test.mjs; scripts/e2e/review-guidance-doc-contract.mjs"
+    }
+  ]
+}

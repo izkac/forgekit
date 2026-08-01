@@ -1,0 +1,15 @@
+{
+  "change": "review-guidance-doc-contract",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "review-guidance-doc-contract",
+      "cmd": "node scripts/e2e/review-guidance-doc-contract.mjs",
+      "expect": "DOC-CONTRACT phrases="
+    }
+  ]
+}
