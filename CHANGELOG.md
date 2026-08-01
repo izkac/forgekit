@@ -1,4 +1,10 @@
-## Unreleased
+# Changelog
+
+## 0.3.36 — 2026-08-01
+
+npm was still on **0.3.33**. In-tree the package version had already been
+advanced through 0.3.34/0.3.35 without a publish; this release ships that work
+plus the findings closed on `fix/review-coverage-cap`.
 
 ### Checkpoint refuses foreign change dirs (F72)
 
@@ -35,10 +41,6 @@ or `**Verdict: REJECTED**`), not instructional "REJECT if …" prose.
 `hasLiveChangeDir` now uses `resolveProjectPlanEngine` so OpenSpec projects
 with `{ plan: { engine: "openspec" } }` and no `plan.dir` retain aged plan
 sessions under `openspec/changes/`, not only under `specs/changes/`.
-
-# Changelog
-
-## Unreleased
 
 ### Cleanup keeps plan-phase sessions with a live change dir (F48)
 
