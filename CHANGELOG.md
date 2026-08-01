@@ -1,5 +1,11 @@
 ## Unreleased
 
+### Analyze coverage buckets (F70)
+
+`forge analyze` coverage now reports measured / predates-telemetry / collection-failed
+counts instead of only a blended ratio, so a live collection failure is not
+hidden among sessions that never had telemetry.
+
 ### Live score/ledger census consults host evidence (F63)
 
 Mid-session `forge score` and the session digest now pass `reviewEvidence`

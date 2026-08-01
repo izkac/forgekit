@@ -126,17 +126,21 @@ export function buildAnalysis(options = {}) {
   const sessions = [];
   let toolResults = 0;
   let errorResults = 0;
-  let withMetrics = 0;
+  let measured = 0;
+  let predatesTelemetry = 0;
+  let collectionFailed = 0;
 
   for (const entry of digests) {
     const card = cards.get(entry.sessionId) ?? null;
     const compact = entry.metrics && typeof entry.metrics === 'object' ? entry.metrics : null;
     const hasMetrics = compact?.available === true;
+    if (hasMetrics) measured += 1;
+    else if (compact?.available === false) collectionFailed += 1;
+    else predatesTelemetry += 1;
     const doc = readSessionDoc(forgeDir, entry.sessionId);
     const grade = entry.grade ?? card?.grade ?? null;
 
     if (hasMetrics) {
-      withMetrics += 1;
       totals.requests += num(compact.requests);
       totals.outputTokens += num(compact.outputTokens);
       totals.totalTokens += num(compact.totalTokens);
@@ -260,8 +264,11 @@ export function buildAnalysis(options = {}) {
   return {
     coverage: {
       sessionsTotal: digests.length,
-      sessionsWithMetrics: withMetrics,
-      ratio: digests.length > 0 ? withMetrics / digests.length : 0,
+      measured,
+      predatesTelemetry,
+      collectionFailed,
+      sessionsWithMetrics: measured,
+      ratio: digests.length > 0 ? measured / digests.length : 0,
     },
     filters: { since: opts.since ?? null, limit: limit ?? null },
     totals: {
@@ -315,19 +322,31 @@ function table(rows, align) {
 /**
  * The analysis as a terminal report.
  *
- * Coverage leads, always — every number below it describes only the sessions
- * that carry metrics, and a reader who missed that would over-read the rest.
+ * Coverage leads, always — measured / predates-telemetry / collection-failed
+ * so a blended history is never mistaken for full telemetry. Every number
+ * below describes only the measured sessions.
  *
  * @param {Record<string, any>} analysis
  * @returns {string}
  */
 export function formatAnalysis(analysis) {
   const a = analysis && typeof analysis === 'object' ? analysis : {};
-  const coverage = a.coverage ?? { sessionsTotal: 0, sessionsWithMetrics: 0, ratio: 0 };
+  const coverage = a.coverage ?? {
+    sessionsTotal: 0,
+    measured: 0,
+    predatesTelemetry: 0,
+    collectionFailed: 0,
+    sessionsWithMetrics: 0,
+    ratio: 0,
+  };
   const out = [];
 
+  const measured = coverage.measured ?? coverage.sessionsWithMetrics ?? 0;
+  const predates = coverage.predatesTelemetry ?? 0;
+  const failed = coverage.collectionFailed ?? 0;
+  const total = coverage.sessionsTotal ?? 0;
   out.push(
-    `Coverage: ${coverage.sessionsWithMetrics ?? 0} of ${coverage.sessionsTotal ?? 0} analysed sessions carry metrics (${pct(coverage.ratio)})`,
+    `Coverage: ${measured} measured, ${predates} predates telemetry, ${failed} collection failed (of ${total}; measured ${pct(coverage.ratio)})`,
   );
   if (a.filters?.since) out.push(`  since ${a.filters.since}`);
   if (a.filters?.limit) out.push(`  most recent ${a.filters.limit}`);

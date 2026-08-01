@@ -1,0 +1,15 @@
+{
+  "change": "analyze-coverage-honesty",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "analyze-report — coverage buckets (F70)",
+      "library": "packages/cli/src/analyze.mjs",
+      "runtimeOwner": "forge analyze / buildAnalysis",
+      "writes": "analysis.coverage + formatAnalysis lead line",
+      "reads": "sessions.jsonl digest metrics",
+      "uiConsumer": "forge analyze stdout / JSON",
+      "evidence": "packages/cli/src/analyze.test.mjs; scripts/e2e/analyze-coverage-honesty.mjs"
+    }
+  ]
+}

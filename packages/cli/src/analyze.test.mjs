@@ -116,10 +116,22 @@ function doc(over = {}) {
   };
 }
 
+/** Empty / zero coverage shape after the honesty buckets landed. */
+function emptyCoverage() {
+  return {
+    sessionsTotal: 0,
+    measured: 0,
+    predatesTelemetry: 0,
+    collectionFailed: 0,
+    sessionsWithMetrics: 0,
+    ratio: 0,
+  };
+}
+
 test('a fresh project analyses to an explicit nothing, not an error', () => {
   const analysis = buildAnalysis({ cwd: project() });
 
-  assert.deepEqual(analysis.coverage, { sessionsTotal: 0, sessionsWithMetrics: 0, ratio: 0 });
+  assert.deepEqual(analysis.coverage, emptyCoverage());
   assert.deepEqual(analysis.sessions, []);
   assert.deepEqual(plain(analysis.byModel), {});
   assert.deepEqual(plain(analysis.byPhase), {});
@@ -130,9 +142,47 @@ test('a fresh project analyses to an explicit nothing, not an error', () => {
   assert.match(text, /nothing to analyse/i);
 });
 
+test('coverage buckets split measured, predates-telemetry, and collection-failed', () => {
+  // Three kinds on digests alone — no live metrics.json required (F70).
+  const digests = [
+    digest('measured', {
+      metrics: compact({ requests: 10, outputTokens: 100, totalTokens: 1000 }),
+      endedAt: '2026-07-21T10:00:00.000Z',
+    }),
+    // No metrics object → predates telemetry (spread undefined then JSON omit).
+    digest('predates', { metrics: undefined, endedAt: '2026-07-22T10:00:00.000Z' }),
+    digest('failed', {
+      metrics: { available: false, reason: 'no transcript on disk' },
+      endedAt: '2026-07-23T10:00:00.000Z',
+    }),
+  ];
+  const analysis = buildAnalysis({ cwd: project({ digests }) });
+
+  assert.deepEqual(analysis.coverage, {
+    sessionsTotal: 3,
+    measured: 1,
+    predatesTelemetry: 1,
+    collectionFailed: 1,
+    sessionsWithMetrics: 1,
+    ratio: 1 / 3,
+  });
+  assert.equal(
+    analysis.coverage.measured +
+      analysis.coverage.predatesTelemetry +
+      analysis.coverage.collectionFailed,
+    analysis.coverage.sessionsTotal,
+  );
+  assert.equal(analysis.coverage.sessionsWithMetrics, analysis.coverage.measured);
+
+  const lead = formatAnalysis(analysis).split('\n').find((l) => l.trim());
+  assert.match(
+    lead,
+    /Coverage:\s*1 measured,\s*1 predates telemetry,\s*1 collection failed \(of 3; measured 33\.3%\)/,
+  );
+});
+
 test('coverage counts every session but token math counts only the measured ones', () => {
-  // Nine sessions, six with metrics — the spec's own scenario. A history that
-  // is 2/3 measured must never be read as a complete one.
+  // Nine sessions: six measured, three predates-telemetry — never read as complete.
   const digests = [];
   for (let i = 0; i < 9; i += 1) {
     digests.push(
@@ -146,6 +196,9 @@ test('coverage counts every session but token math counts only the measured ones
 
   assert.deepEqual(analysis.coverage, {
     sessionsTotal: 9,
+    measured: 6,
+    predatesTelemetry: 3,
+    collectionFailed: 0,
     sessionsWithMetrics: 6,
     ratio: 6 / 9,
   });
@@ -454,7 +507,10 @@ test('the rendered table leads with coverage and survives an empty history', () 
   );
   const firstMeaningfulLine = full.split('\n').find((l) => l.trim());
   assert.match(firstMeaningfulLine, /coverage/i);
-  assert.match(full, /1 of 1/);
+  assert.match(
+    firstMeaningfulLine,
+    /1 measured,\s*0 predates telemetry,\s*0 collection failed \(of 1; measured 100\.0%\)/,
+  );
   assert.match(full, /claude-opus-5/);
 
   const empty = formatAnalysis(buildAnalysis({ cwd: project() }));
@@ -465,7 +521,14 @@ test('the rendered table leads with coverage and survives an empty history', () 
 /** Minimal analysis object for `formatAnalysis` — coverage must be non-zero to reach later sections. */
 function analysisStub(over = {}) {
   return {
-    coverage: { sessionsTotal: 1, sessionsWithMetrics: 1, ratio: 1 },
+    coverage: {
+      sessionsTotal: 1,
+      measured: 1,
+      predatesTelemetry: 0,
+      collectionFailed: 0,
+      sessionsWithMetrics: 1,
+      ratio: 1,
+    },
     totals: { requests: 0, totalTokens: 0, outputTokens: 0, subagents: 0, errorRate: 0 },
     byModel: {},
     byPhase: {},
