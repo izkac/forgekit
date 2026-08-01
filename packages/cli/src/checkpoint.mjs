@@ -12,6 +12,11 @@
  * never push, never run on the default branch unless explicitly allowed, and
  * record the resulting sha on the session so reviewers get a real diff range.
  *
+ * Staging uses `git add -A` excluding `.forge/` scratch — but refuses first
+ * when untracked paths sit under a *foreign* plan-engine change directory
+ * (`<plan.dir>/changes/<other>/`, not this session's openspecChange, not
+ * `archive/`), so another change's in-progress files are never swept in.
+ *
  * Usage:
  *   forge checkpoint --group <name> [--tasks <ids>] [--message <subject>]
  *   forge checkpoint --dry-run
@@ -23,6 +28,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { loadSession, resolveSessionOrExit, REPO_ROOT, saveSession } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
+import { resolveProjectPlanEngine } from './plan-engine.mjs';
 
 const MODES = ['off', 'per-group', 'per-task'];
 const DEFAULT_BRANCHES = new Set(['main', 'master']);
@@ -83,8 +89,42 @@ function emit(payload) {
  * Session bookkeeping is not product work: `.forge/` churns on every phase
  * write (including this command's own), so committing it would make every
  * checkpoint dirty the tree again and bury the real diff in scratch.
+ * Foreign untracked change dirs are a separate gate — see
+ * `foreignUntrackedChangePaths` — not an add-pathspec exclude.
  */
 const EXCLUDE_SCRATCH = ['--', '.', ':(exclude).forge'];
+
+/**
+ * Untracked paths under `<planDir>/changes/<segment>/…` where `segment` is
+ * neither the session's openspecChange nor `archive`. With no openspecChange,
+ * every non-archive segment is foreign.
+ *
+ * @param {{ path: string, untracked: boolean }[]} pending
+ * @param {string} planDir
+ * @param {string | null | undefined} openspecChange
+ * @returns {string[]}
+ */
+export function foreignUntrackedChangePaths(pending, planDir, openspecChange) {
+  const root = String(planDir || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+  if (!root) return [];
+  const prefix = `${root}/changes/`;
+  const allowed = new Set(['archive']);
+  if (openspecChange) allowed.add(openspecChange);
+  return pending
+    .filter((e) => e.untracked)
+    .map((e) => e.path.replace(/\\/g, '/'))
+    .filter((p) => {
+      if (!p.startsWith(prefix)) return false;
+      const rest = p.slice(prefix.length);
+      const slash = rest.indexOf('/');
+      if (slash <= 0) return false;
+      const segment = rest.slice(0, slash);
+      return Boolean(segment) && !allowed.has(segment);
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
 
 /**
  * Working-tree entries with their porcelain status, including untracked ones —
@@ -289,12 +329,13 @@ if (DEFAULT_BRANCHES.has(branch) && !allowDefaultBranch && config?.git?.allowDef
 }
 
 // --- what would land ---
-let files;
+let pending;
 try {
-  files = pendingFiles(cwd);
+  pending = pendingEntries(cwd);
 } catch (err) {
   fail(`Could not read the working tree: ${err instanceof Error ? err.message : err}`);
 }
+const files = pending.map((e) => e.path);
 
 const subject = checkpointSubject(session, opts);
 
@@ -312,6 +353,23 @@ if (files.length === 0) {
 if (dryRun) {
   emit({ ok: true, committed: false, dryRun: true, branch, subject, files });
   process.exit(0);
+}
+
+const planDir = resolveProjectPlanEngine(cwd).dir;
+const foreign = foreignUntrackedChangePaths(pending, planDir, session.openspecChange);
+if (foreign.length > 0) {
+  const changeLabel = session.openspecChange || '(none)';
+  fail(
+    `Refusing to checkpoint: untracked path(s) under a foreign change directory ` +
+      `(session change: ${changeLabel}):\n${foreign.map((p) => `  ${p}`).join('\n')}`,
+    {
+      ok: false,
+      reason: 'foreign untracked change paths',
+      foreign,
+      openspecChange: session.openspecChange ?? null,
+      planDir,
+    },
+  );
 }
 
 // --- commit (never push) ---

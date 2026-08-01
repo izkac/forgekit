@@ -250,3 +250,39 @@ test('checkpoint never pushes', () => {
   assert.equal(out.committed, true);
   assert.equal(git(cwd, 'log', '--oneline', '-1', '--format=%s').includes('phase-1'), true);
 });
+
+test('untracked sibling change dir refuses; same-change untracked still commits', () => {
+  // F72: git add -A would sweep another change's untracked files into this
+  // session's checkpoint. Refuse instead; own-change untracked is fine.
+  const { cwd } = makeProject({
+    config: {
+      git: { checkpoint: 'per-group' },
+      plan: { engine: 'specs', dir: 'specs' },
+    },
+  });
+  const foreign = path.join(cwd, 'specs', 'changes', 'other-change', 'proposal.md');
+  fs.mkdirSync(path.dirname(foreign), { recursive: true });
+  fs.writeFileSync(foreign, '# other\n', 'utf8');
+  const headBefore = git(cwd, 'rev-parse', 'HEAD');
+
+  const refused = run(cwd, ['--group', 'group-01']);
+  assert.equal(refused.status, 1);
+  assert.match(`${refused.stderr}${refused.out ? JSON.stringify(refused.out) : ''}`, /other-change/);
+  assert.match(`${refused.stderr}${refused.out ? JSON.stringify(refused.out) : ''}`, /specs\/changes\/other-change/);
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), headBefore, 'no commit on refuse');
+  assert.equal(
+    git(cwd, 'status', '--porcelain', '--', 'specs/changes/other-change').includes('??'),
+    true,
+    'foreign untracked left untouched',
+  );
+
+  fs.rmSync(path.join(cwd, 'specs', 'changes', 'other-change'), { recursive: true, force: true });
+  const own = path.join(cwd, 'specs', 'changes', 'phase-1', 'note.md');
+  fs.mkdirSync(path.dirname(own), { recursive: true });
+  fs.writeFileSync(own, '# own\n', 'utf8');
+
+  const ok = run(cwd, ['--group', 'group-01']);
+  assert.equal(ok.status, 0);
+  assert.equal(ok.out.committed, true);
+  assert.ok(ok.out.files.includes('specs/changes/phase-1/note.md'));
+});

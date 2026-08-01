@@ -1,0 +1,15 @@
+{
+  "change": "checkpoint-scoped-staging",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-lifecycle — checkpoint refuses foreign change untracked (F72)",
+      "library": "packages/cli/src/checkpoint.mjs",
+      "runtimeOwner": "forge checkpoint",
+      "writes": "none on refuse; else checkpoint commit",
+      "reads": "git status porcelain + session.openspecChange",
+      "uiConsumer": "forge checkpoint CLI",
+      "evidence": "packages/cli/src/checkpoint.test.mjs; scripts/e2e/checkpoint-scoped-staging.mjs"
+    }
+  ]
+}
