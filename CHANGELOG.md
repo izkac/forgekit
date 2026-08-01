@@ -1,3 +1,11 @@
+## Unreleased
+
+### Cleanup OpenSpec plan root (F73)
+
+`hasLiveChangeDir` now uses `resolveProjectPlanEngine` so OpenSpec projects
+with `{ plan: { engine: "openspec" } }` and no `plan.dir` retain aged plan
+sessions under `openspec/changes/`, not only under `specs/changes/`.
+
 # Changelog
 
 ## Unreleased

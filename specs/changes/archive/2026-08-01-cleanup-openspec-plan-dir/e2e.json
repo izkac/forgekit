@@ -1,0 +1,15 @@
+{
+  "change": "cleanup-openspec-plan-dir",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "cleanup-openspec-plan-dir",
+      "cmd": "node scripts/e2e/cleanup-openspec-plan-dir.mjs",
+      "expect": "CLEANUP-OPENSPEC plan-retained=ok"
+    }
+  ]
+}

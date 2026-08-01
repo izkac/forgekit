@@ -351,6 +351,11 @@ test('cleanup retains unfinished plan session with live change dir (F48)', () =>
   // yield to an explicit --include-unfinished --session. An archived-only
   // change does not protect.
   const root = tmp('forge-cleanup-plan-');
+  fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs' } })}\n`,
+  );
   const old = new Date(Date.now() - 30 * 864e5).toISOString();
   const plantScaffold = (id, change) => {
     const dir = path.join(root, '.forge', 'sessions', id);
@@ -409,6 +414,58 @@ test('cleanup retains unfinished plan session with live change dir (F48)', () =>
     env: fleet(),
   });
   assert.equal(fs.existsSync(live), false, 'naming it still deletes unfinished plan work');
+});
+
+test('cleanup retains openspec-engine plan session without plan.dir (F73)', () => {
+  // F73: hasLiveChangeDir fell back to DEFAULT_SPECS_DIR when plan.dir was
+  // absent, so openspec-engine projects (engine only, no dir) looked under
+  // specs/changes/ and deleted aged scaffold sessions that still had a live
+  // openspec/changes/<name>/.
+  const root = tmp('forge-cleanup-openspec-');
+  const old = new Date(Date.now() - 30 * 864e5).toISOString();
+  fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'openspec' } })}\n`,
+  );
+
+  const sessionDir = path.join(root, '.forge', 'sessions', 'live-openspec');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, 'session.json'),
+    `${JSON.stringify({
+      id: 'live-openspec',
+      slug: 'live-openspec',
+      phase: 'plan',
+      planType: 'openspec',
+      openspecChange: 'example-change',
+      createdAt: old,
+      updatedAt: old,
+    })}\n`,
+  );
+  fs.writeFileSync(path.join(sessionDir, 'status.json'), '{}\n');
+  for (const d of ['tasks', 'reviews', 'brainstorm']) fs.mkdirSync(path.join(sessionDir, d));
+
+  fs.mkdirSync(path.join(root, 'openspec', 'changes', 'example-change'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, 'openspec', 'changes', 'example-change', 'proposal.md'),
+    '# why\n',
+  );
+
+  const cleanup = path.join(path.dirname(SESSION_STATUS), 'cleanup-sessions.mjs');
+  execFileSync(process.execPath, [cleanup], {
+    cwd: root,
+    env: {
+      ...process.env,
+      FORGEKIT_FLEET_DIR: path.join(tmp('forge-cleanup-openspec-fleet-'), 's'),
+    },
+  });
+
+  assert.equal(
+    fs.existsSync(sessionDir),
+    true,
+    'openspec engine without plan.dir must look under openspec/changes/',
+  );
 });
 
 test('a stray file in .forge/sessions is not an unreadable session', () => {
