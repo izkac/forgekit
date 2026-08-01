@@ -9,7 +9,8 @@ import {
   compactMetrics,
   readLedger,
 } from './ledger.mjs';
-import { CENSUS_RULE, reviewCensus } from './review-census.mjs';
+import { CENSUS_RULE, FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
+import { writeStamp } from './review-stamp.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 
 function tmp(prefix) {
@@ -556,6 +557,114 @@ test('a session with no frozen verdict falls back to a live census, graded infer
   const { reviews } = digestOf(root);
   assert.equal(reviews.final, reviewCensus(sessionDir).finalReview);
   assert.equal(reviews.evidence, 'inferred');
+});
+
+/**
+ * Host transcript + stopped final-reviewer sidecar under a scratch
+ * CLAUDE_CONFIG_DIR — the shape set-phase.test.mjs plants for freeze tests.
+ * Timestamps sit at `at` so they land inside the collector window.
+ *
+ * @param {string} configDir
+ * @param {string} hostId
+ * @param {string} at
+ * @param {string} forgeSessionId
+ */
+function plantStoppedFinalDispatch(configDir, hostId, at, forgeSessionId) {
+  const projectDir = path.join(configDir, 'projects', '-scratch');
+  fs.mkdirSync(projectDir, { recursive: true });
+  const parentLine = {
+    type: 'assistant',
+    requestId: 'parent_1',
+    timestamp: at,
+    message: {
+      id: 'msg_parent_1',
+      model: 'claude-opus-5',
+      content: [{ type: 'text' }],
+      usage: { input_tokens: 1, output_tokens: 2 },
+    },
+  };
+  fs.writeFileSync(
+    path.join(projectDir, `${hostId}.jsonl`),
+    `${JSON.stringify(parentLine)}\n`,
+    'utf8',
+  );
+  const sidecarDir = path.join(projectDir, hostId, 'subagents');
+  fs.mkdirSync(sidecarDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sidecarDir, 'agent-r1.meta.json'),
+    JSON.stringify({
+      agentType: 'general-purpose',
+      description: `forge-review final ${forgeSessionId}`,
+      model: 'opus',
+      stoppedByUser: true,
+    }),
+    'utf8',
+  );
+  const lines = Array.from({ length: FINAL_REVIEW_REQUEST_FLOOR }, (_, i) => ({
+    type: 'assistant',
+    requestId: `req_r1_${i}`,
+    timestamp: at,
+    message: {
+      id: `msg_r1_${i}`,
+      model: 'claude-opus-5',
+      content: [{ type: 'text' }],
+      usage: { input_tokens: 1, output_tokens: 2 },
+    },
+  }));
+  fs.writeFileSync(
+    path.join(sidecarDir, 'agent-r1.jsonl'),
+    `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
+    'utf8',
+  );
+}
+
+test('live digest census consults host evidence — a stamp does not outrank a measured stop', () => {
+  // F63: score.mjs and ledger.mjs used to call reviewCensus(sessionDir) with
+  // no evidence on the live (no-frozen-verdict) path, so a stamped final
+  // graded `recorded` even when the host recorded that every final dispatch
+  // was stopped. set-phase's freeze always passes evidence; this pin is the
+  // digest's matching call site.
+  const root = tmp('forge-ledger-live-stop-');
+  const configDir = tmp('forge-ledger-live-stop-cfg-');
+  const prevConfig = process.env.CLAUDE_CONFIG_DIR;
+  const hostId = 'host-ledger-live-stop';
+  try {
+    const createdAt = '2026-07-28T10:00:00.000Z';
+    const { sessionDir, session } = makeSession(root, 'sess-ledger-live-stop', {
+      createdAt,
+      updatedAt: '2026-07-28T14:00:00.000Z',
+      // No reviewVerdict — the live-census fallback is what F63 names.
+      host: { agent: 'claude-code', sessionIds: [hostId], boundAt: createdAt },
+    });
+    writeFinalReview(sessionDir, INDEPENDENT_PROSE);
+    writeStamp(sessionDir, {
+      unit: 'final',
+      label: 'forge-review final sess-ledger-live-stop',
+      sessionId: 'sess-ledger-live-stop',
+    });
+    plantStoppedFinalDispatch(configDir, hostId, createdAt, 'sess-ledger-live-stop');
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+
+    // Control: without evidence the stamp alone decides this session.
+    assert.equal(
+      reviewCensus(sessionDir).finalReviewEvidence,
+      'recorded',
+      'fixture: stamp alone grades recorded',
+    );
+    assert.equal(reviewCensus(sessionDir).finalReview, 'independent');
+
+    appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+    const { reviews } = digestOf(root);
+    assert.equal(reviews.final, 'self', 'measured stop outranks the stamp');
+    assert.equal(reviews.evidence, 'host');
+    assert.notEqual(reviews.evidence, 'recorded', 'stamp must not win as recorded');
+    assert.equal(reviews.stoppedByOperator, true);
+  } finally {
+    if (prevConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevConfig;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
 });
 
 test('frozenReviewVerdict answers null for anything that is not a session object', () => {

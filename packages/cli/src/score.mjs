@@ -26,6 +26,7 @@ import { sessionHealth } from './health.mjs';
 import { collectPlanFacts } from './plan-facts.mjs';
 import { isHighRiskText, resolveEffectivePreferences } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
+import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { appendDeferralLedger, appendSessionDigest } from './ledger.mjs';
 
@@ -531,9 +532,11 @@ export function scoreSession(opts) {
   // same value the gate read. Not re-measured: the evidence expires, and this
   // function also runs from `forge score` long after the fact. A session with
   // no frozen verdict — anything that finished before this change, or a
-  // scorecard taken mid-session — falls back to the prose reading, graded
-  // `inferred`. The per-group counts stay on prose by design.
-  const live = reviewCensus(sessionDir);
+  // scorecard taken mid-session — falls back to a live census that consults
+  // host evidence the same way the freeze does (F63), so a stamp alone cannot
+  // outrank a measured stop. The per-group counts stay on prose by design.
+  const evidence = reviewEvidence({ session, env: process.env });
+  const live = reviewCensus(sessionDir, { evidence });
   const frozen = frozenReviewVerdict(session);
   const census = frozen
     ? {

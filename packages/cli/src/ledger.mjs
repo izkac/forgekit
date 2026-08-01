@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadDeferrals } from './integrity.mjs';
 import { reviewCensus } from './review-census.mjs';
+import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { sessionHealth } from './health.mjs';
 
@@ -201,7 +202,11 @@ function forgeDirOf(opts, sessionDir) {
 export function appendSessionDigest(opts) {
   const { sessionDir, session } = opts;
   try {
-    const census = reviewCensus(sessionDir);
+    // Live census consults host evidence the same way `freezeReviewVerdict`
+    // does (F63). Frozen overlay below still wins when present; without it, a
+    // stamp alone must not outrank a measured stop.
+    const evidence = reviewEvidence({ session, env: process.env });
+    const census = reviewCensus(sessionDir, { evidence });
     // THE VERDICT IS NOT RE-MEASURED HERE. `set-phase.mjs` measured it at the
     // `finish`/`done` transition from the host's own dispatch record and froze
     // it onto the session; this line only reads it back. Recomputing would be

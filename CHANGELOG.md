@@ -1,5 +1,11 @@
 ## Unreleased
 
+### Live score/ledger census consults host evidence (F63)
+
+Mid-session `forge score` and the session digest now pass `reviewEvidence`
+into live `reviewCensus` (same as `forge phase done` freeze), so a dispatch
+stamp alone cannot outrank a host-measured stop when no frozen verdict exists.
+
 ### Score rejection count honesty (F59)
 
 `reviewCensus` only counts structural rejection markers (`Round <n> … REJECTED`

@@ -14,6 +14,8 @@ import {
 } from './score.mjs';
 import { e2eStepsHash } from './integrity.mjs';
 import { collectPlanFacts } from './plan-facts.mjs';
+import { FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
+import { writeStamp } from './review-stamp.mjs';
 
 const PHASE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 const SCORE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'score-cli.mjs');
@@ -905,6 +907,103 @@ test('a frozen "there is no final review" keeps the cap on, whatever turned up a
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('live score census consults host evidence — a stamp does not outrank a measured stop', () => {
+  // F63: mid-session `forge score` with no frozen verdict used to call
+  // reviewCensus without evidence, so a stamp alone graded the final review
+  // `recorded`/`independent` even when the host recorded a stop. Mirror of the
+  // ledger pin; scorecard notes are the observable (no evidence field on the card).
+  //
+  // `stampedFinalReview` matches stamp.sessionId to path.basename(sessionDir);
+  // makeSession hard-codes the dir as `sess-score`, so the stamp must name that.
+  const root = tmp('forge-score-live-stop-');
+  const configDir = tmp('forge-score-live-stop-cfg-');
+  const prevConfig = process.env.CLAUDE_CONFIG_DIR;
+  const hostId = 'host-score-live-stop';
+  try {
+    const createdAt = '2026-07-28T10:00:00.000Z';
+    const { sessionDir, session } = makeSession(root, {
+      createdAt,
+      updatedAt: '2026-07-28T14:00:00.000Z',
+      host: { agent: 'claude-code', sessionIds: [hostId], boundAt: createdAt },
+    });
+    assert.equal(session.id, path.basename(sessionDir), 'fixture: stamp id matches dir name');
+    const reviewFile = path.join(sessionDir, 'reviews', 'final-review.md');
+    fs.mkdirSync(path.dirname(reviewFile), { recursive: true });
+    fs.writeFileSync(
+      reviewFile,
+      '# Final review\n\n**Verdict: APPROVED** — opus reviewer 4d2 read the whole diff.\n',
+      'utf8',
+    );
+    writeStamp(sessionDir, {
+      unit: 'final',
+      label: `forge-review final ${session.id}`,
+      sessionId: session.id,
+    });
+    const projectDir = path.join(configDir, 'projects', '-scratch');
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, `${hostId}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        requestId: 'parent_1',
+        timestamp: createdAt,
+        message: {
+          id: 'msg_parent_1',
+          model: 'claude-opus-5',
+          content: [{ type: 'text' }],
+          usage: { input_tokens: 1, output_tokens: 2 },
+        },
+      })}\n`,
+      'utf8',
+    );
+    const sidecarDir = path.join(projectDir, hostId, 'subagents');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sidecarDir, 'agent-r1.meta.json'),
+      JSON.stringify({
+        agentType: 'general-purpose',
+        description: `forge-review final ${session.id}`,
+        model: 'opus',
+        stoppedByUser: true,
+      }),
+      'utf8',
+    );
+    const lines = Array.from({ length: FINAL_REVIEW_REQUEST_FLOOR }, (_, i) => ({
+      type: 'assistant',
+      requestId: `req_r1_${i}`,
+      timestamp: createdAt,
+      message: {
+        id: `msg_r1_${i}`,
+        model: 'claude-opus-5',
+        content: [{ type: 'text' }],
+        usage: { input_tokens: 1, output_tokens: 2 },
+      },
+    }));
+    fs.writeFileSync(
+      path.join(sidecarDir, 'agent-r1.jsonl'),
+      `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
+      'utf8',
+    );
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+
+    assert.equal(
+      reviewCensus(sessionDir).finalReviewEvidence,
+      'recorded',
+      'fixture: stamp alone grades recorded',
+    );
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const notes = reviewCheck(card).notes.join(' ');
+    assert.match(notes, /self-authored/i, notes);
+    assert.doesNotMatch(notes, /independent final review/i, notes);
+  } finally {
+    if (prevConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevConfig;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
   }
 });
 

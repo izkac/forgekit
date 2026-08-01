@@ -508,12 +508,13 @@ function finalBucketWellFormed(evidence) {
  *
  * @param {string} sessionDir
  * @param {{ evidence?: unknown }} [options] `evidence` is the object
- *   `metrics/review-evidence.mjs`'s `reviewEvidence` returns. Omitted — as most
- *   callers still omit it (`score.mjs`, `ledger.mjs`; `set-phase.mjs`'s
- *   `freezeReviewVerdict` passes it) — the verdict falls to this session's own
- *   dispatch stamp, graded `recorded`, and then to the prose reading this
- *   module has always done, graded `inferred`. No caller wiring is needed for
- *   the stamp: it lives under `sessionDir`, which every caller already passes.
+ *   `metrics/review-evidence.mjs`'s `reviewEvidence` returns. Callers that
+ *   score or digest a live census (`score.mjs`, `ledger.mjs`) pass it, as does
+ *   `set-phase.mjs`'s `freezeReviewVerdict`. Omitted — tests, older call sites —
+ *   the verdict falls to this session's own dispatch stamp, graded `recorded`,
+ *   and then to the prose reading this module has always done, graded
+ *   `inferred`. No caller wiring is needed for the stamp: it lives under
+ *   `sessionDir`, which every caller already passes.
  * @returns {{ total: number, independent: number, selfChecks: number,
  *   rejections: number, finalReview: 'independent' | 'self' | null,
  *   finalReviewEvidence: 'host' | 'recorded' | 'inferred' | 'none',
