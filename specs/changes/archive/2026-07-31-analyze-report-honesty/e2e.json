@@ -1,0 +1,15 @@
+{
+  "change": "analyze-report-honesty",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "analyze-report-honesty",
+      "cmd": "node scripts/e2e/analyze-report-honesty.mjs",
+      "expect": "HONESTY digest-split=ok policy-zero=ok no-synthetic=ok sess-err=ok hooks=ok"
+    }
+  ]
+}

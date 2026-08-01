@@ -155,6 +155,31 @@ test('coverage counts every session but token math counts only the measured ones
   assert.equal(analysis.sessions.filter((s) => s.hasMetrics).length, 6);
 });
 
+test('byModel omits the host synthetic model named in a digest', () => {
+  const d = doc({
+    byModel: {
+      '<synthetic>': { requests: 5, input: 5, output: 250, cacheRead: 50000, cacheCreate: 500 },
+      'claude-opus-5': { requests: 90, input: 90, output: 4500, cacheRead: 800000, cacheCreate: 4000 },
+    },
+  });
+  const analysis = buildAnalysis({
+    cwd: project({
+      digests: [
+        digest('s1', {
+          metrics: compact({ models: ['<synthetic>', 'claude-opus-5'] }),
+        }),
+      ],
+      docs: { s1: d },
+    }),
+  });
+
+  assert.equal(Object.hasOwn(analysis.byModel, '<synthetic>'), false);
+  const opus = analysis.byModel['claude-opus-5'];
+  assert.equal(opus.sessions, 1);
+  assert.equal(opus.requests, d.byModel['claude-opus-5'].requests);
+  assert.equal(opus.output, d.byModel['claude-opus-5'].output);
+});
+
 test('per-model rows come from the surviving documents, and grades from every session', () => {
   const d = doc();
   const analysis = buildAnalysis({
@@ -202,6 +227,90 @@ test('phase attribution is summed across the sessions that still have it', () =>
   assert.equal(analysis.byPhase.implement.sessions, 2);
   assert.equal(analysis.byPhase.verify.requests, a.byPhase.verify.requests);
   assert.equal(analysis.byPhase.verify.sessions, 1);
+});
+
+test('digest byModel/byPhase fill per-model rows when metrics.json is gone', () => {
+  // After cleanup only the compact splits remain — they must not read as zeros.
+  const byModel = {
+    'claude-opus-5': { requests: 40, input: 40, output: 2000, cacheRead: 300000, cacheCreate: 1500 },
+    'claude-fable-5': { requests: 7, input: 7, output: 350, cacheRead: 40000, cacheCreate: 200 },
+  };
+  const byPhase = {
+    implement: { requests: 30, input: 30, output: 1500, cacheRead: 250000, cacheCreate: 1200 },
+    verify: { requests: 17, input: 17, output: 850, cacheRead: 90000, cacheCreate: 500 },
+  };
+  const analysis = buildAnalysis({
+    cwd: project({
+      digests: [
+        digest('s-pruned', {
+          metrics: compact({
+            models: Object.keys(byModel).sort(),
+            byModel,
+            byPhase,
+          }),
+        }),
+      ],
+    }),
+  });
+
+  const opus = analysis.byModel['claude-opus-5'];
+  assert.equal(opus.sessions, 1);
+  assert.equal(opus.detailed, 1, 'digest splits count as a detailed contribution');
+  assert.equal(opus.requests, byModel['claude-opus-5'].requests);
+  assert.equal(opus.output, byModel['claude-opus-5'].output);
+  assert.equal(opus.input, byModel['claude-opus-5'].input);
+  assert.equal(opus.cacheRead, byModel['claude-opus-5'].cacheRead);
+  assert.equal(opus.cacheCreate, byModel['claude-opus-5'].cacheCreate);
+
+  const fable = analysis.byModel['claude-fable-5'];
+  assert.equal(fable.requests, byModel['claude-fable-5'].requests);
+  assert.equal(fable.output, byModel['claude-fable-5'].output);
+
+  assert.equal(analysis.byPhase.implement.requests, byPhase.implement.requests);
+  assert.equal(analysis.byPhase.implement.output, byPhase.implement.output);
+  assert.equal(analysis.byPhase.verify.requests, byPhase.verify.requests);
+  assert.equal(analysis.byPhase.verify.sessions, 1);
+});
+
+test('live metrics.json wins over digest byModel/byPhase splits', () => {
+  // Discriminating fixture: digest cells differ from the live doc so a wrong
+  // preference would still produce non-zero numbers — and fail these asserts.
+  const live = doc({
+    byModel: {
+      'claude-opus-5': { requests: 90, input: 90, output: 4500, cacheRead: 800000, cacheCreate: 4000 },
+    },
+    byPhase: {
+      implement: { requests: 80, input: 80, output: 4000, cacheRead: 700000, cacheCreate: 4000 },
+    },
+  });
+  const digestSplit = {
+    byModel: {
+      'claude-opus-5': { requests: 1, input: 1, output: 1, cacheRead: 1, cacheCreate: 1 },
+    },
+    byPhase: {
+      implement: { requests: 2, input: 2, output: 2, cacheRead: 2, cacheCreate: 2 },
+    },
+  };
+  const analysis = buildAnalysis({
+    cwd: project({
+      digests: [
+        digest('s-both', {
+          metrics: compact({
+            models: ['claude-opus-5'],
+            ...digestSplit,
+          }),
+        }),
+      ],
+      docs: { 's-both': live },
+    }),
+  });
+
+  const opus = analysis.byModel['claude-opus-5'];
+  assert.equal(opus.requests, live.byModel['claude-opus-5'].requests);
+  assert.equal(opus.output, live.byModel['claude-opus-5'].output);
+  assert.notEqual(opus.requests, digestSplit.byModel['claude-opus-5'].requests);
+  assert.equal(analysis.byPhase.implement.requests, live.byPhase.implement.requests);
+  assert.notEqual(analysis.byPhase.implement.requests, digestSplit.byPhase.implement.requests);
 });
 
 test('the skip rate answers how often forge resolve-model was bypassed', () => {
@@ -351,6 +460,96 @@ test('the rendered table leads with coverage and survives an empty history', () 
   const empty = formatAnalysis(buildAnalysis({ cwd: project() }));
   assert.ok(empty.trim().length > 0, 'zero sessions still renders something readable');
   assert.doesNotThrow(() => formatAnalysis({}));
+});
+
+/** Minimal analysis object for `formatAnalysis` — coverage must be non-zero to reach later sections. */
+function analysisStub(over = {}) {
+  return {
+    coverage: { sessionsTotal: 1, sessionsWithMetrics: 1, ratio: 1 },
+    totals: { requests: 0, totalTokens: 0, outputTokens: 0, subagents: 0, errorRate: 0 },
+    byModel: {},
+    byPhase: {},
+    dispatches: {
+      total: 0,
+      sessions: 0,
+      allowed: 0,
+      rewritten: 0,
+      denied: 0,
+      skipped: 0,
+      skipRate: 0,
+    },
+    sessions: [],
+    ...over,
+  };
+}
+
+test('model policy: empty tables on sessions do not solely advise wiring the hook', () => {
+  const sessions = 9;
+  const text = formatAnalysis(
+    analysisStub({
+      dispatches: {
+        total: 0,
+        sessions,
+        allowed: 0,
+        rewritten: 0,
+        denied: 0,
+        skipped: 0,
+        skipRate: 0,
+      },
+    }),
+  );
+  assert.match(text, new RegExp(`${sessions} sessions reported no dispatches`, 'i'));
+  assert.doesNotMatch(text, /Wire the PreToolUse hook/);
+});
+
+test('model policy: zero dispatch sessions still advise wiring the hook', () => {
+  const text = formatAnalysis(
+    analysisStub({
+      dispatches: {
+        total: 0,
+        sessions: 0,
+        allowed: 0,
+        rewritten: 0,
+        denied: 0,
+        skipped: 0,
+        skipRate: 0,
+      },
+    }),
+  );
+  assert.match(text, /Wire the PreToolUse hook/);
+});
+
+test('by-model caption marks requests as detailed-only and header is sess err', () => {
+  const text = formatAnalysis(
+    analysisStub({
+      byModel: {
+        'claude-opus-5': {
+          sessions: 2,
+          detailed: 1,
+          requests: 10,
+          input: 1,
+          output: 2,
+          cacheRead: 3,
+          cacheCreate: 4,
+          sessionErrorRate: 0.01,
+          grades: ['A'],
+        },
+      },
+    }),
+  );
+  const caption = text.split('\n').find((l) => /^By model/.test(l));
+  assert.ok(caption, 'By model caption present');
+  assert.match(caption, /request/i);
+  assert.match(caption, /detailed/i);
+  assert.doesNotMatch(caption, /tokens cover the sessions whose metrics\.json still exists/);
+
+  const header = text
+    .split('\n')
+    .find((l) => /^model\b/.test(l.trim()) && /\bsessions\b/.test(l) && /\brequests\b/.test(l));
+  assert.ok(header, 'By model header present');
+  const cols = header.trim().split(/\s{2,}/);
+  assert.ok(cols.includes('sess err'), `expected sess err in ${JSON.stringify(cols)}`);
+  assert.ok(!cols.includes('err'), `bare err must not be a column: ${JSON.stringify(cols)}`);
 });
 
 /* ---------- the CLI ---------- */

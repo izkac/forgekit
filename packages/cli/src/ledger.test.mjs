@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { appendDeferralLedger, appendSessionDigest, readLedger } from './ledger.mjs';
+import {
+  appendDeferralLedger,
+  appendSessionDigest,
+  compactMetrics,
+  readLedger,
+} from './ledger.mjs';
 import { CENSUS_RULE, reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 
@@ -191,10 +196,12 @@ test('the digest carries compact metrics totals, so they survive cleanup', () =>
   assert.equal(entry.metrics.subagents, doc.subagents.length);
   assert.equal(entry.subagentsDispatched, doc.subagents.length);
 
-  // Totals only: the whole point of the ledger is one readable line per
-  // session, and byPhase/tools/per-subagent records stay in metrics.json.
+  // Compact per-model / per-phase splits survive cleanup; tools and
+  // per-subagent records stay in metrics.json.
   assert.deepEqual(Object.keys(entry.metrics).sort(), [
     'available',
+    'byModel',
+    'byPhase',
     'errorRate',
     'models',
     'outputTokens',
@@ -202,6 +209,46 @@ test('the digest carries compact metrics totals, so they survive cleanup', () =>
     'subagents',
     'totalTokens',
   ]);
+  for (const [model, cell] of Object.entries(doc.byModel)) {
+    assert.deepEqual(entry.metrics.byModel[model], {
+      requests: cell.requests,
+      input: cell.input,
+      output: cell.output,
+      cacheRead: cell.cacheRead,
+      cacheCreate: cell.cacheCreate,
+    });
+  }
+  for (const [phase, cell] of Object.entries(doc.byPhase)) {
+    assert.deepEqual(entry.metrics.byPhase[phase], {
+      requests: cell.requests,
+      input: cell.input,
+      output: cell.output,
+      cacheRead: cell.cacheRead,
+      cacheCreate: cell.cacheCreate,
+    });
+  }
+});
+
+test('compactMetrics drops the host synthetic model from byModel and models', () => {
+  const tokens = { input: 10, output: 20, cacheRead: 30, cacheCreate: 40 };
+  const doc = metricsDoc({
+    tokens,
+    models: {
+      '<synthetic>': { requests: 3, ...tokens },
+      'claude-opus-5': { requests: 18, ...tokens },
+    },
+  });
+  const compact = compactMetrics(doc);
+
+  assert.equal(Object.hasOwn(compact.byModel, '<synthetic>'), false);
+  assert.deepEqual(compact.models, ['claude-opus-5']);
+  assert.deepEqual(compact.byModel['claude-opus-5'], {
+    requests: doc.byModel['claude-opus-5'].requests,
+    input: tokens.input,
+    output: tokens.output,
+    cacheRead: tokens.cacheRead,
+    cacheCreate: tokens.cacheCreate,
+  });
 });
 
 test('a measured subagent count supersedes the hand-maintained one', () => {

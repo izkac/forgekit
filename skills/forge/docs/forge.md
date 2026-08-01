@@ -616,7 +616,9 @@ Test tiers: [test-strategy.md](../references/test-strategy.md) — scoped TDD pe
 
 ### Model selection (capability × billing)
 
-Subagents resolve models through **two axes** so Cursor / Claude Code / Codex stay on **subscription/included** pools by default:
+**Canonical rules (agents must follow):** [model-selection.md](../references/model-selection.md).
+
+Subagents resolve models through **two axes** so Cursor / Claude Code / Codex stay on **subscription/included** pools by default. You choose only the **tier**; the resolver chooses the slug (or omit):
 
 | Axis | Values | Default |
 | ---- | ------ | ------- |
@@ -631,7 +633,8 @@ forge models metered                  # WRITE .forge/models.local.json
 
 - Defaults: `packages/cli/src/models.defaults.json` (Cursor `included` = `inherit` → omit Task `model`).
 - Local overlay is optional — see **Checkout-local overrides** above.
-- **Never invent** host model slugs; honor `omitModel` / `model` from the resolver.
+- **Always follow the resolver JSON.** Never invent host model slugs; never pick from the host’s available-models list.
+- **`omitModel: true` → omit the `model` parameter entirely.** Passing any named slug (e.g. a Claude/GPT/Composer id from the Task tool enum) overrides inherit and can **bill the user** — forbidden unless the resolver returned that exact slug with `omitModel: false`.
 - A Claude Code project may **enforce** the overlay at dispatch time
   (`forge enforce-model`, wired as a `PreToolUse` hook by `forge init --claude`).
   A lane whose three tiers are one model rewrites the dispatch; a lane that keeps

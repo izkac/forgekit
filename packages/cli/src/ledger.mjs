@@ -59,15 +59,38 @@ function appendLines(file, lines, replaceWhen) {
   }
 }
 
+const COMPACT_TOKEN_FIELDS = ['input', 'output', 'cacheRead', 'cacheCreate'];
+
+/**
+ * Compact request + token cells for a byModel / byPhase map.
+ *
+ * @param {unknown} table
+ * @param {{ dropSynthetic?: boolean }} [opts]
+ */
+function compactSplitTable(table, opts = {}) {
+  const out = Object.create(null);
+  if (!table || typeof table !== 'object') return out;
+  const num = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+  for (const [key, cell] of Object.entries(table)) {
+    if (typeof key !== 'string' || !key) continue;
+    if (opts.dropSynthetic && key === '<synthetic>') continue;
+    const src = cell && typeof cell === 'object' ? cell : {};
+    const row = { requests: num(src.requests) };
+    for (const field of COMPACT_TOKEN_FIELDS) row[field] = num(src[field]);
+    out[key] = row;
+  }
+  return out;
+}
+
 /**
  * The totals worth keeping forever, distilled from a metrics document.
  *
  * `metrics.json` dies with the session directory; this is the part that
- * survives in `sessions.jsonl`, so it is deliberately one screen wide —
- * totals only, no `byPhase`, no per-tool table, no per-subagent records.
- * `totalTokens` counts all four token classes because cache reads dominate a
- * long session, and a digest reporting only input+output would understate it
- * by an order of magnitude.
+ * survives in `sessions.jsonl`, so it is deliberately compact — session
+ * totals plus per-model / per-phase request and token splits. Per-tool and
+ * per-subagent records stay in `metrics.json`. `totalTokens` counts all four
+ * token classes because cache reads dominate a long session, and a digest
+ * reporting only input+output would understate it by an order of magnitude.
  *
  * Takes the document rather than a path so the writer of `metrics.json` and
  * this reader cannot disagree about what "the totals" means.
@@ -75,13 +98,15 @@ function appendLines(file, lines, replaceWhen) {
  * @param {unknown} doc a parsed metrics.json — or anything at all
  * @returns {{ available: false } | { available: true, requests: number,
  *   outputTokens: number, totalTokens: number, models: string[],
+ *   byModel: Record<string, object>, byPhase: Record<string, object>,
  *   errorRate: number, subagents: number }}
  */
 export function compactMetrics(doc) {
   if (!doc || typeof doc !== 'object' || doc.available !== true) return { available: false };
   const num = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
   const tokens = doc.tokens && typeof doc.tokens === 'object' ? doc.tokens : {};
-  const byModel = doc.byModel && typeof doc.byModel === 'object' ? doc.byModel : {};
+  const byModel = compactSplitTable(doc.byModel, { dropSynthetic: true });
+  const byPhase = compactSplitTable(doc.byPhase);
   return {
     available: true,
     requests: num(doc.requests),
@@ -89,8 +114,11 @@ export function compactMetrics(doc) {
     totalTokens:
       num(tokens.input) + num(tokens.output) + num(tokens.cacheRead) + num(tokens.cacheCreate),
     // Sorted, so diffing two ledger lines is about the numbers rather than
-    // about the order the models happened to appear in.
+    // about the order the models happened to appear in. `<synthetic>` is
+    // filtered for consistency with collection (F69).
     models: Object.keys(byModel).sort(),
+    byModel,
+    byPhase,
     errorRate: num(doc.errors?.rate),
     subagents: Array.isArray(doc.subagents) ? doc.subagents.length : 0,
   };

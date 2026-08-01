@@ -163,8 +163,9 @@ export function decide(input) {
     reason:
       `This project's .forge/models.local.json resolves ${table}${where}. ` +
       `The dispatch asked for "${model}", which is not one of them. ` +
-      'Run `forge resolve-model --tier <fast|standard|capable>` and pass the ' +
-      'model it returns (omit the model parameter when omitModel is true).',
+      'Run `forge resolve-model --tier <fast|standard|capable>` and honor its JSON: ' +
+      'omit the model parameter when omitModel is true; otherwise pass model exactly. ' +
+      'Never invent a slug or pick from the host model list.',
   };
 }
 

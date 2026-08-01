@@ -1,12 +1,9 @@
-# Session Analysis Spec
+# Delta for session-analysis
 
-## Purpose
-
-Describe this capability.
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: Durable per-model and per-phase splits
+
 The system SHALL fold compact per-model and per-phase request/token splits into
 the session digest written at phase done (via `compactMetrics`), and
 `forge analyze` SHALL use those digest splits when a session’s `metrics.json`
@@ -30,6 +27,7 @@ is absent, preferring a live `metrics.json` when present.
   document
 
 ### Requirement: Honest model-policy empty states
+
 When formatting analysis, the system SHALL distinguish “no session carried a
 dispatch table” from “sessions carried dispatch tables that are all zero”.
 
@@ -48,6 +46,7 @@ dispatch table” from “sessions carried dispatch tables that are all zero”.
 - AND it does not solely advise wiring the hook as if none were measured
 
 ### Requirement: Analyze does not grade host synthetic turns as a model
+
 The system SHALL NOT treat the model slug `<synthetic>` as a real model in
 metrics collection `byModel` buckets, and `buildAnalysis` SHALL NOT emit a
 by-model row for `<synthetic>` even when historical digests still list that
@@ -66,6 +65,7 @@ name.
 - THEN `byModel` has no `<synthetic>` key
 
 ### Requirement: By-model table labels match evidence tiers
+
 `formatAnalysis` SHALL label the per-model error column so it is not read as a
 per-model tool-error rate, and SHALL caption which columns are digest-wide
 versus detailed-split-only (including requests, not only tokens).
@@ -84,6 +84,7 @@ versus detailed-split-only (including requests, not only tokens).
   sessions with a detailed split (not only “tokens”)
 
 ### Requirement: Forgekit dogsfoods Claude model-policy hooks
+
 The forgekit repository SHALL ship committed Claude Code hook files and
 settings that register PreToolUse for Agent/Task to
 `.claude/hooks/forge-model-hook.mjs`, so local Claude Code runs can record
