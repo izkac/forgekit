@@ -40,16 +40,18 @@ Each dispatch pays a full fresh context. Batch **consecutive, small, same-area t
 
 ## Model selection
 
-Subagent models use **two axes** — never invent host model IDs from memory:
+**Canonical rules:** [../../references/model-selection.md](../../references/model-selection.md) — read before any dispatch. Summary:
+
+Subagent models use **two axes** — you choose only the **tier**; never invent host model IDs:
 
 | Axis | Values | Default |
 | ---- | ------ | ------- |
 | Capability | `fast` · `standard` · `capable` | role-based (below) |
 | Billing | `included` · `metered` | **`included`** |
 
-**Billing `included` unless the user explicitly asks for API/metered models** (or has set `forge models -- metered`). Do **not** auto-switch to `metered` on failure.
+**Billing `included` unless the user explicitly asks for API/metered models** (or has set `forge models metered`). Do **not** auto-switch to `metered` on failure.
 
-Capability by role:
+Capability by role (this is the `--tier` argument only):
 
 - Touches 1–2 files with a complete spec → `fast` (most tasks, when the plan is well-specified)
 - Multi-file integration, pattern matching, debugging → `standard`
@@ -61,7 +63,12 @@ Before every Task/Agent dispatch, resolve:
 forge resolve-model --tier <fast|standard|capable>
 ```
 
-Honor the JSON: if `omitModel` is true, **omit** the host `model` parameter; otherwise pass `model` exactly as returned. Defaults live in `models.defaults.json`. Checkout overlay `.forge/models.local.json` exists only after `forge models included|metered` (bare `forge models` only prints) or a hand-written per-tier overlay.
+Honor the JSON **literally**:
+
+- `omitModel: true` → **omit** the host `model` parameter entirely. Do **not** pass a slug from the host’s available-models list, docs, or memory — that overrides inherit and can **bill the user**.
+- `omitModel: false` → pass `model` **exactly** as returned.
+
+Defaults live in `models.defaults.json`. Checkout overlay `.forge/models.local.json` exists only after `forge models included|metered` (bare `forge models` only prints) or a hand-written per-tier overlay.
 
 Claude Code projects may enforce that overlay at dispatch time (`forge enforce-model` on `PreToolUse`). Two things follow: a dispatch may come back **rewritten** to a different model than you asked for — that is the project's policy, not an error — and a **denied** dispatch names the resolved set. On a denial, run the resolver and re-dispatch with what it returns; never retry the same model.
 
@@ -74,6 +81,7 @@ Claude Code projects may enforce that overlay at dispatch time (`forge enforce-m
 
 ## Red flags — never
 
+- Pass a `model` slug you picked yourself (host model list, “capable-sounding” product ids, memory) — especially when `omitModel` is true
 - Start implementation on main/master without explicit user consent
 - Skip the review, proceed with unfixed spec gaps or Critical/Important issues, or accept "close enough" on spec compliance
 - Dispatch multiple implementer subagents in parallel (conflicts)

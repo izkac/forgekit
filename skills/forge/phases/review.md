@@ -134,7 +134,7 @@ wherever it sits, but `Reviewed by: coordinator` does not. A `self-check` in a
 floor.
 </HARD-GATE>
 
-**Model:** `forge resolve-model --tier capable` (or `standard`/`fast` when `models.bias` is `prefer-fast` and not high-risk; billing **`included`** by default). If `omitModel` is true, omit the Task `model` parameter; otherwise pass `model` exactly. Do not use metered/API models unless the user explicitly requests them.
+**Model:** follow [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier capable` (or `standard`/`fast` when `models.bias` is `prefer-fast` and not high-risk; billing **`included`** by default). If `omitModel` is true, **omit** the Task `model` parameter entirely; otherwise pass `model` exactly. Do not use metered/API models unless the user explicitly requests them. Never pick a slug from the host’s available-models list.
 
 <HARD-GATE>
 Do NOT hand-pick a model slug for the final reviewer — not even "the most capable" from the host's model list. Resolver output only. On dispatch failure, re-resolve; do not substitute a slug yourself.

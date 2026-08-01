@@ -526,7 +526,15 @@ Subagent billing (included vs API):
 forge models                # print only
 forge models included       # default — subscription pool
 forge models metered        # WRITE .forge/models.local.json — only if you ask
+forge resolve-model --tier standard   # what every agent must run before a subagent
 ```
+
+**Agent rule (non-negotiable):** before every Task/Agent dispatch, run
+`forge resolve-model --tier …` and follow the JSON. If `omitModel` is `true`,
+**omit** the host `model` parameter — do not pick a slug from the host’s
+available-models list. Overriding omit with a named model can force a metered
+lane and bill the user. Full rules ship in the skill at
+`skills/forge/references/model-selection.md`.
 
 Resolution is a contract the coordinator can skip, and skipping it is invisible:
 the overlay sits there while dispatches keep going out on a remembered tier

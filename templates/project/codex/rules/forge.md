@@ -7,6 +7,8 @@ Full workflow: `~/.codex/skills/forge/docs/forge.md` · Skill: user-installed **
 
 **Planning engine:** recorded in `.forge/config.json` (`plan.engine`). After brainstorm, create the change directly — OpenSpec → `/opsx:propose`, built-in specs → `forge change new <slug>`. Skip with `/forge:skip` or when work is trivial.
 
-Scratch: `.forge/` · CLI: `forge new|status|prefs|models|phase|doctor`
+Scratch: `.forge/` · CLI: `forge new|status|prefs|models|resolve-model|phase|doctor`
+
+**Subagent models:** always `forge resolve-model --tier …` then follow JSON (`omitModel: true` → omit host `model`; never pick from the host model list). See skill `references/model-selection.md`.
 
 Do not edit vendor planning-engine skills — Forge orchestrates them.

@@ -113,7 +113,15 @@ Do NOT write implementation code during brainstorm or plan phases until the user
 </HARD-GATE>
 
 <HARD-GATE>
-Subagent dispatch: NEVER pass a model slug you picked yourself (including any from the host's model list). Run `forge resolve-model --tier <fast|standard|capable>` and honor its JSON — omit the `model` parameter when `omitModel` is true, else pass `model` exactly. Metered/API models only on explicit user request. This applies to retries and fallbacks too: if a dispatch fails, re-resolve — do not hand-pick a replacement slug.
+Subagent model selection — full rules: [references/model-selection.md](./references/model-selection.md).
+
+Before **every** Task/Agent/subagent dispatch (including retries):
+
+1. Run `forge resolve-model --tier <fast|standard|capable>`.
+2. Honor the JSON **literally** — never invent, remember, or pick a slug from the host’s available-models list.
+3. If `omitModel` is `true`: **omit** the host `model` parameter entirely (do not pass null/empty/“auto”/any slug). Passing a named model when omit is true often forces a **metered/API** model and **bills the user** — that is forbidden.
+4. If `omitModel` is `false`: pass `model` **exactly** as returned.
+5. Metered/API billing only on **explicit user request** (or an existing `forge models metered` overlay). On failure, escalate **tier** and re-resolve — never hand-pick a replacement slug.
 </HARD-GATE>
 
 ## Session artefacts

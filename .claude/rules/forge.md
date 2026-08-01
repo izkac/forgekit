@@ -15,6 +15,8 @@ Work too small to spec should skip Forge (`/forge:skip` or direct execution).
 
 Scratch sessions: `.forge/sessions/` (14-day retention). Active pointer: `.forge/active.json`.
 
-CLI: `forge new`, `forge status`, `forge prefs`, `forge models`, `forge phase`, `forge doctor`.
+CLI: `forge new`, `forge status`, `forge prefs`, `forge models`, `forge resolve-model`, `forge phase`, `forge doctor`.
+
+**Subagent models:** always run `forge resolve-model --tier …` first and follow its JSON. If `omitModel` is true, omit the host `model` parameter — never pick a slug from the host’s model list (that can bill the user). See skill `references/model-selection.md`.
 
 Do not edit vendor planning-engine skills — Forge orchestrates them. Workflow skills are bundled under the Forge skill's `skills/` folder.
