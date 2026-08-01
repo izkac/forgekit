@@ -1,0 +1,15 @@
+{
+  "change": "shared-host-test-fixtures",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "shared-host-test-fixtures",
+      "cmd": "node scripts/e2e/shared-host-test-fixtures.mjs",
+      "expect": "HOST-FIXTURE shared=1"
+    }
+  ]
+}

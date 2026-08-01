@@ -1,0 +1,15 @@
+{
+  "change": "shared-host-test-fixtures",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-metrics — shared host-tree test fixtures (F55)",
+      "library": "packages/cli/src/metrics/test-host-tree.mjs",
+      "runtimeOwner": "node --test suites importing the module",
+      "writes": "temp host trees in tests only",
+      "reads": "n/a",
+      "uiConsumer": "test suites",
+      "evidence": "packages/cli/src/metrics/*.test.mjs; packages/cli/src/review-census.test.mjs; scripts/e2e/shared-host-test-fixtures.mjs"
+    }
+  ]
+}

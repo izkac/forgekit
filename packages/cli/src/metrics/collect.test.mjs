@@ -5,43 +5,18 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { collectMetrics, writeMetrics } from './collect.mjs';
 import { EMPTY_DISPATCHES } from './dispatches.mjs';
+import {
+  DEFAULT_HOST_ID,
+  assistantLine,
+  jsonl,
+  plantHost,
+} from './test-host-tree.mjs';
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
 }
 
-const HOST_ID = 'f8447a2f-eb56-41b8-8cc1-16606b862780';
-
-/** A `usage` object in the host's own field names. */
-function usage({ input = 0, output = 0, cacheRead = 0, cacheCreate = 0 } = {}) {
-  return {
-    input_tokens: input,
-    cache_creation_input_tokens: cacheCreate,
-    cache_read_input_tokens: cacheRead,
-    output_tokens: output,
-  };
-}
-
-/** One assistant transcript line — i.e. one content block of one reply. */
-function assistantLine({
-  requestId,
-  at,
-  model = 'claude-opus-5',
-  tokens = {},
-  block = { type: 'text' },
-  version = '2.1.220',
-  ...rest
-} = {}) {
-  return {
-    type: 'assistant',
-    requestId,
-    timestamp: at,
-    version,
-    isSidechain: false,
-    ...rest,
-    message: { id: `msg_${requestId}`, model, content: [block], usage: usage(tokens) },
-  };
-}
+const HOST_ID = DEFAULT_HOST_ID;
 
 /** A `user` line carrying one `tool_result`. */
 function toolResultLine({ id, isError = false, at } = {}) {
@@ -50,46 +25,6 @@ function toolResultLine({ id, isError = false, at } = {}) {
     timestamp: at,
     message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError }] },
   };
-}
-
-function jsonl(lines) {
-  return lines.map((line) => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n');
-}
-
-/**
- * Plant a `~/.claude`-shaped tree and return its config dir. Pass `configDir`
- * (the value this same function returned) to plant a second host session
- * beside the first, rather than into a fresh tree of its own — a session
- * bound to several host ids has them all under one project directory.
- *
- * `subagents` maps agent id → `{ meta, lines }`, exactly as the host lays them
- * out beside the parent transcript.
- */
-function plantHost({
-  sessionId = HOST_ID,
-  lines = null,
-  subagents = null,
-  configDir = tmp('forge-collect-'),
-} = {}) {
-  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
-  fs.mkdirSync(project, { recursive: true });
-  if (lines !== null) fs.writeFileSync(path.join(project, `${sessionId}.jsonl`), jsonl(lines));
-  if (subagents !== null) {
-    const dir = path.join(project, sessionId, 'subagents');
-    fs.mkdirSync(dir, { recursive: true });
-    for (const [agentId, { meta, lines: agentLines }] of Object.entries(subagents)) {
-      if (meta !== undefined) {
-        fs.writeFileSync(
-          path.join(dir, `agent-${agentId}.meta.json`),
-          typeof meta === 'string' ? meta : JSON.stringify(meta),
-        );
-      }
-      if (agentLines !== undefined) {
-        fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), jsonl(agentLines));
-      }
-    }
-  }
-  return configDir;
 }
 
 function transcriptPath(configDir, sessionId = HOST_ID) {

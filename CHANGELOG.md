@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Shared host-tree test fixtures (F55)
+
+Claude host-tree planters for review-evidence, collect, and review-census tests
+now live in one module (`metrics/test-host-tree.mjs`) instead of three copies.
+
+### Terminal phase predicate already centralized (F47)
+
+Confirmed resolved: `TERMINAL_PHASES` / `isTerminalPhase` in `lib/fleet.mjs`
+is the single owner; `GATE_PHASES` stays separate (includes `finish`).
+
 ## 0.3.36 — 2026-08-01
 
 npm was still on **0.3.33**. In-tree the package version had already been
