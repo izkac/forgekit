@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.37 — 2026-08-01
 
 ### Review guidance doc contract (F36)
 
