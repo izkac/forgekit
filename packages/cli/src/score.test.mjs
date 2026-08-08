@@ -109,6 +109,104 @@ test('scoreSession: strong sync-only session scores high', () => {
   }
 });
 
+/*
+ * S1 (final review, blocking): the spec's "Allowances are recorded,
+ * reasoned, and surfaced" requirement ends "SHALL be listed in reviewer
+ * packet context and the scorecard". Only the reviewer-packet half shipped;
+ * this pins the scorecard half — every recorded allowance's path, reason,
+ * and phase must appear in both the JSON card and the rendered markdown,
+ * and recording one must never move the score (it is a reasoned, legitimate
+ * escape, not a defect to penalise).
+ */
+function strongSessionFixture(root, sessionOverrides = {}) {
+  const { sessionDir, session } = makeSession(root, { slug: 'add-health', ...sessionOverrides });
+  fs.writeFileSync(
+    path.join(sessionDir, 'spine.json'),
+    `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+    'utf8',
+  );
+  fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify\n\nExit 0\n', 'utf8');
+  const taskDir = path.join(sessionDir, 'tasks', '01-health');
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(taskDir, 'test-evidence.md'),
+    '# Test evidence\n\n- **Exit code:** 0\n- **Summary:** assert response.ok === true\n',
+    'utf8',
+  );
+  return { sessionDir, session };
+}
+
+test('scoreSession: surfaces recorded allowances (path/reason/phase) without moving the score', () => {
+  const root = tmp('forge-score-allow-');
+  try {
+    const { sessionDir, session } = strongSessionFixture(root);
+    const withoutAllowance = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(withoutAllowance.allowances, []);
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'guard-allowances.json'),
+      `${JSON.stringify(
+        [
+          {
+            path: 'src/thing.test.mjs',
+            reason: 'assertion outdated by REQ-4 change',
+            at: '2026-08-08T00:00:00.000Z',
+            phase: 'implement',
+          },
+        ],
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    const withAllowance = scoreSession({ cwd: root, sessionDir, session });
+
+    assert.equal(withAllowance.score, withoutAllowance.score, 'an allowance must not move the score');
+    assert.deepEqual(withAllowance.allowances, [
+      {
+        path: 'src/thing.test.mjs',
+        reason: 'assertion outdated by REQ-4 change',
+        phase: 'implement',
+        at: '2026-08-08T00:00:00.000Z',
+      },
+    ]);
+
+    const md = formatScorecardMarkdown(withAllowance);
+    assert.match(md, /src\/thing\.test\.mjs/);
+    assert.match(md, /assertion outdated by REQ-4 change/);
+    assert.match(md, /implement/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: no guard-allowances.json surfaces an empty allowances list, not an error', () => {
+  const root = tmp('forge-score-allow-none-');
+  try {
+    const { sessionDir, session } = strongSessionFixture(root, { slug: 'no-allowances' });
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(card.allowances, []);
+    assert.equal(card.allowancesError, null);
+    assert.doesNotMatch(formatScorecardMarkdown(card), /## Allowances/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: a malformed guard-allowances.json surfaces as unreadable, not a crash', () => {
+  const root = tmp('forge-score-allow-malformed-');
+  try {
+    const { sessionDir, session } = strongSessionFixture(root, { slug: 'malformed-allowances' });
+    fs.writeFileSync(path.join(sessionDir, 'guard-allowances.json'), 'not json', 'utf8');
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.deepEqual(card.allowances, []);
+    assert.match(card.allowancesError ?? '', /guard-allowances\.json/);
+    assert.match(formatScorecardMarkdown(card), /guard-allowances\.json is unreadable/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /** Session with everything except reviews, so review depth is the only variable. */
 function makeReviewFixture(root, sessionOverrides = {}) {
   const { sessionDir, session } = makeSession(root, {
@@ -1772,6 +1870,125 @@ test('scoreSession: incompleteReason caps score at 59', () => {
     const card = scoreSession({ cwd: root, sessionDir, session });
     assert.ok(card.score <= 59);
     assert.ok(card.caps.some((c) => /incompleteReason/.test(capText(c))));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/*
+ * Tier-2 evidence coverage (task 5.3): a task dir whose only evidence is a
+ * `forge tdd run`-produced `tdd-runs.jsonl` must count toward coverage the
+ * same as one carrying `test-evidence.md` — a red→green task should not
+ * score as if it were missing evidence just because `forge evidence` was
+ * never separately run. The fixtures below vary which stamp shape is present
+ * so the assertion distinguishes "any tdd-runs.jsonl exists" from "an ok:true
+ * pass-stamp exists" — a file-presence heuristic would pass the red-only and
+ * ok:false fixtures too.
+ */
+
+function tddPassStamp(overrides = {}) {
+  return {
+    cmd: 'node',
+    args: ['--test', 'x.test.mjs'],
+    expect: 'pass',
+    exit: 0,
+    ok: true,
+    startedAt: '2026-08-08T00:05:00.000Z',
+    durationMs: 10,
+    ...overrides,
+  };
+}
+
+function tasksCheckOf(card) {
+  return card.checks.find((c) => c.id === 'tasks');
+}
+
+test('scoreSession: a task dir whose only evidence is an executed red→green tdd-runs.jsonl (no test-evidence.md) scores as covered', () => {
+  const root = tmp('forge-score-tddonly-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'docs-fix',
+      tasksTotal: 1,
+      tasksComplete: 1,
+    });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify\n\nExit 0\n', 'utf8');
+    const taskDir = path.join(sessionDir, 'tasks', '01-tdd-only');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'tdd-runs.jsonl'), `${JSON.stringify(tddPassStamp())}\n`, 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.match(tasksCheckOf(card).notes.join(' '), /tier-2 evidence in 1\/1 task dirs/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: a task dir with neither test-evidence.md nor tdd-runs.jsonl scores as uncovered', () => {
+  const root = tmp('forge-score-neither-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'wip',
+      tasksTotal: 1,
+      tasksComplete: 0,
+    });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync only' }, null, 2)}\n`,
+      'utf8',
+    );
+    const taskDir = path.join(sessionDir, 'tasks', '01-inflight');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, 'brief.md'), '# brief\n', 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.match(tasksCheckOf(card).notes.join(' '), /tier-2 evidence in 0\/1 task dirs/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: a tdd-runs.jsonl with only a red (fail) stamp does not count as tier-2 coverage', () => {
+  const root = tmp('forge-score-redonly-');
+  try {
+    const { sessionDir, session } = makeSession(root, { slug: 'wip2', tasksTotal: 1, tasksComplete: 0 });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync only' }, null, 2)}\n`,
+      'utf8',
+    );
+    const taskDir = path.join(sessionDir, 'tasks', '01-red-only');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const redOnly = { ...tddPassStamp(), expect: 'fail', exit: 1 };
+    fs.writeFileSync(path.join(taskDir, 'tdd-runs.jsonl'), `${JSON.stringify(redOnly)}\n`, 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.match(tasksCheckOf(card).notes.join(' '), /tier-2 evidence in 0\/1 task dirs/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: a tdd-runs.jsonl with only an ok:false pass-attempt does not count as tier-2 coverage', () => {
+  const root = tmp('forge-score-okfalse-');
+  try {
+    const { sessionDir, session } = makeSession(root, { slug: 'wip3', tasksTotal: 1, tasksComplete: 0 });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync only' }, null, 2)}\n`,
+      'utf8',
+    );
+    const taskDir = path.join(sessionDir, 'tasks', '01-okfalse');
+    fs.mkdirSync(taskDir, { recursive: true });
+    const contradicted = tddPassStamp({ ok: false, exit: 1 });
+    fs.writeFileSync(path.join(taskDir, 'tdd-runs.jsonl'), `${JSON.stringify(contradicted)}\n`, 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.match(tasksCheckOf(card).notes.join(' '), /tier-2 evidence in 0\/1 task dirs/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

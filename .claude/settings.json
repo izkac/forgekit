@@ -34,6 +34,16 @@
             "statusMessage": "Checking subagent model policy"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-test-guard.mjs\"",
+            "statusMessage": "Checking test-guard policy"
+          }
+        ]
       }
     ]
   }

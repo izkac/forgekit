@@ -13,7 +13,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { checkbox, confirm, input } from '@inquirer/prompts';
 import {
   DEFAULT_ADR_DIR,
   disableProjectAdr,
@@ -36,10 +35,21 @@ import {
   installedManagedPairs,
   promptOpenSpec,
 } from './install.mjs';
+import { collectHookCommands, commandBasename, isCommandReferenced } from './hooks.mjs';
 
 // Environments with project-local command/rule/hook templates. Others are
 // driven by the globally-installed skill alone (no per-project wiring).
 const WIRED_AGENTS = Object.freeze(['cursor', 'claude', 'codex']);
+
+/**
+ * Lazy: `@inquirer/prompts` is a real amount of code that most importers of
+ * this module never need — e.g. `forge doctor --install` reaches
+ * `ensureClaudeHookHints` through here but never prompts. Load it only
+ * where a prompt actually runs.
+ */
+function loadPrompts() {
+  return import('@inquirer/prompts');
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -234,6 +244,175 @@ See the Forge skill and forgekit docs for the full workflow.
 }
 
 /**
+ * @param {unknown} value
+ */
+function deepCloneJson(value) {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * Clone `group` with its `hooks[]` narrowed down to the entries whose
+ * command is not already referenced (per `existingCommands`), keeping the
+ * group's other keys (`matcher`, …) intact. Returns `null` when every entry
+ * is already wired — the group is fully present, skip it, no duplicate to
+ * add. A group shaped unlike `{ hooks: [...] }` is cloned as-is: we can't
+ * tell what it wires, so we don't silently drop it.
+ * @param {unknown} group
+ * @param {Set<string>} existingCommands
+ */
+function filterMissingGroupCommands(group, existingCommands) {
+  if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) {
+    return deepCloneJson(group);
+  }
+  const missingLeaves = group.hooks.filter((leaf) => {
+    const basename = commandBasename(/** @type {{ command?: unknown }} */ (leaf)?.command);
+    return !basename || !isCommandReferenced(basename, existingCommands);
+  });
+  if (missingLeaves.length === 0) return null;
+  const clone = deepCloneJson(group);
+  clone.hooks = deepCloneJson(missingLeaves);
+  return clone;
+}
+
+/**
+ * Structurally merge a generated hooks snippet into a Claude `settings.json`
+ * document. For each event key in the snippet (`SessionStart`,
+ * `UserPromptSubmit`, `PreToolUse`, …), individual hook entries whose
+ * command is not already referenced *anywhere* in the surface's wiring —
+ * across every event in `settings`, and in `localSettings` too (Claude
+ * reads `settings.local.json` the same as `settings.json`, and so does
+ * `checkHookWiring` in doctor.mjs) — are appended, keeping their matcher
+ * group; a group left with nothing missing is skipped entirely, so no
+ * duplicates appear. `localSettings` is read-only input: it informs
+ * "already wired" but is never itself written to or returned.
+ *
+ * Existing groups in `settings` are never reordered, rewritten, or removed,
+ * and unrelated top-level keys (`permissions`, `env`, …) pass through
+ * untouched. Pure: no filesystem access, and neither `settings`, `snippet`,
+ * nor `localSettings` is mutated.
+ *
+ * Refuses (rather than silently discarding) a `settings.hooks` that is
+ * present but not a plain object — `ok: false`, `settings` returned
+ * unchanged. An event in `settings.hooks` whose value is present but not an
+ * array is left untouched and named in `warnings` rather than silently
+ * counted as merged.
+ *
+ * @param {{
+ *   settings: Record<string, unknown> | null | undefined,
+ *   snippet: { hooks?: Record<string, unknown[]> },
+ *   localSettings?: Record<string, unknown> | null,
+ * }} args
+ * @returns {{ ok: boolean, settings: Record<string, unknown>, warnings: string[], error?: string }}
+ */
+export function mergeHooksIntoSettings({ settings, snippet, localSettings }) {
+  const rawSettings = settings && typeof settings === 'object' ? settings : {};
+  const hooksValue = rawSettings.hooks;
+  const hooksValueUsable =
+    hooksValue === undefined ||
+    (typeof hooksValue === 'object' && hooksValue !== null && !Array.isArray(hooksValue));
+  if (!hooksValueUsable) {
+    return {
+      ok: false,
+      settings: deepCloneJson(rawSettings),
+      warnings: [],
+      error: `.hooks must be an object, found ${Array.isArray(hooksValue) ? 'an array' : typeof hooksValue}`,
+    };
+  }
+
+  const merged = deepCloneJson(rawSettings);
+  if (!merged.hooks) merged.hooks = {};
+
+  // Doctor's notion of "wired" doesn't care which event a command lives
+  // under, and it also reads settings.local.json — mirror both scopes here
+  // so the merge never re-adds what doctor already calls wired.
+  const existingCommands = new Set();
+  collectHookCommands(merged.hooks, existingCommands);
+  const localHooks = localSettings?.hooks;
+  if (localHooks && typeof localHooks === 'object' && !Array.isArray(localHooks)) {
+    collectHookCommands(localHooks, existingCommands);
+  }
+
+  const snippetHooks =
+    snippet?.hooks && typeof snippet.hooks === 'object' ? snippet.hooks : {};
+  const warnings = [];
+
+  for (const [eventKey, groups] of Object.entries(snippetHooks)) {
+    if (!Array.isArray(groups)) continue;
+
+    const existingValue = merged.hooks[eventKey];
+    if (existingValue !== undefined && !Array.isArray(existingValue)) {
+      warnings.push(
+        `hooks.${eventKey} is not an array — left untouched; the snippet's ${eventKey} hooks were not merged`,
+      );
+      continue;
+    }
+    const existingGroups = Array.isArray(existingValue) ? existingValue : [];
+
+    const toAppend = [];
+    for (const group of groups) {
+      const missingGroup = filterMissingGroupCommands(group, existingCommands);
+      if (!missingGroup) continue;
+      toAppend.push(missingGroup);
+      collectHookCommands(missingGroup, existingCommands);
+    }
+
+    merged.hooks[eventKey] = [...existingGroups, ...toAppend];
+  }
+
+  return { ok: true, settings: merged, warnings };
+}
+
+/**
+ * Merge the hooks snippet into `.claude/settings.json` on disk. Creates the
+ * file when missing. Reads `.claude/settings.local.json` (if present) only
+ * to learn what's already wired — it is never written to. When
+ * `settings.json` exists but cannot be parsed as JSON, or its `hooks` value
+ * is present but not an object, the merge is refused and the file is left
+ * byte-identical; the caller reports the problem, `forge init` does not
+ * fail.
+ * @param {string} settingsPath
+ * @param {{ hooks?: Record<string, unknown[]> }} snippet
+ */
+function writeMergedClaudeSettings(settingsPath, snippet) {
+  let existing = {};
+  if (fs.existsSync(settingsPath)) {
+    const raw = fs.readFileSync(settingsPath, 'utf8');
+    try {
+      existing = raw.trim() ? JSON.parse(raw) : {};
+    } catch (err) {
+      return {
+        merged: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  const localPath = path.join(path.dirname(settingsPath), 'settings.local.json');
+  /** @type {Record<string, unknown> | undefined} */
+  let localSettings;
+  const warnings = [];
+  if (fs.existsSync(localPath)) {
+    try {
+      const rawLocal = fs.readFileSync(localPath, 'utf8');
+      localSettings = rawLocal.trim() ? JSON.parse(rawLocal) : {};
+    } catch (err) {
+      warnings.push(
+        `${localPath} could not be parsed (${err instanceof Error ? err.message : String(err)}) — treated as empty when checking what's already wired`,
+      );
+    }
+  }
+
+  const result = mergeHooksIntoSettings({ settings: existing, snippet, localSettings });
+  if (!result.ok) {
+    return { merged: false, error: result.error };
+  }
+
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, `${JSON.stringify(result.settings, null, 2)}\n`, 'utf8');
+  return { merged: true, warnings: [...warnings, ...result.warnings] };
+}
+
+/**
  * Append hook registrations into Claude settings.json if present / create stub note.
  * @param {string} cwd
  * @param {{ force?: boolean }} opts
@@ -243,7 +422,7 @@ export function ensureClaudeHookHints(cwd, opts) {
   const notePath = path.join(cwd, '.claude', 'forge-hooks.snippet.json');
   const snippet = {
     _comment:
-      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit + PreToolUse). Paths assume forge CLI is on PATH. The PreToolUse hook is inert until .forge/models.local.json exists.',
+      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit + PreToolUse). Paths assume forge CLI is on PATH. The model-policy PreToolUse hook is inert until .forge/models.local.json exists; the test-guard PreToolUse hook is inert without an active Forge session in implement/verify/review/finish.',
     hooks: {
       SessionStart: [
         {
@@ -280,16 +459,32 @@ export function ensureClaudeHookHints(cwd, opts) {
             },
           ],
         },
+        {
+          matcher: 'Edit|Write|NotebookEdit|MultiEdit',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-test-guard.mjs"',
+              statusMessage: 'Checking test-guard policy',
+            },
+          ],
+        },
       ],
     },
   };
   fs.mkdirSync(path.dirname(notePath), { recursive: true });
+  const settingsExisted = fs.existsSync(settingsPath);
   if (!fs.existsSync(notePath) || opts.force) {
     fs.writeFileSync(notePath, `${JSON.stringify(snippet, null, 2)}\n`, 'utf8');
   }
+
+  const mergeResult = writeMergedClaudeSettings(settingsPath, snippet);
+
   return {
-    settingsExists: fs.existsSync(settingsPath),
+    settingsExists: settingsExisted,
     snippet: notePath,
+    settingsPath,
+    ...mergeResult,
   };
 }
 
@@ -506,6 +701,7 @@ export function rememberedAgents(cwd, home) {
 
 /** @param {string} cwd */
 async function promptAgents(cwd) {
+  const { checkbox } = await loadPrompts();
   const remembered = rememberedAgents(cwd);
   return checkbox({
     message: 'Init Forge project wiring for which environments?',
@@ -523,6 +719,7 @@ async function promptAgents(cwd) {
  * @returns {Promise<boolean>} true = user accepted OpenSpec setup now
  */
 async function promptOpenSpecSetup() {
+  const { confirm } = await loadPrompts();
   return confirm({
     message: 'OpenSpec is not set up in this project. Install and set it up now?',
     default: true,
@@ -621,6 +818,7 @@ export async function resolveInitPlanEngine(opts) {
  * @returns {Promise<{ enabled: boolean, dir: string }>}
  */
 async function promptAdrForInit(defaultDir = DEFAULT_ADR_DIR, defaultEnabled = true) {
+  const { confirm, input } = await loadPrompts();
   const enabled = await confirm({
     message: 'Use Architecture Decision Records (ADRs) in this project?',
     default: defaultEnabled,
@@ -695,6 +893,17 @@ async function main(argv = process.argv.slice(2)) {
     process.stdout.write(
       `\nNo project wiring for: ${labels} — they use the globally installed Forge skill directly (run \`forgekit install\` if not yet installed).\n`,
     );
+  }
+  if (report.claudeHooks && report.claudeHooks.merged === false) {
+    process.stdout.write(
+      `\n${report.claudeHooks.settingsPath} could not be merged — left untouched (${report.claudeHooks.error}).\n` +
+        `Merge ${report.claudeHooks.snippet} into it by hand.\n`,
+    );
+  }
+  if (report.claudeHooks?.warnings?.length) {
+    for (const warning of report.claudeHooks.warnings) {
+      process.stdout.write(`\nWarning: ${warning}\n`);
+    }
   }
   process.stdout.write(
     `\nMerge hook snippets into settings if needed, ensure \`forge\` is on PATH, then open the project in your agent.\n`,

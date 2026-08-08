@@ -103,8 +103,15 @@ your-project/
   .claude/commands/      # same for Claude Code
 ```
 
-Hooks call `forge` on PATH. If SessionStart reminders do not appear, merge the
-generated `forge-hooks.snippet.json` into your agent settings (see init output).
+Hooks call `forge` on PATH. `forge init --claude` merges the generated hooks
+snippet straight into `.claude/settings.json` for you (checking
+`.claude/settings.local.json` too, so an already-wired project is never
+double-registered) — the old "merge it by hand" step is now a fallback for
+when that merge can't proceed (e.g. an unparseable `settings.json`), in which
+case init prints exactly that and names `forge-hooks.snippet.json` to merge
+manually. `forge doctor --install` repairs an unwired Claude surface the same
+way. If SessionStart reminders still do not appear, run `forge doctor` to see
+what's unwired.
 
 ---
 
@@ -425,6 +432,37 @@ Cannot enter phase "done":
   - e2e-results.json missing — run forge e2e run (a green run is required before done)
 ```
 
+### 6f. Test-tamper guard & TDD evidence (mostly automatic)
+
+Implementer subagents cannot edit or delete a test file that already existed
+when the session started (or any Forge integrity artifact) via a tool call —
+a `PreToolUse` hook on Edit/Write/NotebookEdit/MultiEdit denies it during
+implement/verify/review/finish (a shell `rm`/`sed -i`/redirect is not
+intercepted by this hook — agents are instructed never to use one to route
+around a deny). `verify-evidence.md` freezes later than the rest (from
+review, not implement) since it is authored during verify itself. Forge's
+own control surface — `.forge/config.json`, `.forge/active.json`, and any
+session's `session.json` — is guarded unconditionally too, so the guard's
+configuration and trust anchors can't be edited around instead of the file a
+denial actually names; and with no explicit `--session`, the hook considers
+every unfinished in-window session rather than trusting `.forge/active.json`
+alone, so a second, unrelated session can't turn the guard off. `forge phase
+done|finish` re-checks from `git diff` as a backstop, which only ever sees
+**tracked** files: it catches a guarded test and a *committed* integrity
+artifact (e.g. a change-dir `spine.json`, or a tracked `.forge/config.json`)
+on every host, hooked or not, but not an artifact living only under the
+gitignored `.forge/sessions/<id>/` — including that session's own
+`session.json` and `.forge/active.json`, for which the hook is the only real
+defense. Tests an implementer writes fresh during the session stay editable.
+You will not usually run these commands yourself — the coordinator and hooks
+do — but they are the mechanism:
+
+| Command | What it does |
+|---------|---------------|
+| `forge guard check --file <path> [--json]` | What the test-guard hook runs before every Edit/Write: exit 0 allow, 2 deny, 1 internal error (fails open, never treated as deny) |
+| `forge test-allow <path> --reason "<why>"` | Escape hatch — records an allowance for a guarded file into `.forge/sessions/<id>/guard-allowances.json`; only the coordinator should run this, with a reason a reviewer will judge |
+| `forge tdd run --task <nn-slug> --expect fail\|pass -- <cmd…>` | Runs your test command and stamps `tasks/<id>/tdd-runs.jsonl` — every session created by this version requires a red stamp before a green one per task (older sessions are exempt); `forge evidence --task <nn-slug> --no-tdd --reason "<why>"` declares a task exempt when no test cycle applies |
+
 ---
 
 ## 7. Fleet control terminal — all sessions, one place
@@ -608,7 +646,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 | Fleet table empty / session missing | Session registers on its first `forge` command; check the project ran `forge new` |
 | `forge fleet send` seems ignored | Delivery is next-turn via the reminder hook — idle sessions read it when they wake |
 | Cursor Forge sessions missing from `forge fleet` | Cursor's agent sandbox blocks writes to `~/.forgekit`. Re-run `forge` with unrestricted shell (`required_permissions: ["all"]`), or `forge fleet sync` from a normal terminal. Pending stamps live at `.forge/sessions/<id>/fleet-pending.json`. |
-| Session reminder missing | Merge `forge-hooks.snippet.json` from init into agent settings |
+| Session reminder missing | `forge init`/`forge doctor --install` merge hooks automatically; if a merge failed (unparseable `settings.json`), merge `forge-hooks.snippet.json` from init into agent settings by hand |
 | Wrong pace (`brisk` on a big change) | `forge prefs --session-set standard` or ensure `--tasks-total` ≥ 15 |
 
 ---

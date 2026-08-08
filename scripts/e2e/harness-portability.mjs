@@ -86,8 +86,71 @@
  *                             not resurrect the token-dispatch forgery
  *                             `review-evidence-substance` closed.
  *
- * `all` deliberately stays the harness-setup-probe rig's own five phases: it is
- * that change's recorded probe and its verdict must keep meaning what it meant.
+ * Doctor-hook-wiring loop (specs/changes/doctor-unwired-hooks/e2e.json), its own
+ * scratch project rather than layered on `boot` — `boot`'s fixture has no
+ * `specs/specs/` dir, which would fail the *project* check for a reason this
+ * loop is not about, and the point here is that only hook wiring should vary
+ * between the red and green runs:
+ *   doctor-wiring  a project with `.claude/hooks/` holding two `forge-*.mjs`
+ *                  files and one non-forge file, wired for the non-forge file
+ *                  only → the shipped `forge doctor --json` reports exit 1,
+ *                  `checks.hooks.ok: false`, exactly those two basenames
+ *                  unwired, and a message naming `forge-hooks.snippet.json`;
+ *                  the human surface prints a matching `[FAIL]` line; wiring
+ *                  the two basenames flips both to exit 0
+ *
+ * Test-guard loop (specs/changes/tdd-evidence-guard/e2e.json), its own
+ * scratch project (a real git repo — the classifier's whole job is "tracked
+ * at baseCommit", which only a git worktree can answer) rather than layered
+ * on `boot`:
+ *   test-guard  `forge init --claude` on a fresh project merges the hooks
+ *               snippet into `.claude/settings.json` and `forge doctor` then
+ *               exits 0 (F74); against a git-backed session in `implement`,
+ *               `forge guard check` denies a baseline test tracked at
+ *               `baseCommit` (naming the matched rule and the `forge
+ *               test-allow` escape) and allows a test file created during
+ *               the session; `forge test-allow` flips the same baseline
+ *               check to allow with its reason; final-review C1/C2/C3 against
+ *               the shipped binary — `guard.testGlobs: []` does not disable
+ *               the guard and `.forge/config.json` is itself denied (C1),
+ *               `session.json`/`active.json` are themselves denied (C2), and
+ *               a decoy out-of-window session named by `active.json` does not
+ *               shadow the in-window session that actually guards the file
+ *               (C3, naming the real session in the deny); and the backstop —
+ *               `forge integrity-check`, not the hook — refuses a modified
+ *               and a deleted baseline test with no allowance, naming both,
+ *               then clears once both are allowanced, with a clean
+ *               before/after run proving the guard finding is what moved it
+ *
+ * TDD-evidence loop (specs/changes/tdd-evidence-guard/e2e.json), its own
+ * scratch project (no git needed — this loop never reads the worktree),
+ * carrying `features.tddEvidence: true`:
+ *   tdd-evidence  `forge tdd run` re-runs ONE command (a flag-file check)
+ *                 that genuinely fails then genuinely passes and stamps
+ *                 both, sharing cmd+args across the pair; a contradicted
+ *                 `--expect fail` against a passing command exits non-zero
+ *                 and is still stamped; a sibling task holding only a
+ *                 pass-stamp makes `forge integrity-check` refuse naming it
+ *                 while the red→green task stays clear; a fourth task
+ *                 carrying an ok fail-stamp for one command and an ok
+ *                 pass-stamp for a different, unrelated command is refused
+ *                 the same way (final-review I2: pairing correlates by
+ *                 command, `false` then `true` does not clear the gate); a
+ *                 third task's evidence written without `--no-tdd` keeps it
+ *                 gated, and re-recording it with `forge evidence --no-tdd
+ *                 --reason "…"` clears it — the exemption marker read
+ *                 straight from `record-evidence.mjs`, never retyped; and
+ *                 `forge score` counts the tdd-run-only task's evidence
+ *                 toward tier-2 coverage
+ *
+ * `all` is this rig's own recorded probe (`.forge/config.json`'s
+ * `e2e.harness.probe`) — every phase above that is layered onto a shared
+ * fixture or built once and forgotten stays out of it, because re-running it
+ * here would mean re-running the fixture it depends on out of order. Only
+ * self-contained phases join the roster: the original five, and now
+ * `doctor-wiring`, `test-guard`, and `tdd-evidence`, each of which builds and
+ * tears down its own project and touches nothing `boot` or its siblings
+ * leave behind.
  */
 
 import fs from 'node:fs';
@@ -112,6 +175,11 @@ import { fileURLToPath } from 'node:url';
 // guard against it is the corpus recorded beside the constant in
 // `review-census.mjs` and the rule that it is re-measured before it moves.
 import { FINAL_REVIEW_REQUEST_FLOOR } from '../../packages/cli/src/review-census.mjs';
+
+// Same discipline as the import above, for the same reason: the exemption
+// marker `checkTddEvidence` reads back is this module's to define, and a
+// retyped literal here would silently drift from it if it ever changed.
+import { NO_TDD_MARKER } from '../../packages/cli/src/record-evidence.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FORGE_BIN = path.join(REPO, 'packages', 'cli', 'bin', 'forge.mjs');
@@ -186,6 +254,63 @@ function writeLoop(dir, ok) {
   );
 }
 
+/* ---------- doctor-hook-wiring fixture ---------- */
+
+/** Kept apart from SCRATCH: this loop needs its own `specs/specs/` layout, and
+ *  `boot`'s rmSync must not reach it or a run interleaved with other phases
+ *  could delete it out from under a later step. */
+const DOCTOR_WIRING_PROJECT = `${SCRATCH}-doctor-wiring`;
+/** Two forge hook files; a fixture must derive its expectations from these,
+ *  never from prose describing them. */
+const DOCTOR_FORGE_HOOKS = ['forge-alpha.mjs', 'forge-beta.mjs'];
+/** One non-forge hook — realistic clutter `checkHookWiring` must ignore. */
+const DOCTOR_NON_FORGE_HOOK = 'eslint-changed.mjs';
+
+/**
+ * A project doctor can grade on its own: the minimal specs-engine layout
+ * (`checkSpecsProject` needs only `specs/changes/` and `specs/specs/` to
+ * exist) plus `.claude/hooks/` holding `DOCTOR_FORGE_HOOKS` and
+ * `DOCTOR_NON_FORGE_HOOK`. No `.claude/settings.json` is written here —
+ * that is the one thing `writeDoctorWiring` varies between the red and
+ * green runs, so nothing else about the project changes between them.
+ */
+function makeDoctorWiringProject(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, 'specs', 'changes'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'specs', 'specs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' } }, null, 2)}\n`,
+  );
+  const hooksDir = path.join(dir, '.claude', 'hooks');
+  fs.mkdirSync(hooksDir, { recursive: true });
+  // Empty files: checkHookWiring reads basenames off disk, never contents.
+  for (const name of [...DOCTOR_FORGE_HOOKS, DOCTOR_NON_FORGE_HOOK]) {
+    fs.writeFileSync(path.join(hooksDir, name), '');
+  }
+  return dir;
+}
+
+/**
+ * Rewrite `.claude/settings.json` so exactly `wiredBasenames` are referenced
+ * by a hook command — the realistic shape a Claude Code settings file wires
+ * hooks in, one `PostToolUse` entry per basename, not a shortcut the real
+ * surface would never produce.
+ */
+function writeDoctorWiring(dir, wiredBasenames) {
+  const settings = {
+    hooks: {
+      PostToolUse: wiredBasenames.map((name) => ({
+        matcher: 'Edit',
+        hooks: [{ type: 'command', command: `node "$CLAUDE_PROJECT_DIR/.claude/hooks/${name}"` }],
+      })),
+    },
+  };
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
+}
+
 /** Last `n` lines — the runner reports only a 30-line tail, and a long context
  *  silently pushes the assertion message out of it. */
 function tail(text, n) {
@@ -195,6 +320,61 @@ function tail(text, n) {
 function fail(message, context) {
   process.stderr.write(`ASSERTION FAILED: ${message}\n${context ?? ''}\n`);
   process.exit(1);
+}
+
+/* ---------- test-guard fixture ---------- */
+
+/** Kept apart from SCRATCH and DOCTOR_WIRING_PROJECT: this is the first loop
+ *  that needs a REAL git repo (the classifier's whole job is "tracked at
+ *  baseCommit", which only a git worktree can answer), so it must not share
+ *  a directory any sibling phase might `rmSync` out from under it. */
+const TEST_GUARD_PROJECT = `${SCRATCH}-test-guard`;
+
+/**
+ * Mirrors `guard-cli.test.mjs`'s own `git()` — this harness had no git
+ * wrapper before test-guard because no prior phase needed to commit real
+ * content; the classifier under test is defined entirely in terms of what
+ * git considers tracked at a commit, so a fixture without a real repo would
+ * not be exercising it at all.
+ */
+function git(cwd, ...args) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} (in ${cwd}): ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/* ---------- tdd-evidence fixture ---------- */
+
+/** Kept apart from every git-backed fixture above: this loop never reads the
+ *  worktree (`checkTddEvidence` only ever reads `tasks/*\/tdd-runs.jsonl` and
+ *  `test-evidence.md`), so it is plain files under `.forge/`, no git init. */
+const TDD_EVIDENCE_PROJECT = `${SCRATCH}-tdd-evidence`;
+
+/**
+ * A project carrying one session flagged `features.tddEvidence: true` — the
+ * per-session opt-in `checkTddEvidence` requires — with a `notApplicable`
+ * spine so the pairing gate is the only thing `forge integrity-check` can
+ * still refuse on (no e2e.json, no deferrals, no BLOCKED marker to trip).
+ */
+function makeTddEvidenceProject(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  const sessionDir = path.join(dir, '.forge', 'sessions', 's1');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, 'session.json'),
+    `${JSON.stringify({
+      id: 's1',
+      slug: 'tdd-fixture',
+      phase: 'implement',
+      features: { tddEvidence: true },
+    })}\n`,
+  );
+  fs.writeFileSync(path.join(dir, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`);
+  fs.writeFileSync(
+    path.join(sessionDir, 'spine.json'),
+    `${JSON.stringify({ notApplicable: 'tdd-evidence e2e fixture — no runtime spine' }, null, 2)}\n`,
+  );
+  return { dir, sessionDir };
 }
 
 /* ---------- session telemetry fixture ---------- */
@@ -579,8 +759,19 @@ const phase = process.argv[2];
 // codes, so every phase carries its own fail() assertions rather than leaning on
 // the `expect` regexes in e2e.json — the gate has those, the probe does not, and
 // a probe that only watches exit codes reports GREEN against a stubbed change.
+const ALL_ROSTER = [
+  'boot',
+  'record',
+  'show',
+  'red-run',
+  'quiet-cases',
+  'doctor-wiring',
+  'test-guard',
+  'tdd-evidence',
+];
+
 if (phase === 'all') {
-  for (const name of ['boot', 'record', 'show', 'red-run', 'quiet-cases']) {
+  for (const name of ALL_ROSTER) {
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), name], {
       encoding: 'utf8',
       cwd: REPO,
@@ -591,7 +782,7 @@ if (phase === 'all') {
       process.exit(1);
     }
   }
-  process.stdout.write('\nHARNESS PROBE GREEN — 5/5 phases\n');
+  process.stdout.write(`\nHARNESS PROBE GREEN — ${ALL_ROSTER.length}/${ALL_ROSTER.length} phases\n`);
   process.exit(0);
 }
 
@@ -1784,12 +1975,519 @@ if (phase === 'boot') {
   process.stdout.write(
     `AMBIGUITY done=refused verify=warned+acted-on-s1 neighbour=untouched candidates=2\n`,
   );
+} else if (phase === 'doctor-wiring') {
+  // THE VOLO FAILURE MODE, END TO END, AGAINST THE SHIPPED BINARY. A project
+  // with forge hooks on disk but only a non-forge hook wired must fail
+  // `forge doctor`, naming exactly the unwired forge basenames and the
+  // snippet an operator merges to fix it; wiring those basenames must flip
+  // it green. A stub doctor that always exits 0 fails the RED assertions
+  // below; one that always exits 1 fails the GREEN ones — the red→green pair
+  // is what proves this phase discriminates rather than merely running.
+  const dir = makeDoctorWiringProject(DOCTOR_WIRING_PROJECT);
+  const expectedUnwired = [...DOCTOR_FORGE_HOOKS].sort();
+
+  // --- RED: only the non-forge hook is wired ------------------------------
+  writeDoctorWiring(dir, [DOCTOR_NON_FORGE_HOOK]);
+
+  const red = forge(dir, ['doctor', '--json']);
+  if (red.code !== 1) fail(`doctor --json exited ${red.code} against an unwired fixture, expected 1`, red.out);
+  let redReport;
+  try {
+    redReport = JSON.parse(red.stdout);
+  } catch {
+    fail('doctor --json printed no parseable JSON on the red run', red.out);
+  }
+  if (redReport.checks?.hooks?.ok !== false) {
+    fail(
+      'checks.hooks.ok was not false against a project with unwired forge hooks',
+      JSON.stringify(redReport.checks?.hooks),
+    );
+  }
+  const claudeSurface = (redReport.checks.hooks.surfaces ?? []).find((s) => s.surface === 'claude');
+  if (!claudeSurface) fail('no claude surface reported by checks.hooks', JSON.stringify(redReport.checks.hooks));
+  const unwired = [...(claudeSurface.unwired ?? [])].sort();
+  if (JSON.stringify(unwired) !== JSON.stringify(expectedUnwired)) {
+    fail(
+      `claude surface unwired ${JSON.stringify(unwired)}, expected exactly ${JSON.stringify(expectedUnwired)}`,
+      JSON.stringify(claudeSurface, null, 2),
+    );
+  }
+  if (!redReport.checks.hooks.message.includes('forge-hooks.snippet.json')) {
+    fail('doctor --json message did not name forge-hooks.snippet.json', redReport.checks.hooks.message);
+  }
+
+  // The human-facing surface, not just --json: a `[FAIL]` line naming one of
+  // the unwired basenames — the operator reads this, not the JSON.
+  const redHuman = forge(dir, ['doctor']);
+  if (redHuman.code !== 1) fail(`doctor (human) exited ${redHuman.code} against the same fixture, expected 1`, redHuman.out);
+  const failLine = redHuman.stdout
+    .split('\n')
+    .find((line) => line.includes('[FAIL]') && expectedUnwired.some((name) => line.includes(name)));
+  if (!failLine) fail('no [FAIL] line named an unwired forge hook basename', redHuman.stdout);
+
+  // --- FIX: every forge hook basename now appears in a hook command -------
+  writeDoctorWiring(dir, [DOCTOR_NON_FORGE_HOOK, ...DOCTOR_FORGE_HOOKS]);
+
+  const green = forge(dir, ['doctor', '--json']);
+  if (green.code !== 0) fail(`doctor --json exited ${green.code} once every forge hook was wired, expected 0`, green.out);
+  let greenReport;
+  try {
+    greenReport = JSON.parse(green.stdout);
+  } catch {
+    fail('doctor --json printed no parseable JSON on the green run', green.out);
+  }
+  if (greenReport.checks?.hooks?.ok !== true) {
+    fail(
+      'checks.hooks.ok was not true once every forge hook basename was wired',
+      JSON.stringify(greenReport.checks?.hooks),
+    );
+  }
+
+  process.stdout.write('DOCTOR WIRING GREEN\n');
+} else if (phase === 'test-guard') {
+  // THE F74 HALF, AGAINST THE SHIPPED BINARY: a fresh project has no
+  // `.claude/settings.json` at all; `forge init` must structurally merge the
+  // hooks snippet into one (including the `forge-test-guard.mjs` hook this
+  // whole loop is about), and `forge doctor` must then read the project as
+  // fully wired — the same claim `doctor-wiring` proves for a hand-built
+  // fixture, proved here for what `forge init` itself produces.
+  const dir = TEST_GUARD_PROJECT;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+
+  const init = forge(dir, ['init', '--claude', '--no-openspec', '--no-adr']);
+  if (init.code !== 0) fail(`forge init exited ${init.code} on a fresh project`, init.out);
+
+  const settingsPath = path.join(dir, '.claude', 'settings.json');
+  if (!fs.existsSync(settingsPath)) {
+    fail('forge init did not create .claude/settings.json', init.out);
+  }
+  const settingsText = fs.readFileSync(settingsPath, 'utf8');
+  if (!settingsText.includes('forge-test-guard.mjs')) {
+    fail('the merged settings.json does not reference forge-test-guard.mjs', settingsText);
+  }
+
+  const doctorAfterInit = forge(dir, ['doctor']);
+  if (doctorAfterInit.code !== 0) {
+    fail('forge doctor did not exit 0 once forge init had wired the hooks', doctorAfterInit.out);
+  }
+  process.stdout.write('INIT+DOCTOR GREEN (F74)\n');
+
+  // --- now the guard itself: a real git repo, three baseline test files ---
+  // (`foo` denied then allowanced, `bar` tampered by modification, `baz`
+  // tampered by deletion) and one created after the commit (`new`, which
+  // must read as unguarded no matter how it matches the glob).
+  git(dir, 'init', '-q', '-b', 'main');
+  git(dir, 'config', 'user.email', 'e2e@example.com');
+  git(dir, 'config', 'user.name', 'E2E Harness');
+  const srcDir = path.join(dir, 'packages', 'cli', 'src');
+  fs.mkdirSync(srcDir, { recursive: true });
+  const fooTest = path.join(srcDir, 'foo.test.mjs');
+  const barTest = path.join(srcDir, 'bar.test.mjs');
+  const bazTest = path.join(srcDir, 'baz.test.mjs');
+  fs.writeFileSync(fooTest, 'baseline foo\n', 'utf8');
+  fs.writeFileSync(barTest, 'baseline bar\n', 'utf8');
+  fs.writeFileSync(bazTest, 'baseline baz\n', 'utf8');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'base');
+  const baseCommit = git(dir, 'rev-parse', 'HEAD');
+  // Created AFTER the commit: untracked at baseCommit, so it must read as
+  // unguarded even though it matches the same glob as the baseline files.
+  fs.writeFileSync(path.join(srcDir, 'new.test.mjs'), 'new during session\n', 'utf8');
+
+  const sessionDir = path.join(dir, '.forge', 'sessions', 's1');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, 'session.json'),
+    `${JSON.stringify({ id: 's1', slug: 'guard-fixture', phase: 'implement', baseCommit })}\n`,
+  );
+  fs.writeFileSync(path.join(dir, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`);
+  // notApplicable spine: this loop measures the guard, not the E2E gate, and
+  // it is what makes a clean `forge integrity-check` read ok:true below —
+  // isolating the guarded-files finding as the only thing that can flip it.
+  fs.writeFileSync(
+    path.join(sessionDir, 'spine.json'),
+    `${JSON.stringify({ notApplicable: 'test-guard e2e fixture — no runtime spine' }, null, 2)}\n`,
+  );
+
+  const relFoo = 'packages/cli/src/foo.test.mjs';
+  const relNew = 'packages/cli/src/new.test.mjs';
+  const relBar = 'packages/cli/src/bar.test.mjs';
+  const relBaz = 'packages/cli/src/baz.test.mjs';
+
+  // 2. denies a guarded baseline test with no allowance, naming the matched
+  //    rule and the forge test-allow escape.
+  const denied = forge(dir, ['guard', 'check', '--file', relFoo, '--json']);
+  if (denied.code !== 2) {
+    fail(`guard check exited ${denied.code} on a guarded baseline test, expected 2 (deny)`, denied.out);
+  }
+  let deniedOut;
+  try {
+    deniedOut = JSON.parse(denied.stdout);
+  } catch {
+    fail('guard check --json printed no parseable JSON on a deny', denied.out);
+  }
+  if (deniedOut.decision !== 'deny') fail(`decision ${deniedOut.decision}, expected deny`, denied.stdout);
+  if (deniedOut.rule !== '**/*.test.*') fail(`rule ${deniedOut.rule}, expected the matched glob`, denied.stdout);
+  if (!deniedOut.message || !deniedOut.message.includes(deniedOut.rule)) {
+    fail('deny message did not name the matched rule', denied.stdout);
+  }
+  if (!deniedOut.message.includes('forge test-allow')) {
+    fail('deny message did not name the forge test-allow escape', denied.stdout);
+  }
+
+  // 3. a test file created during the session (untracked at baseCommit) is
+  //    not guarded — the discriminating half of the same rule above.
+  const notGuarded = forge(dir, ['guard', 'check', '--file', relNew, '--json']);
+  if (notGuarded.code !== 0) {
+    fail(`guard check exited ${notGuarded.code} on a session-created test file, expected 0 (allow)`, notGuarded.out);
+  }
+  const notGuardedOut = JSON.parse(notGuarded.stdout);
+  if (notGuardedOut.decision !== 'allow' || notGuardedOut.reason !== 'not-guarded') {
+    fail(
+      `session-created test file graded ${notGuardedOut.decision}/${notGuardedOut.reason}, expected allow/not-guarded`,
+      notGuarded.stdout,
+    );
+  }
+
+  // 4. forge test-allow flips the SAME check from deny to allow, and the
+  //    reason surfaces on the flipped check.
+  const allowReason = 'e2e: assertion rewritten for this fixture';
+  const allow = forge(dir, ['test-allow', relFoo, '--reason', allowReason]);
+  if (allow.code !== 0) fail(`forge test-allow exited ${allow.code}`, allow.out);
+  const recheck = forge(dir, ['guard', 'check', '--file', relFoo, '--json']);
+  if (recheck.code !== 0) {
+    fail(`guard check exited ${recheck.code} after an allowance was recorded, expected 0 (allow)`, recheck.out);
+  }
+  const recheckOut = JSON.parse(recheck.stdout);
+  if (recheckOut.decision !== 'allow' || recheckOut.reason !== 'allowance') {
+    fail(`allowed check graded ${recheckOut.decision}/${recheckOut.reason}, expected allow/allowance`, recheck.stdout);
+  }
+  if (recheckOut.allowanceReason !== allowReason) {
+    fail('the allowance reason did not surface on the flipped check', recheck.stdout);
+  }
+  process.stdout.write('GUARD CHECK/ALLOW GREEN\n');
+
+  // 4b. FINAL-REVIEW C1 — the guard's own control surface is not classified
+  //     as unguarded by the very classifier it configures: `guard.testGlobs:
+  //     []` must not silently disable the guard (bar is still tracked and
+  //     unallowanced at this point), and `.forge/config.json` itself must be
+  //     denied like any other guarded file.
+  const configPath = path.join(dir, '.forge', 'config.json');
+  const configBefore = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+  fs.writeFileSync(configPath, `${JSON.stringify({ guard: { testGlobs: [] } }, null, 2)}\n`, 'utf8');
+  const stillDenied = forge(dir, ['guard', 'check', '--file', relBar, '--json']);
+  if (stillDenied.code !== 2) {
+    fail('C1: guard.testGlobs: [] disabled the guard — the baseline test must still be denied', stillDenied.out);
+  }
+  const configDenied = forge(dir, ['guard', 'check', '--file', '.forge/config.json', '--json']);
+  if (configDenied.code !== 2) fail('C1: .forge/config.json itself was not denied during implement', configDenied.out);
+  if (configBefore === null) fs.rmSync(configPath, { force: true });
+  else fs.writeFileSync(configPath, configBefore, 'utf8');
+  process.stdout.write('C1 GUARD CONTROL-SURFACE (config.json) GREEN\n');
+
+  // 4c. FINAL-REVIEW C2 — session.json (the guard's trust anchor) and
+  //     active.json (session resolution) are themselves denied.
+  const sessionJsonDenied = forge(dir, ['guard', 'check', '--file', '.forge/sessions/s1/session.json', '--json']);
+  if (sessionJsonDenied.code !== 2) fail('C2: session.json was not denied during implement', sessionJsonDenied.out);
+  const activeJsonDenied = forge(dir, ['guard', 'check', '--file', '.forge/active.json', '--json']);
+  if (activeJsonDenied.code !== 2) fail('C2: active.json was not denied during implement', activeJsonDenied.out);
+  process.stdout.write('C2 GUARD CONTROL-SURFACE (session.json/active.json) GREEN\n');
+
+  // 4d. FINAL-REVIEW C3 — a second, out-of-window session named by
+  //     active.json must not shadow the in-window session (s1) that
+  //     actually guards the file.
+  fs.mkdirSync(path.join(dir, '.forge', 'sessions', 'decoy'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'sessions', 'decoy', 'session.json'),
+    `${JSON.stringify({ id: 'decoy', slug: 'decoy', phase: 'triage' })}\n`,
+    'utf8',
+  );
+  const activeBefore = fs.readFileSync(path.join(dir, '.forge', 'active.json'), 'utf8');
+  fs.writeFileSync(path.join(dir, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 'decoy' })}\n`, 'utf8');
+  const crossSessionDenied = forge(dir, ['guard', 'check', '--file', relBar, '--json']);
+  if (crossSessionDenied.code !== 2) {
+    fail(
+      'C3: a decoy out-of-window session named by active.json shadowed the guarding session (s1)',
+      crossSessionDenied.out,
+    );
+  }
+  let crossSessionOut;
+  try {
+    crossSessionOut = JSON.parse(crossSessionDenied.stdout);
+  } catch {
+    fail('C3: guard check --json printed no parseable JSON on the cross-session deny', crossSessionDenied.out);
+  }
+  if (crossSessionOut.sessionId !== 's1') {
+    fail(`C3: deny named session ${crossSessionOut.sessionId}, expected s1 (the actual guarding session)`, crossSessionDenied.stdout);
+  }
+  fs.writeFileSync(path.join(dir, '.forge', 'active.json'), activeBefore, 'utf8'); // restore for the steps below
+  fs.rmSync(path.join(dir, '.forge', 'sessions', 'decoy'), { recursive: true, force: true }); // and the decoy itself —
+  // gate-class commands below (forge test-allow) refuse on ANY ambiguity,
+  // not just a misdirected pointer, so a leftover second session would break
+  // them even with active.json restored.
+  process.stdout.write('C3 CROSS-SESSION GUARD GREEN\n');
+
+  // 5. THE BACKSTOP — on the CLI, not the hook, which is the half that must
+  //    hold on a host with no hooks wired at all. A clean control FIRST:
+  //    nothing has moved since the commit apart from the untracked
+  //    new.test.mjs and foo's ledger entry above, so a clean
+  //    `forge integrity-check` must already read ok:true with zero problems
+  //    — proof that the RED step below is the guard finding, not some other
+  //    problem this fixture happens to carry.
+  const clean = forge(dir, ['integrity-check']);
+  if (clean.code !== 0) fail('forge integrity-check refused a clean session before any tamper', clean.out);
+  let cleanReport;
+  try {
+    cleanReport = JSON.parse(clean.stdout);
+  } catch {
+    fail('integrity-check printed no parseable JSON on the clean run', clean.out);
+  }
+  if (cleanReport.problems.length !== 0) {
+    fail('THE CONTROL IS THE TEST: a clean session already carries integrity problems', JSON.stringify(cleanReport.problems));
+  }
+
+  // RED: modify one baseline test, delete another — neither has an allowance.
+  fs.appendFileSync(barTest, 'tampered\n', 'utf8');
+  fs.rmSync(bazTest);
+  const tampered = forge(dir, ['integrity-check']);
+  if (tampered.code === 0) {
+    fail('forge integrity-check accepted a modified+deleted baseline test with no allowance', tampered.out);
+  }
+  const tamperedReport = JSON.parse(tampered.stdout);
+  const namesBar = tamperedReport.problems.some((p) => p.includes(relBar) && p.includes('without allowance'));
+  const namesBaz = tamperedReport.problems.some((p) => p.includes(relBaz) && p.includes('without allowance'));
+  if (!namesBar) fail(`integrity-check did not name the modified file ${relBar}`, JSON.stringify(tamperedReport.problems, null, 2));
+  if (!namesBaz) fail(`integrity-check did not name the deleted file ${relBaz}`, JSON.stringify(tamperedReport.problems, null, 2));
+
+  // GREEN: allow both, WITHOUT reverting either tamper — the finding must
+  // clear because of the allowance, not because the change went away.
+  const allowBar = forge(dir, ['test-allow', relBar, '--reason', 'e2e: intentional tamper for the backstop step']);
+  if (allowBar.code !== 0) fail(`forge test-allow exited ${allowBar.code} for ${relBar}`, allowBar.out);
+  const allowBaz = forge(dir, ['test-allow', relBaz, '--reason', 'e2e: intentional delete for the backstop step']);
+  if (allowBaz.code !== 0) fail(`forge test-allow exited ${allowBaz.code} for ${relBaz}`, allowBaz.out);
+
+  const cleared = forge(dir, ['integrity-check']);
+  if (cleared.code !== 0) fail('forge integrity-check still refused once both tampers were allowed', cleared.out);
+  const clearedReport = JSON.parse(cleared.stdout);
+  if (clearedReport.problems.length !== 0) {
+    fail('allowances did not fully clear the guarded-files finding', JSON.stringify(clearedReport.problems, null, 2));
+  }
+
+  process.stdout.write('TEST GUARD GREEN\n');
+} else if (phase === 'tdd-evidence') {
+  const { dir, sessionDir } = makeTddEvidenceProject(TDD_EVIDENCE_PROJECT);
+  const TASK = '01-guard';
+  const GREEN_ONLY_TASK = '02-pass-only';
+  const DOCS_TASK = '03-docs-only';
+  const MISMATCH_TASK = '04-mismatched-pair';
+  const failingCmd = [process.execPath, '-e', 'process.exit(1)'];
+  const passingCmd = [process.execPath, '-e', 'process.exit(0)'];
+  // TASK's genuine pair uses the SAME cmd+args for both runs — a real
+  // red→green cycle re-runs one command and watches its outcome change, it
+  // does not swap in an unrelated command for the green half. The outcome
+  // flips because `flagFile` starts absent (red: exit 1) and is created
+  // between the two `forge tdd run` calls below (green: exit 0), a genuine
+  // state change, not a forged pairing (design D6, final-review I2).
+  const flagFile = path.join(dir, 'tdd-evidence.flag');
+  const pairedCmd = [
+    process.execPath,
+    '-e',
+    "process.exit(require('fs').existsSync(process.argv[1]) ? 0 : 1)",
+    flagFile,
+  ];
+
+  // 1. forge tdd run executes the command itself and stamps the outcome:
+  //    the command under --expect fail (flag absent) exits non-zero and
+  //    stamps ok:true; the SAME command under --expect pass (flag now
+  //    present) exits zero and stamps the green.
+  const red = forge(dir, ['tdd', 'run', '--task', TASK, '--expect', 'fail', '--', ...pairedCmd]);
+  if (red.code !== 0) fail(`forge tdd run --expect fail exited ${red.code} for a genuinely failing command`, red.out);
+  fs.writeFileSync(flagFile, '');
+  const green = forge(dir, ['tdd', 'run', '--task', TASK, '--expect', 'pass', '--', ...pairedCmd]);
+  if (green.code !== 0) fail(`forge tdd run --expect pass exited ${green.code} for a genuinely passing command`, green.out);
+
+  const tddRunsFile = path.join(sessionDir, 'tasks', TASK, 'tdd-runs.jsonl');
+  const readStamps = () =>
+    fs
+      .readFileSync(tddRunsFile, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+  let stamps = readStamps();
+  if (stamps.length !== 2) fail(`tdd-runs.jsonl has ${stamps.length} line(s), expected 2 after the red+green pair`, JSON.stringify(stamps));
+  if (stamps[0].expect !== 'fail' || stamps[0].ok !== true || stamps[0].exit === 0) {
+    fail('the red stamp is not expect:fail/ok:true with a non-zero exit', JSON.stringify(stamps[0]));
+  }
+  if (stamps[1].expect !== 'pass' || stamps[1].ok !== true || stamps[1].exit !== 0) {
+    fail('the green stamp is not expect:pass/ok:true with a zero exit', JSON.stringify(stamps[1]));
+  }
+  if (stamps[0].cmd !== stamps[1].cmd || JSON.stringify(stamps[0].args) !== JSON.stringify(stamps[1].args)) {
+    fail('TASK\'s red and green stamps do not share cmd+args — this fixture no longer proves a same-command pair', JSON.stringify(stamps, null, 2));
+  }
+  process.stdout.write('TDD RUN RED+GREEN STAMPED\n');
+
+  // 2. A contradicted expectation (--expect fail against a passing command)
+  //    exits non-zero and is still stamped, with ok:false.
+  const contradicted = forge(dir, ['tdd', 'run', '--task', TASK, '--expect', 'fail', '--', ...passingCmd]);
+  if (contradicted.code === 0) {
+    fail('forge tdd run exited 0 for a contradicted expectation (expected fail, command passed)', contradicted.out);
+  }
+  stamps = readStamps();
+  if (stamps.length !== 3) fail(`tdd-runs.jsonl has ${stamps.length} line(s), expected 3 after the contradiction`, JSON.stringify(stamps));
+  if (stamps[2].expect !== 'fail' || stamps[2].ok !== false || stamps[2].exit !== 0) {
+    fail('the contradicted stamp is not expect:fail/ok:false with a zero exit', JSON.stringify(stamps[2]));
+  }
+  process.stdout.write('TDD RUN CONTRADICTION STAMPED\n');
+
+  // 3. THE PAIRING GATE. A sibling task holding only a pass-stamp (no red
+  //    ever recorded) must make `forge integrity-check` refuse, naming it —
+  //    while TASK, which has a genuine red-before-green pair (the
+  //    contradiction above is ok:false and does not count as either), stays
+  //    clear. One run proves both halves at once: the gate discriminates
+  //    between the two task dirs, not merely "some task is unpaired".
+  const greenOnly = forge(dir, ['tdd', 'run', '--task', GREEN_ONLY_TASK, '--expect', 'pass', '--', ...passingCmd]);
+  if (greenOnly.code !== 0) fail(`forge tdd run exited ${greenOnly.code} recording the green-only sibling`, greenOnly.out);
+
+  const gated = forge(dir, ['integrity-check']);
+  if (gated.code === 0) {
+    fail('forge integrity-check accepted a session with a green-without-red task', gated.out);
+  }
+  let gatedReport;
+  try {
+    gatedReport = JSON.parse(gated.stdout);
+  } catch {
+    fail('integrity-check printed no parseable JSON', gated.out);
+  }
+  const namesGreenOnly = gatedReport.problems.some((p) => p.includes(GREEN_ONLY_TASK));
+  const namesTask = gatedReport.problems.some((p) => p.includes(TASK));
+  if (!namesGreenOnly) fail(`integrity-check did not name the green-only task ${GREEN_ONLY_TASK}`, JSON.stringify(gatedReport.problems, null, 2));
+  if (namesTask) {
+    fail(`integrity-check flagged ${TASK}, which holds a valid red-before-green pair`, JSON.stringify(gatedReport.problems, null, 2));
+  }
+  process.stdout.write('TDD PAIRING GATE GREEN (discriminates paired vs unpaired)\n');
+
+  // 4. THE --no-tdd EXEMPTION, proved as a real red→green mutation on ONE
+  //    task rather than two fixtures that merely look different: first
+  //    record evidence WITHOUT the declaration (a task dir with
+  //    test-evidence.md but no tdd-runs.jsonl and no exemption marker) —
+  //    RED, gated same as any other undeclared task. Then re-record the
+  //    SAME task WITH --no-tdd --reason, overwriting the file in place —
+  //    GREEN, cleared by the marker alone, nothing else about the fixture
+  //    having moved.
+  const undeclared = forge(dir, [
+    'evidence', '--task', DOCS_TASK, '--command', 'echo ok', '--exit', '0', '--summary', 'manual check',
+  ]);
+  if (undeclared.code !== 0) fail(`forge evidence exited ${undeclared.code} recording undeclared evidence`, undeclared.out);
+
+  const beforeDeclare = forge(dir, ['integrity-check']);
+  if (beforeDeclare.code === 0) {
+    fail('forge integrity-check accepted a task with evidence but no red→green cycle and no exemption', beforeDeclare.out);
+  }
+  const beforeDeclareReport = JSON.parse(beforeDeclare.stdout);
+  const namesDocsUndeclared = beforeDeclareReport.problems.some((p) => p.includes(DOCS_TASK));
+  if (!namesDocsUndeclared) {
+    fail(`integrity-check did not name the undeclared task ${DOCS_TASK}`, JSON.stringify(beforeDeclareReport.problems, null, 2));
+  }
+
+  const reason = 'documentation only, no behavior change';
+  const declare = forge(dir, ['evidence', '--task', DOCS_TASK, '--no-tdd', '--reason', reason]);
+  if (declare.code !== 0) fail(`forge evidence --no-tdd exited ${declare.code}`, declare.out);
+  const evidenceFile = path.join(sessionDir, 'tasks', DOCS_TASK, 'test-evidence.md');
+  const evidenceBody = fs.readFileSync(evidenceFile, 'utf8');
+  if (!evidenceBody.includes(NO_TDD_MARKER)) {
+    fail(`test-evidence.md for ${DOCS_TASK} does not carry the exemption marker`, evidenceBody);
+  }
+  if (!evidenceBody.includes(reason)) {
+    fail('the recorded reason does not appear in the task evidence file', evidenceBody);
+  }
+
+  const afterDeclare = forge(dir, ['integrity-check']);
+  const afterDeclareReport = JSON.parse(afterDeclare.stdout);
+  const stillNamesDocs = afterDeclareReport.problems.some((p) => p.includes(DOCS_TASK));
+  if (stillNamesDocs) {
+    fail(`integrity-check still named ${DOCS_TASK} after its --no-tdd exemption was recorded`, JSON.stringify(afterDeclareReport.problems, null, 2));
+  }
+  // GREEN_ONLY_TASK is untouched by any of this and must still be the one
+  // thing keeping the gate red — otherwise this run would prove nothing
+  // about the exemption specifically.
+  const stillNamesGreenOnly = afterDeclareReport.problems.some((p) => p.includes(GREEN_ONLY_TASK));
+  if (!stillNamesGreenOnly) {
+    fail('the green-only task stopped being named — this run no longer isolates the exemption', JSON.stringify(afterDeclareReport.problems, null, 2));
+  }
+  process.stdout.write('TDD NO-TDD EXEMPTION GREEN (undeclared refused, declared cleared)\n');
+
+  // 5. Executed stamps count as tier-2 evidence for scoring: TASK's only
+  //    evidence is a red→green tdd-runs.jsonl (no test-evidence.md at all),
+  //    and it must still count toward coverage, same as GREEN_ONLY_TASK
+  //    (stamped, if unpaired) and DOCS_TASK (test-evidence.md). All three
+  //    task dirs should read as carrying tier-2 evidence.
+  const scored = forge(dir, ['score', '--json']);
+  if (scored.code !== 0 && scored.code !== 1) {
+    // score-cli exits non-zero only in the strict --write path; --json alone
+    // always prints a report, so anything else here is a real failure.
+    fail(`forge score --json exited ${scored.code}`, scored.out);
+  }
+  let scorecard;
+  try {
+    scorecard = JSON.parse(scored.stdout);
+  } catch {
+    fail('forge score --json printed no parseable JSON', scored.out);
+  }
+  const tasksCheck = (scorecard.checks ?? []).find((c) => c?.id === 'tasks');
+  if (!tasksCheck) fail('scorecard has no "tasks" check', JSON.stringify(scorecard, null, 2));
+  const tasksNotes = (tasksCheck.notes ?? []).join(' | ');
+  if (!tasksNotes.includes('tier-2 evidence in 3/3 task dirs')) {
+    fail(
+      `TASK's tdd-run-only evidence was not counted toward tier-2 coverage: ${tasksNotes}`,
+      JSON.stringify(tasksCheck, null, 2),
+    );
+  }
+  process.stdout.write('TDD SCORE GREEN (tdd-run-only task counted as tier-2)\n');
+
+  // 6. THE PAIRING GATE CORRELATES BY COMMAND (final-review I2 regression):
+  //    an ok fail-stamp for one command and an ok pass-stamp for a
+  //    different, unrelated command must NOT satisfy the gate, even though
+  //    both stamps are genuine and CLI-authored — reproduces the reviewer's
+  //    `forge tdd run --expect fail -- false` then `--expect pass -- true`
+  //    finding (here: two invocations of the same interpreter with
+  //    different -e arguments, so this also proves args are compared, not
+  //    just the executable name).
+  const mismatchRed = forge(dir, ['tdd', 'run', '--task', MISMATCH_TASK, '--expect', 'fail', '--', ...failingCmd]);
+  if (mismatchRed.code !== 0) {
+    fail(`forge tdd run --expect fail exited ${mismatchRed.code} recording the mismatched-pair red`, mismatchRed.out);
+  }
+  const mismatchGreen = forge(dir, ['tdd', 'run', '--task', MISMATCH_TASK, '--expect', 'pass', '--', ...passingCmd]);
+  if (mismatchGreen.code !== 0) {
+    fail(`forge tdd run --expect pass exited ${mismatchGreen.code} recording the mismatched-pair green`, mismatchGreen.out);
+  }
+  const mismatchGate = forge(dir, ['integrity-check']);
+  if (mismatchGate.code === 0) {
+    fail(
+      'forge integrity-check accepted a task with an ok fail-stamp for one command and an ok pass-stamp ' +
+        'for a different, unrelated command (I2 regression: false-then-true must not clear the gate)',
+      mismatchGate.out,
+    );
+  }
+  let mismatchReport;
+  try {
+    mismatchReport = JSON.parse(mismatchGate.stdout);
+  } catch {
+    fail('integrity-check printed no parseable JSON for the mismatched-pair task', mismatchGate.out);
+  }
+  const namesMismatch = mismatchReport.problems.some((p) => p.includes(MISMATCH_TASK));
+  if (!namesMismatch) {
+    fail(`integrity-check did not name ${MISMATCH_TASK}`, JSON.stringify(mismatchReport.problems, null, 2));
+  }
+  process.stdout.write('TDD PAIRING GATE CORRELATES BY COMMAND (I2 regression closed)\n');
+
+  process.stdout.write('TDD EVIDENCE GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
-      'review-stamp-decides|session-ambiguity\n',
+      'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence\n',
   );
   process.exit(1);
 }

@@ -18,6 +18,8 @@ import {
   OPENSPEC_INSTALL_CMD,
   resolveProjectPlanEngine,
 } from './plan-engine.mjs';
+import { ensureClaudeHookHints } from './init.mjs';
+import { collectHookCommands, isCommandReferenced } from './hooks.mjs';
 
 export { OPENSPEC_PACKAGE, OPENSPEC_INSTALL_CMD };
 
@@ -162,11 +164,147 @@ export function checkSpecsProject(opts) {
   };
 }
 
+const FORGE_HOOK_FILE_RE = /^forge-.*\.mjs$/;
+
+/**
+ * Detect forge hook files on disk that are not referenced by the host
+ * surface's wiring (settings.json / settings.local.json for Claude,
+ * hooks.json for Cursor). Does not integrate into runDoctorChecks.
+ * @param {{
+ *   cwd: string,
+ *   existsSync?: typeof fs.existsSync,
+ *   readFileSync?: typeof fs.readFileSync,
+ *   readdirSync?: typeof fs.readdirSync,
+ * }} opts
+ */
+export function checkHookWiring(opts) {
+  const existsSync = opts.existsSync ?? fs.existsSync;
+  const readFileSync = opts.readFileSync ?? fs.readFileSync;
+  const readdirSync = opts.readdirSync ?? fs.readdirSync;
+  const cwd = opts.cwd;
+
+  const surfaceDefs = [
+    {
+      surface: 'claude',
+      hooksDir: path.join(cwd, '.claude', 'hooks'),
+      wiringPaths: [
+        path.join(cwd, '.claude', 'settings.json'),
+        path.join(cwd, '.claude', 'settings.local.json'),
+      ],
+      hint: 'merge .claude/forge-hooks.snippet.json into .claude/settings.json',
+    },
+    {
+      surface: 'cursor',
+      hooksDir: path.join(cwd, '.cursor', 'hooks'),
+      wiringPaths: [path.join(cwd, '.cursor', 'hooks.json')],
+      hint: 'merge .cursor/forge-hooks.snippet.json into .cursor/hooks.json',
+    },
+  ];
+
+  const surfaces = [];
+
+  for (const def of surfaceDefs) {
+    if (!existsSync(def.hooksDir)) continue;
+
+    let entries;
+    try {
+      entries = readdirSync(def.hooksDir);
+    } catch {
+      entries = [];
+    }
+    const present = entries.filter((name) => FORGE_HOOK_FILE_RE.test(name));
+    if (present.length === 0) continue;
+
+    const wiringPaths = def.wiringPaths.filter((p) => existsSync(p));
+    const references = new Set();
+    const errors = [];
+
+    for (const wiringPath of wiringPaths) {
+      let raw;
+      try {
+        raw = readFileSync(wiringPath, 'utf8');
+      } catch (err) {
+        errors.push(`${wiringPath}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      let json;
+      try {
+        json = JSON.parse(raw);
+      } catch (err) {
+        errors.push(`${wiringPath}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      collectHookCommands(json?.hooks, references);
+    }
+
+    const unwired = present.filter((name) => !isCommandReferenced(name, references));
+    const wiringError = errors.length > 0 ? errors.join('; ') : null;
+    const surfaceOk = unwired.length === 0;
+
+    surfaces.push({
+      surface: def.surface,
+      hooksDir: def.hooksDir,
+      wiringPaths,
+      present,
+      unwired,
+      wiringError,
+      ok: surfaceOk,
+      hint: def.hint,
+    });
+  }
+
+  const ok = surfaces.every((s) => s.ok);
+  const skipped = surfaces.length === 0;
+
+  let message;
+  if (skipped) {
+    message = 'no forge hooks found on disk';
+  } else if (ok) {
+    message = 'forge hooks wired';
+  } else {
+    message = surfaces
+      .filter((s) => !s.ok)
+      .map((s) => {
+        const names = s.unwired.join(', ');
+        const errPart = s.wiringError ? ` (${s.wiringError})` : '';
+        return `${s.surface}: unwired hook(s) ${names}${errPart} — ${s.hint}`;
+      })
+      .join('; ');
+  }
+
+  return {
+    id: 'hook-wiring',
+    ok,
+    skipped,
+    surfaces: surfaces.map(({ hint, ...rest }) => rest),
+    message,
+  };
+}
+
+/**
+ * `forge doctor --install`'s hook-repair step: when the claude surface is
+ * unwired, merge the standard hooks snippet into `.claude/settings.json` —
+ * the same structural merge `forge init` performs (writes the snippet file
+ * too, for transparency). Cursor's `hooks.json` merge already happens inside
+ * `forge init` and is out of scope for `--install`.
+ * @param {string} cwd
+ * @param {ReturnType<typeof checkHookWiring>} hooks
+ * @returns {boolean} whether a repair was attempted
+ */
+function installUnwiredClaudeHooks(cwd, hooks) {
+  const claude = hooks.surfaces.find((s) => s.surface === 'claude');
+  if (!claude || claude.ok) return false;
+  ensureClaudeHookHints(cwd, { force: false });
+  return true;
+}
+
 /**
  * @param {{
  *   cwd?: string,
  *   install?: boolean,
  *   existsSync?: typeof fs.existsSync,
+ *   readFileSync?: typeof fs.readFileSync,
+ *   readdirSync?: typeof fs.readdirSync,
  *   runCommand?: Function,
  * }} [opts]
  */
@@ -188,10 +326,24 @@ export function runDoctorChecks(opts = {}) {
       message: 'built-in specs engine — OpenSpec CLI not required',
       installCommand: OPENSPEC_INSTALL_CMD,
     };
+    let hooks = checkHookWiring({
+      cwd,
+      existsSync: opts.existsSync,
+      readFileSync: opts.readFileSync,
+      readdirSync: opts.readdirSync,
+    });
+    if (opts.install && !hooks.ok && installUnwiredClaudeHooks(cwd, hooks)) {
+      hooks = checkHookWiring({
+        cwd,
+        existsSync: opts.existsSync,
+        readFileSync: opts.readFileSync,
+        readdirSync: opts.readdirSync,
+      });
+    }
     return {
-      ok: project.ok,
+      ok: project.ok && cli.ok && hooks.ok,
       engine: engine.engine,
-      checks: { project, cli },
+      checks: { project, cli, hooks },
       installCommand: OPENSPEC_INSTALL_CMD,
       actions: [],
     };
@@ -236,11 +388,26 @@ export function runDoctorChecks(opts = {}) {
     cli = checkOpenSpecCli({ cwd, runCommand: opts.runCommand });
   }
 
-  const ok = project.ok && cli.ok;
+  let hooks = checkHookWiring({
+    cwd,
+    existsSync: opts.existsSync,
+    readFileSync: opts.readFileSync,
+    readdirSync: opts.readdirSync,
+  });
+  if (opts.install && !hooks.ok && installUnwiredClaudeHooks(cwd, hooks)) {
+    hooks = checkHookWiring({
+      cwd,
+      existsSync: opts.existsSync,
+      readFileSync: opts.readFileSync,
+      readdirSync: opts.readdirSync,
+    });
+  }
+
+  const ok = project.ok && cli.ok && hooks.ok;
   return {
     ok,
     engine: engine.engine,
-    checks: { project, cli },
+    checks: { project, cli, hooks },
     installCommand: OPENSPEC_INSTALL_CMD,
     actions,
   };
@@ -253,6 +420,8 @@ export function runDoctorChecks(opts = {}) {
  *   stdout?: NodeJS.WritableStream,
  *   stderr?: NodeJS.WritableStream,
  *   existsSync?: typeof fs.existsSync,
+ *   readFileSync?: typeof fs.readFileSync,
+ *   readdirSync?: typeof fs.readdirSync,
  *   runCommand?: Function,
  * }} [io]
  */
@@ -279,16 +448,19 @@ export function runDoctor(argv, io = {}) {
     cwd: opts.cwd ?? cwd,
     install: opts.install,
     existsSync: io.existsSync,
+    readFileSync: io.readFileSync,
+    readdirSync: io.readdirSync,
     runCommand: io.runCommand,
   });
 
   if (opts.json) {
     stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
-    const { project, cli } = report.checks;
+    const { project, cli, hooks } = report.checks;
     stdout.write(`Forge doctor (plan engine: ${report.engine ?? 'openspec'})\n`);
     stdout.write(`  [${project.ok ? 'ok' : 'FAIL'}] ${project.message}\n`);
     stdout.write(`  [${cli.ok ? 'ok' : 'FAIL'}] ${cli.message}\n`);
+    stdout.write(`  [${hooks.ok ? 'ok' : 'FAIL'}] ${hooks.message}\n`);
     if (!cli.ok) {
       stdout.write(`\nOffer: install OpenSpec CLI?\n  ${cli.installCommand}\n`);
       stdout.write(`Or re-run with: forge doctor --install\n`);
@@ -309,6 +481,8 @@ export function runDoctor(argv, io = {}) {
  *   cwd?: string,
  *   stderr?: NodeJS.WritableStream,
  *   existsSync?: typeof fs.existsSync,
+ *   readFileSync?: typeof fs.readFileSync,
+ *   readdirSync?: typeof fs.readdirSync,
  *   runCommand?: Function,
  * }} [opts]
  */
@@ -318,6 +492,8 @@ export function warnIfDoctorFails(opts = {}) {
     const report = runDoctorChecks({
       cwd: opts.cwd ?? process.cwd(),
       existsSync: opts.existsSync,
+      readFileSync: opts.readFileSync,
+      readdirSync: opts.readdirSync,
       runCommand: opts.runCommand,
     });
     if (!report.ok) {
@@ -327,6 +503,9 @@ export function warnIfDoctorFails(opts = {}) {
       }
       if (!report.checks.cli.ok) {
         stderr.write(`  - ${report.checks.cli.message}\n`);
+      }
+      if (report.checks.hooks && !report.checks.hooks.ok) {
+        stderr.write(`  - ${report.checks.hooks.message}\n`);
       }
       if (!report.checks.cli.ok) {
         stderr.write(`  Install: ${report.installCommand}\n`);

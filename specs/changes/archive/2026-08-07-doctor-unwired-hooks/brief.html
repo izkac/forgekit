@@ -1,0 +1,102 @@
+<!-- forge-brief-specs-hash:4be5233477187dd0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief — Doctor detects unwired hooks</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 48rem; margin: 2rem auto; padding: 0 1rem;
+         color: #1a1a1a; background: #fff; line-height: 1.55; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; font-size: .9em; }
+  li { margin: .3rem 0; }
+  .muted { color: #555; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>window.mermaid && mermaid.initialize({ startOnLoad: true });</script>
+</head>
+<body>
+
+<h1>Doctor detects unwired hooks</h1>
+
+<h2>TL;DR</h2>
+<p>Forge's enforcement rides on small hook programs that <code>forge init</code>
+copies into each project. But copying the files is only half the job — the
+agent (Claude Code, Cursor) only runs a hook that is also <em>registered</em>
+in its settings file, and that registration is a manual merge step that is
+easy to skip. When it is skipped, everything downstream is silently off:
+subagent model policy is not enforced, dispatches are not recorded, session
+reminders never fire — and nothing tells you. One real project (volo) ran 47
+subagents with zero dispatches recorded in exactly this state; another (helm)
+ran its whole history with only one of four hooks registered. After this
+change, <code>forge doctor</code> catches the state, and every
+<code>forge new</code> warns about it.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li><code>forge doctor</code> compares the hook files present on disk
+      against what the agent's settings actually register, and fails with the
+      exact list of unregistered hooks and the snippet file to merge.</li>
+  <li><code>forge new</code> already runs doctor in warn-only mode — so a
+      project in this state warns at every session start instead of staying
+      silent for weeks.</li>
+  <li>The check keys off the files on disk, not a hardcoded list — a hook
+      added by a future Forge version is covered automatically.</li>
+</ul>
+
+<h2>How it works</h2>
+<pre class="mermaid">
+flowchart TD
+    D[forge doctor] --> C{.claude/hooks/ exists?}
+    C -->|no| S[surface skipped — ok]
+    C -->|yes| F[list forge-*.mjs on disk]
+    F --> W["walk hook commands in settings.json
+    and settings.local.json"]
+    W -->|every file referenced| OK[check passes]
+    W -->|any file missing| FAIL["exit 1 — unwired: forge-model-hook.mjs, …
+    merge .claude/forge-hooks.snippet.json"]
+    N[forge new] -->|warn-only doctor| FAIL
+</pre>
+<p>The same logic covers Cursor (<code>.cursor/hooks/</code> against
+<code>.cursor/hooks.json</code>). A project with no hooks directory for a
+surface simply skips that surface — init decides what a project wires; doctor
+only insists that what was scaffolded is actually live. A settings file that
+exists but cannot be parsed fails the check too, because at runtime it
+behaves exactly like an unwired one.</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li><code>forge doctor</code> can now fail (exit 1) in projects that
+      previously passed while silently unenforced — that is the point. The
+      fix it prints is the merge you were always supposed to do.</li>
+  <li><code>--warn-only</code> (used by <code>forge new</code>) still exits 0;
+      you just see the warning.</li>
+  <li><code>forge init</code> is unchanged. Making init merge the settings
+      itself is filed as a follow-up idea in the findings ledger.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>A deliberately-parked hook file now fails doctor. The escape is to wire
+      it or delete the file — an intentionally dead hook lying in the hooks
+      directory is precisely the ambiguity the check exists to remove.</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li><strong>1. Hook-wiring check</strong> — the detection function, test-first
+      against the real volo/helm shapes (1 task).</li>
+  <li><strong>2. Doctor integration</strong> — report field, human output,
+      exit code, <code>forge new</code> warning (1 task).</li>
+  <li><strong>3. Product-loop acceptance</strong> — a scratch project in the
+      volo state driven through the shipped binary; red before wiring, green
+      after (1 task).</li>
+</ul>
+
+<p class="muted">Change: <code>specs/changes/doctor-unwired-hooks</code> ·
+Session: <code>doctor-unwired-hooks</code> · 2026-08-07</p>
+
+</body>
+</html>

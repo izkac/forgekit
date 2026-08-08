@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   DEFAULT_TIER,
+  NO_TDD_MARKER,
   buildEvidence,
   parseArgs,
   runRecordEvidence,
@@ -49,6 +50,8 @@ function makeOpts(overrides = {}) {
     session: null,
     allowFail: false,
     forgeDir: null,
+    noTdd: false,
+    reason: null,
     help: false,
     ...overrides,
   };
@@ -89,7 +92,20 @@ test('parseArgs defaults and unknown-arg rejection', () => {
   assert.equal(opts.session, null);
   assert.equal(opts.allowFail, false);
   assert.equal(opts.forgeDir, null);
+  assert.equal(opts.noTdd, false);
+  assert.equal(opts.reason, null);
   assert.throws(() => parseArgs(['--bogus']), /unknown argument/);
+});
+
+test('parseArgs parses --no-tdd and --reason', () => {
+  const opts = parseArgs([
+    '--task', '01-docs',
+    '--no-tdd',
+    '--reason', 'documentation only, no behavior change',
+  ]);
+  assert.equal(opts.task, '01-docs');
+  assert.equal(opts.noTdd, true);
+  assert.equal(opts.reason, 'documentation only, no behavior change');
 });
 
 // ---------------------------------------------------------------------------
@@ -340,6 +356,234 @@ test('the evidence header records how the session was decided, not who ran the t
       /- \*\*Session:\*\* sess-b \(resolved from \.forge\/active\.json while several sessions were open\)/,
       'a guessed session must say so in the file it writes',
     );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// --no-tdd / --reason (Gap A: tasks with no applicable test cycle)
+// ---------------------------------------------------------------------------
+
+test('--no-tdd without --reason refuses and writes nothing', () => {
+  const dir = tmp('forge-evidence-notdd-noreason-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({ command: null, exit: null, summary: null, noTdd: true }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/--reason/.test(result.message), result.message);
+    assert.equal(fs.existsSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence')), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--no-tdd with a blank --reason refuses and writes nothing', () => {
+  const dir = tmp('forge-evidence-notdd-blankreason-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({ command: null, exit: null, summary: null, noTdd: true, reason: '   ' }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/--reason/.test(result.message), result.message);
+    assert.equal(fs.existsSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence')), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--no-tdd --reason declares the task exempt without requiring --command/--exit/--summary', () => {
+  const dir = tmp('forge-evidence-notdd-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({
+        task: '01-docs',
+        command: null,
+        exit: null,
+        summary: null,
+        noTdd: true,
+        reason: 'documentation only, no behavior change',
+      }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 0, result.message);
+    const content = fs.readFileSync(evidencePath(forgeDir, 'sess-a', '01-docs'), 'utf8');
+    assert.ok(content.includes(NO_TDD_MARKER), 'evidence file must carry the durable declaration marker');
+    assert.match(content, /documentation only, no behavior change/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--no-tdd can be combined with --command/--exit/--summary and records both', () => {
+  const dir = tmp('forge-evidence-notdd-combo-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({
+        task: '02-docs-lint',
+        noTdd: true,
+        reason: 'docs only; ran lint as a sanity check',
+        command: 'npm run lint:docs',
+        exit: '0',
+        summary: 'lint clean',
+      }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 0, result.message);
+    const content = fs.readFileSync(evidencePath(forgeDir, 'sess-a', '02-docs-lint'), 'utf8');
+    assert.ok(content.includes(NO_TDD_MARKER));
+    assert.match(content, /docs only; ran lint as a sanity check/);
+    assert.match(content, /npm run lint:docs/);
+    assert.match(content, /lint clean/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--no-tdd with a partial --command/--exit/--summary trio still requires the missing ones', () => {
+  const dir = tmp('forge-evidence-notdd-partial-');
+  try {
+    makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({
+        command: 'npm run lint:docs',
+        exit: null,
+        summary: null,
+        noTdd: true,
+        reason: 'docs only',
+      }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/--exit/.test(result.message), result.message);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The marker must be CLI-authored only — reviewer-found smuggle (F1a):
+// `--summary`/`--command`/`--tier`/`--task` interpolate caller text straight
+// into the same file the marker lives in, with no check that the text
+// itself quotes the marker. Without --no-tdd/--reason at all, an implementer
+// describing "notes on <!-- forge:no-tdd-declared -->" in a summary cleared
+// the pairing gate for its own task.
+// ---------------------------------------------------------------------------
+
+test('a --summary quoting the no-tdd marker is refused, even without --no-tdd (reviewer repro)', () => {
+  const dir = tmp('forge-evidence-smuggle-summary-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({
+        summary: `green — see notes on ${NO_TDD_MARKER}`,
+      }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/marker/i.test(result.message), result.message);
+    assert.equal(fs.existsSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence')), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a --command quoting the no-tdd marker is refused', () => {
+  const dir = tmp('forge-evidence-smuggle-command-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({ command: `npm test # ${NO_TDD_MARKER}` }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/marker/i.test(result.message), result.message);
+    assert.equal(fs.existsSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence')), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a --tier quoting the no-tdd marker is refused', () => {
+  const dir = tmp('forge-evidence-smuggle-tier-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({ tier: `2 ${NO_TDD_MARKER}` }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/marker/i.test(result.message), result.message);
+    assert.equal(fs.existsSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence')), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a --task quoting the no-tdd marker is refused', () => {
+  const dir = tmp('forge-evidence-smuggle-task-');
+  try {
+    makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({ task: `01-sneaky-${NO_TDD_MARKER}` }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/marker/i.test(result.message), result.message);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a --summary quoting the marker is still refused when combined with a legitimate --no-tdd --reason', () => {
+  // The write-time check is unconditional — --no-tdd does not create an
+  // exception for smuggling a second, free-text copy of the marker in.
+  const dir = tmp('forge-evidence-smuggle-notdd-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(
+      makeOpts({
+        command: null,
+        exit: null,
+        summary: `docs only ${NO_TDD_MARKER}`,
+        noTdd: true,
+        reason: 'documentation only',
+      }),
+      dir,
+      FIXED_NOW,
+    );
+    assert.equal(result.exitCode, 1);
+    assert.ok(/marker/i.test(result.message), result.message);
+    assert.equal(fs.existsSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence')), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a plain --command/--exit/--summary run (no --no-tdd) never writes the no-tdd marker', () => {
+  const dir = tmp('forge-evidence-notdd-absent-');
+  try {
+    const forgeDir = makeForgeFixture(dir, 'sess-a');
+    const result = runRecordEvidence(makeOpts(), dir, FIXED_NOW);
+    assert.equal(result.exitCode, 0, result.message);
+    const content = fs.readFileSync(evidencePath(forgeDir, 'sess-a', '03-record-evidence'), 'utf8');
+    assert.ok(!content.includes(NO_TDD_MARKER));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

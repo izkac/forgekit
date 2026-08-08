@@ -189,21 +189,47 @@ check for 43.
 4. **Reviewer** (unless pace skips it):
    - **`always` / high-risk hard floor:** dispatch [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md) for this task → `task-review.md`.
    - **`per-group` at group boundary:** dispatch one reviewer covering **all tasks in the just-finished `tasks.md` group** → `group-review.md` (include each task id + paths). Mid-group low-risk tasks: self-check `task-review.md` only.
-   - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{DIFF_RANGE}` and `{CAPABILITY_SPEC_EXCERPT}` — read actual code, not the implementer's summary. **Model:** [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Honor `omitModel` / `model` literally. Do **not** skip high-risk tasks.
+   - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{DIFF_RANGE}`, `{CAPABILITY_SPEC_EXCERPT}`, and `{GUARD_ALLOWANCES}` (paste `.forge/sessions/<id>/guard-allowances.json`'s contents — there is no `forge guard list` to generate this — or "none" if the file doesn't exist) — read actual code, not the implementer's summary. **Model:** [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Honor `omitModel` / `model` literally. Do **not** skip high-risk tasks.
 5. Fix loop until the reviewer approves (max `review.maxRounds` from pace; then escalate to the human). For group reviews, fix any rejected task in the group before continuing to the next group.
-6. Record **test evidence** from the implementer's report (every task, even when review is deferred to group end):
-   ```bash
-   forge evidence --task <nn>-<slug> --command "<tier-2 cmd>" --exit 0 --summary "<pass summary>"
-   ```
-   (Refuses non-zero exit without `--allow-fail`; template + rules in [../references/test-evidence.md](../references/test-evidence.md).)
+6. **Tier-2 evidence — two paths, know which one this task takes:**
+   - **Behavior-change tasks (TDD applies):** evidence comes from `forge tdd run`
+     stamps the implementer produced during the loop — a red stamp
+     (`--expect fail`) before production code, a green stamp (`--expect pass`)
+     after (see [../references/tdd-core.md](../references/tdd-core.md)). Each
+     call executes the command itself and appends to
+     `tasks/<nn>-<slug>/tdd-runs.jsonl`; there is nothing for the coordinator to
+     stamp by hand here — do **not** also run `forge evidence` for the same
+     command; `forge score` reads the stamps directly (an ok pass-stamp counts
+     as tier-2 coverage even with no `test-evidence.md`), so this costs
+     nothing on the scorecard. For sessions carrying `features.tddEvidence`,
+     `forge phase done|finish` refuses a completed task with no fail-stamp
+     chronologically before a pass-stamp in that file.
+   - **Non-TDD artifacts (docs-only, config, other work with no red/green
+     cycle):** do **not** just run the plain evidence command — declare it, so
+     the pairing gate knows this task has no red→green cycle to demand:
+     ```bash
+     forge evidence --task <nn>-<slug> --no-tdd --reason "<why no test cycle applies>"
+     # or, with a command that still ran (e.g. a lint pass):
+     forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<pass summary>" --no-tdd --reason "<why>"
+     ```
+     `--no-tdd` writes a durable, reviewer-visible marker that exempts the
+     task from the pairing gate; evidence recorded without it does **not**
+     exempt anything. A completed task with neither a red→green stamp pair
+     nor a `--no-tdd` declaration refuses at `forge phase done`, with no way
+     through except producing one of the two. (Template + rules in
+     [../references/test-evidence.md](../references/test-evidence.md).)
 
-   **Add `--session <id>` when more than one session is open in the project.**
-   Without it the session comes from `.forge/active.json`, which is a hint — and
-   this command writes into `sessions/<id>/tasks/<task>/`, where `forge score`
-   reads the exit code into that session's scorecard and durable ledger. It will
-   refuse rather than replace evidence a previous run produced, so a wrong guess
-   costs you a re-run rather than somebody else's record; naming the session
-   removes the refusal for later runs of the same task.
+   **Add `--session <id>` to either command when more than one session is open
+   in the project.** Without it the session comes from `.forge/active.json`,
+   which is a hint — and both commands write into `sessions/<id>/tasks/<task>/`,
+   where `forge score` reads them into that session's scorecard and durable
+   ledger. `forge evidence` refuses rather than replace evidence a previous run
+   produced, so a wrong guess costs you a re-run rather than somebody else's
+   record; naming the session removes the refusal for later runs of the same
+   task.
+
+   If an implementer's edit is denied by the test-tamper guard mid-task, see
+   **Guarded files** below before re-dispatching.
 7. Mark task complete in `tasks.md` (`- [ ]` → `- [x]`). That checklist is the source of truth — fleet/status/health derive `tasksComplete` from it (and heal the session cache). Still run the progress command below when you want `--subagents` updated. Detect group boundary: next line in `tasks.md` is a new `##` heading, or no remaining tasks under the current heading.
 8. **Checkpoint** — when the project opts in (`.forge/config.json` → `git.checkpoint`):
    ```bash
@@ -229,6 +255,78 @@ check for 43.
 ```bash
 forge phase implement --tasks-complete <N> --subagents <total dispatched so far>
 ```
+
+## Guarded files
+
+A test file that already existed at the session's `baseCommit` (matching
+`guard.testGlobs`), plus Forge's own integrity artifacts (`spine.json`,
+`e2e.json`, `e2e-results.json`, `verify-evidence.md`, `test-evidence.md`,
+`tdd-runs.jsonl`), is **guarded** against tool-call edits: a `PreToolUse` hook
+on `Edit`/`Write`/`NotebookEdit`/`MultiEdit` denies implementer edits to it
+during implement/verify/review/finish. Tests an implementer writes fresh
+during this session are not guarded — TDD still works. `verify-evidence.md`
+is the one exception to the implement-onward window: it is authored during
+verify itself (see [verify.md](./verify.md)), so it stays editable through
+implement and verify and freezes starting review.
+
+Forge's own control surface is guarded too, unconditionally, regardless of
+`guard.testGlobs` or tracking state: `.forge/config.json`, `.forge/active.json`,
+and any session's `session.json`. These are what the guard itself reads to
+decide what to guard and which session to guard against — an implementer (or
+an agent routing around a denied edit) cannot turn the guard off by rewriting
+its configuration or its trust anchors instead of the file it was told not to
+touch.
+
+`guard.testGlobs` in `.forge/config.json` overrides the default glob set
+(`**/*.test.*`, `**/*.spec.*`, `**/__tests__/**`, `**/test/**`,
+`**/tests/**`) — a project override **replaces** the defaults, it does not
+add to them, so `{ "guard": { "testGlobs": ["tests/**"] } }` silently drops
+guard coverage for `*.test.*` files living outside `tests/`. Read the
+project's `.forge/config.json` before assuming the default globs apply. An
+override that resolves to zero usable globs (`[]`, or all-blank strings) is
+treated as a configuration error, not an opt-out — the guard falls back to
+the defaults and warns loudly rather than silently guarding nothing; a
+genuine opt-out has to be an explicit, reviewable glob list.
+
+The hook's session resolution does not trust `.forge/active.json` alone: with
+no explicit `--session`, it considers every unfinished session in the
+enforcement window and denies if **any** of them guards the file, even when
+the pointer currently names a different (non-guarding, or out-of-window)
+session. A second concurrent session — including a throwaway one created by
+`forge new` — cannot turn the guard off for the session actually doing the
+work.
+
+- **Implementers must never run `forge test-allow`.** A denied edit is not an
+  obstacle to route around; it means the task, as briefed, requires changing a
+  file that isn't the implementer's to change. **The hook only intercepts tool
+  calls** (`Edit`/`Write`/`NotebookEdit`/`MultiEdit`) — a shell `rm`, `sed -i`,
+  or `>` redirect against a guarded file is not intercepted and must never be
+  used to route around a deny either; the rule is about the file, not the tool.
+- A denied edit comes back as `NEEDS_CONTEXT` or `BLOCKED` with the guard's
+  deny message verbatim — read it before re-dispatching; it names the file and
+  the escape hatch.
+- Only the **coordinator** decides whether the change is legitimate (a test
+  genuinely needs to change alongside a contract) and records the allowance
+  with a reason:
+  ```bash
+  forge test-allow <path> --reason "<why this edit is legitimate>"
+  ```
+  That reason is not private — it lands at
+  `.forge/sessions/<id>/guard-allowances.json` and in the reviewer's packet
+  (there is no `forge guard list`; paste the ledger file's contents into
+  `{GUARD_ALLOWANCES}` yourself), and a weak reason is a review finding (see
+  [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md)).
+- **The integrity backstop's coverage is narrower than the hook's.**
+  `forge integrity-check` / `forge phase done|finish` re-check guarded files
+  from `git diff`, which only ever sees **tracked** files — so the backstop
+  catches a guarded test (tracked at `baseCommit`) and a committed
+  change-dir artifact (e.g. `openspec/changes/<name>/spine.json`), and a
+  tracked `.forge/config.json`, on every host, hooked or not, but **not** an
+  integrity artifact living only under the gitignored `.forge/sessions/<id>/`
+  (including that session's own `session.json` and `.forge/active.json`),
+  which no diff can see. The hook is the real defense for session-dir
+  artifacts and for `session.json`/`active.json` specifically; the backstop
+  is a second line for what git can see.
 
 ## Forge constraints (include in every brief)
 
