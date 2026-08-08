@@ -50,6 +50,16 @@ const FORGE_CONTROL_BASENAMES = new Set(['config.json', 'active.json', 'session.
 const FORGE_DIR_PREFIX = '.forge/';
 
 /**
+ * Whether this platform's filesystem treats paths as case-insensitive
+ * (macOS/APFS, Windows) or case-sensitive (Linux). Computed once and shared
+ * as the default for every case-sensitive comparison the guard makes — the
+ * tracked-path lookup (`makeGitLsTree`) and the glob match (`classifyGuarded`)
+ * — so the two can never drift apart on a real invocation; only an explicit
+ * override (as tests use) can make them disagree, and only intentionally.
+ */
+const DEFAULT_CASE_INSENSITIVE = process.platform === 'darwin' || process.platform === 'win32';
+
+/**
  * @param {string} normalized already-posix-normalized path
  * @returns {string | null} the matched basename, or null
  */
@@ -105,9 +115,13 @@ function escapeRegExpChar(ch) {
  * use only `*` and `**`.
  *
  * @param {string} glob
+ * @param {boolean} [caseInsensitive] when true, the literal glob tokens
+ *   (e.g. ".test.", "test/", "__tests__/") match regardless of case — a
+ *   case-only variant of a glob token (`src/a.TEST.mjs`) must be caught on a
+ *   folding platform the same way the tracked-path lookup catches it.
  * @returns {RegExp}
  */
-function globToRegExp(glob) {
+function globToRegExp(glob, caseInsensitive = false) {
   const g = String(glob);
   let re = '';
   let i = 0;
@@ -131,18 +145,24 @@ function globToRegExp(glob) {
       i += 1;
     }
   }
-  return new RegExp(`^${re}$`);
+  return new RegExp(`^${re}$`, caseInsensitive ? 'i' : undefined);
 }
 
 /**
- * @param {{ relPath: string, session?: unknown, config?: { guard?: { testGlobs?: string[] } }, gitLsTree: (relPath: string) => boolean }} params
+ * @param {{ relPath: string, session?: unknown, config?: { guard?: { testGlobs?: string[] } }, gitLsTree: (relPath: string) => boolean, caseInsensitive?: boolean }} params
  *   `session` is accepted for API parity with the hook and integrity-backstop
  *   callers (task 2.1 / 4.1) but is not read here: baseline-tracking is
  *   fully delegated to the injected `gitLsTree`, which already knows the
  *   session's `baseCommit` (see `makeGitLsTree`).
+ *   `caseInsensitive` defaults the same way `makeGitLsTree`'s does (see
+ *   `DEFAULT_CASE_INSENSITIVE`) so the glob match here and the tracked-path
+ *   lookup inside the injected `gitLsTree` agree on one platform decision
+ *   (F90) — a glob token itself (".test.", "test/", ...) is a second
+ *   case-sensitive comparison that must fold in step with the lookup, not
+ *   independently of it.
  * @returns {{ guarded: boolean, rule: string | null, warning: string | null }}
  */
-export function classifyGuarded({ relPath, config, gitLsTree }) {
+export function classifyGuarded({ relPath, config, gitLsTree, caseInsensitive = DEFAULT_CASE_INSENSITIVE }) {
   const normalized = normalizePath(relPath);
   const basename = path.posix.basename(normalized);
   const { globs, invalid } = resolveTestGlobs(config?.guard?.testGlobs);
@@ -158,7 +178,7 @@ export function classifyGuarded({ relPath, config, gitLsTree }) {
   }
 
   for (const glob of globs) {
-    if (globToRegExp(glob).test(normalized) && gitLsTree(normalized)) {
+    if (globToRegExp(glob, caseInsensitive).test(normalized) && gitLsTree(normalized)) {
       return { guarded: true, rule: glob, warning };
     }
   }
@@ -171,12 +191,27 @@ export function classifyGuarded({ relPath, config, gitLsTree }) {
  * returns a lookup closure. On any git failure it throws a descriptive
  * Error — callers decide fail-open vs fail-closed.
  *
- * @param {{ cwd: string, baseCommit: string }} params
+ * `caseInsensitive` defaults to the current platform's filesystem semantics
+ * (macOS/Windows fold case; Linux does not) but is injectable so a single
+ * CI runner can exercise both branches (F90). Folding uses plain
+ * `String.prototype.toLowerCase()`, which is not a total Unicode case fold —
+ * e.g. the Turkish dotted capital I (U+0130) lowercases to "i" plus a
+ * combining dot, not to plain "i" — so that one code point stays unguarded
+ * under folding. Accepted gap: it under-guards a rare case rather than
+ * over-guarding and denying legitimate edits.
+ *
+ * @param {{ cwd: string, baseCommit: string, caseInsensitive?: boolean }} params
  * @returns {(relPath: string) => boolean}
  */
-export function makeGitLsTree({ cwd, baseCommit }) {
+export function makeGitLsTree({
+  cwd,
+  baseCommit,
+  caseInsensitive = DEFAULT_CASE_INSENSITIVE,
+}) {
   /** @type {Set<string> | null} */
   let names = null;
+  /** @type {Set<string> | null} */
+  let lowerNames = null;
   return function gitLsTree(relPath) {
     if (names === null) {
       // -z: NUL-terminated, unquoted output. Without it, git's default
@@ -192,8 +227,15 @@ export function makeGitLsTree({ cwd, baseCommit }) {
         throw new Error(`git ls-tree -r -z --name-only ${baseCommit} failed in ${cwd}: ${reason}`);
       }
       names = new Set(result.stdout.split('\0').filter(Boolean));
+      if (caseInsensitive) {
+        lowerNames = new Set([...names].map((n) => n.toLowerCase()));
+      }
     }
-    return names.has(normalizePath(relPath));
+    const normalized = normalizePath(relPath);
+    if (caseInsensitive) {
+      return lowerNames.has(normalized.toLowerCase());
+    }
+    return names.has(normalized);
   };
 }
 

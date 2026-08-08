@@ -20,7 +20,7 @@
 
 ## 2. Case-insensitive guard bypass (F90)
 
-- [ ] 2.1 `packages/cli/src/guard.mjs`: `makeGitLsTree` folds case in its
+- [x] 2.1 `packages/cli/src/guard.mjs`: `makeGitLsTree` folds case in its
       tracked-path lookup on `darwin`/`win32` only, exact elsewhere. Inject
       the platform rather than reading `process.platform` inside the lookup,
       so tests drive both behaviours on a Linux CI runner. TDD in

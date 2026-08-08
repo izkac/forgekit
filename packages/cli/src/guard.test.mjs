@@ -216,6 +216,154 @@ test('makeGitLsTree tracks a non-ASCII filename despite core.quotepath', () => {
   assert.equal(gitLsTree('tests/café.test.mjs'), true);
 });
 
+// --- F90: case-insensitive filesystems must not bypass the guard ----------
+
+/** A scratch repo with one tracked test file at a given relative path. */
+function makeScratchRepoWithTrackedPath(relPath) {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'guard-git-')));
+  git(cwd, ['init', '-q', '-b', 'main']);
+  git(cwd, ['config', 'user.email', 'test@example.com']);
+  git(cwd, ['config', 'user.name', 'Test']);
+  const abs = path.join(cwd, ...relPath.split('/'));
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, 'baseline\n', 'utf8');
+  git(cwd, ['add', '-A']);
+  git(cwd, ['commit', '-q', '-m', 'base']);
+  const baseCommit = git(cwd, ['rev-parse', 'HEAD']);
+  return { cwd, baseCommit };
+}
+
+test('F90: caseInsensitive:true folds a case-variant filename to a member of the tracked set', () => {
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('src/a.test.mjs');
+  const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: true });
+  assert.equal(gitLsTree('src/A.test.mjs'), true);
+});
+
+test('F90: caseInsensitive:true folds a case-variant directory to a member of the tracked set', () => {
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('src/a.test.mjs');
+  const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: true });
+  assert.equal(gitLsTree('SRC/a.test.mjs'), true);
+});
+
+test('F90: caseInsensitive:false keeps the case-variant filename a non-member (exact match preserved)', () => {
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('src/a.test.mjs');
+  const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: false });
+  assert.equal(gitLsTree('src/A.test.mjs'), false);
+});
+
+test('F90: an unrelated path is a non-member under both caseInsensitive settings', () => {
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('src/a.test.mjs');
+  for (const caseInsensitive of [true, false]) {
+    const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive });
+    assert.equal(gitLsTree('src/other.mjs'), false, `caseInsensitive=${caseInsensitive}`);
+  }
+});
+
+test('F90: makeGitLsTree defaults caseInsensitive from process.platform when omitted', () => {
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('src/a.test.mjs');
+  const gitLsTree = makeGitLsTree({ cwd, baseCommit });
+  const expectFolds = process.platform === 'darwin' || process.platform === 'win32';
+  assert.equal(
+    gitLsTree('src/A.test.mjs'),
+    expectFolds,
+    `default caseInsensitive should be ${expectFolds} on ${process.platform}`,
+  );
+});
+
+test('F90: caseInsensitive:true still tracks a non-ASCII filename via the -z listing', () => {
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('tests/café.test.mjs');
+  const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: true });
+  // Exact-case non-ASCII lookup still works under folding.
+  assert.equal(gitLsTree('tests/café.test.mjs'), true);
+  // A case-variant of the accented letter also folds: simple toLowerCase
+  // handles precomposed Latin-1 accents like é/É correctly.
+  assert.equal(gitLsTree('tests/CAFÉ.test.mjs'), true);
+});
+
+test('F90: caseInsensitive:true uses simple toLowerCase(), which is not total Unicode case folding', () => {
+  // Documents a known limit rather than pretending simple toLowerCase() is a
+  // complete case-fold: the Turkish dotted capital I (U+0130) lowercases to
+  // "i" + a combining dot above (U+0307) in the locale-independent JS
+  // toLowerCase(), not to plain ASCII "i" — so it does NOT fold to a tracked
+  // plain-"i" path. This is an accepted gap, not a bypass: it under-guards a
+  // rare code point rather than over-guarding (false positives stay excluded
+  // per the spec's case-sensitive-platform requirement).
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('src/i.test.mjs');
+  const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: true });
+  assert.equal('İ'.toLowerCase() === 'i', false, 'fixture assumption: JS toLowerCase does not map İ to plain i');
+  assert.equal(gitLsTree('src/İ.test.mjs'), false);
+});
+
+test('F90: classifyGuarded (the real consumer) treats a case-variant test file as guarded under folding', () => {
+  const { cwd, baseCommit } = makeScratchRepoWithTrackedPath('src/a.test.mjs');
+  const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: true });
+  const result = classifyGuarded({
+    relPath: 'src/A.test.mjs',
+    config: {},
+    gitLsTree,
+    caseInsensitive: true,
+  });
+  assert.equal(result.guarded, true);
+  assert.equal(result.rule, '**/*.test.*');
+});
+
+// --- F90 follow-up: the glob match is a second case-sensitive comparison --
+//
+// classifyGuarded compares the path against a glob (not only against the
+// tracked-path Set). Folding the Set lookup alone leaves a glob token itself
+// (".test.", ".spec.", "test/", "tests/", "__tests__/") case-sensitive, so
+// uppercasing *that* token — e.g. "src/a.TEST.mjs" — still bypasses the
+// guard on a folding platform even though the file resolves to the same
+// inode as the tracked "src/a.test.mjs". Both comparisons must be driven by
+// the same caseInsensitive decision.
+test('F90: classifyGuarded folds the glob token itself under caseInsensitive, for every default glob', () => {
+  const cases = [
+    { tracked: 'src/a.test.mjs', variant: 'src/a.TEST.mjs', rule: '**/*.test.*' },
+    { tracked: 'src/a.test.mjs', variant: 'SRC/A.TEST.MJS', rule: '**/*.test.*' },
+    { tracked: 'src/a.spec.mjs', variant: 'src/a.SPEC.mjs', rule: '**/*.spec.*' },
+    { tracked: 'test/a.mjs', variant: 'TEST/a.mjs', rule: '**/test/**' },
+    { tracked: 'tests/a.mjs', variant: 'TESTS/a.mjs', rule: '**/tests/**' },
+    { tracked: '__tests__/a.mjs', variant: '__TESTS__/a.mjs', rule: '**/__tests__/**' },
+  ];
+  for (const { tracked, variant, rule } of cases) {
+    const { cwd, baseCommit } = makeScratchRepoWithTrackedPath(tracked);
+
+    const foldedLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: true });
+    const folded = classifyGuarded({
+      relPath: variant,
+      config: {},
+      gitLsTree: foldedLsTree,
+      caseInsensitive: true,
+    });
+    assert.equal(folded.guarded, true, `${variant} (tracked ${tracked}) should be guarded under folding`);
+    assert.equal(folded.rule, rule);
+
+    const exactLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive: false });
+    const exact = classifyGuarded({
+      relPath: variant,
+      config: {},
+      gitLsTree: exactLsTree,
+      caseInsensitive: false,
+    });
+    assert.equal(exact.guarded, false, `${variant} (tracked ${tracked}) should stay unguarded when case-sensitive`);
+  }
+});
+
+test('F90: classifyGuarded does not fold the glob match when caseInsensitive is false, even if the file is otherwise tracked', () => {
+  // Isolates the glob comparison from the tracked-path lookup: gitLsTree
+  // always answers true here, so the only thing that can make this
+  // case-sensitive path unguarded is the glob regex itself staying
+  // case-sensitive. If the glob fold ever leaked into the caseInsensitive:
+  // false branch, this would flip to guarded:true for the wrong reason.
+  const result = classifyGuarded({
+    relPath: 'src/a.TEST.mjs',
+    config: {},
+    gitLsTree: () => true,
+    caseInsensitive: false,
+  });
+  assert.equal(result.guarded, false);
+});
+
 test('a windows-separator path is normalized before matching', () => {
   const tracked = new Set(['packages/cli/src/foo.test.mjs']);
   const result = classifyGuarded({
