@@ -62,10 +62,17 @@ if (!fs.existsSync(ACTIVE_FILE)) {
   process.exit(0);
 }
 
-const r = spawnSync('forge', ['reminder', '--format', 'plain', '--prompt', prompt], {
+// `forge` is a `.cmd` shim on win32, so it can only be found via the shell —
+// but shell:true joins argv into an unquoted command string, so the prompt
+// must be quoted by hand there. Everywhere else, shell:false passes argv
+// straight to execve, so `prompt` reaches `forge` untouched regardless of
+// shell metacharacters.
+const useShell = process.platform === 'win32';
+const promptArg = useShell ? `"${prompt.replaceAll('"', '""')}"` : prompt;
+const r = spawnSync('forge', ['reminder', '--format', 'plain', '--prompt', promptArg], {
   encoding: 'utf8',
   cwd: REPO_ROOT,
-  shell: true,
+  shell: useShell,
 });
 
 if (r.status === 0 && r.stdout.trim()) {

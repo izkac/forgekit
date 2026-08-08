@@ -1,0 +1,55 @@
+<!-- forge-brief-specs-hash:565f43eebd557b7b -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief — Hook injection and case-guard bypass</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; font-size: .9em; }
+  .box { border: 1px solid #ddd; border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; background: #fafafa; }
+</style>
+</head>
+<body>
+<h1>Two shipped bugs, nothing else</h1>
+<p><strong>In one sentence:</strong> this fixes a command-injection bug that
+fires on every prompt you type, and a way to edit a protected test just by
+changing its capitalisation — and adds no new capability at all.</p>
+
+<div class="box">
+<p><strong>1. Your prompts were being run through a shell.</strong> Two hooks
+passed whatever you typed to a shell without quoting it. A prompt containing a
+semicolon or a backtick — an ordinary code snippet, pasted — would have its
+contents executed. I reproduced it: a prompt ending
+<code>; touch /tmp/PWNED</code> created the file. No attacker needed; this was
+reachable by accident, on every message. The identical bug was found and fixed
+in a third hook during the last change; its two older siblings were missed.</p>
+</div>
+
+<div class="box">
+<p><strong>2. Capitalisation walked past the test guard.</strong> The guard
+blocked <code>src/a.test.mjs</code> but allowed <code>src/A.test.mjs</code> —
+and on macOS and Windows those are the same file. So an agent could edit a
+protected test by changing one letter's case. The end-of-session integrity
+check still caught the change, so this was one layer of two failing rather
+than a complete hole, but it was the layer that stops the edit happening at
+all.</p>
+</div>
+
+<h2>What this deliberately does not do</h2>
+<p>No new features. The previous session added a great deal of new code to a
+tool whose job is raising quality, and left these two behind. This change is
+scoped to the two, and I checked a third finding (<code>F88</code>) before
+starting — it turned out to be already fixed, so it is being closed rather
+than rebuilt.</p>
+
+<h2>One honest limit</h2>
+<p>The case fix applies only where the filesystem is actually
+case-insensitive. On Linux, <code>Foo.test.mjs</code> and
+<code>foo.test.mjs</code> really are two different files, and treating them as
+one would start guarding files that aren't tracked. The tests drive both
+behaviours directly so this is verified rather than assumed.</p>
+</body>
+</html>
