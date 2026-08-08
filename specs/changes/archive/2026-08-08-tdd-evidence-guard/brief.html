@@ -1,0 +1,85 @@
+<!-- forge-brief-specs-hash:29ec1b595c945142 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief — TDD evidence guard</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; font-size: .9em; }
+  .box { border: 1px solid #ddd; border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; background: #fafafa; }
+  ul { padding-left: 1.2rem; }
+</style>
+</head>
+<body>
+<h1>TDD evidence guard</h1>
+<p><strong>In one sentence:</strong> after this change, an agent can no longer
+quietly rewrite your existing tests, claim a test run it never made, or ship
+into a project where the enforcement hooks were never turned on.</p>
+
+<h2>Why now</h2>
+<p>Research across 2024–2026 (and our own 34-session scorecard data) agrees on
+one point: written rules for agents decay, mechanical gates hold. The
+best-documented agent failure mode is <em>test gaming</em> — editing or
+deleting tests so bad code looks green, then reporting success. Today Forge's
+TDD rules are all prose: nothing blocks a test edit, and the "evidence" that
+tests ran red-then-green is typed in by the same agent that did the work.</p>
+
+<h2>What gets built</h2>
+
+<div class="box">
+<p><strong>1. A test guard.</strong> Tests that already existed when the
+session started become read-only for agents, from implement through finish.
+An edit attempt is blocked on the spot (Claude Code hook), and even on hosts
+without hooks, <code>forge phase done</code> refuses if a pre-existing test
+was changed without a recorded exception. New tests written during the
+session are unaffected — TDD needs those. When a legitimate change to an old
+test is needed, <code>forge test-allow &lt;file&gt; --reason "…"</code>
+records it; every exception is shown to reviewers and on the scorecard.</p>
+</div>
+
+<div class="box">
+<p><strong>2. Executed red→green proof.</strong> A new command,
+<code>forge tdd run</code>, runs the test command itself and writes the
+result (command, exit code, time) to the task's evidence file. The agent can
+no longer transcribe an exit code — the CLI observed the run. Completing a
+session now requires each finished task to show a real failing run before its
+passing run.</p>
+</div>
+
+<div class="box">
+<p><strong>3. Hooks wired by default.</strong> Until now <code>forge
+init</code> wrote a hooks snippet but left merging it into
+<code>.claude/settings.json</code> to you — the main reason some projects ran
+with zero enforcement. Init (and <code>forge doctor --install</code>) now
+merge it automatically, without touching your own settings entries.</p>
+</div>
+
+<div class="box">
+<p><strong>4. An honest exit for work with no tests to run.</strong> Some
+tasks change documentation or configuration and have no red/green cycle at
+all. Those record <code>forge evidence --task &lt;id&gt; --no-tdd --reason
+"…"</code>. The reason is required, it is written into the task's evidence
+file, and reviewers are told to judge it — claiming "docs-only" on a task
+that changed real behavior is a review finding, not a free pass. Recording
+evidence <em>without</em> either a red→green pair or this declaration will
+refuse at the end of the session.</p>
+</div>
+
+<h2>What it feels like day to day</h2>
+<ul>
+  <li>Normal TDD work is unchanged — write a new test, watch it fail, make it pass.</li>
+  <li>If an agent tries to "fix" an old test, it gets blocked and must ask you; your approval is one command and is visible at review time.</li>
+  <li>If the guard itself breaks, it fails <em>open</em> with a warning — it will never lock you out of your own session. The end-of-session integrity gate is the safety net that fails closed.</li>
+  <li>Old and in-flight sessions are exempt from the new red→green requirement; only sessions created after this ships are held to it.</li>
+</ul>
+
+<h2>What is deliberately out of scope</h2>
+<p>Two follow-ups from the same research roadmap land later: an independent
+test-writer subagent (tests authored by a different agent than the
+implementer) and a mutation-testing gate (proof that tests can actually catch
+bugs).</p>
+</body>
+</html>

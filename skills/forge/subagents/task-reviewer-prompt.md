@@ -23,6 +23,16 @@ Capability specs beat narrow task wording when they conflict. See
 
 Diff range: {DIFF_RANGE}   <!-- `forge checkpoint --range --last` → paste its `reviewTarget` (scopes to this group; names untracked files a diff hides). No checkpoints: `git diff` + the untracked files in `git status`. -->
 
+## Guard allowances open on this session
+
+{GUARD_ALLOWANCES}   <!-- coordinator: paste the contents of .forge/sessions/<id>/guard-allowances.json (path + reason + phase) verbatim, or "none" if the file doesn't exist — there is no `forge guard list` to generate this for you, and an unfilled placeholder here is worse than leaving it out -->
+
+Each allowance recorded a coordinator's decision to let an edit through the
+test-tamper guard. Judge whether the **reason** actually justifies changing
+that file — "needed to make the test pass" is not a reason, it is the guard
+firing correctly. A weak or missing reason is a review finding on its own,
+independent of whether the resulting code is otherwise fine.
+
 **Read the actual code.** The summary above was written by the party under review — it is a map, not evidence. Read the changed files (or the diff range) before any verdict; verify each spec requirement against what the code does, not what the summary says it does.
 
 ## Check — spec compliance first, then quality
@@ -44,13 +54,14 @@ Diff range: {DIFF_RANGE}   <!-- `forge checkpoint --range --last` → paste its 
 - Wiring is deferred **without a registered open deferral** — the packet must show `forge defer list` output naming this task's deferral; "wiring in §9" with no registry entry is a REJECT
 - The task claims a capability whose `spine.json` row is missing or library-only (empty runtimeOwner / writes / evidence)
 - The task authored or touched `e2e.json` steps that would pass against a stubbed handler (no domain side-effect assertions), or set `notApplicable` without a real reason
+- A guarded test (or other guarded file) was edited without a recorded allowance in this session's ledger, or with one whose reason doesn't hold up (see **Guard allowances** above)
 
 **Code quality:**
 
 - Simplicity — no over-engineering
 - Surgical diff — no unrelated edits
 - Error handling — no silent failures
-- Tests — meaningful coverage for behaviour changes; **`test-evidence.md`** (tier 2) present with exit code `0` and pass summary; evidence is **narrow** unless task required full workspace
+- Tests — meaningful coverage for behaviour changes; tier-2 evidence present in one of three shapes: **`test-evidence.md`** with exit code `0` and pass summary; an ok fail-stamp before an ok pass-stamp in **`tdd-runs.jsonl`** (behavior-change tasks); or **`test-evidence.md`** carrying a `--no-tdd` declaration (`<!-- forge:no-tdd-declared -->` plus a `- **No-TDD reason:**` line, no Command/Exit/Summary required) for a task with no applicable red→green cycle. Do **not** flag the third shape as missing evidence — but do read the reason: judge it the same way you judge a guard allowance (see above), and "docs-only" on a task that actually touched a handler or other behavior is a finding, not a pass. Evidence is **narrow** unless task required full workspace
 - Ecosystem — dependents updated if contracts changed
 - AGENTS.md coding guidelines
 

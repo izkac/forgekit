@@ -1,0 +1,19 @@
+{
+  "change": "doctor-unwired-hooks",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "doctor-wiring",
+      "cmd": "node scripts/e2e/harness-portability.mjs doctor-wiring",
+      "expect": "DOCTOR WIRING GREEN"
+    },
+    {
+      "name": "harness-probe",
+      "cmd": "node scripts/e2e/harness-portability.mjs all"
+    }
+  ]
+}

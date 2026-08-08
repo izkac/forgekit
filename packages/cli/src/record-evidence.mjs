@@ -13,9 +13,18 @@
  *
  * Options:
  *   --task <nn-slug>    Task directory name, e.g. 03-record-evidence (required)
- *   --command <cmd>     Test command that was run (required)
- *   --exit <code>       Exit code of the test command (required, integer)
- *   --summary <text>    Pass/fail summary, e.g. "3/3 pass" (required)
+ *   --command <cmd>     Test command that was run (required unless --no-tdd is
+ *                        given with no command details at all)
+ *   --exit <code>       Exit code of the test command (required alongside --command)
+ *   --summary <text>    Pass/fail summary, e.g. "3/3 pass" (required alongside --command)
+ *   --no-tdd            Declare the task has no applicable red→green test cycle
+ *                        (docs/config-only work) — exempts it from the
+ *                        red→green pairing gate in `forge integrity-check`.
+ *                        Requires --reason. May be combined with
+ *                        --command/--exit/--summary (e.g. a docs task that
+ *                        still ran a lint command) — the declaration marker
+ *                        stays unambiguous either way.
+ *   --reason <text>     Why no test cycle applies (required with --no-tdd)
  *   --tier <label>      Tier label (default: "2 (task-scoped — not full workspace unless noted)")
  *   --session <id>      Session id (default: sessionId from .forge/active.json)
  *   --allow-fail        Write evidence even when --exit is non-zero
@@ -28,6 +37,27 @@ import { pathToFileURL } from 'node:url';
 import { unfinishedSessions } from './lib.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
+
+// `checkTddEvidence` (integrity.mjs) reads a task's test-evidence.md for
+// this literal token to decide whether the task is exempt from the
+// red→green pairing gate. `hasNoTddDeclaration` there requires it to appear
+// as a WHOLE LINE (never a substring inside another line) alongside a
+// non-empty reason line — never a bare substring match — so:
+//   - free text that merely *quotes* the token (a --summary describing this
+//     very feature) can never satisfy it, since it always shares its line
+//     with a `- **Summary:** …` prefix;
+//   - `runRecordEvidence` additionally refuses to let --task/--command/
+//     --summary/--tier contain this token at all, so the CLI is the token's
+//     only author and it can only ever land on its own line;
+//   - a bare marker appended by anything other than the CLI (e.g. a hand or
+//     Bash edit with no --reason) still reads as "not declared".
+export const NO_TDD_MARKER = '<!-- forge:no-tdd-declared -->';
+
+// The exact prefix `buildEvidence` writes before the reason text. Read back
+// by `hasNoTddDeclaration` (integrity.mjs) to require a genuine, non-empty
+// reason alongside the marker — one parser of the shape, shared by writer
+// and reader, so they cannot silently drift apart on what "a reason" means.
+export const NO_TDD_REASON_LABEL = '- **No-TDD reason:**';
 
 /**
  * @param {string[]} argv
@@ -42,6 +72,8 @@ export function parseArgs(argv) {
     session: null,
     allowFail: false,
     forgeDir: null,
+    noTdd: false,
+    reason: null,
     help: false,
   };
 
@@ -55,6 +87,8 @@ export function parseArgs(argv) {
     else if (arg === '--session') opts.session = argv[++i];
     else if (arg === '--allow-fail') opts.allowFail = true;
     else if (arg === '--forge-dir') opts.forgeDir = argv[++i];
+    else if (arg === '--no-tdd') opts.noTdd = true;
+    else if (arg === '--reason') opts.reason = argv[++i];
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else throw new Error(`unknown argument: ${arg}`);
   }
@@ -65,10 +99,25 @@ export function parseArgs(argv) {
 /**
  * Render the canonical test-evidence template.
  *
- * @param {{ task: string, tier: string, command: string, exit: number, summary: string, runAt: string }} fields
+ * `command`/`exit`/`summary` are omitted (not printed as empty/blank fields)
+ * when null — the shape a `--no-tdd` declaration with no accompanying command
+ * takes. `noTddReason`, when non-null, prepends the durable `NO_TDD_MARKER`
+ * line `checkTddEvidence` reads back, plus the reviewer-visible reason text.
+ *
+ * @param {{ task: string, tier: string, command?: string | null, exit?: number | null, summary?: string | null, runAt: string, noTddReason?: string | null }} fields
  * @returns {string}
  */
-export function buildEvidence({ task, tier, command, exit, summary, runAt, session, sessionFrom }) {
+export function buildEvidence({
+  task,
+  tier,
+  command,
+  exit,
+  summary,
+  runAt,
+  session,
+  sessionFrom,
+  noTddReason,
+}) {
   return [
     `# Test evidence — Task ${task}`,
     '',
@@ -78,9 +127,10 @@ export function buildEvidence({ task, tier, command, exit, summary, runAt, sessi
     // needs to know is whether it was named or guessed from the pointer.
     ...(session ? [`- **Session:** ${session}${sessionFrom ? ` (${sessionFrom})` : ''}`] : []),
     `- **Tier:** ${tier}`,
-    `- **Command:** \`${command}\``,
-    `- **Exit code:** ${exit}`,
-    `- **Summary:** ${summary}`,
+    ...(noTddReason != null ? [NO_TDD_MARKER, `${NO_TDD_REASON_LABEL} ${noTddReason}`] : []),
+    ...(command != null ? [`- **Command:** \`${command}\``] : []),
+    ...(exit != null ? [`- **Exit code:** ${exit}`] : []),
+    ...(summary != null ? [`- **Summary:** ${summary}`] : []),
     `- **Run at:** ${runAt}`,
     '- **Recorded by:** implementer subagent (coordinator transcript)',
     '',
@@ -152,15 +202,63 @@ function resolveSessionId(session, forgeDir) {
  * @returns {{ exitCode: number; message: string }}
  */
 export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Date()) {
-  for (const field of ['task', 'command', 'exit', 'summary']) {
-    if (!opts[field]) {
-      return { exitCode: 1, message: `--${field} is required` };
+  if (!opts.task) {
+    return { exitCode: 1, message: '--task is required' };
+  }
+
+  // THE CLI MUST BE THE MARKER'S ONLY AUTHOR. `command`/`summary`/`tier`/
+  // `task` are interpolated into the same evidence file the marker itself
+  // lives in, and none of them go through `--no-tdd`. Without this check, an
+  // implementer's own summary of this feature — "green, see notes on
+  // <!-- forge:no-tdd-declared -->" — quoted the exact token and exempted its
+  // own task from the pairing gate with no --no-tdd, no --reason, and no
+  // stamps: `hasNoTddDeclaration`'s whole-line match (see integrity.mjs)
+  // closes the same hole for text embedded inside a labelled line like
+  // `- **Summary:** …`, but this refusal is the layer that stops the token
+  // from ever reaching the file at all, regardless of what future evidence
+  // readers do with it.
+  for (const [field, value] of [
+    ['task', opts.task],
+    ['command', opts.command],
+    ['summary', opts.summary],
+    ['tier', opts.tier],
+  ]) {
+    if (typeof value === 'string' && value.includes(NO_TDD_MARKER)) {
+      return {
+        exitCode: 1,
+        message:
+          `--${field} must not contain the no-tdd declaration marker (${NO_TDD_MARKER}) — ` +
+          'that token may only be written by forge evidence --no-tdd --reason "<text>".',
+      };
     }
   }
 
-  const testExit = Number(opts.exit);
-  if (!Number.isInteger(testExit)) {
-    return { exitCode: 1, message: `--exit must be an integer, got: ${opts.exit}` };
+  if (opts.noTdd && !(typeof opts.reason === 'string' && opts.reason.trim().length > 0)) {
+    return {
+      exitCode: 1,
+      message: '--reason is required with --no-tdd — declaring a task exempt without saying why is not a declaration',
+    };
+  }
+
+  // A docs-only task declared via --no-tdd may have no command to report at
+  // all. But once any one of --command/--exit/--summary is given, all three
+  // are required, same as the non-declaring path — a partial trio is not
+  // useful evidence either way.
+  const anyCommandFieldGiven = opts.command != null || opts.exit != null || opts.summary != null;
+  if (!opts.noTdd || anyCommandFieldGiven) {
+    for (const field of ['command', 'exit', 'summary']) {
+      if (!opts[field]) {
+        return { exitCode: 1, message: `--${field} is required` };
+      }
+    }
+  }
+
+  let testExit = null;
+  if (opts.exit != null) {
+    testExit = Number(opts.exit);
+    if (!Number.isInteger(testExit)) {
+      return { exitCode: 1, message: `--exit must be an integer, got: ${opts.exit}` };
+    }
   }
 
   const forgeDir = path.resolve(cwd, opts.forgeDir ?? '.forge');
@@ -184,7 +282,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     return { exitCode: 1, message: `Session dir not found: ${sessionDir} (session ${sessionId})` };
   }
 
-  if (testExit !== 0 && !opts.allowFail) {
+  if (testExit !== null && testExit !== 0 && !opts.allowFail) {
     return {
       exitCode: 1,
       message: `Refusing to record failing evidence (exit code ${testExit}). Fix the tests and re-run, or pass --allow-fail to record anyway.`,
@@ -238,6 +336,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
       exit: testExit,
       summary: opts.summary,
       runAt: now().toISOString(),
+      noTddReason: opts.noTdd ? opts.reason : null,
     }),
     'utf8',
   );
@@ -253,9 +352,15 @@ Record tier-2 test evidence for a Forge implement task at
 
 Options:
   --task <nn-slug>    Task directory name, e.g. 03-record-evidence (required)
-  --command <cmd>     Test command that was run (required)
-  --exit <code>       Exit code of the test command (required, integer)
-  --summary <text>    Pass/fail summary, e.g. "3/3 pass" (required)
+  --command <cmd>     Test command that was run (required unless --no-tdd is
+                       given with no command details at all)
+  --exit <code>       Exit code of the test command (required alongside --command)
+  --summary <text>    Pass/fail summary, e.g. "3/3 pass" (required alongside --command)
+  --no-tdd            Declare the task has no applicable red→green test cycle
+                       (docs/config-only work); exempts it from the pairing
+                       gate. Requires --reason. May combine with --command/
+                       --exit/--summary.
+  --reason <text>     Why no test cycle applies (required with --no-tdd)
   --tier <label>      Tier label (default: "${DEFAULT_TIER}")
   --session <id>      Session id (default: sessionId from .forge/active.json)
   --allow-fail        Write evidence even when --exit is non-zero

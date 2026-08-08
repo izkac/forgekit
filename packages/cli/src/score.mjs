@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJson, writeJson } from './lib.mjs';
+import { loadAllowances } from './guard.mjs';
 import {
   JOBS_SIGNAL_RE,
   checkE2eGate,
@@ -16,6 +17,7 @@ import {
   e2ePath,
   loadDeferrals,
   openDeferrals,
+  readTddRunStamps,
   resolveChangeDir,
   runIntegrityChecks,
   sessionJobsSignalText,
@@ -92,6 +94,37 @@ function isReviewContainer(dir) {
 }
 
 /**
+ * Whether a task dir's `tdd-runs.jsonl` carries at least one `ok: true`
+ * pass-stamp — a task whose only evidence was produced by `forge tdd run`
+ * (never `forge evidence`) still demonstrated a real green run. Reuses
+ * `integrity.mjs`'s `readTddRunStamps`, the same fail-closed parser
+ * `checkTddEvidence` uses, so a malformed or unreadable ledger here reads as
+ * "no stamp" rather than crashing the scorecard or silently over-crediting.
+ *
+ * DELIBERATE DIVERGENCE FROM `checkTddEvidence`: this credits a *pass-only*
+ * ledger (a green stamp with no preceding red), which is exactly the shape
+ * `checkTddEvidence` refuses at the `forge phase done` gate — that check
+ * requires an ok fail-stamp chronologically before the ok pass-stamp, this
+ * one does not. That is what the capability spec asks for ("Executed stamps
+ * count as tier-2 evidence for scoring", scenario: "the only evidence is a
+ * valid red→green tdd-runs.jsonl" — pairing already assumed there), but it
+ * means the scorer is more permissive than the done gate on this one shape:
+ * a task with only a pass-stamp still fails `forge phase done` (as it
+ * should) while separately scoring as tier-2-covered here. Keep this
+ * divergence intentional, not accidental, if either side changes.
+ *
+ * @param {string} dir task dir (e.g. `<sessionDir>/tasks/01-thing`)
+ * @returns {boolean}
+ */
+function hasOkPassStamp(dir) {
+  const file = path.join(dir, 'tdd-runs.jsonl');
+  if (!fs.existsSync(file)) return false;
+  const { stamps, error } = readTddRunStamps(file);
+  if (error) return false;
+  return stamps.some((s) => s.expect === 'pass' && s.ok === true);
+}
+
+/**
  * @param {string} sessionDir
  */
 function listTaskEvidence(sessionDir) {
@@ -109,8 +142,14 @@ function listTaskEvidence(sessionDir) {
   let withEvidence = 0;
   let exitNonZero = 0;
   for (const e of entries) {
-    const file = path.join(tasksDir, e.name, 'test-evidence.md');
-    if (!fs.existsSync(file)) continue;
+    const dir = path.join(tasksDir, e.name);
+    const file = path.join(dir, 'test-evidence.md');
+    if (!fs.existsSync(file)) {
+      // No test-evidence.md — a task scored purely by `forge tdd run` still
+      // counts, so a red→green-only task isn't reported as missing evidence.
+      if (hasOkPassStamp(dir)) withEvidence += 1;
+      continue;
+    }
     withEvidence += 1;
     const body = fs.readFileSync(file, 'utf8');
     const m = body.match(/\*\*Exit code:\*\*\s*`?(-?\d+)`?/i) || body.match(/Exit code:\s*`?(-?\d+)`?/i);
@@ -127,6 +166,18 @@ function listTaskEvidence(sessionDir) {
 }
 
 /**
+ * TRADE-OFF SURFACED BY REVIEW: this only ever reads `test-evidence.md` —
+ * there is no equivalent ceremony-only scan of `tdd-runs.jsonl`. Since task
+ * 5.3, a task dir can carry full tier-2 coverage (`listTaskEvidence` /
+ * `hasOkPassStamp` above) from a red→green ledger alone, with no
+ * `test-evidence.md` at all — such a task passes through this honesty check
+ * entirely unscrutinised, neither penalised nor flagged. This is defensible
+ * (a `tdd-runs.jsonl` stamp is a command the CLI actually executed and
+ * recorded the exit code for, unlike free-text prose, so there is no
+ * "ceremony" for this heuristic to catch), but it is a real gap in coverage
+ * and not merely an oversight — write it down so a future change to either
+ * side does so deliberately.
+ *
  * @param {string} sessionDir
  */
 function evidenceHonestyIssues(sessionDir) {
@@ -147,6 +198,28 @@ function evidenceHonestyIssues(sessionDir) {
     }
   }
   return issues;
+}
+
+/**
+ * Reads `guard-allowances.json` for the scorecard (spec: "Allowances are
+ * recorded, reasoned, and surfaced" — SHALL be listed in the scorecard, not
+ * only reviewer-packet context). Reuses `guard.mjs`'s `loadAllowances` — the
+ * one reader the hook and the integrity backstop already trust — rather than
+ * a second parser that could disagree with them about what an allowance is.
+ *
+ * Fails closed like every other malformed-artifact read in this file (spine,
+ * `tdd-runs.jsonl`): an unreadable ledger surfaces as `error`, an empty list
+ * never as a crash and never silently as "no allowances".
+ *
+ * @param {string} sessionDir
+ * @returns {{ allowances: Array<{ path: string, reason: string, at: string, phase: string | null }>, error: string | null }}
+ */
+function loadAllowancesForScorecard(sessionDir) {
+  try {
+    return { allowances: loadAllowances(sessionDir), error: null };
+  } catch (err) {
+    return { allowances: [], error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /**
@@ -761,6 +834,14 @@ export function scoreSession(opts) {
   const grade = gradeForScore(score);
   const changeDir = resolveChangeDir({ cwd, session });
 
+  // Surfacing only (spec: "Allowances are recorded, reasoned, and
+  // surfaced" — SHALL be listed in the scorecard). Deliberately never feeds
+  // `score`/`caps`: an allowance is a reasoned, legitimate escape, not a
+  // defect — penalising it would push agents toward using the guard's
+  // bypasses without recording one, exactly what the allowance ledger
+  // exists to avoid.
+  const { allowances, error: allowancesError } = loadAllowancesForScorecard(sessionDir);
+
   return {
     version: 1,
     scoredAt: new Date().toISOString(),
@@ -775,6 +856,13 @@ export function scoreSession(opts) {
     caps,
     checks,
     integrityOk: integrity.ok,
+    allowances: allowances.map((a) => ({
+      path: a.path,
+      reason: a.reason,
+      phase: a.phase ?? null,
+      at: a.at ?? null,
+    })),
+    allowancesError,
     humanPrompts,
     interpretation: interpretGrade(grade, score, session),
   };
@@ -818,6 +906,19 @@ export function formatScorecardMarkdown(card) {
   if (card.caps.length) {
     lines.push('## Caps');
     for (const c of card.caps) lines.push(`- ${capText(c)}`);
+    lines.push('');
+  }
+  if (card.allowancesError) {
+    lines.push('## Allowances');
+    lines.push('');
+    lines.push(`guard-allowances.json is unreadable (${card.allowancesError}) — fix or remove it.`);
+    lines.push('');
+  } else if (card.allowances.length) {
+    lines.push('## Allowances');
+    lines.push('');
+    for (const a of card.allowances) {
+      lines.push(`- \`${a.path}\` (phase: ${a.phase ?? 'unknown'}): ${a.reason}`);
+    }
     lines.push('');
   }
   lines.push('## Checks');

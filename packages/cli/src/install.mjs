@@ -17,7 +17,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkbox, input, select } from '@inquirer/prompts';
 import {
   ADR_SKILLS,
   DEFAULT_ADR_DIR,
@@ -31,6 +30,16 @@ import { saveUserPlanEngine } from './plan-engine.mjs';
 import { hashDirectory, packageVersion, resolveAsset } from './paths.mjs';
 
 export const FORGEKIT_STAMP = '.forgekit.json';
+
+/**
+ * Lazy: `@inquirer/prompts` is a real amount of code that most importers of
+ * this module never need — e.g. `forge doctor --install` reaches
+ * `installedManagedPairs`/`AGENTS` through here but never prompts. Load it
+ * only where a prompt actually runs.
+ */
+function loadPrompts() {
+  return import('@inquirer/prompts');
+}
 
 /** @type {Record<string, { label: string, nextHint: string }>} */
 export const SKILLS = {
@@ -500,6 +509,7 @@ export function listInstallStatus(opts = {}) {
  * @returns {Promise<string[]>}
  */
 async function promptMulti(message, ids, checkedIds = []) {
+  const { checkbox } = await loadPrompts();
   const checked = new Set(checkedIds);
   return checkbox({
     message,
@@ -529,6 +539,7 @@ async function promptAgents(checkedIds) {
  * @returns {Promise<string>}
  */
 export async function promptAdrDir(defaultDir = DEFAULT_ADR_DIR) {
+  const { input } = await loadPrompts();
   const dir = await input({
     message: 'ADR directory inside each repo',
     default: defaultDir,
@@ -540,6 +551,7 @@ export async function promptAdrDir(defaultDir = DEFAULT_ADR_DIR) {
  * @returns {Promise<boolean>} true = OpenSpec, false = built-in specs engine
  */
 export async function promptOpenSpec() {
+  const { select } = await loadPrompts();
   return select({
     message: 'Planning engine?',
     choices: [

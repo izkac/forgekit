@@ -36,6 +36,9 @@ const COMMANDS = {
   change: { script: 'change.mjs' },
   spine: { script: 'spine.mjs' },
   e2e: { script: 'e2e.mjs' },
+  guard: { script: 'guard-cli.mjs' },
+  'test-allow': { script: 'test-allow-cli.mjs' },
+  tdd: { script: 'tdd-run.mjs' },
   defer: { script: 'defer.mjs' },
   'integrity-check': { script: 'integrity-check.mjs', aliases: ['integrity'] },
   score: { script: 'score-cli.mjs', aliases: ['scorecard'] },
@@ -74,6 +77,9 @@ Commands:
   spine init|check        Capability→runtime spine matrix (spine.json)
   e2e init|run|check      Executable product-loop acceptance (e2e.json)
   e2e disable|enable      Operator-only project e2e off switch
+  guard check --file <path> [--json]  Guarded-file check (used by the test-guard hook)
+  test-allow <path> --reason "<why>"  Record a guard allowance (escape hatch)
+  tdd run --task <nn-slug> --expect fail|pass [--] <cmd>  Execute + stamp red/green evidence
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)
   score [--write]         L2 session scorecard (auto-written at phase done)

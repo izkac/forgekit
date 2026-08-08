@@ -1,0 +1,15 @@
+{
+  "change": "doctor-unwired-hooks",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "project-wiring: doctor detects unwired hooks",
+      "library": "packages/cli/src/doctor.mjs (checkHookWiring)",
+      "runtimeOwner": "forge doctor CLI (runDoctor) and forge new via warnIfDoctorFails (new-session.mjs)",
+      "writes": "doctor report checks.hooks (stdout JSON / human output, exit code)",
+      "reads": ".claude/hooks/, .claude/settings.json, .claude/settings.local.json, .cursor/hooks/, .cursor/hooks.json",
+      "uiConsumer": "operator terminal (forge doctor output, forge new stderr warning)",
+      "evidence": ".forge/sessions/20260807T105058Z-doctor-unwired-hooks-56bb49/e2e-results.json (forge e2e run)"
+    }
+  ]
+}

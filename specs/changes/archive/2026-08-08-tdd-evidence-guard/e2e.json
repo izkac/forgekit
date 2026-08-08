@@ -1,0 +1,24 @@
+{
+  "change": "tdd-evidence-guard",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "test-guard",
+      "cmd": "node scripts/e2e/harness-portability.mjs test-guard",
+      "expect": "TEST GUARD GREEN"
+    },
+    {
+      "name": "tdd-evidence",
+      "cmd": "node scripts/e2e/harness-portability.mjs tdd-evidence",
+      "expect": "TDD EVIDENCE GREEN"
+    },
+    {
+      "name": "harness-probe",
+      "cmd": "node scripts/e2e/harness-portability.mjs all"
+    }
+  ]
+}

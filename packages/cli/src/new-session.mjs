@@ -58,6 +58,13 @@ const dir = sessionPath(sessionId);
 scaffoldSessionDirs(dir);
 
 const session = defaultSession(sessionId, slug);
+// Task 5.2 / design D6: sessions created by this version carry the
+// red-before-green pairing-gate flag. `integrity.mjs`'s tdd-evidence check
+// enforces the gate only when this is truthy, so older and in-flight
+// sessions (created before this line existed) are exempt — never rewritten
+// retroactively, since `forge new` only ever touches the session it just
+// created.
+session.features = { tddEvidence: true };
 // Start the timeline where the session starts — `createdAt`, not "now" — so
 // no work falls into a gap before the first `forge phase` transition.
 appendPhaseHistory(session, session.phase, session.createdAt);

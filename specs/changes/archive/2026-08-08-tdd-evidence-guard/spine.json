@@ -1,0 +1,60 @@
+{
+  "change": "tdd-evidence-guard",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "test-guard: hook denies guarded edits",
+      "library": "packages/cli/src/guard.mjs (classifyGuarded) + guard-cli.mjs",
+      "runtimeOwner": "PreToolUse hook forge-test-guard.mjs (Edit|Write|NotebookEdit) spawning `forge guard check`",
+      "writes": "hook deny/allow decision (exit code + message to host); stderr warnings on fail-open",
+      "reads": "session.json (phase, baseCommit), .forge/config.json guard.testGlobs, git ls-tree at baseCommit, guard-allowances.json",
+      "uiConsumer": "Claude Code hook UI (deny message), operator terminal",
+      "evidence": ".forge/sessions/20260807T180052Z-tdd-hardening-071439/e2e-results.json (test-guard step)"
+    },
+    {
+      "capability": "test-guard: allowance ledger",
+      "library": "packages/cli/src/guard.mjs (loadAllowances/addAllowance) + test-allow-cli.mjs",
+      "runtimeOwner": "forge test-allow CLI (gate-class session resolution)",
+      "writes": "guard-allowances.json in the session dir",
+      "reads": "session resolution, --reason argument",
+      "uiConsumer": "reviewer packets + scorecard (allowance list), operator terminal",
+      "evidence": ".forge/sessions/20260807T180052Z-tdd-hardening-071439/e2e-results.json (test-guard step)"
+    },
+    {
+      "capability": "test-guard: integrity backstop",
+      "library": "packages/cli/src/integrity.mjs (guardedFiles check) reusing guard.mjs",
+      "runtimeOwner": "forge integrity-check / forge phase done|finish (enforceDoneGate)",
+      "writes": "integrity problem list refusing the phase transition",
+      "reads": "git diff baseCommit..worktree, guard-allowances.json, session.json",
+      "uiConsumer": "operator terminal (refusal message)",
+      "evidence": ".forge/sessions/20260807T180052Z-tdd-hardening-071439/e2e-results.json (test-guard step)"
+    },
+    {
+      "capability": "tdd-evidence: executed red→green stamps",
+      "library": "packages/cli/src/tdd-run.mjs",
+      "runtimeOwner": "forge tdd run CLI (executes the test command itself)",
+      "writes": "tasks/<nn-slug>/tdd-runs.jsonl stamps (cmd, expect, exit, ok, timestamps)",
+      "reads": "--task, --expect, command argv; session resolution",
+      "uiConsumer": "reviewers (task dirs), scorer (tier-2 evidence), operator terminal",
+      "evidence": ".forge/sessions/20260807T180052Z-tdd-hardening-071439/e2e-results.json (tdd-evidence step)"
+    },
+    {
+      "capability": "tdd-evidence: pairing gate",
+      "library": "packages/cli/src/integrity.mjs (tddEvidence check) + new-session.mjs feature flag",
+      "runtimeOwner": "forge integrity-check / forge phase done|finish; flag written by forge new",
+      "writes": "integrity problem list (missing/misordered red→green pair)",
+      "reads": "session.features.tddEvidence, tasks/*/tdd-runs.jsonl, tasks.md completion state",
+      "uiConsumer": "operator terminal (refusal message)",
+      "evidence": ".forge/sessions/20260807T180052Z-tdd-hardening-071439/e2e-results.json (tdd-evidence step)"
+    },
+    {
+      "capability": "project-wiring: init merges hooks into settings.json",
+      "library": "packages/cli/src/init.mjs (mergeHooksIntoSettings)",
+      "runtimeOwner": "forge init and forge doctor --install",
+      "writes": ".claude/settings.json (structural merge, idempotent)",
+      "reads": ".claude/forge-hooks.snippet.json, existing settings.json",
+      "uiConsumer": "operator terminal; forge doctor hook-wiring check turns green",
+      "evidence": ".forge/sessions/20260807T180052Z-tdd-hardening-071439/e2e-results.json (test-guard step, init-wires portion)"
+    }
+  ]
+}

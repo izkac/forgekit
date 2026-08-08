@@ -20,6 +20,38 @@ Full skill: [skills/test-driven-development/SKILL.md](../skills/test-driven-deve
 - **Tier 1 (each red/green cycle):** single test file or pattern — never the full workspace suite.
 - **Tier 2 (task done):** narrowest command proving this task — changed tests + directly related tests. Full workspace runs **once at verify (tier 3)**, not per task. Report command + exit code + pass/fail summary.
 
+## Tier 2 evidence is executed, not transcribed
+
+Tier 2 evidence for this task is produced by running the command through the
+CLI itself, not by you reporting a command and exit code for the coordinator
+to write down:
+
+```bash
+forge tdd run --task <nn-slug> --expect fail -- <tier-2 cmd>   # RED, before you write production code
+# … write the simplest code that passes …
+forge tdd run --task <nn-slug> --expect pass -- <tier-2 cmd>   # GREEN, once it's green
+```
+
+Each call runs the command itself and appends a stamp to
+`tasks/<nn-slug>/tdd-runs.jsonl` — a stamp the CLI never observed running is
+not evidence, no matter how confidently it's described in your report. `forge
+score` reads these stamps directly (an ok pass-stamp counts as tier-2
+coverage even with no `test-evidence.md`), so recording only through `forge
+tdd run` costs nothing on the scorecard.
+
+A task with no applicable red→green cycle (docs-only, config, no behavior
+changed) is not "just run `forge evidence` instead" — declare it:
+
+```bash
+forge evidence --task <nn-slug> --no-tdd --reason "<why no test cycle applies>"
+```
+
+`--no-tdd` writes a durable, reviewer-visible marker that exempts this task
+from the pairing gate. Evidence recorded the old way (`--command --exit
+--summary`, no `--no-tdd`) does **not** exempt it — a task with neither a
+red→green stamp pair nor a `--no-tdd` declaration refuses at `forge phase
+done`, with no way through except going back and producing one or the other.
+
 ## Expected values come from the fixture, never from the brief
 
 **Compute every expected number in code from the fixture you built.** A figure
@@ -52,7 +84,7 @@ that only the correct choice produces.
 
 ## Red flags — stop and start over
 
-Code before test · test passes immediately · can't explain the failure · "I'll test after" · "already manually tested" · "too simple to test" · "keep as reference / adapt existing code" · "deleting X hours is wasteful" (sunk cost) · "run full workspace to be safe" (tier 3 belongs at verify) · "just this once" · copying an expected number out of the brief · a fixture whose discarded candidates are identical to the winner.
+Code before test · test passes immediately · can't explain the failure · "I'll test after" · "already manually tested" · "too simple to test" · "keep as reference / adapt existing code" · "deleting X hours is wasteful" (sunk cost) · "run full workspace to be safe" (tier 3 belongs at verify) · "just this once" · copying an expected number out of the brief · a fixture whose discarded candidates are identical to the winner · a red or green stamp `forge tdd run` never observed (transcribed into your report instead of executed).
 
 ## Bugs
 
