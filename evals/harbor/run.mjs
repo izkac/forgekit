@@ -648,11 +648,11 @@ async function persistPlan(plan, trials) {
 }
 
 function validatedHarborVersion(output) {
-  const value = output.trim();
-  if (!/^harbor \d+\.\d+\.\d+$/.test(value)) {
+  const match = /^(?:harbor )?(\d+\.\d+\.\d+)$/.exec(output.trim());
+  if (match === null) {
     throw new Error('Harbor version probe returned unrecognized output');
   }
-  return value;
+  return match[1];
 }
 
 async function main(argv) {
