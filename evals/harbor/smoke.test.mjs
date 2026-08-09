@@ -119,8 +119,9 @@ import path from 'node:path';
 const result = spawnSync(process.execPath, [process.env.REAL_RUNNER, ...process.argv.slice(2)], { encoding: 'utf8', env: process.env });
 if (result.status !== 0) { process.stderr.write(result.stderr); process.exit(result.status); }
 const plan = JSON.parse(result.stdout);
-appendFileSync(path.join(plan.runDirectory, 'arms', 'forge', 'solution', 'solve.sh'), '\\n# unexpected staging mutation\\n');
-writeFileSync(process.env.RUN_DIRECTORY_CAPTURE, plan.runDirectory);
+const runDirectory = path.join(process.env.FORGEKIT_EVAL_RUNS_ROOT, plan.runId);
+appendFileSync(path.join(runDirectory, 'arms', 'forge', 'solution', 'solve.sh'), '\\n# unexpected staging mutation\\n');
+writeFileSync(process.env.RUN_DIRECTORY_CAPTURE, runDirectory);
 process.stdout.write(result.stdout);
 `);
   await chmod(fakeRunner, 0o755);

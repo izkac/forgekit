@@ -320,12 +320,13 @@ function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm }) {
   return argv;
 }
 
-function spawnHarbor(argv, stdout, stderr) {
+function spawnHarbor(argv, stdout, stderr, cwd) {
   return new Promise((resolve, reject) => {
     const child = spawn('harbor', argv, {
       shell: false,
       stdio: ['ignore', stdout, stderr],
       env: process.env,
+      cwd,
     });
     child.on('error', (error) => reject(new Error(`failed to invoke Harbor: ${error.message}`)));
     child.on('close', (code, signal) => {
@@ -447,7 +448,7 @@ async function executeTrial(trial) {
   try {
     stdout = await open(path.join(trial.trialDirectory, 'harbor.stdout.log'), 'w');
     stderr = await open(path.join(trial.trialDirectory, 'harbor.stderr.log'), 'w');
-    await spawnHarbor(trial.harborArgv, stdout.fd, stderr.fd);
+    await spawnHarbor(trial.harborArgv, stdout.fd, stderr.fd, trial.runDirectory);
     await normalizeTrial(trial);
     trial.status = 'verified';
     trial.manifestData.status = 'verified';
@@ -608,7 +609,7 @@ async function main(argv) {
         trialOutput,
         manifest,
         manifestRelative: path.relative(runDirectory, manifest),
-        harborArgv: argvForHarbor,
+        harborArgv: portableHarborArgv,
         startedAt: null,
         finishedAt: null,
         status: manifestData.status,
@@ -655,6 +656,7 @@ async function main(argv) {
     let executionIndex = 0;
     plan.status = 'running';
     plan.startedAt = new Date().toISOString();
+    await persistPlan(plan, trials);
     const attempt = async (trial) => {
       executionIndex += 1;
       trial.executionIndex = executionIndex;
@@ -681,7 +683,7 @@ async function main(argv) {
     await persistPlan(plan, trials);
   }
 
-  process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(publicPlanData(plan), null, 2)}\n`);
   if (failures.length !== 0) {
     const details = failures.map(({ trialId, error }) => `${trialId}: ${error}`).join('; ');
     throw new Error(`${failures.length} trial(s) failed; see persisted plan and manifests: ${details}`);

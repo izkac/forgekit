@@ -140,6 +140,7 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   };
   assert.deepEqual(plan.settings.forgekitTreatment, treatment);
   assert.equal(JSON.stringify(plan).includes(sourceTarball), false);
+  assert.equal(result.stdout.includes(testRunsRoot), false, 'serialized plan must use portable run-relative locators');
   assert.equal(JSON.stringify(plan).includes(testRunsRoot), false, 'plan must use portable run-relative locators');
   assert.equal(JSON.stringify(plan).includes(projectRoot), false, 'plan must not disclose the checkout path');
 
@@ -267,7 +268,7 @@ writeFileSync(path.join(output, 'artifacts', 'app', '.forge', 'scorecard.json'),
   t.after(() => cleanupPlan(plan));
   const captured = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(captured.length, 1);
-  assert.equal(captured[0][captured[0].indexOf('--path') + 1], path.join(plan.runDirectory, 'arms', 'baseline'));
+  assert.deepEqual(captured, [plan.trials[0].harborArgv]);
   assert.equal(plan.trials[0].harborArgv[plan.trials[0].harborArgv.indexOf('--path') + 1], 'arms/baseline');
   assert.equal(plan.trials[0].status, 'verified');
   assert.equal(captured[0].includes('--n-concurrent'), true);
