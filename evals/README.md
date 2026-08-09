@@ -52,7 +52,7 @@ in this public repository, so the corpus is not private and cannot be assumed
 to be free of training contamination.
 
 The companion manifest `evals/harbor/corpora/forgekit-hard-v2.json` currently
-allowlists only `reservation-confirmation-race` (task version `1.0.0`) from its
+allowlists only `reservation-confirmation-race` (task version `1.0.1`) from its
 separate task root. It asks the agent to repair overlapping reservation
 confirmations while preserving same-key sharing, different-key conflict,
 payment-failure retry, expiry-as-admission-deadline, sequential replay, and

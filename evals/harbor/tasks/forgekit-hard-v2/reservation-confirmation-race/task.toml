@@ -7,7 +7,7 @@ artifacts = [
 
 [task]
 name = "forgekit-hard-v2/reservation-confirmation-race"
-version = "1.0.0"
+version = "1.0.1"
 description = "Repair concurrent reservation confirmation without breaking idempotency or expiry semantics."
 authors = []
 keywords = ["node", "concurrency", "idempotency", "reservation"]
