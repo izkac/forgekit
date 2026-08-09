@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "corpus_id": "forgekit-held-out-v1",
+  "description": "Versioned multi-category task corpus with verifier checks held out from the agent at execution time. Publication does not imply training-contamination freedom.",
+  "tasks": [
+    {
+      "id": "pagination-boundary",
+      "category": "bug",
+      "difficulty": "easy",
+      "visible_test": "src/server.test.mjs"
+    },
+    {
+      "id": "node-health-endpoint",
+      "category": "feature",
+      "difficulty": "easy",
+      "visible_test": "src/server.test.mjs"
+    },
+    {
+      "id": "audit-log-wiring",
+      "category": "integration",
+      "difficulty": "medium",
+      "visible_test": "src/server.test.mjs"
+    },
+    {
+      "id": "router-extraction",
+      "category": "refactor",
+      "difficulty": "medium",
+      "visible_test": "src/server.test.mjs"
+    },
+    {
+      "id": "csv-formula-regression",
+      "category": "tests",
+      "difficulty": "medium",
+      "visible_test": "src/server.test.mjs"
+    },
+    {
+      "id": "encoded-path-traversal",
+      "category": "security",
+      "difficulty": "medium",
+      "visible_test": "src/server.test.mjs"
+    }
+  ]
+}

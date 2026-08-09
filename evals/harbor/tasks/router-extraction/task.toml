@@ -14,7 +14,8 @@ keywords = ["node", "http", "refactor", "router"]
 
 [metadata]
 difficulty = "medium"
-category = "refactor"
+category = "programming"
+benchmark_category = "refactor"
 tags = ["node", "http", "routing", "module-extraction"]
 difficulty_explanation = "Requires a structural module extraction while preserving routes and adding parameter matching."
 

@@ -17,6 +17,7 @@ keywords = ["node", "http", "smoke"]
 [metadata]
 difficulty = "easy"
 category = "programming"
+benchmark_category = "feature"
 tags = ["node", "http", "health-check"]
 difficulty_explanation = "Small local HTTP change with a regression test and an external verifier."
 

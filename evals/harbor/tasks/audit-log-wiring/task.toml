@@ -14,7 +14,8 @@ keywords = ["node", "http", "integration", "audit"]
 
 [metadata]
 difficulty = "medium"
-category = "integration"
+category = "programming"
+benchmark_category = "integration"
 tags = ["node", "http", "dependency-injection", "audit-log"]
 difficulty_explanation = "Requires tracing an HTTP composition root and proving ordered effects across injected adapters."
 

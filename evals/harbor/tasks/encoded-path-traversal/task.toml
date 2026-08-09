@@ -16,7 +16,8 @@ keywords = ["node", "http", "security", "path-traversal"]
 
 [metadata]
 difficulty = "medium"
-category = "security"
+category = "programming"
+benchmark_category = "security"
 tags = ["node", "http", "path-traversal", "regression-test"]
 difficulty_explanation = "Requires canonicalizing adversarial URL paths without breaking legitimate encoded filenames."
 
