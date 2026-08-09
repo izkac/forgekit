@@ -100,19 +100,28 @@ From the repository root:
 npm run test:evals
 npm run lint:evals
 npm run smoke:evals
+npm run smoke:evals:hard-v2
 ```
 
-Smoke preserves its v1 contract: it validates all six v1 tasks,
-baseline/Forge staging, hidden-verifier isolation, untouched and known-good
-verifier paths, and every v1 agent and verifier Docker context. `test:evals`
-also runs the hard-v2 reservation host tests, including untouched-negative,
-reference- and alternate-positive, anti-tamper, and semantic-mutant cases.
-Docker build checks run when the daemon is available,
-but `docker build --check` is build-context and Dockerfile lint/check validation;
-it does not build an image or exercise installation or runtime behavior. Smoke
-never invokes Harbor or a model. The local smoke/oracle scripts currently rely
-on POSIX shell and tooling, so run them on Linux, another POSIX host, or WSL;
-native Windows semantics are not currently supported.
+`npm run smoke:evals` remains the exact v1 smoke. It validates all six v1
+tasks, baseline/Forge staging, hidden-verifier isolation, untouched and
+known-good verifier paths, and the three Docker contexts for each v1 task.
+
+`npm run smoke:evals:hard-v2` selects only the hard companion. For the current
+reservation task it validates manifest/task metadata, dry-run baseline/Forge
+staging and verifier isolation, plus the required host matrix: untouched
+negative, oracle positive, alternate positive, tamper negative, no-added-test
+negative, and mutant negative. It validates exactly three Docker build-check
+contexts—baseline agent, Forge agent, and separate verifier—running
+`docker build --check` when Docker is available or reporting Docker validation
+as skipped after local context-reference checks. It never invokes Harbor or a
+model.
+
+`test:evals` also runs the hard-v2 host and adversarial cases. Docker
+build-check is build-context and Dockerfile lint/check validation; it does not
+build an image or exercise installation or runtime behavior. Both smoke paths
+rely on POSIX shell and tooling, so run them on Linux, another POSIX host, or
+WSL; native Windows semantics are not currently supported.
 
 The checked-in `solution/solve.sh` is a known-good verifier oracle. Its passing
 reward proves only that the verifier accepts that fixture. An untouched fixture
@@ -453,14 +462,22 @@ remain limitations.
 
 For `reservation-confirmation-race`, the separate no-network verifier uses
 fixed inputs, a manual clock, and deferred barriers instead of timing sleeps.
-Its public hidden probe deterministically checks same-key overlap,
-different-key conflict, failed-payment retry, and expiry-admission behavior;
-the visible regression suite covers the existing sequential and HTTP behavior.
-Agent-added `src/*.test.mjs` files must pass
-normally and kill one complete API-compatible concurrency mutant with an
-assertion failure; import, syntax, bootstrap, crash, and timeout failures do not
-count. The visible test and package metadata are protected, and both reference
-and structurally different positive solutions pass.
+Its public deterministic harness keeps scheduling and assertions in a trusted
+parent. In the verifier container, candidate modules execute in a child worker
+under the configured untrusted UID/GID and exchange commands/results over
+dedicated RPC pipes whose accepted result frames carry a per-worker nonce. It
+checks same-key overlap, different-key conflict, failed-payment retry, expiry
+admission, and unrelated-reservation progress.
+
+The harness also drives the real HTTP adapter. Confirmation must succeed once,
+conflict must preserve the `already_confirmed` domain behavior as HTTP 409,
+expiry must remain HTTP 410 without charging, and an unknown route must remain
+HTTP 404; incompatible lookalike errors that degrade these responses to HTTP
+500 fail verification. Agent-added `src/*.test.mjs` files must pass normally
+and kill one complete API-compatible concurrency mutant with an assertion
+failure; import, syntax, bootstrap, crash, and timeout failures do not count.
+The visible test and package metadata are protected, and both reference and
+structurally different positive solutions pass.
 
 Those controls test grader integrity, not every possible schedule or solution.
 The public probe can be contaminated, one mutant is only a proxy for one

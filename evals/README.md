@@ -96,19 +96,29 @@ From the repository root:
 npm run test:evals
 npm run lint:evals
 npm run smoke:evals
+npm run smoke:evals:hard-v2
 ```
 
-The smoke command preserves its v1 coverage: it checks every v1 task's
-metadata, arm staging, verifier isolation, untouched fixture, known-good
-solution, and all three Docker build contexts. `test:evals` additionally runs
-the hard-v2 host checks, including untouched-negative, two structurally
-different positive solutions, anti-tamper, and mutation behavior. Smoke runs
-`docker build --check` when Docker is accessible, but never
-invokes Harbor or a model. That Docker command validates the build context and
-Dockerfile checks/lint; it does not build an image or exercise installation or
-runtime behavior. The local smoke/oracle path currently invokes POSIX shell and
-tooling and requires Linux, another POSIX host, or WSL rather than native
-Windows semantics. The checked-in `solution/solve.sh` is a verifier oracle:
+`npm run smoke:evals` remains the exact v1 smoke: it checks every v1 task's
+metadata, baseline/Forge staging, verifier isolation, untouched fixture,
+known-good solution, and the three Docker contexts for each v1 task.
+
+`npm run smoke:evals:hard-v2` is isolated to the selected hard companion. For
+its current reservation task it validates manifest/task metadata, dry-run
+baseline/Forge staging and verifier isolation, and the required host matrix:
+untouched negative, oracle positive, alternate positive, tamper negative,
+no-added-test negative, and mutant negative. It then validates exactly three
+Docker build-check contexts: baseline agent, Forge agent, and separate
+verifier. When Docker is accessible it runs `docker build --check` for those
+contexts; otherwise it reports Docker validation as skipped after checking the
+Dockerfiles' local context references. It never invokes Harbor or a model.
+
+`test:evals` also exercises the hard-v2 host and adversarial cases. Docker
+build-check validates build contexts and Dockerfile checks/lint; it does not
+build an image or exercise installation or runtime behavior. Both smoke paths
+currently invoke POSIX shell and tooling and require Linux, another POSIX host,
+or WSL rather than native Windows semantics. The checked-in
+`solution/solve.sh` is a verifier oracle:
 acceptance of that known-good fixture validates the grader's positive path, not
 agent performance. Likewise, untouched-fixture rewards validate the
 negative path only.
@@ -361,14 +371,22 @@ seeds.
 ## Hard-v2 Verifier And Mutation Limits
 
 The reservation verifier is separate, no-network, and not mounted into the
-agent environment. Its concurrency probes use fixed data, a manual clock, and
-deferred barriers rather than timing sleeps, so the checked scenarios are
-deterministic. Grading also runs agent-added `src/*.test.mjs` files against one
-complete API-compatible concurrency mutant. The tests qualify only when they
-pass normally and produce an assertion failure—not an import, syntax,
-bootstrap, crash, or timeout failure—against that mutant. The protected visible
-test and package metadata are digest checked, and two structurally different
-known-good fixtures exercise the positive path.
+agent environment. Its deterministic hidden harness keeps scheduling and
+assertions in a trusted parent. In the verifier container, candidate modules
+run in a child worker under the configured untrusted UID/GID and communicate
+over dedicated RPC pipes; only nonce-prefixed result frames are accepted. Fixed
+data, a manual clock, and deferred barriers replace timing sleeps. The HTTP
+probe exercises the real adapter and requires confirmation success,
+`already_confirmed` as HTTP 409, `expired` as HTTP 410 without a charge, and
+unknown-route HTTP 404. This also ensures service domain errors remain
+compatible with the HTTP adapter rather than degrading to HTTP 500.
+
+Grading also runs agent-added `src/*.test.mjs` files against one complete
+API-compatible concurrency mutant. The tests qualify only when they pass
+normally and produce an assertion failure—not an import, syntax, bootstrap,
+crash, or timeout failure—against that mutant. The protected visible test and
+package metadata are digest checked, and two structurally different known-good
+fixtures exercise the positive path.
 
 These controls are useful verifier-integrity evidence, not secrecy or exhaustive
 proof. The task, verifier, hidden probe, and mutant are public and may be
