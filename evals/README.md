@@ -18,8 +18,22 @@ For an operator walkthrough, see
 
 ## Status And Scope
 
-The pilot corpus is implemented in `evals/harbor/corpus.json`. It has one
-small, dependency-free Node task in each of six target categories:
+The evaluator has two checked-in, versioned corpus IDs:
+
+| Corpus ID | Default | Current scope |
+| --- | --- | --- |
+| `forgekit-held-out-v1` | Yes | Frozen six-task pilot, one small Node task in each target category. |
+| `forgekit-hard-v2` | No | Incomplete hard-corpus foundation: one bug task only. |
+
+Omitting `--corpus` continues to select `forgekit-held-out-v1`. Selection is
+restricted to these checked-in IDs and their mapped roots: unknown IDs,
+path-like values, and arbitrary filesystem roots are not accepted. The v1
+manifest and all six v1 task trees are protected by
+`evals/harbor/corpus-v1.lock.json`; its CI test fails on byte/revision drift.
+Historical v1 content must not be rewritten in place—publish a new corpus ID
+instead.
+
+The v1 pilot is implemented in `evals/harbor/corpus.json`:
 
 | Category | Task | What changes |
 | --- | --- | --- |
@@ -37,10 +51,21 @@ execution through that separate verifier boundary. The tasks and verifiers are
 in this public repository, so the corpus is not private and cannot be assumed
 to be free of training contamination.
 
-This is a **pilot corpus**, not a representative sample of coding work. Six
-small Node tasks, one per category, cannot establish general effectiveness,
-long-horizon behavior, or a population effect. The tools produce measurements;
-they do not automatically decide whether Forgekit is effective.
+The companion manifest `evals/harbor/corpora/forgekit-hard-v2.json` currently
+allowlists only `reservation-confirmation-race` (task version `1.0.0`) from its
+separate task root. It asks the agent to repair overlapping reservation
+confirmations while preserving same-key sharing, different-key conflict,
+payment-failure retry, expiry-as-admission-deadline, sequential replay, and
+HTTP behavior, and to add a deterministic no-sleep concurrency regression
+test.
+
+Both corpora are public pilots, not representative samples of coding work. V1's
+six small tasks cannot establish general effectiveness. Hard-v2 is explicitly
+an **incomplete one-category foundation**, not a completed six-category corpus
+and not evidence about provider or Forgekit treatment effectiveness. No
+provider-backed effectiveness evidence has been produced by adding this
+infrastructure or its one task. The tools produce measurements; they do not
+automatically decide whether Forgekit is effective.
 
 ## Prerequisites, Cost, And Credentials
 
@@ -73,9 +98,12 @@ npm run lint:evals
 npm run smoke:evals
 ```
 
-The smoke command checks every corpus task's metadata, arm staging, verifier
-isolation, untouched fixture, known-good solution, and all three Docker build
-contexts. It runs `docker build --check` when Docker is accessible, but never
+The smoke command preserves its v1 coverage: it checks every v1 task's
+metadata, arm staging, verifier isolation, untouched fixture, known-good
+solution, and all three Docker build contexts. `test:evals` additionally runs
+the hard-v2 host checks, including untouched-negative, two structurally
+different positive solutions, anti-tamper, and mutation behavior. Smoke runs
+`docker build --check` when Docker is accessible, but never
 invokes Harbor or a model. That Docker command validates the build context and
 Dockerfile checks/lint; it does not build an image or exercise installation or
 runtime behavior. The local smoke/oracle path currently invokes POSIX shell and
@@ -120,20 +148,26 @@ Dry-run before spending provider tokens:
 
 ```bash
 node evals/harbor/run.mjs \
-  --task pagination-boundary \
+  --corpus forgekit-hard-v2 \
+  --task reservation-confirmation-race \
   --arm both \
-  --repetitions 3 \
+  --repetitions 1 \
   --concurrency 1 \
-  --seed pilot-v1 \
+  --seed hard-v2-foundation \
   --agent <agent> \
   --model <model-id> \
   --forgekit-tarball "$FORGEKIT_TARBALL" \
   --dry-run
 ```
 
-Remove `--dry-run` for a real run. Run the same command separately for each of
-the six task ids; the runner intentionally accepts one canonical task per
-invocation. `--arm baseline` and `--arm forge` are useful for diagnosis, but
+This example is intentionally a no-provider dry-run of the current hard-v2
+foundation. For v1, omit `--corpus` (or pass
+`--corpus forgekit-held-out-v1`) and choose one of its six allowlisted task IDs.
+The runner accepts one canonical task per invocation and rejects a task not
+listed exactly once by the selected manifest. Remove `--dry-run` only after
+separately authorizing a real, billable run; doing so is an experiment, not
+pre-existing provider evidence. `--arm baseline` and `--arm forge` are useful
+for diagnosis, but
 one `--arm both` invocation is preferred for a paired trial. Split single-arm
 runs can be temporally separated and are weaker causal evidence even when the
 aggregator later matches their provenance and repetition cells.
@@ -186,12 +220,15 @@ does not eliminate model nondeterminism, provider drift, or other confounding.
 Each canonical task has this Harbor shape:
 
 ```text
-evals/harbor/tasks/<task-id>/
+<selected-task-root>/<task-id>/
   task.toml
   instruction.md
   environment/
   solution/
   tests/
+
+v1 root:      evals/harbor/tasks/
+hard-v2 root: evals/harbor/tasks/forgekit-hard-v2/
 ```
 
 `instruction.md` and `environment/` are agent-visible. `tests/` builds the
@@ -281,8 +318,11 @@ trial/outcome counts, and elapsed seconds; they exclude prompts, credentials, an
 ## Provenance, Reproducibility, And Privacy
 
 Every run persists `evals/.runs/<run-id>/plan.json` plus one
-`trials/<trial-id>/manifest.json` per trial. The plan records corpus identity
-and revision, task/category and task revision, harness revision, selected seed
+`trials/<trial-id>/manifest.json` per trial. The plan and every manifest record
+`taskVersion` from the selected task's `task.toml`, and hard-v2 additionally
+requires that version to match its manifest entry. They also record the
+selected corpus identity, schema version, manifest-byte revision, task/category
+and complete task-tree revision, harness revision, selected seed
 and exact schedule, images, agent/model, treatment identity, settings, arm
 staging, trial order/status, and timestamps. Each manifest binds a trial to the
 same provenance and records planned versus actual execution order, Harbor argv/version with the
@@ -318,10 +358,30 @@ and redact a run before sharing or archiving it. Never commit run artifacts or
 put secrets in tasks, instructions, model identifiers, agent identifiers, or
 seeds.
 
+## Hard-v2 Verifier And Mutation Limits
+
+The reservation verifier is separate, no-network, and not mounted into the
+agent environment. Its concurrency probes use fixed data, a manual clock, and
+deferred barriers rather than timing sleeps, so the checked scenarios are
+deterministic. Grading also runs agent-added `src/*.test.mjs` files against one
+complete API-compatible concurrency mutant. The tests qualify only when they
+pass normally and produce an assertion failure—not an import, syntax,
+bootstrap, crash, or timeout failure—against that mutant. The protected visible
+test and package metadata are digest checked, and two structurally different
+known-good fixtures exercise the positive path.
+
+These controls are useful verifier-integrity evidence, not secrecy or exhaustive
+proof. The task, verifier, hidden probe, and mutant are public and may be
+contaminated. A single semantic mutant measures one requested test property; it
+does not prove broad test quality, enumerate all concurrency interleavings, or
+establish production safety. Separate verification prevents execution-time
+mounting of grader code into the agent container, but it does not make a public
+benchmark private or demonstrate provider effectiveness.
+
 ## Interpretation Limits
 
-Report the exact pilot corpus, task-level results, complete and incomplete
-pairs, missing metrics, cost, time, treatment digest/version, and all cohort
+Report the exact selected corpus and its completion status, task-level results,
+complete and incomplete pairs, missing metrics, cost, time, treatment digest/version, and all cohort
 controls. Do not generalize from these six tasks to other languages,
 repositories, models, providers, long-running changes, or production work.
 Public benchmark results can be useful context, but do not remove contamination,
