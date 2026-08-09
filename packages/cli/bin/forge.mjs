@@ -7,7 +7,7 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { findRepoRoot } from '../src/repo-root.mjs';
 import { isVersionFlag, versionLine } from '../src/version.mjs';
@@ -129,6 +129,9 @@ const args = [...(entry.prependArgs ?? []), ...rest].map((arg, i, all) =>
   i > 0 && all[i - 1] === '--cwd' && !path.isAbsolute(arg) ? path.resolve(invokedFrom, arg) : arg,
 );
 
+const stdioGuardOption = `--import=${pathToFileURL(path.join(SRC, 'stdio-guard.mjs')).href}`;
+const childNodeOptions = [process.env.NODE_OPTIONS, stdioGuardOption].filter(Boolean).join(' ');
+
 const r = spawnSync(process.execPath, [path.join(SRC, entry.script), ...args], {
   stdio: 'inherit',
   cwd: repoRoot,
@@ -137,6 +140,8 @@ const r = spawnSync(process.execPath, [path.join(SRC, entry.script), ...args], {
     FORGE_INVOKED_FROM: invokedFrom,
     FORGEKIT_ROOT: path.resolve(__dirname, '..', '..', '..'),
     FORGEKIT_CLI_ROOT: path.resolve(__dirname, '..'),
+    NODE_OPTIONS: childNodeOptions,
+    FORGEKIT_STDIO_GUARD_OPTION: stdioGuardOption,
   },
 });
 

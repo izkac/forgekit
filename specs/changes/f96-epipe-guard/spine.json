@@ -1,0 +1,15 @@
+{
+  "change": "f96-epipe-guard",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Forge tolerates downstream pipe closure",
+      "library": "packages/cli/src/stdio-guard.mjs",
+      "runtimeOwner": "packages/cli/bin/forge.mjs command router",
+      "writes": "stdout process exit policy",
+      "reads": "stdout error events and inherited NODE_OPTIONS",
+      "uiConsumer": "CLI pipeline consumer",
+      "evidence": "packages/cli/src/stdio-guard.test.mjs"
+    }
+  ]
+}
