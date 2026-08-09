@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { ManualClock } from "./clock.mjs";
 import { ConfirmationService } from "./confirmation-service.mjs";
+import { createHttpServer } from "./http-app.mjs";
 import { MemoryReservationStore } from "./reservation-store.mjs";
 
 function deferred() {
@@ -77,5 +78,48 @@ test("expiry is an admission deadline, not a late completion deadline", async ()
   const result = await confirmation;
   assert.equal(result.status, "confirmed");
   assert.equal(result.paymentId, "slow-payment");
+});
+
+
+test("the HTTP confirmation route remains compatible", async () => {
+  const calls = [];
+  const reservation = { id: "http-one", amount: 99, expiresAt: 1000, status: "held" };
+  const server = createHttpServer({
+    reservationStore: { get(id) { assert.equal(id, "http-one"); return reservation; } },
+    confirmationService: {
+      async confirm(id, key) {
+        calls.push({ id, key });
+        return { ...reservation, status: "confirmed", idempotencyKey: key, paymentId: "http-pay" };
+      }
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const root = await fetch(`${base}/`);
+    assert.equal(root.status, 200);
+    assert.equal(await root.text(), "reservation-service\n");
+
+    const shown = await fetch(`${base}/reservations/http-one`);
+    assert.equal(shown.status, 200);
+    assert.deepEqual(await shown.json(), reservation);
+
+    const confirmed = await fetch(`${base}/reservations/http-one/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "http-key" },
+      body: "{}"
+    });
+    assert.equal(confirmed.status, 200);
+    assert.equal((await confirmed.json()).paymentId, "http-pay");
+    assert.deepEqual(calls, [{ id: "http-one", key: "http-key" }]);
+
+    const missing = await fetch(`${base}/missing`);
+    assert.equal(missing.status, 404);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 /* END PRE-EXISTING VISIBLE TESTS */

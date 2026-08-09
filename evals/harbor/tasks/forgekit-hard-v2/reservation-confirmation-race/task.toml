@@ -20,7 +20,7 @@ tags = ["node", "concurrency", "idempotency", "expiry", "race-condition"]
 difficulty_explanation = "Requires a deterministic concurrent regression test and coordination across an external async payment boundary while preserving replay, conflict, retry, and admission-deadline semantics."
 
 [agent]
-timeout_sec = 600.0
+timeout_sec = 1200.0
 
 [verifier]
 timeout_sec = 180.0
