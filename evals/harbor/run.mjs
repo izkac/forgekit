@@ -14,7 +14,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultCorpusId, selectCorpus } from './corpus-selection.mjs';
+import { assertSafeTaskTree, defaultCorpusId, selectCorpus } from './corpus-selection.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsRoot = path.resolve(here, '..');
@@ -665,7 +665,7 @@ async function main(argv) {
   const selection = selectCorpus(config.corpusId);
   const { category, corpus, manifestTaskVersion } = await loadCorpusTask(selection, config.task);
   const forgekitTreatment = await prepareForgekitTreatment(config);
-  const canonicalTask = path.join(selection.taskRoot, config.task);
+  const canonicalTask = await assertSafeTaskTree(selection.taskRoot, config.task);
   await assertCanonicalTask(canonicalTask);
   const taskVersion = await taskVersionFrom(canonicalTask);
   if (manifestTaskVersion !== null && manifestTaskVersion !== taskVersion) {

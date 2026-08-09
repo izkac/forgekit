@@ -48,6 +48,8 @@ function createRun(root, {
   treatment = { kind: 'published-version', version: '1.2.3' },
   selectedArm = 'both',
   taskRevision = `revision-${task}`,
+  taskVersion,
+  manifestTaskVersion = taskVersion,
   corpus = { id: 'test-corpus', revision: 'corpus-v1' },
 } = {}) {
   const directory = path.join(root, runId);
@@ -65,6 +67,7 @@ function createRun(root, {
       runId,
       trialId,
       task,
+      ...(manifestTaskVersion === undefined ? {} : { taskVersion: manifestTaskVersion }),
       category,
       taskRevision,
       corpus,
@@ -115,6 +118,7 @@ function createRun(root, {
     dryRun: false,
     status: cells.some((cell) => cell.status === 'failed') ? 'completed-with-failures' : 'completed',
     task,
+    ...(taskVersion === undefined ? {} : { taskVersion }),
     category,
     taskRevision,
     corpus,
@@ -354,3 +358,54 @@ test('refuses traversal and symlink run directories before reading data', () => 
 function requireText(file) {
   return readFileSync(file, 'utf8');
 }
+
+test('validates and binds taskVersion for new runs while accepting legacy runs without it', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-task-version-'));
+  const legacy = createRun(root, {
+    runId: 'legacy-versionless', task: 'legacy-task', category: 'bug',
+    cells: [{ arm: 'baseline', repetition: 1, shippable: 1 }],
+  });
+  let result = invoke([legacy]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const versioned = createRun(root, {
+    runId: 'versioned', task: 'versioned-task', category: 'bug', taskVersion: '2.0.0',
+    cells: [{ arm: 'baseline', repetition: 1, shippable: 1 }],
+  });
+  result = invoke([versioned]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const plan = JSON.parse(requireText(path.join(versioned, 'plan.json')));
+  const manifestPath = path.join(versioned, plan.trials[0].manifest);
+  const manifest = JSON.parse(requireText(manifestPath));
+  manifest.taskVersion = '2.0.1';
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  result = invoke([versioned]);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /taskVersion.*does not match its plan/i);
+
+  plan.taskVersion = 'latest';
+  writeFileSync(path.join(versioned, 'plan.json'), JSON.stringify(plan));
+  result = invoke([versioned]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /taskVersion.*semantic/i);
+});
+
+test('refuses to pair equal task revisions carrying different semantic task versions', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-task-version-provenance-'));
+  const baseline = createRun(root, {
+    runId: 'version-one', task: 'same-task', category: 'bug', selectedArm: 'baseline',
+    taskRevision: 'same-revision', taskVersion: '1.0.0',
+    cells: [{ arm: 'baseline', repetition: 1, shippable: 0 }],
+  });
+  const forge = createRun(root, {
+    runId: 'version-two', task: 'same-task', category: 'bug', selectedArm: 'forge',
+    taskRevision: 'same-revision', taskVersion: '2.0.0',
+    cells: [{ arm: 'forge', repetition: 1, shippable: 1 }],
+  });
+  const result = invoke([baseline, forge]);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /task revision|provenance|task version/i);
+});
