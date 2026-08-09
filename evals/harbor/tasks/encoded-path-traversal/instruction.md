@@ -10,3 +10,6 @@ attempts as missing files without disclosing files outside `public`. Preserve
 the existing successful public-file responses and missing-file behavior,
 including legitimate encoded filenames. Add an automated security regression
 test covering traversal, then run the existing test suite.
+
+Do not edit or replace the pre-existing `src/server.test.mjs`; put the required
+new coverage in a separate `src/*.test.mjs` file.

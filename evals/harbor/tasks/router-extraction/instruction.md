@@ -18,3 +18,6 @@ with the JSON body `{ "itemId": decodedItemId }`. Other methods and
 
 Add an automated test for the parameterized route (including a percent-encoded
 ID), then run the existing test suite.
+
+Do not edit or replace the pre-existing `src/server.test.mjs`; put the required
+new coverage in a separate `src/*.test.mjs` file.

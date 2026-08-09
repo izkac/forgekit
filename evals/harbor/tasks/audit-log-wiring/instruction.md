@@ -15,3 +15,6 @@ Keep the existing root, validation, and not-found behavior. Do not replace the
 injected adapters or duplicate their work in the HTTP handler. Add an automated
 HTTP-level test that supplies recording adapters and proves both effects occur
 in persistence-then-audit order, then run the existing test suite.
+
+Do not edit or replace the pre-existing `src/server.test.mjs`; put the required
+new coverage in a separate `src/*.test.mjs` file.
