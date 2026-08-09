@@ -282,6 +282,20 @@ test('refuses to pair split arms from different task or corpus revisions', () =>
   assert.equal(result.stdout, '');
 });
 
+test('refuses provenance drift across repetitions of the same task', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-repetition-provenance-'));
+  const directories = [
+    createRun(root, { runId: 'rep1-base', task: 'same-task', category: 'bug', selectedArm: 'baseline', taskRevision: 'rev-a', cells: [{ arm: 'baseline', repetition: 1, shippable: 0 }] }),
+    createRun(root, { runId: 'rep1-forge', task: 'same-task', category: 'bug', selectedArm: 'forge', taskRevision: 'rev-a', cells: [{ arm: 'forge', repetition: 1, shippable: 1 }] }),
+    createRun(root, { runId: 'rep2-base', task: 'same-task', category: 'bug', selectedArm: 'baseline', taskRevision: 'rev-b', cells: [{ arm: 'baseline', repetition: 2, shippable: 0 }] }),
+    createRun(root, { runId: 'rep2-forge', task: 'same-task', category: 'bug', selectedArm: 'forge', taskRevision: 'rev-b', cells: [{ arm: 'forge', repetition: 2, shippable: 1 }] }),
+  ];
+  const result = invoke(directories);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /task revision|provenance/i);
+  assert.equal(result.stdout, '');
+});
+
 test('refuses mixed cohorts without emitting an aggregate', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-mixed-'));
   const one = createRun(root, {

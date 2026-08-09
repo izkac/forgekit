@@ -346,7 +346,13 @@ function pairKey(observation) {
 
 function sortedPairCells(observations) {
   const cells = new Map();
+  const taskProvenance = new Map();
   for (const observation of observations) {
+    const expected = taskProvenance.get(observation.task);
+    if (expected && !sameValue(expected, observation.provenance)) {
+      throw new Error(`task revision or provenance differs across repetitions of task ${observation.task}`);
+    }
+    taskProvenance.set(observation.task, observation.provenance);
     const key = pairKey(observation);
     if (!cells.has(key)) cells.set(key, { task: observation.task, category: observation.category, repetition: observation.repetition });
     const cell = cells.get(key);
