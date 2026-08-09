@@ -34,7 +34,7 @@
 
 ## 3. Product loop
 
-- [ ] 3.1 Extend the existing `test-guard` phase in
+- [x] 3.1 Extend the existing `test-guard` phase in
       `scripts/e2e/harness-portability.mjs` (do **not** add a new phase —
       this change is two fixes, not a capability) to drive the shipped binary
       through both: a prompt containing shell metacharacters leaves no
