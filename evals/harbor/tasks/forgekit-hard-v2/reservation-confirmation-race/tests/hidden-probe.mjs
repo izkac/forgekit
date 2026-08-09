@@ -29,6 +29,7 @@ const safeStringify = JSON.stringify.bind(JSON);
 const safeParse = JSON.parse.bind(JSON);
 const safeClone = structuredClone;
 const NativePromise = Promise;
+const safeImmediate = setImmediate;
 function send(value) { safeWrite(4, prefix + safeStringify(value) + "\n"); }
 function errorValue(error) {
   return { code: error && error.code, name: error && error.name, message: error && error.message };
@@ -104,7 +105,10 @@ function settleConfirm(command) {
   );
 }
 async function handle(command) {
-  if (command.type === "barrier") return send({ type: "barrier", barrierId: command.barrierId });
+  if (command.type === "barrier") {
+    await new NativePromise((resolve) => safeImmediate(resolve));
+    return send({ type: "barrier", barrierId: command.barrierId });
+  }
   if (command.type === "reset") return reset(command);
   if (command.type === "confirm") return settleConfirm(command);
   if (command.type === "setClock") { now = command.now; return send({ type: "clockSet" }); }
@@ -300,8 +304,10 @@ async function runContract() {
     worker.send({ type: "confirm", callId: "one", reservationId: "one", key: "one-key" });
     const oneCharge = await worker.wait((message) => message.type === "charge" && message.input.reservationId === "one");
     worker.send({ type: "confirm", callId: "two", reservationId: "two", key: "two-key" });
-    const twoCharge = await worker.wait((message) => message.type === "charge" && message.input.reservationId === "two");
+    worker.send({ type: "barrier", barrierId: "unrelated" });
+    await worker.wait((message) => message.type === "barrier" && message.barrierId === "unrelated");
     assert.equal(worker.count("charge", since), 2);
+    const twoCharge = await worker.wait((message) => message.type === "charge" && message.input.reservationId === "two");
     worker.send({ type: "gatewayResolve", chargeId: twoCharge.chargeId, paymentId: "two-payment" });
     assert.equal((await confirmation(worker, "two")).value.paymentId, "two-payment");
     worker.send({ type: "gatewayResolve", chargeId: oneCharge.chargeId, paymentId: "one-payment" });
