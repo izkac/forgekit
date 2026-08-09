@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(CLI_ROOT, '..', '..');
-const packet = (name) => path.join(REPO_ROOT, 'skills', 'forge', 'subagents', name);
+const sourceSkills = path.join(REPO_ROOT, 'skills');
+const skillsRoot = fs.existsSync(sourceSkills) ? sourceSkills : path.join(CLI_ROOT, 'vendor', 'skills');
+const packet = (name) => path.join(skillsRoot, 'forge', 'subagents', name);
 
 test('implementer packet targets the coordinator session and returns its executed ledger', () => {
   const text = fs.readFileSync(packet('implementer-prompt.md'), 'utf8');
@@ -28,7 +30,7 @@ test('reviewer packet validates flagged tasks from the same executed ledger', ()
 
 
 test('implement phase tells the coordinator to fill every evidence target placeholder', () => {
-  const text = fs.readFileSync(path.join(REPO_ROOT, 'skills', 'forge', 'phases', 'implement.md'), 'utf8');
+  const text = fs.readFileSync(path.join(skillsRoot, 'forge', 'phases', 'implement.md'), 'utf8');
   for (const placeholder of ['{SESSION_ID}', '{TASK_ID}', '{TDD_EVIDENCE_ENABLED}']) {
     assert.match(text, new RegExp(placeholder.replace(/[{}]/g, '\$&')));
   }

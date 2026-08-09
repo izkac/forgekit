@@ -169,17 +169,18 @@ function main() {
     process.exit(1);
   });
 
-  child.on('close', (code) => {
+  child.on('close', (code, signal) => {
     if (settled) return;
     settled = true;
     const durationMs = Date.now() - startedMs;
-    const ok = expect === 'fail' ? code !== 0 : code === 0;
+    const ok = code !== null && (expect === 'fail' ? code !== 0 : code === 0);
     const stamp = { cmd, args: cmdArgs, expect, exit: code, ok, startedAt, durationMs };
     const filePath = appendStamp(sessionId, task, stamp);
     printReceipt(filePath, stamp);
     if (!ok) {
+      const outcome = code === null && signal ? `terminated by signal ${signal}` : `exited ${code}`;
       process.stderr.write(
-        `forge tdd run: contradicted expectation — expected ${expect}, command exited ${code}\n`,
+        `forge tdd run: contradicted expectation — expected ${expect}, command ${outcome}\n`,
       );
     }
     process.exit(ok ? 0 : 1);
