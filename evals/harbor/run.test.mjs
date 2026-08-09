@@ -52,9 +52,10 @@ test('dry run stages canonical baseline and Forge arms and writes trial manifest
   assert.equal(plan.dryRun, true);
   assert.match(plan.harnessRevision, /^[a-f0-9]{64}$/);
   assert.equal(plan.trials.length, 4);
-  assert.deepEqual(plan.trials.map(({ arm, repetition }) => [arm, repetition]), [
-    ['baseline', 1], ['forge', 1], ['baseline', 2], ['forge', 2],
-  ]);
+  assert.deepEqual(plan.trials.map(({ arm, repetition }) => [arm, repetition]),
+    plan.schedule.armOrders.flatMap((armOrder, index) => (
+      armOrder.map((arm) => [arm, index + 1])
+    )));
 
   const baseline = path.join(plan.runDirectory, 'arms', 'baseline');
   const forge = path.join(plan.runDirectory, 'arms', 'forge');
@@ -323,4 +324,197 @@ writeFileSync(path.join(job, 'trial', 'artifacts', 'app', '.forge', 'verifier', 
   const result = await run(args, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /verifier reward\.json/);
+});
+
+
+test('seeded paired schedules replay deterministically and persist exact counterbalance metadata', async (t) => {
+  const seededArgs = [...validArgs, '--seed', 'replay-seed_2026', '--dry-run'];
+  const firstResult = await run(seededArgs);
+  assert.equal(firstResult.code, 0, firstResult.stderr);
+  const first = JSON.parse(firstResult.stdout);
+  t.after(() => cleanupPlan(first));
+
+  const persisted = JSON.parse(await readFile(path.join(first.runDirectory, 'plan.json'), 'utf8'));
+  assert.deepEqual(persisted, first);
+  assert.equal(first.seed, 'replay-seed_2026');
+  assert.equal(first.settings.seed, first.seed);
+  assert.equal(first.category, 'feature');
+  assert.match(first.corpus.id, /^[a-z0-9-]+$/);
+  assert.match(first.corpus.revision, /^[a-f0-9]{64}$/);
+  assert.match(first.schedule.startHash, /^[a-f0-9]{64}$/);
+  assert.ok(['baseline', 'forge'].includes(first.schedule.startingArm));
+  assert.deepEqual(first.schedule.firstArmCounts, { baseline: 1, forge: 1 });
+  assert.deepEqual(first.schedule.imbalance, {
+    present: false,
+    firstPositionDifference: 0,
+    favoredArm: null,
+  });
+
+  const byRepetition = Map.groupBy(first.trials, (trial) => trial.repetition);
+  assert.deepEqual([...byRepetition.values()].map((pair) => pair.map((trial) => trial.arm)), [
+    first.schedule.armOrders[0],
+    first.schedule.armOrders[1],
+  ]);
+  assert.deepEqual(first.schedule.armOrders[1], [...first.schedule.armOrders[0]].reverse());
+  assert.deepEqual(first.trials.map((trial) => trial.scheduleIndex), [1, 2, 3, 4]);
+  assert.deepEqual(first.trials.map((trial) => trial.executionIndex), [null, null, null, null]);
+
+  for (const trial of first.trials) {
+    const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+    assert.equal(manifest.seed, first.settings.seed);
+    assert.equal(manifest.category, 'feature');
+    assert.deepEqual(manifest.corpus, first.corpus);
+    assert.equal(manifest.scheduleIndex, trial.scheduleIndex);
+    assert.equal(manifest.executionIndex, null);
+    assert.deepEqual(manifest.armOrder, first.schedule.armOrders[trial.repetition - 1]);
+    assert.equal(manifest.armOrdinal, manifest.armOrder.indexOf(manifest.arm) + 1);
+    assert.equal(manifest.startedAt, null);
+    assert.equal(manifest.finishedAt, null);
+  }
+
+  const secondResult = await run(seededArgs);
+  assert.equal(secondResult.code, 0, secondResult.stderr);
+  const second = JSON.parse(secondResult.stdout);
+  t.after(() => cleanupPlan(second));
+  assert.equal(second.runId, first.runId);
+  assert.deepEqual(second.schedule, first.schedule);
+  assert.deepEqual(
+    second.trials.map(({ arm, repetition, scheduleIndex, armOrder, armOrdinal }) => (
+      { arm, repetition, scheduleIndex, armOrder, armOrdinal }
+    )),
+    first.trials.map(({ arm, repetition, scheduleIndex, armOrder, armOrdinal }) => (
+      { arm, repetition, scheduleIndex, armOrder, armOrdinal }
+    )),
+  );
+});
+
+test('odd paired schedules disclose their one-first-position imbalance', async (t) => {
+  const args = [...validArgs, '--seed', 'odd-seed', '--dry-run'];
+  args[args.indexOf('--repetitions') + 1] = '3';
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  const otherArm = plan.schedule.startingArm === 'baseline' ? 'forge' : 'baseline';
+  assert.deepEqual(plan.schedule.firstArmCounts, {
+    [plan.schedule.startingArm]: 2,
+    [otherArm]: 1,
+  });
+  assert.deepEqual(plan.schedule.imbalance, {
+    present: true,
+    firstPositionDifference: 1,
+    favoredArm: plan.schedule.startingArm,
+  });
+  assert.deepEqual(plan.schedule.armOrders, [
+    [plan.schedule.startingArm, otherArm],
+    [otherArm, plan.schedule.startingArm],
+    [plan.schedule.startingArm, otherArm],
+  ]);
+});
+
+test('single-arm schedules remain one ordinary trial per repetition', async (t) => {
+  const args = [...validArgs, '--seed', 'single-arm-seed', '--dry-run'];
+  args[args.indexOf('--arm') + 1] = 'forge';
+  args[args.indexOf('--repetitions') + 1] = '3';
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  assert.equal(plan.schedule.strategy, 'single-arm');
+  assert.equal(plan.schedule.startingArm, null);
+  assert.deepEqual(plan.schedule.armOrders, [['forge'], ['forge'], ['forge']]);
+  assert.deepEqual(plan.schedule.firstArmCounts, { baseline: 0, forge: 3 });
+  assert.equal(plan.schedule.imbalance, null);
+  assert.deepEqual(plan.trials.map((trial) => [trial.arm, trial.repetition, trial.armOrdinal]), [
+    ['forge', 1, 1], ['forge', 2, 1], ['forge', 3, 1],
+  ]);
+});
+
+test('rejects unsafe seeds before creating a run', async (t) => {
+  const isolatedRuns = await mkdtemp(path.join(os.tmpdir(), 'forgekit-invalid-seed-runs-'));
+  t.after(() => rm(isolatedRuns, { recursive: true, force: true }));
+  for (const seed of ['', '../escape', 'contains space', 'semi;colon', 'x'.repeat(129)]) {
+    const result = await run([...validArgs, '--seed', seed, '--dry-run'], {
+      env: { FORGEKIT_EVAL_RUNS_ROOT: isolatedRuns },
+    });
+    assert.notEqual(result.code, 0, `seed ${JSON.stringify(seed)} should fail`);
+    assert.match(result.stderr, /seed must be a safe identifier/);
+  }
+  assert.deepEqual(await readdir(isolatedRuns), []);
+});
+
+test('paired execution serializes each pair, records actual order, and continues after failures', async (t) => {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-pair-bin-'));
+  const capture = path.join(bin, 'events.jsonl');
+  const fakeHarbor = path.join(bin, 'harbor');
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('harbor 0.20.0'); process.exit(0); }
+const jobName = args[args.indexOf('--job-name') + 1];
+const event = (name) => appendFileSync(process.env.HARBOR_CAPTURE_FILE, JSON.stringify({ name, jobName, at: Date.now() }) + '\\n');
+event('start');
+await new Promise((resolve) => setTimeout(resolve, 40));
+if (jobName.includes('-baseline-')) { event('end'); process.exit(9); }
+const job = path.join(args[args.indexOf('--jobs-dir') + 1], 'job');
+mkdirSync(path.join(job, 'trial', 'verifier'), { recursive: true });
+writeFileSync(path.join(job, 'trial', 'verifier', 'reward.json'), '{"functional":1,"regression":1,"tests_unchanged":1,"shippable":1}');
+event('end');
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const args = [...validArgs, '--seed', 'pair-failure-seed'];
+  args[args.indexOf('--repetitions') + 1] = '3';
+  args[args.indexOf('--concurrency') + 1] = '2';
+  const result = await run(args, {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture },
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /3 trial\(s\) failed/);
+  const plan = JSON.parse(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  assert.equal(plan.status, 'completed-with-failures');
+  assert.equal(plan.trials.length, 6);
+  assert.deepEqual(plan.trials.map((trial) => trial.status).sort(), [
+    'failed', 'failed', 'failed', 'verified', 'verified', 'verified',
+  ]);
+  assert.deepEqual(
+    [...plan.trials].sort((left, right) => left.executionIndex - right.executionIndex)
+      .map((trial) => trial.executionIndex),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.ok(plan.trials.every((trial) => trial.startedAt && trial.finishedAt));
+  assert.deepEqual(JSON.parse(await readFile(path.join(plan.runDirectory, 'plan.json'), 'utf8')), plan);
+
+  const events = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
+  for (let repetition = 1; repetition <= 3; repetition += 1) {
+    const trials = plan.trials.filter((trial) => trial.repetition === repetition);
+    assert.deepEqual(trials.map((trial) => trial.arm), trials[0].armOrder);
+    const firstEnd = events.findIndex((event) => event.name === 'end' && event.jobName === trials[0].trialId);
+    const secondStart = events.findIndex((event) => event.name === 'start' && event.jobName === trials[1].trialId);
+    assert.ok(firstEnd >= 0 && secondStart > firstEnd, `repetition ${repetition} arms must execute serially`);
+    for (const trial of trials) {
+      const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+      assert.equal(manifest.executionIndex, trial.executionIndex);
+      assert.equal(manifest.startedAt, trial.startedAt);
+      assert.equal(manifest.finishedAt, trial.finishedAt);
+      assert.equal(manifest.status, trial.status);
+    }
+  }
+});
+
+
+test('rejects tasks outside the versioned corpus before creating a run', async (t) => {
+  const isolatedRuns = await mkdtemp(path.join(os.tmpdir(), 'forgekit-unlisted-task-runs-'));
+  t.after(() => rm(isolatedRuns, { recursive: true, force: true }));
+  const args = [...validArgs];
+  args[args.indexOf('--task') + 1] = 'unlisted-safe-task';
+  const result = await run([...args, '--dry-run'], {
+    env: { FORGEKIT_EVAL_RUNS_ROOT: isolatedRuns },
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /not listed exactly once in corpus\.json/);
+  assert.deepEqual(await readdir(isolatedRuns), []);
 });
