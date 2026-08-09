@@ -219,6 +219,13 @@ node evals/harbor/run.mjs \
   | tee /tmp/forge-eval-pagination-boundary.json
 ```
 
+During real execution the runner writes sanitized `[eval-progress]` lifecycle
+messages to stderr and a heartbeat every 30 seconds, while stdout remains one
+JSON plan suitable for `tee`. Use `--progress-interval-seconds N` to change the
+heartbeat cadence or `0` to disable periodic heartbeats; start and terminal
+lifecycle messages remain enabled. Progress lines contain run/trial identities,
+arm, status, and elapsed time only—never prompts, credentials, or host paths.
+
 Confirm credentials, builds, rewards, normalized results, and actual cost. Then
 choose a repetition count justified by the trial plan and budget. Use the same
 agent, model and model settings, treatment bytes, seed, repetitions,
@@ -375,11 +382,14 @@ locators and omit the absolute run directory. Locate a run by combining its
 default `evals/.runs`. Harbor executes from that run directory using the exact
 relative argv recorded in provenance.
 
-Logs and downloaded artifacts can still include host paths, source files,
-hidden-verifier output, model transcripts, Forge process data, and provider
-metadata. Although the local tarball source path is omitted and credential
-values are not intentionally written, inspect and redact the entire run before
-moving, sharing, or archiving it. Never commit run artifacts.
+Forge artifact summaries and normalized telemetry use a run-relative
+`artifactLocator` plus a relative file inventory; they do not serialize the
+host-absolute artifact discovery path. Raw Harbor logs and downloaded artifacts
+can still include host paths, source files, hidden-verifier output, model
+transcripts, Forge process data, and provider metadata. Although the local
+tarball source path is omitted and credential values are not intentionally
+written, inspect and redact the entire run before moving, sharing, or archiving
+it. Never commit run artifacts.
 
 Preserve unmodified `plan.json`, manifests, normalized records, logs, corpus
 revision, task revision, harness revision, treatment digest/version, agent and
