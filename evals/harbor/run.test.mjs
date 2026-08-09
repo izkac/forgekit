@@ -692,3 +692,82 @@ process.exit(9);
   assert.equal(result.stderr.includes('VERSION-S3CR3T'), false);
   assert.equal(result.stderr.includes(testRunsRoot), false);
 });
+
+test('omitted and explicit v1 corpus selection use the frozen legacy manifest and task root', async (t) => {
+  const omittedResult = await run([...validArgs, '--dry-run']);
+  assert.equal(omittedResult.code, 0, omittedResult.stderr);
+  const omitted = parsePlan(omittedResult.stdout);
+  t.after(() => cleanupPlan(omitted));
+
+  const explicitResult = await run([...validArgs, '--corpus', 'forgekit-held-out-v1', '--dry-run']);
+  assert.equal(explicitResult.code, 0, explicitResult.stderr);
+  const explicit = parsePlan(explicitResult.stdout);
+  t.after(() => cleanupPlan(explicit));
+
+  assert.equal(explicit.runId, omitted.runId);
+  assert.equal(omitted.runId, 'dry-run-3c61176c4236', 'omitted selector must preserve the v1 dry-run identity');
+  assert.deepEqual(explicit.corpus, omitted.corpus);
+  assert.equal(explicit.corpus.id, 'forgekit-held-out-v1');
+  assert.equal(explicit.taskRevision, omitted.taskRevision);
+  assert.equal(explicit.taskVersion, '1.0.0');
+  assert.deepEqual(explicit.arms, omitted.arms);
+  for (const trial of explicit.trials) {
+    const manifest = JSON.parse(await readFile(manifestFile(explicit, trial), 'utf8'));
+    assert.deepEqual(manifest.corpus, explicit.corpus);
+    assert.equal(manifest.taskVersion, explicit.taskVersion);
+    assert.equal(manifest.canonicalTask, 'tasks/node-health-endpoint');
+  }
+});
+
+test('rejects unknown and path-like corpus selectors before creating a run', async (t) => {
+  const isolatedRuns = await mkdtemp(path.join(os.tmpdir(), 'forgekit-invalid-corpus-runs-'));
+  t.after(() => rm(isolatedRuns, { recursive: true, force: true }));
+  const cases = [
+    ['unknown-corpus', /unknown corpus: unknown-corpus/],
+    ['../forgekit-hard-v2', /corpus must be a safe corpus id/],
+    ['/tmp/corpus.json', /corpus must be a safe corpus id/],
+    ['forgekit-hard-v2.json', /corpus must be a safe corpus id/],
+  ];
+  for (const [corpus, expected] of cases) {
+    const result = await run([...validArgs, '--corpus', corpus, '--dry-run'], {
+      env: { FORGEKIT_EVAL_RUNS_ROOT: isolatedRuns },
+    });
+    assert.notEqual(result.code, 0, `corpus ${corpus} should fail`);
+    assert.match(result.stderr, expected);
+  }
+  assert.deepEqual(await readdir(isolatedRuns), []);
+});
+
+test('explicit hard-v2 selection stages only its allowlisted root and records complete provenance', async (t) => {
+  const args = [...validArgs, '--corpus', 'forgekit-hard-v2', '--dry-run'];
+  args[args.indexOf('--task') + 1] = 'reservation-confirmation-race';
+  args[args.indexOf('--repetitions') + 1] = '1';
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  assert.equal(plan.task, 'reservation-confirmation-race');
+  assert.equal(plan.taskVersion, '1.0.0');
+  assert.equal(plan.category, 'bug');
+  assert.equal(plan.corpus.id, 'forgekit-hard-v2');
+  assert.equal(plan.corpus.schemaVersion, 1);
+  assert.match(plan.corpus.revision, /^[a-f0-9]{64}$/);
+  assert.match(plan.taskRevision, /^[a-f0-9]{64}$/);
+  assert.notEqual(plan.runId, '');
+
+  for (const arm of plan.arms) {
+    assert.equal(
+      await readFile(path.join(plan.runDirectory, arm.stagedTask, 'environment/app/src/confirmation-service.mjs'), 'utf8')
+        .then((source) => source.length > 0),
+      true,
+    );
+  }
+  for (const trial of plan.trials) {
+    const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
+    assert.deepEqual(manifest.corpus, plan.corpus);
+    assert.equal(manifest.taskRevision, plan.taskRevision);
+    assert.equal(manifest.taskVersion, plan.taskVersion);
+    assert.equal(manifest.canonicalTask, 'tasks/forgekit-hard-v2/reservation-confirmation-race');
+  }
+});

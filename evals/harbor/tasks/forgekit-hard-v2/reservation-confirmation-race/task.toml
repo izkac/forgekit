@@ -1,0 +1,43 @@
+schema_version = "1.4"
+
+artifacts = [
+  "/app/package.json",
+  "/app/src/",
+]
+
+[task]
+name = "forgekit-hard-v2/reservation-confirmation-race"
+version = "1.0.0"
+description = "Repair concurrent reservation confirmation without breaking idempotency or expiry semantics."
+authors = []
+keywords = ["node", "concurrency", "idempotency", "reservation"]
+
+[metadata]
+difficulty = "hard"
+category = "programming"
+benchmark_category = "bug"
+tags = ["node", "concurrency", "idempotency", "expiry", "race-condition"]
+difficulty_explanation = "Requires a deterministic concurrent regression test and coordination across an external async payment boundary while preserving replay, conflict, retry, and admission-deadline semantics."
+
+[agent]
+timeout_sec = 1200.0
+
+[verifier]
+timeout_sec = 180.0
+environment_mode = "separate"
+
+[verifier.environment]
+os = "linux"
+network_mode = "no-network"
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 1024
+storage_mb = 10240
+
+[environment]
+os = "linux"
+network_mode = "public"
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 10240

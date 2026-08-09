@@ -56,6 +56,12 @@ function requirePositiveInteger(value, label) {
   return value;
 }
 
+function requireSemanticVersion(value, label) {
+  requireString(value, label);
+  if (!/^\d+\.\d+\.\d+$/.test(value)) throw new Error(`${label} must be a semantic version`);
+  return value;
+}
+
 function requireSchemaVersion(value, expected, label) {
   if (value !== expected) throw new Error(`${label} schema version must be ${expected}`);
 }
@@ -167,6 +173,7 @@ function validatePlan(plan, runDirectory) {
   requireSchemaVersion(plan.schemaVersion, 1, 'plan.json');
   const runId = requireSafeId(plan.runId, 'plan.json.runId');
   requireSafeId(plan.task, 'plan.json.task');
+  if (Object.hasOwn(plan, 'taskVersion')) requireSemanticVersion(plan.taskVersion, 'plan.json.taskVersion');
   requireSafeId(plan.category, 'plan.json.category');
   requireString(plan.taskRevision, 'plan.json.taskRevision');
   requireString(plan.harnessRevision, 'plan.json.harnessRevision');
@@ -188,6 +195,15 @@ function assertManifestMatchesPlan(manifest, plan, trialEntry, cohort, label) {
   requireSafeId(manifest.runId, `${label}.runId`);
   requireSafeId(manifest.trialId, `${label}.trialId`);
   requireSafeId(manifest.task, `${label}.task`);
+  const planHasTaskVersion = Object.hasOwn(plan, 'taskVersion');
+  const manifestHasTaskVersion = Object.hasOwn(manifest, 'taskVersion');
+  if (planHasTaskVersion !== manifestHasTaskVersion) {
+    throw new Error(`${label}.taskVersion does not match its plan`);
+  }
+  if (manifestHasTaskVersion) {
+    requireSemanticVersion(manifest.taskVersion, `${label}.taskVersion`);
+    if (manifest.taskVersion !== plan.taskVersion) throw new Error(`${label}.taskVersion does not match its plan`);
+  }
   requireSafeId(manifest.category, `${label}.category`);
   requireString(manifest.taskRevision, `${label}.taskRevision`);
   requireString(manifest.harnessRevision, `${label}.harnessRevision`);
@@ -291,6 +307,7 @@ async function readRun(candidate) {
       status: manifest.status,
       provenance: stableValue({
         task_revision: manifest.taskRevision,
+        ...(Object.hasOwn(manifest, 'taskVersion') ? { task_version: manifest.taskVersion } : {}),
         corpus: manifest.corpus,
         images: manifest.images,
       }),

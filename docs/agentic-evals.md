@@ -1,7 +1,7 @@
-# Run The Held-Out Forge Versus No-Forge Pilot
+# Run Versioned Forge Versus No-Forge Evaluations
 
-This guide runs the same coding agent on the pilot corpus with and without
-Forgekit. The harness lives in `evals/`, uses
+This guide runs the same coding agent with and without Forgekit on an
+explicitly selected evaluation corpus. The harness lives in `evals/`, uses
 [Harbor](https://harborframework.com/) for containerized execution, and is not
 installed by the published Forgekit CLI package.
 
@@ -16,6 +16,12 @@ The outcome is the verifier reward, not the agent's final message, visible
 tests, Forge scorecard, or `.forge/` telemetry. Process telemetry can explain a
 result but cannot upgrade or downgrade the verifier outcome.
 
+The evaluator accepts only two checked-in corpus IDs. Omitting `--corpus`
+selects `forgekit-held-out-v1`, preserving the historical default. Passing
+`--corpus forgekit-hard-v2` selects its separate manifest and task root.
+Unknown IDs, path-like values, and arbitrary filesystem roots fail before task
+staging.
+
 The implemented `forgekit-held-out-v1` pilot has six public, versioned tasks:
 
 | Category | Task id | Requested work |
@@ -27,7 +33,22 @@ The implemented `forgekit-held-out-v1` pilot has six public, versioned tasks:
 | tests | `csv-formula-regression` | Boundary tests and CSV formula neutralization |
 | security | `encoded-path-traversal` | Encoded traversal hardening without filename regressions |
 
-Each task's hidden grader lives in its own `tests/` verifier context. Harbor's
+The v1 manifest and complete contents of all six v1 task trees are frozen by
+`evals/harbor/corpus-v1.lock.json`. CI hashes them and fails on drift; historical
+v1 must not be changed in place. A substantive change requires a new corpus ID.
+
+`forgekit-hard-v2` is a companion corpus with only one current task:
+
+| Category | Task id | Task version | Requested work |
+| --- | --- | --- | --- |
+| bug | `reservation-confirmation-race` | `1.0.0` | Repair confirmation races and add a deterministic overlap test. |
+
+Hard-v2 is an **incomplete one-category foundation**. It is not yet a complete
+six-category corpus, and its infrastructure, oracle runs, and verifier tests
+are not provider-backed evidence that Forgekit is effective. No provider
+effectiveness evidence has been produced for hard-v2 at HEAD.
+
+Each task's grader lives in its own `tests/` verifier context. Harbor's
 `environment_mode = "separate"` and no-network verifier keep it out of the
 agent container at execution time. Because the tasks and graders are checked
 into a public repository, "held out" does not mean private or demonstrably
@@ -79,16 +100,28 @@ From the repository root:
 npm run test:evals
 npm run lint:evals
 npm run smoke:evals
+npm run smoke:evals:hard-v2
 ```
 
-Smoke validates all six task contracts, baseline/Forge staging, hidden-verifier
-isolation, the untouched and known-good verifier paths, and every agent and
-verifier Docker context. Docker build checks run when the daemon is available,
-but `docker build --check` is build-context and Dockerfile lint/check validation;
-it does not build an image or exercise installation or runtime behavior. Smoke
-never invokes Harbor or a model. The local smoke/oracle scripts currently rely
-on POSIX shell and tooling, so run them on Linux, another POSIX host, or WSL;
-native Windows semantics are not currently supported.
+`npm run smoke:evals` remains the exact v1 smoke. It validates all six v1
+tasks, baseline/Forge staging, hidden-verifier isolation, untouched and
+known-good verifier paths, and the three Docker contexts for each v1 task.
+
+`npm run smoke:evals:hard-v2` selects only the hard companion. For the current
+reservation task it validates manifest/task metadata, dry-run baseline/Forge
+staging and verifier isolation, plus the required host matrix: untouched
+negative, oracle positive, alternate positive, tamper negative, no-added-test
+negative, and mutant negative. It validates exactly three Docker build-check
+contexts—baseline agent, Forge agent, and separate verifier—running
+`docker build --check` when Docker is available or reporting Docker validation
+as skipped after local context-reference checks. It never invokes Harbor or a
+model.
+
+`test:evals` also runs the hard-v2 host and adversarial cases. Docker
+build-check is build-context and Dockerfile lint/check validation; it does not
+build an image or exercise installation or runtime behavior. Both smoke paths
+rely on POSIX shell and tooling, so run them on Linux, another POSIX host, or
+WSL; native Windows semantics are not currently supported.
 
 The checked-in `solution/solve.sh` is a known-good verifier oracle. Its passing
 reward proves only that the verifier accepts that fixture. An untouched fixture
@@ -125,15 +158,17 @@ To evaluate an already published package instead, use
 `--forgekit-tarball` and `--forgekit-version`, including for a baseline-only
 run, so the planned cohort always identifies its treatment.
 
-## 4. Dry-Run One Paired Task
+## 4. Dry-Run The Hard-v2 Foundation
 
 Choose a stable seed and preview the command:
 
 ```bash
-export EVAL_SEED='pilot-v1'
-export EVAL_TASK='pagination-boundary'
+export EVAL_SEED='hard-v2-foundation'
+export EVAL_CORPUS='forgekit-hard-v2'
+export EVAL_TASK='reservation-confirmation-race'
 
 node evals/harbor/run.mjs \
+  --corpus "$EVAL_CORPUS" \
   --task "$EVAL_TASK" \
   --arm both \
   --repetitions 1 \
@@ -153,7 +188,7 @@ identifies itself by `runId`; Harbor argv contains exact run-relative locators
 and executes with the run directory as its working directory. Inspect it before spending:
 
 ```bash
-jq '{runId, corpus, taskRevision, harnessRevision, seed, schedule, images, settings, trials}' \
+jq '{runId, corpus, taskVersion, taskRevision, harnessRevision, seed, schedule, images, settings, trials}' \
   /tmp/forge-eval-dry-run.json
 
 RUNS_ROOT="${FORGEKIT_EVAL_RUNS_ROOT:-evals/.runs}"
@@ -168,7 +203,8 @@ separate verifier must not receive that tarball. A dry-run directory is
 recreated deterministically for the same inputs. Use only one dry-run writer per
 runs root: concurrent writers with the same derived run id can replace or
 interleave that directory. A dry-run is not accepted by the aggregator as
-completed evidence.
+completed evidence. This hard-v2 example is deliberately dry-run only: it
+validates selection and staging without claiming a provider outcome.
 
 ## 5. Understand Seed, Order, And Concurrency
 
@@ -202,11 +238,17 @@ save wall-clock time but make a causal reading weaker even though each pair's
 internal order is preserved. Neither a seed nor concurrency one removes model
 nondeterminism, provider changes, temporal drift, or unpinned dependency drift.
 
-## 6. Run The Pilot
+## 6. Run The V1 Pilot
 
-First execute one real pair:
+The current hard-v2 companion is incomplete and has no provider effectiveness
+evidence. The established six-task run instructions below therefore continue
+to describe v1. Reset the variables from the hard-v2 dry-run; omission of
+`--corpus` intentionally exercises the v1 default:
 
 ```bash
+export EVAL_SEED='pilot-v1'
+export EVAL_TASK='pagination-boundary'
+
 node evals/harbor/run.mjs \
   --task "$EVAL_TASK" \
   --arm both \
@@ -281,15 +323,19 @@ find "$RUN_DIR/trials" -maxdepth 2 -type f | sort
 `plan.json` is written before model execution and finalized afterward. It
 records:
 
-- corpus id/schema/revision, task/category and canonical task revision;
+- selected corpus id/schema/manifest revision, task/category, semantic
+  `taskVersion`, canonical task-tree revision, and corpus-mapped task locator;
 - harness revision, images, agent/model, treatment digest/version, seed and
   settings;
 - the counterbalance derivation and planned arm order;
 - staged arms, trial/manifests, planned and actual execution order, terminal
   status, and timestamps.
 
-Each `trials/<trial-id>/manifest.json` binds its trial to that provenance and
-records Harbor argv/version with the exact run-relative locators used during
+Each `trials/<trial-id>/manifest.json` repeats the corpus, `taskVersion`, task
+revision, and harness provenance and binds its trial to them. For hard-v2, the
+manifest task version must match `task.toml`; disagreement fails before
+staging. The trial manifest records Harbor argv/version with the exact
+run-relative locators used during
 execution, requested inputs, and path-safe resolved identity fields (`name`,
 numeric `version`, and `model_info.name`/`provider`) when the safe identity matches the requested
 agent/model. Unknown agent-info fields are omitted and invalid identity leaves become `null`.
@@ -402,15 +448,44 @@ privacy policy prevents retaining raw transcripts or source, define and record
 a redaction/retention procedure before the run rather than silently deleting
 provenance afterward.
 
-## 10. Interpret The Pilot Conservatively
+## 10. Interpret The Corpora Conservatively
 
-This corpus contains six small dependency-free Node fixtures and only one task
-per category. It does not represent other languages, large repositories,
+V1 contains six small dependency-free Node fixtures and only one task per
+category. Hard-v2 currently contains one bug task, so it is an incomplete
+one-category foundation rather than a representative hard corpus. Neither
+represents other languages, large repositories,
 long-horizon maintenance, production integrations, or all coding-agent use.
 Public availability introduces contamination risk; separate hidden verifiers
 reduce execution-time leakage but cannot prove task novelty. Model
 nondeterminism, provider drift, small samples, order effects, and missing trials
 remain limitations.
+
+For `reservation-confirmation-race`, the separate no-network verifier uses
+fixed inputs, a manual clock, and deferred barriers instead of timing sleeps.
+Its public deterministic harness keeps scheduling and assertions in a trusted
+parent. In the verifier container, candidate modules execute in a child worker
+under the configured untrusted UID/GID and exchange commands/results over
+dedicated RPC pipes whose accepted result frames carry a per-worker nonce. It
+checks same-key overlap, different-key conflict, failed-payment retry, expiry
+admission, and unrelated-reservation progress.
+
+The harness also drives the real HTTP adapter. Confirmation must succeed once,
+conflict must preserve the `already_confirmed` domain behavior as HTTP 409,
+expiry must remain HTTP 410 without charging, and an unknown route must remain
+HTTP 404; incompatible lookalike errors that degrade these responses to HTTP
+500 fail verification. Agent-added `src/*.test.mjs` files must pass normally
+and kill one complete API-compatible concurrency mutant with an assertion
+failure; import, syntax, bootstrap, crash, and timeout failures do not count.
+The visible test and package metadata are protected, and both reference and
+structurally different positive solutions pass.
+
+Those controls test grader integrity, not every possible schedule or solution.
+The public probe can be contaminated, one mutant is only a proxy for one
+semantic test-quality property, and a mutant kill does not prove broad test
+quality or production concurrency safety. A separate verifier prevents the
+grader from being mounted into the agent container during execution; it does
+not make public code private. None of the hard-v2 infrastructure, deterministic
+checks, mutations, or oracle fixtures is provider effectiveness evidence.
 
 Report task-level outcomes, complete/incomplete pairs, missingness, cost and
 time, cohort controls, and uncertainty. Do not infer general or causal

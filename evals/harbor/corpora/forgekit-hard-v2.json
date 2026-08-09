@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "corpus_id": "forgekit-hard-v2",
+  "description": "Substantially harder Node 22 maintenance tasks with deterministic hidden concurrency and semantic test-quality checks.",
+  "tasks": [
+    {
+      "id": "reservation-confirmation-race",
+      "version": "1.0.0",
+      "category": "bug",
+      "difficulty": "hard",
+      "task_path": "tasks/forgekit-hard-v2/reservation-confirmation-race",
+      "entrypoint": "src/server.mjs",
+      "visible_tests": [
+        "src/confirmation-service.test.mjs"
+      ]
+    }
+  ]
+}

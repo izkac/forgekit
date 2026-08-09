@@ -16,6 +16,7 @@
     "lint": "eslint scripts evals && npm run lint --workspace=@izkac/forgekit",
     "lint:evals": "eslint evals",
     "smoke:evals": "node evals/harbor/smoke.mjs",
+    "smoke:evals:hard-v2": "node evals/harbor/smoke-hard-v2.mjs",
     "prepack": "npm run prepack --workspace=@izkac/forgekit",
     "install:link": "npm install && npm link --workspace=@izkac/forgekit"
   },

@@ -9,10 +9,27 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '..', '..');
 const smoke = path.join(here, 'smoke.mjs');
+const hardSmoke = path.join(here, 'smoke-hard-v2.mjs');
 
 function runSmoke(env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [smoke], {
+      cwd: projectRoot,
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+function runHardSmoke(env = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [hardSmoke], {
       cwd: projectRoot,
       env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -144,4 +161,83 @@ test('concurrent smoke CLIs isolate their dry-run staging', async () => {
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /PASS baseline\/Forge staging and verifier isolation/);
   }
+});
+
+
+test('hard-v2 smoke validates its selected task and host suite without Harbor or a provider', async (t) => {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-hard-smoke-tripwire-'));
+  const harborCapture = path.join(bin, 'harbor-called');
+  const harbor = path.join(bin, 'harbor');
+  const docker = path.join(bin, 'docker');
+  await writeFile(harbor, `#!/bin/sh
+printf called > "$HARBOR_CAPTURE"
+exit 99
+`);
+  await writeFile(docker, '#!/bin/sh\nexit 1\n');
+  await Promise.all([chmod(harbor, 0o755), chmod(docker, 0o755)]);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const result = await runHardSmoke({
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    HARBOR_CAPTURE: harborCapture,
+  });
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /PASS hard-v2 manifest and task metadata: reservation-confirmation-race/);
+  assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation/);
+  assert.match(result.stdout, /PASS hard-v2 task-specific host suite: .*untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant/i);
+  assert.match(result.stdout, /SKIP model\/Harbor execution: .*no model was invoked/i);
+
+  const summary = resultFrom(result.stdout);
+  assert.equal(summary.schemaVersion, 2);
+  assert.equal(summary.corpusId, 'forgekit-hard-v2');
+  assert.deepEqual(Object.keys(summary.tasks), ['reservation-confirmation-race']);
+  assert.equal(summary.tasks['reservation-confirmation-race'].hostSuite.status, 'passed');
+  assert.deepEqual(summary.tasks['reservation-confirmation-race'].hostSuite.coverage, [
+    'untouched-negative', 'oracle-positive', 'alternate-positive',
+    'tamper-negative', 'no-added-test-negative', 'mutant-negative',
+  ]);
+  assert.equal(summary.modelHarbor.modelExecuted, false);
+  assert.equal(summary.docker.status, 'skipped');
+  await assert.rejects(stat(harborCapture), { code: 'ENOENT' });
+});
+
+test('hard-v2 smoke checks exactly three isolated Docker contexts', async (t) => {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-hard-smoke-docker-'));
+  const capture = path.join(bin, 'docker-argv.jsonl');
+  const docker = path.join(bin, 'docker');
+  await writeFile(docker, `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+appendFileSync(process.env.DOCKER_CAPTURE, JSON.stringify(process.argv.slice(2)) + '\\n');
+`);
+  await chmod(docker, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const result = await runHardSmoke({
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    DOCKER_CAPTURE: capture,
+  });
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /PASS Docker validation: 3 hard-v2 build contexts/);
+  const summary = resultFrom(result.stdout);
+  assert.equal(summary.docker.status, 'validated');
+  assert.equal(summary.docker.method, 'docker build --check');
+  assert.deepEqual(summary.docker.contexts, [
+    'reservation-confirmation-race:baseline-agent',
+    'reservation-confirmation-race:forge-agent',
+    'reservation-confirmation-race:separate-verifier',
+  ]);
+
+  const calls = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(calls[0], ['info', '--format', '{{.ServerVersion}}']);
+  assert.equal(calls.length, 4);
+  for (const call of calls.slice(1)) {
+    assert.deepEqual(call.slice(0, 2), ['build', '--check']);
+    assert.ok(call.includes('--file'));
+  }
+});
+
+test('package exposes hard-v2 smoke separately from the legacy v1 smoke command', async () => {
+  const packageJson = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'));
+  assert.equal(packageJson.scripts['smoke:evals'], 'node evals/harbor/smoke.mjs');
+  assert.equal(packageJson.scripts['smoke:evals:hard-v2'], 'node evals/harbor/smoke-hard-v2.mjs');
 });

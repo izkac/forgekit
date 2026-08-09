@@ -24,6 +24,8 @@ jobs:
       - run: npm install
       - run: npm run lint
       - run: npm test
+      - name: Verify frozen evaluation corpus v1
+        run: node --test evals/harbor/corpus-v1-lock.test.mjs
       - name: Smoke forge init + doctor (specs engine)
         shell: bash
         run: |
