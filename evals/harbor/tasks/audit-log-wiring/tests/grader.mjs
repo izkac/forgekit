@@ -5,6 +5,8 @@ import { dirname } from "node:path";
 
 const APP_DIR = process.env.HARBOR_APP_DIR || "/app";
 const TEST_FILE = `${APP_DIR}/src/server.test.mjs`;
+const PACKAGE_FILE = `${APP_DIR}/package.json`;
+const EXPECTED_PACKAGE_SHA256 = "c7a3460197ccd16d40f50a9e02fa44fbca12ef3accbb64dd0cf58d1e7782148d";
 const REWARD_DIR = process.env.HARBOR_REWARD_DIR || "/logs/verifier";
 const REWARD_FILE = process.env.HARBOR_REWARD_FILE || `${REWARD_DIR}/reward.json`;
 const EXPECTED_VISIBLE_TEST_SHA256 = "68fe2969e1c88c4da2fc1c73c29e6d67e624204dc482f5e08c970f7ea6a36596";
@@ -72,6 +74,20 @@ function visibleTestIsUnchanged() {
   }
 }
 
+function packageContractIsUnchanged() {
+  try {
+    return createHash("sha256").update(readFileSync(PACKAGE_FILE)).digest("hex") === EXPECTED_PACKAGE_SHA256;
+  } catch {
+    return false;
+  }
+}
+
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
 function runVisibleSuite() {
   const result = spawnSync("npm", ["test"], {
     cwd: APP_DIR,
@@ -90,9 +106,10 @@ function hasAddedIntegrationTest() {
       .filter((name) => name.endsWith(".test.mjs") && name !== "server.test.mjs")
       .some((name) => {
         const source = readFileSync(`${APP_DIR}/src/${name}`, "utf8");
-        return source.includes("/orders")
-          && source.includes("auditSink")
-          && /\b(?:assert|test)\b/.test(source);
+        const activeSource = stripComments(source);
+        return activeSource.includes("/orders")
+          && activeSource.includes("auditSink")
+          && /\b(?:assert|test)\b/.test(activeSource);
       });
   } catch {
     return false;
@@ -179,7 +196,7 @@ console.log("HARBOR_PROBE " + JSON.stringify(result));
 async function grade() {
   lockVerifierBoundary();
   // Record the immutable visible-test result before any agent-controlled code executes.
-  const testsUnchanged = visibleTestIsUnchanged() ? 1 : 0;
+  const testsUnchanged = visibleTestIsUnchanged() && packageContractIsUnchanged() ? 1 : 0;
   const visibleSuitePassed = runVisibleSuite();
   const addedTest = hasAddedIntegrationTest();
   let probe = { functional: false, regression: false };

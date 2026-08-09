@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const APP_DIR = process.env.HARBOR_APP_DIR || "/app";
 const TEST_FILE = `${APP_DIR}/src/server.test.mjs`;
+const PACKAGE_FILE = `${APP_DIR}/package.json`;
+const EXPECTED_PACKAGE_SHA256 = "bb192225d7c3566461bec49a788a3ae538fc25c26eec6adb59a01e89d4010ced";
 const REWARD_DIR = process.env.HARBOR_REWARD_DIR || "/logs/verifier";
 const REWARD_FILE = process.env.HARBOR_REWARD_FILE || `${REWARD_DIR}/reward.json`;
 const EXPECTED_VISIBLE_TEST_SHA256 = "aab7b43d330f14760f3daedfa8ada13431d0069fbaf8b4cefbd0c34014b6ece8";
@@ -74,6 +76,20 @@ function visibleTestIsUnchanged() {
   }
 }
 
+function packageContractIsUnchanged() {
+  try {
+    return createHash("sha256").update(readFileSync(PACKAGE_FILE)).digest("hex") === EXPECTED_PACKAGE_SHA256;
+  } catch {
+    return false;
+  }
+}
+
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
 function runVisibleSuite() {
   const result = spawnSync("npm", ["test"], {
     cwd: APP_DIR,
@@ -92,7 +108,8 @@ function hasAddedRouterTest() {
       .filter((name) => name.endsWith(".test.mjs") && name !== "server.test.mjs")
       .some((name) => {
         const source = readFileSync(`${APP_DIR}/src/${name}`, "utf8");
-        return source.includes("/items/") && /\b(?:assert|test)\b/.test(source);
+        const activeSource = stripComments(source);
+        return activeSource.includes("/items/") && /\b(?:assert|test)\b/.test(activeSource);
       });
   } catch {
     return false;
@@ -215,7 +232,7 @@ async function checkExisting(base) {
 async function grade() {
   lockVerifierBoundary();
   // Hash the complete visible regression file before agent-controlled execution.
-  const testsUnchanged = visibleTestIsUnchanged() ? 1 : 0;
+  const testsUnchanged = visibleTestIsUnchanged() && packageContractIsUnchanged() ? 1 : 0;
   const visibleSuitePassed = runVisibleSuite();
   const addedTest = hasAddedRouterTest();
   const structure = hasExtractedRouter();

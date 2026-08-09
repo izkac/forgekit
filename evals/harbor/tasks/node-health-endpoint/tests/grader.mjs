@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const APP_DIR = process.env.HARBOR_APP_DIR || "/app";
 const TEST_FILE = `${APP_DIR}/src/server.test.mjs`;
+const PACKAGE_FILE = `${APP_DIR}/package.json`;
+const EXPECTED_PACKAGE_SHA256 = "f4fc7c2da6a123aa26ce29697d1c6a58d5db9f8996c33ba3a16e4050699898c3";
 const REWARD_DIR = process.env.HARBOR_REWARD_DIR || "/logs/verifier";
 const REWARD_FILE = process.env.HARBOR_REWARD_FILE || `${REWARD_DIR}/reward.json`;
 // Hash the complete original visible regression file. Agents add new tests in
@@ -94,6 +96,20 @@ function visibleTestIsUnchanged() {
   return actualHash === EXPECTED_VISIBLE_TEST_SHA256;
 }
 
+function packageContractIsUnchanged() {
+  try {
+    return createHash("sha256").update(readFileSync(PACKAGE_FILE)).digest("hex") === EXPECTED_PACKAGE_SHA256;
+  } catch {
+    return false;
+  }
+}
+
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
 function runVisibleSuite() {
   const result = spawnSync("npm", ["test"], {
     cwd: APP_DIR,
@@ -116,7 +132,8 @@ function hasAddedHealthTest() {
       .filter((name) => name.endsWith(".test.mjs") && name !== "server.test.mjs")
       .some((name) => {
         const source = readFileSync(`${APP_DIR}/src/${name}`, "utf8");
-        return source.includes("/health") && /\b(?:assert|test)\b/.test(source);
+        const activeSource = stripComments(source);
+        return activeSource.includes("/health") && /\b(?:assert|test)\b/.test(activeSource);
       });
   } catch {
     return false;
@@ -272,7 +289,7 @@ async function checkOtherRoutes(baseURL) {
 
 async function grade() {
   lockVerifierBoundary();
-  const testsUnchanged = visibleTestIsUnchanged() ? 1 : 0;
+  const testsUnchanged = visibleTestIsUnchanged() && packageContractIsUnchanged() ? 1 : 0;
   const visibleSuitePassed = runVisibleSuite();
   const addedHealthTest = hasAddedHealthTest();
   let functional = 0;

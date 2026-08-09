@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const APP_DIR = process.env.HARBOR_APP_DIR || "/app";
 const TEST_FILE = `${APP_DIR}/src/server.test.mjs`;
+const PACKAGE_FILE = `${APP_DIR}/package.json`;
+const EXPECTED_PACKAGE_SHA256 = "87ab28760778241863154c3df21b21e4f686e2207d01651a4b278e2bae3e9726";
 const REWARD_DIR = process.env.HARBOR_REWARD_DIR || "/logs/verifier";
 const REWARD_FILE = process.env.HARBOR_REWARD_FILE || `${REWARD_DIR}/reward.json`;
 const EXPECTED_VISIBLE_TEST_SHA256 = "5c4a297bea47ed4d4b6de065c2dcc2ee8448c496222e47987c835f33ca871123";
@@ -80,6 +82,20 @@ function visibleTestIsUnchanged() {
   } catch {
     return false;
   }
+}
+
+function packageContractIsUnchanged() {
+  try {
+    return createHash("sha256").update(readFileSync(PACKAGE_FILE)).digest("hex") === EXPECTED_PACKAGE_SHA256;
+  } catch {
+    return false;
+  }
+}
+
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 }
 
 function runVisibleSuite() {
@@ -175,6 +191,7 @@ async function fetchText(url, options = {}) {
 }
 
 function addedTestSourceLooksRelevant(source) {
+  source = stripComments(source);
   return source.includes("/items?page=2")
     && source.includes("/items?page=3")
     && /\b(?:assert|test)\b/.test(source);
@@ -227,7 +244,7 @@ async function checkRegression(baseURL) {
 async function grade() {
   lockVerifierBoundary();
   // This snapshot is deliberately taken before any agent-controlled test or app executes.
-  const testsUnchanged = visibleTestIsUnchanged() ? 1 : 0;
+  const testsUnchanged = visibleTestIsUnchanged() && packageContractIsUnchanged() ? 1 : 0;
   const visibleSuitePassed = runVisibleSuite();
   const addedTest = hasAddedTest();
   let functional = 0;
