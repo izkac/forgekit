@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const temporaryDirectories = new Set();
+after(() => {
+  for (const directory of temporaryDirectories) rmSync(directory, { recursive: true, force: true });
+});
 const expected = {
   untouched: { functional: 0, regression: 1, tests_unchanged: 1, shippable: 0 },
   solution: { functional: 1, regression: 1, tests_unchanged: 1, shippable: 1 },
@@ -16,6 +20,7 @@ const expected = {
 function copyFixture(taskName) {
   const task = path.join(here, "tasks", taskName);
   const directory = mkdtempSync(path.join(tmpdir(), `forgekit-${taskName}-`));
+  temporaryDirectories.add(directory);
   const app = path.join(directory, "app");
   cpSync(path.join(task, "environment", "app"), app, { recursive: true });
   return { task, directory, app };
