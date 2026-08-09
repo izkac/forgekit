@@ -184,20 +184,21 @@ check for 43.
 ## Per-task loop
 
 1. Extract full task text + file paths + relevant **capability** spec sections (not only the task checkbox line).
-2. Write `.forge/sessions/<id>/tasks/<nn>-<slug>/brief.md` using [../subagents/implementer-prompt.md](../subagents/implementer-prompt.md).
+2. Write `.forge/sessions/<id>/tasks/<nn>-<slug>/brief.md` using [../subagents/implementer-prompt.md](../subagents/implementer-prompt.md). Fill `{SESSION_ID}` with the current session id and `{TASK_ID}` with this task directory id; never leave either target for the implementer to infer from `.forge/active.json`.
 3. Dispatch **implementer** subagent — brief includes [../references/tdd-core.md](../references/tdd-core.md). **Model:** follow [../references/model-selection.md](../references/model-selection.md) — resolve via `forge resolve-model --tier <fast|standard|capable>` (billing defaults to **`included`**). Use `fast` for mechanical tasks (1–2 files, complete spec) and batched small tasks; `standard` for multi-file integration; escalate one capability tier (still `included`) when re-dispatching after `BLOCKED`. If `omitModel` is true, **omit** the Task `model` parameter entirely (never pass a host-list slug); otherwise pass `model` exactly.
 4. **Reviewer** (unless pace skips it):
    - **`always` / high-risk hard floor:** dispatch [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md) for this task → `task-review.md`.
    - **`per-group` at group boundary:** dispatch one reviewer covering **all tasks in the just-finished `tasks.md` group** → `group-review.md` (include each task id + paths). Mid-group low-risk tasks: self-check `task-review.md` only.
-   - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{DIFF_RANGE}`, `{CAPABILITY_SPEC_EXCERPT}`, and `{GUARD_ALLOWANCES}` (paste `.forge/sessions/<id>/guard-allowances.json`'s contents — there is no `forge guard list` to generate this — or "none" if the file doesn't exist) — read actual code, not the implementer's summary. **Model:** [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Honor `omitModel` / `model` literally. Do **not** skip high-risk tasks.
+   - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{SESSION_ID}`, `{TASK_ID}`, `{TDD_EVIDENCE_ENABLED}`, `{DIFF_RANGE}`, `{CAPABILITY_SPEC_EXCERPT}`, and `{GUARD_ALLOWANCES}` (paste `.forge/sessions/<id>/guard-allowances.json`'s contents — there is no `forge guard list` to generate this — or "none" if the file doesn't exist) — read actual code, not the implementer's summary. **Model:** [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Honor `omitModel` / `model` literally. Do **not** skip high-risk tasks.
 5. Fix loop until the reviewer approves (max `review.maxRounds` from pace; then escalate to the human). For group reviews, fix any rejected task in the group before continuing to the next group.
 6. **Tier-2 evidence — two paths, know which one this task takes:**
-   - **Behavior-change tasks (TDD applies):** evidence comes from `forge tdd run`
-     stamps the implementer produced during the loop — a red stamp
-     (`--expect fail`) before production code, a green stamp (`--expect pass`)
-     after (see [../references/tdd-core.md](../references/tdd-core.md)). Each
-     call executes the command itself and appends to
-     `tasks/<nn>-<slug>/tdd-runs.jsonl`; there is nothing for the coordinator to
+   - **Behavior-change tasks (TDD applies):** evidence comes from
+     `forge tdd run --session <id> --task <task-id>` stamps the implementer
+     produced during the loop — a red stamp (`--expect fail`) before production
+     code, a green stamp (`--expect pass`) after (see
+     [../references/tdd-core.md](../references/tdd-core.md)). Each call executes
+     the command itself and appends to
+     `.forge/sessions/<id>/tasks/<task-id>/tdd-runs.jsonl`; there is nothing for the coordinator to
      stamp by hand here — do **not** also run `forge evidence` for the same
      command; `forge score` reads the stamps directly (an ok pass-stamp counts
      as tier-2 coverage even with no `test-evidence.md`), so this costs
