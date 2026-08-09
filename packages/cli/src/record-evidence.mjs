@@ -282,6 +282,23 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     return { exitCode: 1, message: `Session dir not found: ${sessionDir} (session ${sessionId})` };
   }
 
+  let session = {};
+  try {
+    session = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+  } catch {
+    // Legacy fixtures and sessions without readable metadata retain the old path.
+  }
+  const tddLedger = path.join(sessionDir, 'tasks', opts.task, 'tdd-runs.jsonl');
+  if (session?.features?.tddEvidence === true && !opts.noTdd && !fs.existsSync(tddLedger)) {
+    return {
+      exitCode: 1,
+      message:
+        `Plain evidence cannot start task ${opts.task} in a session with executed TDD evidence enabled. ` +
+        `Have the implementer run forge tdd run --session ${sessionId} --task ${opts.task} during the real RED→GREEN cycle; ` +
+        'do not reconstruct stamps retroactively. Use --no-tdd --reason only when no behavior changed.',
+    };
+  }
+
   if (testExit !== null && testExit !== 0 && !opts.allowFail) {
     return {
       exitCode: 1,

@@ -588,3 +588,31 @@ test('a plain --command/--exit/--summary run (no --no-tdd) never writes the no-t
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('flagged task refuses plain evidence before an executed ledger exists', () => {
+  const dir = tmp('forge-evidence-flagged-');
+  const forgeDir = makeForgeFixture(dir, 's1');
+  fs.writeFileSync(path.join(forgeDir, 'sessions', 's1', 'session.json'), JSON.stringify({ id: 's1', features: { tddEvidence: true } }));
+  const result = runRecordEvidence(makeOpts({ session: 's1', forgeDir }), dir, FIXED_NOW);
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.message, /forge tdd run/);
+  assert.equal(fs.existsSync(evidencePath(forgeDir, 's1', '03-record-evidence')), false);
+});
+
+test('flagged task accepts no-TDD declarations and supplemental evidence after a ledger exists', () => {
+  const dir = tmp('forge-evidence-compatible-');
+  const forgeDir = makeForgeFixture(dir, 's1');
+  const sessionDir = path.join(forgeDir, 'sessions', 's1');
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify({ id: 's1', features: { tddEvidence: true } }));
+
+  const exempt = runRecordEvidence(makeOpts({ task: 'docs', session: 's1', forgeDir, noTdd: true, reason: 'docs only' }), dir, FIXED_NOW);
+  assert.equal(exempt.exitCode, 0, exempt.message);
+
+  const ledgerDir = path.join(sessionDir, 'tasks', 'behavior');
+  fs.mkdirSync(ledgerDir, { recursive: true });
+  fs.writeFileSync(path.join(ledgerDir, 'tdd-runs.jsonl'), '{"expect":"fail"}\n');
+  const supplemental = runRecordEvidence(makeOpts({ task: 'behavior', session: 's1', forgeDir }), dir, FIXED_NOW);
+  assert.equal(supplemental.exitCode, 0, supplemental.message);
+  assert.equal(fs.existsSync(evidencePath(forgeDir, 's1', 'behavior')), true);
+});

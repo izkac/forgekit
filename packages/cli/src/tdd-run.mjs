@@ -92,7 +92,15 @@ export function parseArgs(argv) {
 function appendStamp(sid, task, stamp) {
   const taskDir = path.join(sessionPath(sid), 'tasks', task);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.appendFileSync(path.join(taskDir, 'tdd-runs.jsonl'), `${JSON.stringify(stamp)}\n`, 'utf8');
+  const filePath = path.join(taskDir, 'tdd-runs.jsonl');
+  fs.appendFileSync(filePath, `${JSON.stringify(stamp)}\n`, 'utf8');
+  return filePath;
+}
+
+function printReceipt(filePath, stamp) {
+  process.stderr.write(
+    `forge tdd run: stamped ${filePath}; expected=${stamp.expect}; childExit=${stamp.exit}; ok=${stamp.ok}\n`,
+  );
 }
 
 function main() {
@@ -154,36 +162,25 @@ function main() {
     if (settled) return;
     settled = true;
     const durationMs = Date.now() - startedMs;
-    appendStamp(sessionId, task, {
-      cmd,
-      args: cmdArgs,
-      expect,
-      exit: null,
-      ok: false,
-      startedAt,
-      durationMs,
-    });
+    const stamp = { cmd, args: cmdArgs, expect, exit: null, ok: false, startedAt, durationMs };
+    const filePath = appendStamp(sessionId, task, stamp);
+    printReceipt(filePath, stamp);
     process.stderr.write(`forge tdd run: failed to execute ${cmd}: ${err.message}\n`);
     process.exit(1);
   });
 
-  child.on('close', (code) => {
+  child.on('close', (code, signal) => {
     if (settled) return;
     settled = true;
     const durationMs = Date.now() - startedMs;
-    const ok = expect === 'fail' ? code !== 0 : code === 0;
-    appendStamp(sessionId, task, {
-      cmd,
-      args: cmdArgs,
-      expect,
-      exit: code,
-      ok,
-      startedAt,
-      durationMs,
-    });
+    const ok = code !== null && (expect === 'fail' ? code !== 0 : code === 0);
+    const stamp = { cmd, args: cmdArgs, expect, exit: code, ok, startedAt, durationMs };
+    const filePath = appendStamp(sessionId, task, stamp);
+    printReceipt(filePath, stamp);
     if (!ok) {
+      const outcome = code === null && signal ? `terminated by signal ${signal}` : `exited ${code}`;
       process.stderr.write(
-        `forge tdd run: contradicted expectation — expected ${expect}, command exited ${code}\n`,
+        `forge tdd run: contradicted expectation — expected ${expect}, command ${outcome}\n`,
       );
     }
     process.exit(ok ? 0 : 1);

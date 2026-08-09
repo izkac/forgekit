@@ -92,6 +92,7 @@ test('red stamp: a failing command with --expect fail exits 0 and stamps ok:true
   assert.equal(stamps[0].ok, true);
   assert.equal(stamps[0].expect, 'fail');
   assert.equal(stamps[0].exit, 1);
+  assert.match(r.stderr, /tdd-runs\.jsonl.*expected=fail.*childExit=1.*ok=true/);
 });
 
 test('green stamp: a passing command with --expect pass exits 0 and stamps ok:true with exit 0', () => {
@@ -103,6 +104,7 @@ test('green stamp: a passing command with --expect pass exits 0 and stamps ok:tr
   assert.equal(stamps[0].ok, true);
   assert.equal(stamps[0].expect, 'pass');
   assert.equal(stamps[0].exit, 0);
+  assert.match(r.stderr, /tdd-runs\.jsonl.*expected=pass.*childExit=0.*ok=true/);
 });
 
 test('contradiction (pass expected fail): a passing command with --expect fail exits non-zero and stamps ok:false', () => {
@@ -113,6 +115,7 @@ test('contradiction (pass expected fail): a passing command with --expect fail e
   assert.equal(stamps.length, 1, 'a contradicted expectation is still stamped');
   assert.equal(stamps[0].ok, false);
   assert.equal(stamps[0].exit, 0);
+  assert.match(r.stderr, /expected=fail.*childExit=0.*ok=false/);
 });
 
 test('contradiction (fail expected pass): a failing command with --expect pass exits non-zero and stamps ok:false', () => {
@@ -123,6 +126,21 @@ test('contradiction (fail expected pass): a failing command with --expect pass e
   assert.equal(stamps.length, 1, 'a contradicted expectation is still stamped');
   assert.equal(stamps[0].ok, false);
   assert.equal(stamps[0].exit, 1);
+  assert.match(r.stderr, /expected=pass.*childExit=1.*ok=false/);
+});
+
+test('signal-terminated command never becomes a usable expected RED stamp', { skip: process.platform === 'win32' }, () => {
+  const { root, sessionDir } = makeProject();
+  const r = runTddRun(root, [
+    'run', '--task', '01-signal', '--expect', 'fail', '--',
+    process.execPath, '-e', "process.kill(process.pid, 'SIGTERM')",
+  ]);
+  assert.notEqual(r.status, 0);
+  const [stamp] = readStamps(sessionDir, '01-signal');
+  assert.equal(stamp.exit, null);
+  assert.equal(stamp.ok, false);
+  assert.match(r.stderr, /expected=fail.*childExit=null.*ok=false/);
+  assert.match(r.stderr, /SIGTERM/);
 });
 
 test('stamp schema: all seven fields present, startedAt parses as a date, durationMs is a non-negative number', () => {
