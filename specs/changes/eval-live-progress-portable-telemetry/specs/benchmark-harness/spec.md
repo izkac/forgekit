@@ -4,7 +4,7 @@
 
 ### Requirement: Long-running trials expose sanitized progress
 
-The evaluator SHALL emit run and trial lifecycle messages plus periodic heartbeats on stderr without changing the single JSON plan emitted on stdout. Heartbeats SHALL be configurable with a validated non-negative interval, SHALL default to 30 seconds, and SHALL contain no credentials, task instructions, source paths, checkout paths, or treatment source paths.
+The evaluator SHALL emit run and trial lifecycle messages plus periodic heartbeats on stderr without changing the single JSON plan emitted on stdout. Heartbeats SHALL be configurable with a validated interval from 0 through 86400 seconds, SHALL default to 30 seconds, and SHALL contain no credentials, task instructions, source paths, checkout paths, or treatment source paths.
 
 #### Scenario: Healthy model execution remains observable
 - **WHEN** a Harbor trial runs longer than the configured progress interval

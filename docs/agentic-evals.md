@@ -223,8 +223,9 @@ During real execution the runner writes sanitized `[eval-progress]` lifecycle
 messages to stderr and a heartbeat every 30 seconds, while stdout remains one
 JSON plan suitable for `tee`. Use `--progress-interval-seconds N` (0–86400) to change the
 heartbeat cadence or `0` to disable periodic heartbeats; start and terminal
-lifecycle messages remain enabled. Progress lines contain run/trial identities,
-arm, status, and elapsed time only—never prompts, credentials, or host paths.
+lifecycle messages remain enabled. Progress lines contain safe run/trial/task identities, arm, status, ordinal,
+trial/outcome counts, and elapsed time only—never prompts, credentials, or host
+paths.
 
 Confirm credentials, builds, rewards, normalized results, and actual cost. Then
 choose a repetition count justified by the trial plan and budget. Use the same
@@ -382,9 +383,10 @@ locators and omit the absolute run directory. Locate a run by combining its
 default `evals/.runs`. Harbor executes from that run directory using the exact
 relative argv recorded in provenance.
 
-Forge artifact summaries and normalized telemetry use a run-relative
-`artifactLocator` plus a relative file inventory; they do not serialize the
-host-absolute artifact discovery path. Raw Harbor logs and downloaded artifacts
+Forge artifact summaries and normalized telemetry use a trial-Harbor-output-relative
+`artifactLocator` plus a relative file inventory; resolve the locator beneath
+`$RUN_DIR/trials/<trial-id>/harbor`. They do not serialize the host-absolute
+artifact discovery path. Raw Harbor logs and downloaded artifacts
 can still include host paths, source files, hidden-verifier output, model
 transcripts, Forge process data, and provider metadata. Although the local
 tarball source path is omitted and credential values are not intentionally

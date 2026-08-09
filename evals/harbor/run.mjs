@@ -343,7 +343,7 @@ function spawnHarbor(argv, stdout, stderr, cwd) {
       env: process.env,
       cwd,
     });
-    child.on('error', (error) => reject(new Error(`failed to invoke Harbor: ${error.message}`)));
+    child.on('error', () => reject(new Error('Harbor failed to start')));
     child.on('close', (code, signal) => {
       if (code === 0) resolve();
       else reject(new Error(`Harbor exited ${signal ? `with signal ${signal}` : `with code ${code}`}`));
@@ -351,17 +351,22 @@ function spawnHarbor(argv, stdout, stderr, cwd) {
   });
 }
 
-function captureProcess(executable, argv) {
+function captureProcess(executable, argv, label) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, argv, { shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', (error) => reject(new Error(`failed to invoke ${executable}: ${error.message}`)));
+    child.on('error', () => reject(new Error(`${label} failed to start`)));
     child.on('close', (code, signal) => {
-      if (code === 0) resolve({ stdout, stderr });
-      else reject(new Error(`${executable} exited ${signal ? `with signal ${signal}` : `with code ${code}`}: ${stderr.trim()}`));
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      const error = new Error(`${label} exited ${signal ? `with signal ${signal}` : `with code ${code}`}`);
+      Object.defineProperty(error, 'capturedStderr', { value: stderr, enumerable: false });
+      reject(error);
     });
   });
 }
@@ -431,7 +436,18 @@ async function normalizeTrial(trial) {
   if (forgeSummary) argv.push('--forge-summary', forgeSummary);
   if (harborTrialResult) argv.push('--harbor-result', harborTrialResult);
   if (harborJobResult) argv.push('--harbor-job-result', harborJobResult);
-  const result = await captureProcess(process.execPath, argv);
+  let result;
+  try {
+    result = await captureProcess(process.execPath, argv, 'result normalizer');
+  } catch (error) {
+    if (typeof error.capturedStderr === 'string') {
+      await writeFile(
+        path.join(trial.trialDirectory, 'normalizer.stderr.log'),
+        error.capturedStderr.slice(0, 65_536),
+      ).catch(() => {});
+    }
+    throw new Error('result normalization failed; inspect trial-local normalizer.stderr.log');
+  }
   await writeFile(normalizedResult, result.stdout);
   trial.manifestData.reward = path.relative(trial.runDirectory, rewards[0]);
   trial.manifestData.harborResult = harborTrialResult ? path.relative(trial.runDirectory, harborTrialResult) : null;
@@ -453,13 +469,29 @@ async function writeManifest(trial) {
   await writeFile(trial.manifest, `${JSON.stringify(trial.manifestData, null, 2)}\n`);
 }
 
+function sanitizeTrialError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/^Harbor exited (?:with signal [A-Za-z0-9]+|with code \d+)$/.test(message)) return message;
+  if (message === 'Harbor failed to start') return message;
+  if (/^expected exactly one verifier reward\.json, found \d+$/.test(message)) return message;
+  if (message === 'result normalization failed; inspect trial-local normalizer.stderr.log') return message;
+  return 'trial execution failed; inspect trial-local logs';
+}
+
+async function recordPrivateTrialError(trial, error) {
+  const detail = error instanceof Error ? (error.stack || error.message) : String(error);
+  await writeFile(
+    path.join(trial.trialDirectory, 'runner-error.log'),
+    `${detail.slice(0, 65_536)}\n`,
+  ).catch(() => {});
+}
+
 async function executeTrial(trial, progressIntervalSeconds, ordinal, totalTrials) {
   trial.status = 'running';
   trial.startedAt = new Date().toISOString();
   trial.manifestData.status = 'running';
   trial.manifestData.startedAt = trial.startedAt;
-  await writeManifest(trial);
-  const progressStartedAt = Date.now();
+  const progressStartedAt = performance.now();
   emitProgress({
     run: trial.manifestData.runId,
     event: 'trial-start',
@@ -472,14 +504,18 @@ async function executeTrial(trial, progressIntervalSeconds, ordinal, totalTrials
       run: trial.manifestData.runId,
       event: 'trial-heartbeat',
       arm: trial.arm,
-      elapsedSeconds: Math.max(1, Math.floor((Date.now() - progressStartedAt) / 1000)),
+      status: 'running',
+      elapsedSeconds: Math.max(1, Math.floor((performance.now() - progressStartedAt) / 1000)),
       trial: trial.trialId,
     });
   }, progressIntervalSeconds * 1000);
   heartbeat?.unref();
+
   let stdout;
   let stderr;
+  let failure = null;
   try {
+    await writeManifest(trial);
     stdout = await open(path.join(trial.trialDirectory, 'harbor.stdout.log'), 'w');
     stderr = await open(path.join(trial.trialDirectory, 'harbor.stderr.log'), 'w');
     await spawnHarbor(trial.harborArgv, stdout.fd, stderr.fd, trial.runDirectory);
@@ -487,25 +523,46 @@ async function executeTrial(trial, progressIntervalSeconds, ordinal, totalTrials
     trial.status = 'verified';
     trial.manifestData.status = 'verified';
   } catch (error) {
-    trial.status = 'failed';
-    trial.error = error.message;
-    trial.manifestData.status = 'failed';
-    trial.manifestData.error = error.message;
-    throw error;
+    failure = error;
+    await recordPrivateTrialError(trial, error);
   } finally {
     if (heartbeat) clearInterval(heartbeat);
-    await Promise.all([stdout?.close(), stderr?.close()]);
+    const closes = await Promise.allSettled([stdout?.close(), stderr?.close()]);
+    if (failure === null) {
+      const rejectedClose = closes.find((result) => result.status === 'rejected');
+      if (rejectedClose) failure = rejectedClose.reason;
+    }
+    if (failure !== null) {
+      const publicError = sanitizeTrialError(failure);
+      trial.status = 'failed';
+      trial.error = publicError;
+      trial.manifestData.status = 'failed';
+      trial.manifestData.error = publicError;
+      await recordPrivateTrialError(trial, failure);
+    }
     trial.finishedAt = new Date().toISOString();
     trial.manifestData.finishedAt = trial.finishedAt;
-    await writeManifest(trial);
+    try {
+      await writeManifest(trial);
+    } catch (error) {
+      if (failure === null) failure = error;
+      const publicError = sanitizeTrialError(failure);
+      trial.status = 'failed';
+      trial.error = publicError;
+      trial.manifestData.status = 'failed';
+      trial.manifestData.error = publicError;
+      await recordPrivateTrialError(trial, error);
+    }
     emitProgress({
       run: trial.manifestData.runId,
       event: trial.status === 'verified' ? 'trial-verified' : 'trial-failed',
       arm: trial.arm,
-      elapsedSeconds: Math.max(0, Math.round((Date.now() - progressStartedAt) / 1000)),
+      elapsedSeconds: Math.max(0, Math.round((performance.now() - progressStartedAt) / 1000)),
       trial: trial.trialId,
     });
   }
+
+  if (failure !== null) throw new Error(trial.error);
 }
 
 async function runWithConcurrency(items, limit, action) {
@@ -582,7 +639,7 @@ async function main(argv) {
 
   const harborVersion = config.dryRun
     ? null
-    : (await captureProcess('harbor', ['--version'])).stdout.trim();
+    : (await captureProcess('harbor', ['--version'], 'Harbor version probe')).stdout.trim();
 
   const trials = [];
   let scheduleIndex = 0;
@@ -698,7 +755,7 @@ async function main(argv) {
     let executionIndex = 0;
     plan.status = 'running';
     plan.startedAt = new Date().toISOString();
-    const progressStartedAt = Date.now();
+    const progressStartedAt = performance.now();
     await persistPlan(plan, trials);
     emitProgress({ run: runId, event: 'run-start', task: config.task, trials: trials.length });
     const attempt = async (trial) => {
@@ -726,15 +783,15 @@ async function main(argv) {
     }
     plan.finishedAt = new Date().toISOString();
     plan.status = failures.length === 0 ? 'completed' : 'completed-with-failures';
+    await persistPlan(plan, trials);
     emitProgress({
       run: runId,
       event: 'run-completed',
       status: plan.status,
       verified: trials.filter((trial) => trial.status === 'verified').length,
       failed: failures.length,
-      elapsedSeconds: Math.max(0, Math.round((Date.now() - progressStartedAt) / 1000)),
+      elapsedSeconds: Math.max(0, Math.round((performance.now() - progressStartedAt) / 1000)),
     });
-    await persistPlan(plan, trials);
   }
 
   process.stdout.write(`${JSON.stringify(publicPlanData(plan), null, 2)}\n`);

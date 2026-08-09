@@ -275,8 +275,8 @@ Real runs keep stdout as one final JSON plan and write sanitized `[eval-progress
 lifecycle messages to stderr. A heartbeat appears every 30 seconds by default so
 long Harbor setup or model work does not look hung. Set
 `--progress-interval-seconds N` (0–86400) to change the cadence or `0` to disable only
-periodic heartbeats. Messages include safe run/trial ids, arm, status, ordinal,
-and elapsed seconds; they exclude prompts, credentials, and paths.
+periodic heartbeats. Messages include safe run/trial/task ids, arm, status, ordinal,
+trial/outcome counts, and elapsed seconds; they exclude prompts, credentials, and paths.
 
 ## Provenance, Reproducibility, And Privacy
 
@@ -304,9 +304,10 @@ absolute run directory. `runId` is the stable locator: the operator combines it
 with the configured runs root (or the default `evals/.runs`). Harbor is invoked
 from that run root with the exact relative argv recorded in provenance.
 
-Forge artifact summaries and normalized telemetry use a run-relative
-`artifactLocator` plus relative file names instead of the host-absolute discovery
-path. Raw artifacts and logs may still contain host paths, source,
+Forge artifact summaries and normalized telemetry use a trial-Harbor-output-relative
+`artifactLocator` plus relative file names. Resolve the locator beneath
+`$RUN_DIR/trials/<trial-id>/harbor`; the host-absolute discovery path is not
+serialized. Raw artifacts and logs may still contain host paths, source,
 hidden-verifier output, model transcripts, Forge telemetry, and provider
 metadata. The local tarball's source host path is deliberately omitted, and
 credential values are not intended to be recorded, but operators must inspect

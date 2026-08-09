@@ -7,9 +7,9 @@
 ## Decisions
 
 - Decision: write progress only to stderr.
-  - Emit run start, trial start, periodic `still running` heartbeat, and terminal trial/run messages containing only run/trial ids, arm, ordinal, status, and elapsed seconds.
+  - Emit run start, trial start, periodic `still running` heartbeat, and terminal trial/run messages containing only safe run/trial/task ids, arm, ordinal, status, trial counts, outcome counts, and elapsed seconds.
   - Rationale: stdout remains parseable and progress cannot leak task source, credentials, or host paths.
-- Decision: expose `--progress-interval-seconds`, default 30; `0` disables heartbeats but not lifecycle events.
+- Decision: expose `--progress-interval-seconds` from 0 through 86400, default 30; `0` disables heartbeats but not lifecycle events.
   - Rationale: production behavior is useful by default and tests can exercise short intervals without hidden environment hooks.
 - Decision: store `artifactLocator` relative to the trial Harbor output root and remove `artifactPath`.
   - Rationale: consumers need a portable locator plus the already-relative file list, not a host location.

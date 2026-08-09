@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -324,8 +324,12 @@ writeFileSync(path.join(output, 'artifacts', '.forge', 'session.json'), '{}');
   const normalized = JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8'));
   assert.equal(normalized.instrumentation.available, true);
   assert.equal(normalized.instrumentation.forge.artifactPath, undefined);
-  assert.match(normalized.instrumentation.forge.artifactLocator, /(?:^|\/)artifacts\/(?:app\/)?\.forge$/);
-  assert.equal(path.isAbsolute(normalized.instrumentation.forge.artifactLocator), false);
+  const artifactLocator = normalized.instrumentation.forge.artifactLocator;
+  assert.match(artifactLocator, /(?:^|\/)artifacts\/(?:app\/)?\.forge$/);
+  assert.equal(path.isAbsolute(artifactLocator), false);
+  assert.equal(artifactLocator.split('/').includes('..'), false);
+  const trialOutputRoot = path.join(plan.runDirectory, 'trials', plan.trials[0].trialId, 'harbor');
+  assert.equal((await stat(path.join(trialOutputRoot, artifactLocator))).isDirectory(), true);
   assert.equal(JSON.stringify(normalized).includes(testRunsRoot), false);
   assert.equal(JSON.stringify(normalized).includes(projectRoot), false);
 });
@@ -580,9 +584,80 @@ writeFileSync(path.join(job, 'result.json'), '{}');
   assert.equal(plan.trials[0].status, 'verified');
   assert.match(result.stderr, /\[eval-progress] run=[^ ]+ event=run-start task=node-health-endpoint trials=1/);
   assert.match(result.stderr, /event=trial-start arm=baseline ordinal=1\/1/);
-  assert.match(result.stderr, /event=trial-heartbeat arm=baseline elapsedSeconds=1/);
+  assert.match(result.stderr, /event=trial-heartbeat arm=baseline status=running elapsedSeconds=1/);
   assert.match(result.stderr, /event=trial-verified arm=baseline elapsedSeconds=/);
   assert.match(result.stderr, /event=run-completed status=completed verified=1 failed=0 elapsedSeconds=/);
   assert.equal(result.stderr.includes(testRunsRoot), false);
   assert.equal(result.stderr.includes(projectRoot), false);
+
+  const noHeartbeatArgs = [...args];
+  noHeartbeatArgs[noHeartbeatArgs.indexOf('--progress-interval-seconds') + 1] = '0';
+  const noHeartbeat = await run(noHeartbeatArgs, {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+  });
+  assert.equal(noHeartbeat.code, 0, noHeartbeat.stderr);
+  const noHeartbeatPlan = parsePlan(noHeartbeat.stdout);
+  t.after(() => cleanupPlan(noHeartbeatPlan));
+  assert.doesNotMatch(noHeartbeat.stderr, /event=trial-heartbeat/);
+  assert.match(noHeartbeat.stderr, /event=trial-start/);
+  assert.match(noHeartbeat.stderr, /event=trial-verified/);
+  assert.match(noHeartbeat.stderr, /event=run-completed/);
+
+  const concurrentArgs = [...args];
+  concurrentArgs[concurrentArgs.indexOf('--repetitions') + 1] = '2';
+  concurrentArgs[concurrentArgs.indexOf('--concurrency') + 1] = '2';
+  const concurrent = await run(concurrentArgs, {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+  });
+  assert.equal(concurrent.code, 0, concurrent.stderr);
+  const concurrentPlan = parsePlan(concurrent.stdout);
+  t.after(() => cleanupPlan(concurrentPlan));
+  const heartbeatTrials = [...concurrent.stderr.matchAll(
+    /event=trial-heartbeat arm=baseline status=running elapsedSeconds=\d+ trial=([^\s]+)/g,
+  )].map((match) => match[1]);
+  assert.equal(new Set(heartbeatTrials).size, 2);
+});
+
+
+test('failed normalization keeps paths and malformed content out of structured output', async (t) => {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-private-error-bin-'));
+  const fakeHarbor = path.join(bin, 'harbor');
+  const secretMarker = 'S3CR3T';
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('harbor 0.20.0'); process.exit(0); }
+const job = path.join(args[args.indexOf('--jobs-dir') + 1], 'job');
+const output = path.join(job, 'trial');
+mkdirSync(path.join(output, 'verifier'), { recursive: true });
+writeFileSync(path.join(output, 'verifier', 'reward.json'), '${secretMarker}');
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const args = [...validArgs];
+  args[args.indexOf('--arm') + 1] = 'baseline';
+  args[args.indexOf('--repetitions') + 1] = '1';
+  const result = await run(args, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  assert.notEqual(result.code, 0);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  const persisted = await readFile(path.join(plan.runDirectory, 'plan.json'), 'utf8');
+  const manifest = await readFile(manifestFile(plan, plan.trials[0]), 'utf8');
+  const publicOutput = `${result.stdout}
+${result.stderr}
+${persisted}
+${manifest}`;
+  assert.equal(publicOutput.includes(secretMarker), false);
+  assert.equal(publicOutput.includes(testRunsRoot), false);
+  assert.equal(publicOutput.includes(projectRoot), false);
+  assert.equal(plan.trials[0].error, 'result normalization failed; inspect trial-local normalizer.stderr.log');
+  assert.equal(JSON.parse(manifest).error, plan.trials[0].error);
+  const privateDiagnostic = await readFile(
+    path.join(plan.runDirectory, 'trials', plan.trials[0].trialId, 'normalizer.stderr.log'),
+    'utf8',
+  );
+  assert.match(privateDiagnostic, /S3CR3T/);
+  assert.equal(privateDiagnostic.includes(testRunsRoot), true);
 });
