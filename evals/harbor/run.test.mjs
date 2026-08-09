@@ -34,6 +34,7 @@ const validArgs = [
   '--arm', 'both',
   '--repetitions', '2',
   '--concurrency', '2',
+  '--progress-interval-seconds', '30',
   '--agent', 'claude-code',
   '--model', 'anthropic/claude-sonnet-4',
   '--forgekit-version', '0.3.37',
@@ -208,6 +209,8 @@ test('rejects invalid input before creating a run', async () => {
     [['--repetitions', '0'], 'repetitions must be a positive integer'],
     [['--repetitions', '1.5'], 'repetitions must be a positive integer'],
     [['--concurrency', '-1'], 'concurrency must be a positive integer'],
+    [['--progress-interval-seconds', '-1'], 'progress-interval-seconds must be a non-negative integer'],
+    [['--progress-interval-seconds', '1.5'], 'progress-interval-seconds must be a non-negative integer'],
     [['--forgekit-version', 'latest'], 'forgekit-version must be a published semantic version'],
     [['--forgekit-version', '1.2.3; touch pwned'], 'forgekit-version must be a published semantic version'],
     [['--agent', '--malicious'], '--agent requires a value'],
@@ -536,4 +539,43 @@ test('rejects tasks outside the versioned corpus before creating a run', async (
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /not listed exactly once in corpus\.json/);
   assert.deepEqual(await readdir(isolatedRuns), []);
+});
+
+
+test('long real trial emits sanitized lifecycle heartbeats on stderr while stdout stays JSON', async (t) => {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-progress-bin-'));
+  const fakeHarbor = path.join(bin, 'harbor');
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('harbor 0.20.0'); process.exit(0); }
+await new Promise((resolve) => setTimeout(resolve, 1200));
+const job = path.join(args[args.indexOf('--jobs-dir') + 1], 'job');
+const output = path.join(job, 'trial');
+mkdirSync(path.join(output, 'verifier'), { recursive: true });
+writeFileSync(path.join(output, 'verifier', 'reward.json'), '{"functional":1,"regression":1,"tests_unchanged":1,"shippable":1}');
+writeFileSync(path.join(output, 'result.json'), '{}');
+writeFileSync(path.join(job, 'result.json'), '{}');
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const args = [...validArgs];
+  args[args.indexOf('--arm') + 1] = 'baseline';
+  args[args.indexOf('--repetitions') + 1] = '1';
+  args[args.indexOf('--progress-interval-seconds') + 1] = '1';
+  const result = await run(args, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  assert.equal(plan.status, 'completed');
+  assert.equal(plan.trials[0].status, 'verified');
+  assert.match(result.stderr, /\[eval-progress] run=[^ ]+ event=run-start task=node-health-endpoint trials=1/);
+  assert.match(result.stderr, /event=trial-start arm=baseline ordinal=1\/1/);
+  assert.match(result.stderr, /event=trial-heartbeat arm=baseline elapsedSeconds=1/);
+  assert.match(result.stderr, /event=trial-verified arm=baseline elapsedSeconds=/);
+  assert.match(result.stderr, /event=run-completed status=completed verified=1 failed=0 elapsedSeconds=/);
+  assert.equal(result.stderr.includes(testRunsRoot), false);
+  assert.equal(result.stderr.includes(projectRoot), false);
 });

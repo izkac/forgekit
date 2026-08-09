@@ -26,11 +26,11 @@ const normalizer = path.join(here, 'normalize-results.mjs');
 const installMarker = '# FORGEKIT_INSTALL_MARKER: the Forge arm may replace this line with its pinned Forgekit install command.';
 const valueOptions = new Set([
   '--task', '--arm', '--repetitions', '--concurrency', '--agent', '--model', '--seed',
-  '--forgekit-version', '--forgekit-tarball',
+  '--forgekit-version', '--forgekit-tarball', '--progress-interval-seconds',
 ]);
 
 function usage() {
-  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> [--seed <safe-identifier>]\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n`;
+  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> [--seed <safe-identifier>]\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n  [--progress-interval-seconds <non-negative-int; default 30>]\n`;
 }
 
 function parseArgs(argv) {
@@ -69,6 +69,7 @@ function parseArgs(argv) {
     seed: raw['--seed'] ?? 'default',
     forgekitVersion: raw['--forgekit-version'] ?? null,
     forgekitTarball: raw['--forgekit-tarball'] ?? null,
+    progressIntervalSeconds: parseNonNegativeInteger(raw['--progress-interval-seconds'] ?? '30', 'progress-interval-seconds'),
     dryRun,
   };
   validate(config);
@@ -80,6 +81,18 @@ function parsePositiveInteger(value, name) {
     throw new Error(`${name} must be a positive integer`);
   }
   return Number(value);
+}
+
+function parseNonNegativeInteger(value, name) {
+  if (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return Number(value);
+}
+
+function emitProgress(fields) {
+  const values = Object.entries(fields).map(([name, value]) => `${name}=${value}`);
+  process.stderr.write(`[eval-progress] ${values.join(' ')}\n`);
 }
 
 function validate(config) {
@@ -268,7 +281,7 @@ function scheduleFor(config, taskRevision) {
 
 function runIdFor(config, forgekitTreatment) {
   if (config.dryRun) {
-    const identity = { ...config, forgekitTarball: undefined, forgekitTreatment };
+    const identity = { ...config, forgekitTarball: undefined, progressIntervalSeconds: undefined, forgekitTreatment };
     const digest = createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 12);
     return `dry-run-${digest}`;
   }
@@ -437,12 +450,30 @@ async function writeManifest(trial) {
   await writeFile(trial.manifest, `${JSON.stringify(trial.manifestData, null, 2)}\n`);
 }
 
-async function executeTrial(trial) {
+async function executeTrial(trial, progressIntervalSeconds, ordinal, totalTrials) {
   trial.status = 'running';
   trial.startedAt = new Date().toISOString();
   trial.manifestData.status = 'running';
   trial.manifestData.startedAt = trial.startedAt;
   await writeManifest(trial);
+  const progressStartedAt = Date.now();
+  emitProgress({
+    run: trial.manifestData.runId,
+    event: 'trial-start',
+    arm: trial.arm,
+    ordinal: `${ordinal}/${totalTrials}`,
+    trial: trial.trialId,
+  });
+  const heartbeat = progressIntervalSeconds === 0 ? null : setInterval(() => {
+    emitProgress({
+      run: trial.manifestData.runId,
+      event: 'trial-heartbeat',
+      arm: trial.arm,
+      elapsedSeconds: Math.max(1, Math.floor((Date.now() - progressStartedAt) / 1000)),
+      trial: trial.trialId,
+    });
+  }, progressIntervalSeconds * 1000);
+  heartbeat?.unref();
   let stdout;
   let stderr;
   try {
@@ -459,10 +490,18 @@ async function executeTrial(trial) {
     trial.manifestData.error = error.message;
     throw error;
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
     await Promise.all([stdout?.close(), stderr?.close()]);
     trial.finishedAt = new Date().toISOString();
     trial.manifestData.finishedAt = trial.finishedAt;
     await writeManifest(trial);
+    emitProgress({
+      run: trial.manifestData.runId,
+      event: trial.status === 'verified' ? 'trial-verified' : 'trial-failed',
+      arm: trial.arm,
+      elapsedSeconds: Math.max(0, Math.round((Date.now() - progressStartedAt) / 1000)),
+      trial: trial.trialId,
+    });
   }
 }
 
@@ -656,13 +695,17 @@ async function main(argv) {
     let executionIndex = 0;
     plan.status = 'running';
     plan.startedAt = new Date().toISOString();
+    const progressStartedAt = Date.now();
     await persistPlan(plan, trials);
+    emitProgress({ run: runId, event: 'run-start', task: config.task, trials: trials.length });
     const attempt = async (trial) => {
       executionIndex += 1;
       trial.executionIndex = executionIndex;
       trial.manifestData.executionIndex = executionIndex;
       try {
-        await executeTrial(trial);
+        await executeTrial(
+          trial, config.progressIntervalSeconds, executionIndex, trials.length,
+        );
       } catch (error) {
         failures.push({ trialId: trial.trialId, error: error.message });
       }
@@ -680,6 +723,14 @@ async function main(argv) {
     }
     plan.finishedAt = new Date().toISOString();
     plan.status = failures.length === 0 ? 'completed' : 'completed-with-failures';
+    emitProgress({
+      run: runId,
+      event: 'run-completed',
+      status: plan.status,
+      verified: trials.filter((trial) => trial.status === 'verified').length,
+      failed: failures.length,
+      elapsedSeconds: Math.max(0, Math.round((Date.now() - progressStartedAt) / 1000)),
+    });
     await persistPlan(plan, trials);
   }
 
