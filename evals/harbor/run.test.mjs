@@ -239,7 +239,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 const args = process.argv.slice(2);
 if (args[0] === '--version') {
-  process.stdout.write('harbor 0.20.0\\n');
+  process.stdout.write('0.20.0\\n');
   process.exit(0);
 }
 appendFileSync(process.env.HARBOR_CAPTURE_FILE, JSON.stringify(args) + '\\n');
@@ -282,7 +282,7 @@ writeFileSync(path.join(output, 'artifacts', 'app', '.forge', 'scorecard.json'),
   assert.equal(captured[0][captured[0].indexOf('--n-concurrent') + 1], '1');
   assert.equal(captured[0].includes('--artifact'), false);
   const manifest = JSON.parse(await readFile(manifestFile(plan, plan.trials[0]), 'utf8'));
-  assert.equal(manifest.harbor.version, 'harbor 0.20.0');
+  assert.equal(manifest.harbor.version, '0.20.0');
   assert.equal(manifest.status, 'verified');
   assert.deepEqual(manifest.resolvedAgent, {
     name: 'claude-code',
