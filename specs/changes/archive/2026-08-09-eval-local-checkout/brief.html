@@ -1,0 +1,9 @@
+<!-- forge-brief-specs-hash:db7a6121ee1cbc6d -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Brief - Evaluate local Forgekit checkout</title><style>body{font-family:system-ui,sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem;line-height:1.55}code{background:#f2f2f2;padding:.1em .3em;border-radius:4px}.box{border:1px solid #ddd;border-radius:8px;padding:.8rem 1rem}</style></head><body>
+<h1>Evaluate this checkout without publishing it</h1>
+<div class="box"><strong>Outcome:</strong> the Harbor runner can install an operator-built local Forgekit tarball in only the Forge arm and prove which exact bytes it installed.</div>
+<h2>Operator flow</h2><ol><li>Run <code>npm pack</code> for the local Forgekit workspace.</li><li>Pass the resulting archive with <code>--forgekit-tarball</code>.</li><li>Inspect the recorded SHA-256 in the plan and trial manifests.</li></ol>
+<h2>Safety boundary</h2><p>The runner snapshots and hashes the archive, gives it a safe digest-derived name, verifies it inside Docker, disables install lifecycle scripts, and never sends it to the baseline or verifier. It does not publish or package arbitrary source directories.</p>
+<h2>Not claimed</h2><p>The archive hash identifies Forgekit payload bytes, but transitive registry dependencies are not fully pinned. A local smoke proves packaging and Docker installation; provider-backed model evaluation remains a separate step.</p>
+</body></html>

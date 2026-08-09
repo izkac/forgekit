@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -96,6 +97,91 @@ test('dry run stages canonical baseline and Forge arms and writes trial manifest
     assert.match(manifest.images.verifier, /node:22-bookworm@sha256:[a-f0-9]{64}/);
     assert.equal(Object.keys(manifest).some((key) => /key|token|secret|credential/i.test(key)), false);
   }
+});
+
+test('dry run stages an immutable local tarball only in the Forge arm', async (t) => {
+  const sourceDirectory = await mkdtemp(path.join(os.tmpdir(), 'forgekit local tarball ; '));
+  const sourceTarball = path.join(sourceDirectory, 'operator named $(unsafe).tgz');
+  const payload = Buffer.from('local-forgekit-payload\0with-binary-bytes');
+  await writeFile(sourceTarball, payload);
+  t.after(() => rm(sourceDirectory, { recursive: true, force: true }));
+
+  const args = validArgs.filter((value, index) => (
+    value !== '--forgekit-version' && validArgs[index - 1] !== '--forgekit-version'
+  ));
+  args.push('--forgekit-tarball', sourceTarball, '--dry-run');
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  const digest = createHash('sha256').update(payload).digest('hex');
+  const stagedFilename = `forgekit-treatment-${digest}.tgz`;
+  const treatment = {
+    kind: 'local-tarball',
+    sha256: digest,
+    byteSize: payload.length,
+    stagedFilename,
+  };
+  assert.deepEqual(plan.settings.forgekitTreatment, treatment);
+  assert.equal(JSON.stringify(plan).includes(sourceTarball), false);
+
+  const baselineEnvironment = path.join(plan.runDirectory, 'arms', 'baseline', 'environment');
+  const forgeEnvironment = path.join(plan.runDirectory, 'arms', 'forge', 'environment');
+  assert.equal((await readdir(baselineEnvironment)).some((name) => name.endsWith('.tgz')), false);
+  assert.deepEqual(await readFile(path.join(forgeEnvironment, stagedFilename)), payload);
+
+  const baselineDockerfile = await readFile(path.join(baselineEnvironment, 'Dockerfile'), 'utf8');
+  const forgeDockerfile = await readFile(path.join(forgeEnvironment, 'Dockerfile'), 'utf8');
+  assert.doesNotMatch(baselineDockerfile, /forgekit-treatment|npm install .*forgekit/i);
+  assert.match(forgeDockerfile, new RegExp(`COPY ${stagedFilename} /tmp/forgekit-treatment\\.tgz`));
+  assert.match(forgeDockerfile, new RegExp(`${digest}  /tmp/forgekit-treatment\\.tgz`));
+  assert.match(forgeDockerfile, /sha256sum --check --strict/);
+  assert.match(forgeDockerfile, /npm install --global --ignore-scripts --no-audit --no-fund \/tmp\/forgekit-treatment\.tgz/);
+  assert.doesNotMatch(forgeDockerfile, /operator named|FORGEKIT_INSTALL_MARKER/);
+
+  for (const trial of plan.trials) {
+    const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+    assert.equal(manifest.forgekitVersion, null);
+    assert.deepEqual(manifest.forgekitTreatment, treatment);
+    assert.equal(JSON.stringify(manifest).includes(sourceTarball), false);
+  }
+
+  const secondTarball = path.join(sourceDirectory, 'same payload elsewhere.tgz');
+  await writeFile(secondTarball, payload);
+  const secondArgs = args.map((value) => value === sourceTarball ? secondTarball : value);
+  const secondResult = await run(secondArgs);
+  assert.equal(secondResult.code, 0, secondResult.stderr);
+  const secondPlan = JSON.parse(secondResult.stdout);
+  t.after(() => cleanupPlan(secondPlan));
+  assert.equal(secondPlan.runId, plan.runId, 'dry-run identity must depend on payload bytes, not host path');
+});
+
+test('local tarball selection fails closed before creating a run', async (t) => {
+  const fixtureDirectory = await mkdtemp(path.join(os.tmpdir(), 'forgekit-tarball-validation-'));
+  const tarball = path.join(fixtureDirectory, 'forgekit.tgz');
+  await writeFile(tarball, 'payload');
+  t.after(() => rm(fixtureDirectory, { recursive: true, force: true }));
+  const isolatedRuns = await mkdtemp(path.join(os.tmpdir(), 'forgekit-tarball-invalid-runs-'));
+  t.after(() => rm(isolatedRuns, { recursive: true, force: true }));
+
+  const withoutVersion = validArgs.filter((value, index) => (
+    value !== '--forgekit-version' && validArgs[index - 1] !== '--forgekit-version'
+  ));
+  const cases = [
+    [withoutVersion, 'exactly one of --forgekit-version and --forgekit-tarball is required'],
+    [[...validArgs, '--forgekit-tarball', tarball], 'exactly one of --forgekit-version and --forgekit-tarball is required'],
+    [[...withoutVersion, '--forgekit-tarball', path.join(fixtureDirectory, 'missing.tgz')], 'forgekit-tarball must be a readable regular file'],
+    [[...withoutVersion, '--forgekit-tarball', fixtureDirectory], 'forgekit-tarball must be a readable regular file'],
+  ];
+  for (const [args, message] of cases) {
+    const result = await run([...args, '--dry-run'], {
+      env: { FORGEKIT_EVAL_RUNS_ROOT: isolatedRuns },
+    });
+    assert.notEqual(result.code, 0, `expected failure for ${args.join(' ')}`);
+    assert.match(result.stderr, new RegExp(message));
+  }
+  assert.deepEqual(await readdir(isolatedRuns), []);
 });
 
 test('rejects invalid input before creating a run', async () => {

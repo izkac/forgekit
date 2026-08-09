@@ -7,8 +7,8 @@ paired A/B arms:
 - **Baseline** uses the selected agent and model without Forgekit installed or
   injected workflow instructions.
 - **Forge** uses the same task, agent, and model, while its treatment image
-  installs a selected published Forgekit version and receives the Forge
-  workflow instructions.
+  installs either a selected published Forgekit version or an explicitly built
+  local tarball and receives the Forge workflow instructions.
 
 For a step-by-step operator walkthrough, including a paired Forge versus
 no-Forge run and result inspection, see [`docs/agentic-evals.md`](../docs/agentic-evals.md).
@@ -49,6 +49,29 @@ node evals/harbor/run.mjs \
   --dry-run
 ```
 
+To evaluate this checkout without publishing it, build the package explicitly
+and select the resulting immutable payload instead of `--forgekit-version`:
+
+```bash
+TARBALL_DIR="$(mktemp -d)"
+npm pack --workspace=@izkac/forgekit --pack-destination "$TARBALL_DIR"
+FORGEKIT_TARBALL="$(find "$TARBALL_DIR" -maxdepth 1 -name '*.tgz' -print -quit)"
+
+node evals/harbor/run.mjs \
+  --task node-health-endpoint \
+  --arm both \
+  --repetitions 1 \
+  --concurrency 1 \
+  --agent <agent> \
+  --model <model-id> \
+  --forgekit-tarball "$FORGEKIT_TARBALL" \
+  --dry-run
+```
+
+`npm pack` runs this checkout's trusted `prepack` lifecycle to refresh the
+ignored vendored assets. The evaluator runner itself never invokes packaging
+scripts and never publishes. Pass a tarball only from a source you trust.
+
 Real run, using the same inputs without `--dry-run`:
 
 ```bash
@@ -74,11 +97,14 @@ result for every successful trial. A Harbor process exit alone is not recorded
 as an outcome pass.
 
 The runner validates the task, arm, positive repetition and concurrency
-values, model and agent parameters, and the Forgekit package version before
-starting a trial. `--forgekit-version` refers to a published package version:
-the baseline image must not install Forgekit, and the Forge image installs the
-selected package inside the container. The local checkout is not implicitly
-measured, and Harbor is not added to the published `packages/cli` dependencies.
+values, model and agent parameters, and exactly one Forgekit treatment selector
+before starting a trial. `--forgekit-version` refers to a published package;
+`--forgekit-tarball` snapshots a readable local file and records its SHA-256 and
+byte size without recording the operator's host path. The baseline image never
+receives Forgekit. The Forge image verifies the local digest before installing
+with lifecycle scripts disabled. The local checkout is never selected
+implicitly, and Harbor is not added to the published `packages/cli`
+dependencies.
 
 ## Task Contract
 
@@ -152,13 +178,20 @@ Docker build contexts. If the Docker daemon is accessible it also runs
 `docker build --check` for the baseline image, Forge image, and separate
 verifier image. It never invokes Harbor or a model.
 
-For the 2026-08-09 local verification, all 22 evaluator tests and lint passed. The
-hidden verifier produced `{functional:0, regression:1, tests_unchanged:1,
+For the 2026-08-09 local-tarball verification, all 25 evaluator tests and
+lint passed, including concurrent evaluator/smoke execution. The hidden
+verifier produced `{functional:0, regression:1, tests_unchanged:1,
 shippable:0}` for the untouched fixture and all ones for the known-good
-solution. Docker validation was skipped because this host could not access the
-Docker daemon; Harbor/model execution and credentials were intentionally not
-used. The existing full workspace test command reported 1,154 passing, zero failing, and one todo test; full lint also passed. The full
-workspace commands are:
+solution. Docker access was repaired and `docker build --check` passed for the
+baseline agent, Forge agent, and verifier contexts. A real local tarball image
+then built successfully, verified its SHA-256 during the build, and returned
+`forge 0.3.37` plus working help output with install lifecycle scripts disabled.
+Harbor 0.20.0 completed separate no-model `nop` trials for both arms and the
+runner normalized their verifier-owned untouched rewards; this validates the
+container/job/artifact boundary without claiming a coding-agent result. No
+provider-backed model was executed because credentials were not configured.
+The full workspace test command reported 1,154 passing, zero failing, and one
+todo test; full lint also passed. The full workspace commands are:
 
 ```bash
 npm test
@@ -198,8 +231,10 @@ across a larger held-out corpus, with outcome and cost/time comparisons.
 - Hold the task, agent, model, model settings, container inputs, repetition
   count, and concurrency constant across a comparison. Change only the Forge
   treatment.
-- Pin and record the Forgekit package version, Harbor version, task revision,
-  harness revision, image versions, and any supported random seed. The smoke
+- Pin and record the Forgekit treatment (published version or local tarball
+  SHA-256), Harbor version, task revision, harness revision, image versions,
+  and any supported random seed. A local tarball digest identifies the Forgekit
+  payload bytes but does not pin registry-resolved transitive dependencies. The smoke
   task pins its Node base image by registry digest and avoids mutable package
   installation in the task Dockerfiles. Real manifests record Harbor's
   resolved agent name/version from its trial result, plus the requested agent,

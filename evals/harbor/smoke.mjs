@@ -144,7 +144,7 @@ function changedFiles(canonical, staged) {
   return [...names].filter((name) => canonical.get(name) !== staged.get(name)).sort();
 }
 
-async function stageAndValidate() {
+async function stageAndValidate(workDirectory) {
   const result = await run(process.execPath, [
     runner,
     '--task', taskId,
@@ -155,7 +155,7 @@ async function stageAndValidate() {
     '--model', 'local/not-executed',
     '--forgekit-version', forgekitVersion,
     '--dry-run',
-  ]);
+  ], { env: { FORGEKIT_EVAL_RUNS_ROOT: path.join(workDirectory, 'runs') } });
   if (result.code !== 0) throw new Error(`runner dry-run failed: ${result.stderr.trim() || result.stdout.trim()}`);
 
   let plan;
@@ -346,7 +346,7 @@ async function main() {
     await validateTaskContract();
     process.stdout.write('PASS task metadata and required structure\n');
 
-    const staged = await stageAndValidate();
+    const staged = await stageAndValidate(workDirectory);
     plan = staged.plan;
     process.stdout.write('PASS baseline/Forge staging and verifier isolation\n');
 

@@ -15,7 +15,7 @@ Each benchmark invocation can stage two arms from one canonical task:
 | Arm | Forgekit installed | Forge instructions | External verifier |
 | --- | --- | --- | --- |
 | `baseline` | No | No; use the agent's normal workflow | Yes |
-| `forge` | Yes, at the selected published version | Yes | Yes |
+| `forge` | Yes, from a selected published version or local tarball | Yes | Yes |
 
 Both arms use the same task fixture, hidden verifier, agent, model, repetition
 count, and concurrency. The runner's treatment transformation changes only the
@@ -33,9 +33,11 @@ smoke task, `node-health-endpoint`. That task is enough to validate the A/B
 wiring, but one small task cannot establish that Forge improves coding agents
 in general.
 
-The current runner measures a **published** `@izkac/forgekit` version. It does
-not package the current checkout or test uncommitted Forgekit source. Local
-tarball treatment is not supported yet.
+The runner can measure either a published `@izkac/forgekit` version or an
+operator-built local tarball. Local mode is the preferred way to evaluate this
+checkout before publication: the runner snapshots the tarball, records its
+SHA-256, and installs it only in the Forge arm. It never selects or packages the
+checkout implicitly.
 
 A real evaluation requires:
 
@@ -44,7 +46,7 @@ A real evaluation requires:
 - An accessible Docker daemon.
 - A Harbor-supported agent and model.
 - The model provider credentials required by that Harbor agent.
-- A published Forgekit semantic version.
+- Exactly one Forgekit treatment: a published semantic version or a trusted local tarball.
 
 ## 1. Validate The Harness Without A Model
 
@@ -101,17 +103,25 @@ runner does not write credentials into its manifests.
 
 ## 3. Choose Constant Evaluation Inputs
 
-Set one agent, model, and published Forgekit version and keep them unchanged
-between arms:
+Set one agent and model, then package this checkout explicitly without
+publishing it:
 
 ```bash
 export EVAL_AGENT='<harbor-agent>'
 export EVAL_MODEL='<provider/model-id>'
-export FORGEKIT_VERSION="$(npm view @izkac/forgekit version)"
+export TARBALL_DIR="$(mktemp -d)"
+npm pack --workspace=@izkac/forgekit --pack-destination "$TARBALL_DIR"
+export FORGEKIT_TARBALL="$(find "$TARBALL_DIR" -maxdepth 1 -name '*.tgz' -print -quit)"
+sha256sum "$FORGEKIT_TARBALL"
 ```
 
-For a fair comparison, do not change model settings, credentials, task files,
-or concurrency between the baseline and Forge trials.
+`npm pack` runs Forgekit's trusted `prepack` lifecycle and refreshes ignored
+vendored assets; it does not publish. The runner does not execute the pack step
+for you. Use only a tarball you trust. For a published comparison instead, omit
+`--forgekit-tarball` and pass `--forgekit-version <semver>`.
+
+For a fair comparison, do not change the tarball, model settings, credentials,
+task files, or concurrency between the baseline and Forge trials.
 
 ## 4. Preview The Paired Run
 
@@ -125,7 +135,7 @@ node evals/harbor/run.mjs \
   --concurrency 1 \
   --agent "$EVAL_AGENT" \
   --model "$EVAL_MODEL" \
-  --forgekit-version "$FORGEKIT_VERSION" \
+  --forgekit-tarball "$FORGEKIT_TARBALL" \
   --dry-run | tee /tmp/forge-eval-dry-run.json
 ```
 
@@ -147,8 +157,9 @@ RUN_DIR="$(jq -r .runDirectory /tmp/forge-eval-dry-run.json)"
 diff -ru "$RUN_DIR/arms/baseline" "$RUN_DIR/arms/forge" || true
 ```
 
-The expected differences are the arm-specific `instruction.md` and the Forge
-arm's `environment/Dockerfile` install line.
+The expected differences are the arm-specific `instruction.md`, the Forge
+arm's `environment/Dockerfile` install treatment, and its digest-named local
+archive. The baseline and verifier must not contain that archive.
 
 ## 5. Run Forge Versus No Forge
 
@@ -163,7 +174,7 @@ node evals/harbor/run.mjs \
   --concurrency 1 \
   --agent "$EVAL_AGENT" \
   --model "$EVAL_MODEL" \
-  --forgekit-version "$FORGEKIT_VERSION" \
+  --forgekit-tarball "$FORGEKIT_TARBALL" \
   | tee /tmp/forge-eval-run.json
 ```
 
@@ -185,7 +196,7 @@ node evals/harbor/run.mjs \
   --concurrency 2 \
   --agent "$EVAL_AGENT" \
   --model "$EVAL_MODEL" \
-  --forgekit-version "$FORGEKIT_VERSION" \
+  --forgekit-tarball "$FORGEKIT_TARBALL" \
   | tee /tmp/forge-eval-run.json
 ```
 
@@ -206,7 +217,7 @@ node evals/harbor/run.mjs \
   --concurrency 2 \
   --agent "$EVAL_AGENT" \
   --model "$EVAL_MODEL" \
-  --forgekit-version "$FORGEKIT_VERSION"
+  --forgekit-tarball "$FORGEKIT_TARBALL"
 
 # Forge treatment only
 node evals/harbor/run.mjs \
@@ -216,7 +227,7 @@ node evals/harbor/run.mjs \
   --concurrency 2 \
   --agent "$EVAL_AGENT" \
   --model "$EVAL_MODEL" \
-  --forgekit-version "$FORGEKIT_VERSION"
+  --forgekit-tarball "$FORGEKIT_TARBALL"
 ```
 
 Separate invocations are useful for diagnosis, but `--arm both` is preferred
@@ -281,8 +292,8 @@ minimum, report:
 - cost;
 - retries;
 - missing instrumentation;
-- agent, model, Forgekit version, Harbor version, task revision, harness
-  revision, and pinned image inputs.
+- agent, model, Forgekit treatment identity (published version or local
+  SHA-256), Harbor version, task revision, harness revision, and pinned image inputs.
 
 Use multiple repetitions because coding models are nondeterministic. Do not
 pool unmatched runs produced with different models, provider versions,
@@ -315,13 +326,19 @@ Then start a new shell and rerun `harbor --version`.
 
 ### Forgekit fails during the Forge image build
 
-Verify the selected version is published:
+For local treatment, confirm the archived payload is the one recorded by the
+plan and inspect the staged checksum/install lines:
 
 ```bash
-npm view "@izkac/forgekit@$FORGEKIT_VERSION" version
+sha256sum "$FORGEKIT_TARBALL"
+RUN_DIR="$(jq -r .runDirectory /tmp/forge-eval-dry-run.json)"
+jq '.settings.forgekitTreatment' /tmp/forge-eval-dry-run.json
+grep -n 'forgekit-treatment' "$RUN_DIR/arms/forge/environment/Dockerfile"
 ```
 
-The runner intentionally does not install the local checkout.
+The digest identifies the Forgekit payload bytes, but npm may still resolve
+unpinned transitive dependencies from the registry. For published treatment,
+verify `npm view "@izkac/forgekit@<version>" version`.
 
 ### A trial exits without `normalized-result.json`
 
