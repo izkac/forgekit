@@ -334,8 +334,32 @@ async function runContract() {
     assert.equal(response.status, 200);
     assert.equal((await response.json()).paymentId, "http-hidden-payment");
     assert.equal(worker.count("charge", since), 1);
+
+    const conflict = await fetch(`${base}/reservations/http-reservation/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "http-other-key" },
+      body: "{}"
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json()).error, "already_confirmed");
+    assert.equal(worker.count("charge", since), 1);
+
     const missing = await fetch(`${base}/missing`);
     assert.equal(missing.status, 404);
+    worker.send({ type: "stopHttp" });
+    await worker.wait((message) => message.type === "serverStopped");
+
+    since = await reset(worker, [held("http-expired", 50, 100)], 100);
+    worker.send({ type: "startHttp" });
+    const expiredStarted = await worker.wait((message) => message.type === "serverStarted");
+    const expiredResponse = await fetch(`http://127.0.0.1:${expiredStarted.port}/reservations/http-expired/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "http-expired-key" },
+      body: "{}"
+    });
+    assert.equal(expiredResponse.status, 410);
+    assert.equal((await expiredResponse.json()).error, "expired");
+    assert.equal(worker.count("charge", since), 0);
     worker.send({ type: "stopHttp" });
     await worker.wait((message) => message.type === "serverStopped");
     return true;

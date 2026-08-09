@@ -82,17 +82,20 @@ test("expiry is an admission deadline, not a late completion deadline", async ()
 
 
 test("the HTTP confirmation route remains compatible", async () => {
-  const calls = [];
-  const reservation = { id: "http-one", amount: 99, expiresAt: 1000, status: "held" };
-  const server = createHttpServer({
-    reservationStore: { get(id) { assert.equal(id, "http-one"); return reservation; } },
-    confirmationService: {
-      async confirm(id, key) {
-        calls.push({ id, key });
-        return { ...reservation, status: "confirmed", idempotencyKey: key, paymentId: "http-pay" };
-      }
+  const clock = new ManualClock(100);
+  const reservationStore = new MemoryReservationStore([
+    { id: "http-one", amount: 99, expiresAt: 200 },
+    { id: "http-expired", amount: 50, expiresAt: 100 }
+  ]);
+  const paymentGateway = {
+    calls: [],
+    async charge(input) {
+      this.calls.push(input);
+      return { paymentId: "http-pay" };
     }
-  });
+  };
+  const confirmationService = new ConfirmationService({ reservationStore, paymentGateway, clock });
+  const server = createHttpServer({ confirmationService, reservationStore });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -105,7 +108,7 @@ test("the HTTP confirmation route remains compatible", async () => {
 
     const shown = await fetch(`${base}/reservations/http-one`);
     assert.equal(shown.status, 200);
-    assert.deepEqual(await shown.json(), reservation);
+    assert.equal((await shown.json()).id, "http-one");
 
     const confirmed = await fetch(`${base}/reservations/http-one/confirm`, {
       method: "POST",
@@ -114,7 +117,24 @@ test("the HTTP confirmation route remains compatible", async () => {
     });
     assert.equal(confirmed.status, 200);
     assert.equal((await confirmed.json()).paymentId, "http-pay");
-    assert.deepEqual(calls, [{ id: "http-one", key: "http-key" }]);
+    assert.equal(paymentGateway.calls.length, 1);
+
+    const conflict = await fetch(`${base}/reservations/http-one/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "other-key" },
+      body: "{}"
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json()).error, "already_confirmed");
+
+    const expired = await fetch(`${base}/reservations/http-expired/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "expired-key" },
+      body: "{}"
+    });
+    assert.equal(expired.status, 410);
+    assert.equal((await expired.json()).error, "expired");
+    assert.equal(paymentGateway.calls.length, 1);
 
     const missing = await fetch(`${base}/missing`);
     assert.equal(missing.status, 404);
@@ -122,4 +142,5 @@ test("the HTTP confirmation route remains compatible", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
 /* END PRE-EXISTING VISIBLE TESTS */

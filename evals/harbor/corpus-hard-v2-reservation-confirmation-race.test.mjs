@@ -286,3 +286,16 @@ test("candidate cannot reclaim protected files", () => {
       "chown", "-R", `${process.getuid()}:${process.getgid()}`, "/cleanup"], { encoding: "utf8", timeout: 30_000 });
   }
 });
+
+
+test("private lookalike domain errors cannot degrade HTTP conflict and expiry to 500", () => {
+  const fixture = copyFixture();
+  apply(fixture, "solution/solve.sh");
+  cpSync(
+    path.join(task, "tests", "adversarial", "private-error-oracle.mjs"),
+    path.join(fixture.app, "src", "confirmation-service.mjs")
+  );
+  assert.deepEqual(grade(fixture), {
+    functional: 0, regression: 0, tests_unchanged: 1, shippable: 0
+  });
+});

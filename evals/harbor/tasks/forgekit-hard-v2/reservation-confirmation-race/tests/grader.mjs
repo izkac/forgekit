@@ -16,7 +16,7 @@ const PACKAGE_FILE = `${APP_DIR}/package.json`;
 const VISIBLE_TEST_FILE = `${APP_DIR}/src/confirmation-service.test.mjs`;
 const SERVICE_FILE = `${APP_DIR}/src/confirmation-service.mjs`;
 const EXPECTED_PACKAGE_SHA256 = "96957c9e859f8e911f12d3bc1db904e8e11005becf940f4091b1615f9e990638";
-const EXPECTED_VISIBLE_SHA256 = "3959956efa53b552a0532453bffb0b8497b49879916c989876ba7f4c7b3894b8";
+const EXPECTED_VISIBLE_SHA256 = "e4821b3fb2d184cbd2f024926c80f6a6f7cc252849244e75b9be17477c421f48";
 
 function emptyReward() {
   return { functional: 0, regression: 0, tests_unchanged: 0, shippable: 0 };
