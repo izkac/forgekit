@@ -23,6 +23,15 @@ Capability specs beat narrow task wording when they conflict. See
 
 Diff range: {DIFF_RANGE}   <!-- `forge checkpoint --range --last` → paste its `reviewTarget` (scopes to this group; names untracked files a diff hides). No checkpoints: `git diff` + the untracked files in `git status`. -->
 
+## Forge evidence target
+
+- Session ID: `{SESSION_ID}`
+- Task ID: `{TASK_ID}`
+- Executed-evidence gate enabled: `{TDD_EVIDENCE_ENABLED}`
+- Executed ledger: `.forge/sessions/{SESSION_ID}/tasks/{TASK_ID}/tdd-runs.jsonl`
+
+When the gate is enabled for a behavior-changing task, read that ledger and require an ok expected RED before an ok GREEN for identical command argv. Plain `test-evidence.md` is supplemental only; it never substitutes for the executed pair. A valid `--no-tdd` declaration is acceptable only when the task changed no behavior.
+
 ## Guard allowances open on this session
 
 {GUARD_ALLOWANCES}   <!-- coordinator: paste the contents of .forge/sessions/<id>/guard-allowances.json (path + reason + phase) verbatim, or "none" if the file doesn't exist — there is no `forge guard list` to generate this for you, and an unfilled placeholder here is worse than leaving it out -->
@@ -61,7 +70,7 @@ independent of whether the resulting code is otherwise fine.
 - Simplicity — no over-engineering
 - Surgical diff — no unrelated edits
 - Error handling — no silent failures
-- Tests — meaningful coverage for behaviour changes; tier-2 evidence present in one of three shapes: **`test-evidence.md`** with exit code `0` and pass summary; an ok fail-stamp before an ok pass-stamp in **`tdd-runs.jsonl`** (behavior-change tasks); or **`test-evidence.md`** carrying a `--no-tdd` declaration (`<!-- forge:no-tdd-declared -->` plus a `- **No-TDD reason:**` line, no Command/Exit/Summary required) for a task with no applicable red→green cycle. Do **not** flag the third shape as missing evidence — but do read the reason: judge it the same way you judge a guard allowance (see above), and "docs-only" on a task that actually touched a handler or other behavior is a finding, not a pass. Evidence is **narrow** unless task required full workspace
+- Tests — meaningful coverage for behaviour changes; tier-2 evidence present in one of three shapes: for a legacy/unflagged task, **`test-evidence.md`** with exit code `0` and pass summary; for a flagged behavior-changing task, an ok fail-stamp before an ok pass-stamp in **`tdd-runs.jsonl`** (behavior-change tasks); or **`test-evidence.md`** carrying a `--no-tdd` declaration (`<!-- forge:no-tdd-declared -->` plus a `- **No-TDD reason:**` line, no Command/Exit/Summary required) for a task with no applicable red→green cycle. Do **not** flag the third shape as missing evidence — but do read the reason: judge it the same way you judge a guard allowance (see above), and "docs-only" on a task that actually touched a handler or other behavior is a finding, not a pass. Evidence is **narrow** unless task required full workspace
 - Ecosystem — dependents updated if contracts changed
 - AGENTS.md coding guidelines
 
