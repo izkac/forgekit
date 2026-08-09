@@ -76,18 +76,21 @@ test('forge new: does not rewrite an already-existing session (no retroactive fl
 });
 
 
-test('forge new: warns when configured checkpoints are unavailable on the default branch', () => {
-  const root = makeRepo('new-session-checkpoint-warning-');
-  fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.forge', 'config.json'), JSON.stringify({ git: { checkpoint: 'per-group' } }));
+test('forge new: warns when configured checkpoints are unavailable on a protected default branch', () => {
+  for (const branch of ['main', 'master']) {
+    const root = makeRepo(`new-session-checkpoint-warning-${branch}-`);
+    if (branch === 'master') git(root, 'branch', '-m', 'master');
+    fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.forge', 'config.json'), JSON.stringify({ git: { checkpoint: 'per-group' } }));
 
-  const r = runNewSession(root, ['checkpoint-warning']);
-  assert.equal(r.status, 0, r.stderr);
-  const out = JSON.parse(r.stdout);
-  assert.deepEqual(out.checkpointWarning?.mode, 'per-group');
-  assert.equal(out.checkpointWarning?.branch, 'main');
-  assert.match(out.checkpointWarning?.advice ?? '', /branch|allowDefaultBranch/i);
-  assert.match(r.stderr, /warning.*checkpoint.*main/is);
+    const r = runNewSession(root, [`checkpoint-warning-${branch}`]);
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(out.checkpointWarning?.mode, 'per-group');
+    assert.equal(out.checkpointWarning?.branch, branch);
+    assert.match(out.checkpointWarning?.advice ?? '', /branch|allowDefaultBranch/i);
+    assert.match(r.stderr, new RegExp(`warning.*checkpoint.*${branch}`, 'is'));
+  }
 });
 
 test('forge new: checkpoint warning stays quiet when disabled, eligible, or explicitly allowed', () => {
