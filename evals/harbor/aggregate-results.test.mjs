@@ -199,8 +199,36 @@ test('aggregates coherent runs by arm, category, and task using complete pairs o
   assert.match(report.limitations.join(' '), /causal|representative|held.out/i);
   assert.equal(Object.hasOwn(report, 'verdict'), false);
   assert.equal(Object.hasOwn(report, 'effectiveness'), false);
+  assert.deepEqual(report.run_ids, ['run-feature', 'run-security']);
+  assert.equal(JSON.stringify(report).includes(root), false, 'aggregate output must not leak input host paths');
 });
 
+test('primary summary weights tasks equally instead of overweighting repeated task pairs', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-macro-'));
+  const feature = createRun(root, {
+    runId: 'macro-feature', task: 'feature-task', category: 'feature',
+    cells: [
+      { arm: 'baseline', repetition: 1, shippable: 0 }, { arm: 'forge', repetition: 1, shippable: 1 },
+      { arm: 'baseline', repetition: 2, shippable: 0 }, { arm: 'forge', repetition: 2, shippable: 1 },
+    ],
+  });
+  const security = createRun(root, {
+    runId: 'macro-security', task: 'security-task', category: 'security',
+    cells: [
+      { arm: 'baseline', repetition: 1, shippable: 1 }, { arm: 'forge', repetition: 1, shippable: 0 },
+    ],
+  });
+  const result = invoke([feature, security]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.pairs.outcomes.shippable.mean_delta, 1 / 3, 'pooled micro result remains descriptive');
+  assert.deepEqual(report.primary, {
+    endpoint: 'shippable',
+    estimand: 'equal-task-weighted mean of within-task paired deltas',
+    complete_tasks: 2,
+    mean_delta: 0,
+  });
+});
 
 test('pairs baseline and forge observations from separate single-arm run directories', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-arms-'));

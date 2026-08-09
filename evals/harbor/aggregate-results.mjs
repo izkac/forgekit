@@ -389,15 +389,25 @@ async function aggregate(runDirectories) {
   const observations = runs.flatMap((run) => run.observations);
   // Validate duplicates across run-directory boundaries before producing any report.
   sortedPairCells(observations);
+  const tasks = groupedSummaries(observations, 'task');
+  const taskDeltas = Object.values(tasks)
+    .map((summary) => summary.pairs.outcomes.shippable.mean_delta)
+    .filter((value) => value !== null);
   return {
     schema_version: 1,
     cohort,
-    run_directories: runs.map((run) => run.runDirectory),
+    run_ids: runs.map((run) => run.runId),
     observations: observations.filter((observation) => observation.outcome !== null).length,
     arms: armsSummary(observations),
     categories: groupedSummaries(observations, 'category'),
-    tasks: groupedSummaries(observations, 'task'),
+    tasks,
     pairs: pairSummary(observations),
+    primary: {
+      endpoint: 'shippable',
+      estimand: 'equal-task-weighted mean of within-task paired deltas',
+      complete_tasks: taskDeltas.length,
+      mean_delta: mean(taskDeltas),
+    },
     limitations: [
       'Paired deltas include complete task/repetition pairs only; incomplete pairs and missing instrumentation are excluded.',
       'Published tasks are held out through a separate verifier boundary, not private or contamination-free.',
