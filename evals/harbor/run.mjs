@@ -410,6 +410,23 @@ async function existingFile(candidate) {
   }
 }
 
+function resolvedAgentIdentity(manifestData, rawAgentInfo) {
+  const safeIdentity = (value, pattern) => (
+    typeof value === 'string' && pattern.test(value) ? value : null
+  );
+  const identifier = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+  const name = safeIdentity(rawAgentInfo?.name, identifier);
+  const modelName = safeIdentity(rawAgentInfo?.model_info?.name, identifier);
+  const provider = safeIdentity(rawAgentInfo?.model_info?.provider, identifier);
+  const requestedModel = provider === null ? modelName : `${provider}/${modelName}`;
+  if (name !== manifestData.agent || requestedModel !== manifestData.model) return null;
+  return {
+    name,
+    version: safeIdentity(rawAgentInfo?.version, /^\d+\.\d+\.\d+$/),
+    model_info: { name: modelName, provider },
+  };
+}
+
 async function normalizeTrial(trial) {
   const rewards = await findEntries(
     trial.trialOutput,
@@ -455,7 +472,10 @@ async function normalizeTrial(trial) {
   if (harborTrialResult) {
     try {
       const parsedTrialResult = JSON.parse(await readFile(harborTrialResult, 'utf8'));
-      trial.manifestData.resolvedAgent = parsedTrialResult.agent_info || null;
+      trial.manifestData.resolvedAgent = resolvedAgentIdentity(
+        trial.manifestData,
+        parsedTrialResult.agent_info,
+      );
     } catch {
       trial.manifestData.resolvedAgent = null;
     }
@@ -605,6 +625,14 @@ async function persistPlan(plan, trials) {
   await writeFile(path.join(plan.runDirectory, 'plan.json'), `${JSON.stringify(publicPlanData(plan), null, 2)}\n`);
 }
 
+function validatedHarborVersion(output) {
+  const value = output.trim();
+  if (!/^harbor \d+\.\d+\.\d+$/.test(value)) {
+    throw new Error('Harbor version probe returned unrecognized output');
+  }
+  return value;
+}
+
 async function main(argv) {
   const config = parseArgs(argv);
   if (config.help) {
@@ -639,7 +667,9 @@ async function main(argv) {
 
   const harborVersion = config.dryRun
     ? null
-    : (await captureProcess('harbor', ['--version'], 'Harbor version probe')).stdout.trim();
+    : validatedHarborVersion(
+      (await captureProcess('harbor', ['--version'], 'Harbor version probe')).stdout,
+    );
 
   const trials = [];
   let scheduleIndex = 0;

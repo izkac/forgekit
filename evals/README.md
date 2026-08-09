@@ -286,8 +286,11 @@ and revision, task/category and task revision, harness revision, selected seed
 and exact schedule, images, agent/model, treatment identity, settings, arm
 staging, trial order/status, and timestamps. Each manifest binds a trial to the
 same provenance and records planned versus actual execution order, Harbor argv/version with the
-exact run-relative locators used for execution, requested and resolved agent
-information when available, reward
+exact run-relative locators used for execution, requested agent inputs, and a
+path-safe resolved-agent identity whitelist (`name`, numeric `version`, and
+`model_info.name`/`provider`) when the safe identity matches the requested
+agent/model. Unknown resolved-agent fields are
+omitted and invalid identity leaves become `null`. Manifests also record reward
 and result references, status, errors, and normalized-result references.
 Plans and manifests are written before execution and updated during/after it,
 so partial and failed runs remain auditable.

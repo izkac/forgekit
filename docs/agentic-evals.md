@@ -290,8 +290,10 @@ records:
 
 Each `trials/<trial-id>/manifest.json` binds its trial to that provenance and
 records Harbor argv/version with the exact run-relative locators used during
-execution, requested inputs, resolved agent information when available,
-schedule/arm ordinal,
+execution, requested inputs, and path-safe resolved identity fields (`name`,
+numeric `version`, and `model_info.name`/`provider`) when the safe identity matches the requested
+agent/model. Unknown agent-info fields are omitted and invalid identity leaves become `null`.
+Manifests also record schedule/arm ordinal,
 status/timestamps, errors, and reward,
 Harbor result, Forge summary, and normalized-result references when available.
 A manifest status of `verified` means an external verifier reward was found and

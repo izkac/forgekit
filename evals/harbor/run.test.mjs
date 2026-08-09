@@ -252,7 +252,10 @@ writeFileSync(path.join(output, 'verifier', 'reward.json'), JSON.stringify({ fun
 writeFileSync(path.join(output, 'result.json'), JSON.stringify({
   started_at: '2026-08-09T00:00:00.000Z',
   finished_at: '2026-08-09T00:00:01.500Z',
-  agent_info: { name: 'fake-agent', version: '1.2.3' },
+  agent_info: {
+    name: 'claude-code', version: 'S3CR3T', workspace: process.cwd(), secret: 'AGENT-INFO-SECRET',
+    model_info: { name: 'claude-sonnet-4', provider: 'anthropic', prompt: 'PRIVATE-PROMPT' }
+  },
   agent_result: { n_input_tokens: 10, n_output_tokens: 5, cost_usd: 0.01 }
 }));
 writeFileSync(path.join(job, 'result.json'), JSON.stringify({ stats: { n_retries: 2 } }));
@@ -281,7 +284,14 @@ writeFileSync(path.join(output, 'artifacts', 'app', '.forge', 'scorecard.json'),
   const manifest = JSON.parse(await readFile(manifestFile(plan, plan.trials[0]), 'utf8'));
   assert.equal(manifest.harbor.version, 'harbor 0.20.0');
   assert.equal(manifest.status, 'verified');
-  assert.deepEqual(manifest.resolvedAgent, { name: 'fake-agent', version: '1.2.3' });
+  assert.deepEqual(manifest.resolvedAgent, {
+    name: 'claude-code',
+    version: null,
+    model_info: { name: 'claude-sonnet-4', provider: 'anthropic' },
+  });
+  assert.equal(JSON.stringify(manifest).includes('AGENT-INFO-SECRET'), false);
+  assert.equal(JSON.stringify(manifest).includes('PRIVATE-PROMPT'), false);
+  assert.equal(JSON.stringify(manifest).includes(testRunsRoot), false);
   assert.deepEqual(JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8')).outcome, {
     functional: 1, regression: 1, tests_unchanged: 1, shippable: 1,
   });
@@ -660,4 +670,25 @@ ${manifest}`;
   );
   assert.match(privateDiagnostic, /S3CR3T/);
   assert.equal(privateDiagnostic.includes(testRunsRoot), true);
+});
+
+
+test('untrusted Harbor version output is rejected without serialization', async (t) => {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-version-bin-'));
+  const fakeHarbor = path.join(bin, 'harbor');
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+if (process.argv[2] === '--version') {
+  console.log('harbor 0.20.0 VERSION-S3CR3T ' + process.env.FORGEKIT_EVAL_RUNS_ROOT);
+  process.exit(0);
+}
+process.exit(9);
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  const result = await run(validArgs, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  assert.notEqual(result.code, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Harbor version probe returned unrecognized output/);
+  assert.equal(result.stderr.includes('VERSION-S3CR3T'), false);
+  assert.equal(result.stderr.includes(testRunsRoot), false);
 });
