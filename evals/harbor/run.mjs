@@ -416,9 +416,9 @@ async function normalizeTrial(trial) {
   if (harborJobResult) argv.push('--harbor-job-result', harborJobResult);
   const result = await captureProcess(process.execPath, argv);
   await writeFile(normalizedResult, result.stdout);
-  trial.manifestData.reward = rewards[0];
-  trial.manifestData.harborResult = harborTrialResult;
-  trial.manifestData.harborJobResult = harborJobResult;
+  trial.manifestData.reward = path.relative(trial.runDirectory, rewards[0]);
+  trial.manifestData.harborResult = harborTrialResult ? path.relative(trial.runDirectory, harborTrialResult) : null;
+  trial.manifestData.harborJobResult = harborJobResult ? path.relative(trial.runDirectory, harborJobResult) : null;
   if (harborTrialResult) {
     try {
       const parsedTrialResult = JSON.parse(await readFile(harborTrialResult, 'utf8'));
@@ -427,8 +427,8 @@ async function normalizeTrial(trial) {
       trial.manifestData.resolvedAgent = null;
     }
   }
-  trial.manifestData.forgeSummary = forgeSummary;
-  trial.manifestData.normalizedResult = normalizedResult;
+  trial.manifestData.forgeSummary = forgeSummary ? path.relative(trial.runDirectory, forgeSummary) : null;
+  trial.manifestData.normalizedResult = path.relative(trial.runDirectory, normalizedResult);
   return normalizedResult;
 }
 
@@ -478,13 +478,31 @@ async function runWithConcurrency(items, limit, action) {
 }
 
 function trialPlanData(trial) {
-  const { manifestData, ...data } = trial;
+  return {
+    trialId: trial.trialId,
+    arm: trial.arm,
+    repetition: trial.repetition,
+    scheduleIndex: trial.scheduleIndex,
+    executionIndex: trial.executionIndex,
+    armOrder: trial.armOrder,
+    armOrdinal: trial.armOrdinal,
+    manifest: trial.manifestRelative,
+    harborArgv: trial.manifestData.harbor.argv,
+    startedAt: trial.startedAt,
+    finishedAt: trial.finishedAt,
+    status: trial.status,
+    ...(trial.error ? { error: trial.error } : {}),
+  };
+}
+
+function publicPlanData(plan) {
+  const { runDirectory, ...data } = plan;
   return data;
 }
 
 async function persistPlan(plan, trials) {
   plan.trials = trials.map(trialPlanData);
-  await writeFile(path.join(plan.runDirectory, 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  await writeFile(path.join(plan.runDirectory, 'plan.json'), `${JSON.stringify(publicPlanData(plan), null, 2)}\n`);
 }
 
 async function main(argv) {
@@ -538,6 +556,9 @@ async function main(argv) {
       const argvForHarbor = harborArgv({
         stagedTask: stagedTasks[arm], agent: config.agent, model: config.model, trialOutput, trialId, arm,
       });
+      const portableHarborArgv = [...argvForHarbor];
+      portableHarborArgv[portableHarborArgv.indexOf('--path') + 1] = `arms/${arm}`;
+      portableHarborArgv[portableHarborArgv.indexOf('--jobs-dir') + 1] = `trials/${trialId}/harbor`;
       const manifest = path.join(trialDirectory, 'manifest.json');
       const manifestData = {
         schemaVersion: 1,
@@ -562,8 +583,8 @@ async function main(argv) {
         resolvedAgent: null,
         images,
         settings: { repetitions: config.repetitions, concurrency: config.concurrency, seed: config.seed },
-        canonicalTask,
-        stagedTask: stagedTasks[arm],
+        canonicalTask: `tasks/${config.task}`,
+        stagedTask: `arms/${arm}`,
         startedAt: null,
         finishedAt: null,
         status: config.dryRun ? 'dry-run' : 'planned',
@@ -571,7 +592,7 @@ async function main(argv) {
           executable: 'harbor',
           version: harborVersion,
           versionSource: config.dryRun ? 'not-probed-dry-run' : 'harbor --version',
-          argv: argvForHarbor,
+          argv: portableHarborArgv,
         },
       };
       const trial = {
@@ -582,6 +603,7 @@ async function main(argv) {
         executionIndex: null,
         armOrder,
         armOrdinal,
+        runDirectory,
         trialDirectory,
         trialOutput,
         manifest,
@@ -621,7 +643,7 @@ async function main(argv) {
       forgekitVersion: config.forgekitVersion,
       forgekitTreatment: forgekitTreatment.metadata,
     },
-    arms: arms.map((arm) => ({ arm, stagedTask: stagedTasks[arm] })),
+    arms: arms.map((arm) => ({ arm, stagedTask: `arms/${arm}` })),
     startedAt: null,
     finishedAt: null,
     trials: [],

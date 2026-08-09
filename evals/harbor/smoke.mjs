@@ -166,11 +166,14 @@ async function stageAndValidate(workDirectory, taskId, taskRoot) {
     throw new Error('runner dry-run did not emit a JSON plan');
   }
   try {
+    Object.defineProperty(plan, 'runDirectory', {
+      value: path.join(workDirectory, 'runs', plan.runId), enumerable: false,
+    });
     requireCondition(plan.dryRun === true, 'runner smoke staging must be a dry run');
   requireCondition(plan.settings?.arm === 'both', 'runner did not stage both arms');
   requireCondition(plan.trials?.every((trial) => trial.status === 'dry-run'), 'runner attempted a non-dry trial');
 
-  const stagedByArm = Object.fromEntries(plan.arms.map(({ arm, stagedTask }) => [arm, stagedTask]));
+  const stagedByArm = Object.fromEntries(plan.arms.map(({ arm, stagedTask }) => [arm, path.join(plan.runDirectory, stagedTask)]));
   requireCondition(stagedByArm.baseline && stagedByArm.forge, 'runner plan is missing a staged arm');
   const [canonicalMap, baselineMap, forgeMap] = await Promise.all([
     directoryMap(taskRoot),

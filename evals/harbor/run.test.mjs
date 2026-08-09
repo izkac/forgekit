@@ -37,7 +37,19 @@ const validArgs = [
   '--agent', 'claude-code',
   '--model', 'anthropic/claude-sonnet-4',
   '--forgekit-version', '0.3.37',
-];
+ ];
+
+function parsePlan(stdout) {
+  const plan = JSON.parse(stdout);
+  Object.defineProperty(plan, 'runDirectory', {
+    value: path.join(testRunsRoot, plan.runId), enumerable: false,
+  });
+  return plan;
+}
+
+function manifestFile(plan, trial) {
+  return path.join(plan.runDirectory, trial.manifest);
+}
 
 async function cleanupPlan(plan) {
   if (plan?.runDirectory) await rm(plan.runDirectory, { recursive: true, force: true });
@@ -46,7 +58,7 @@ async function cleanupPlan(plan) {
 test('dry run stages canonical baseline and Forge arms and writes trial manifests', async (t) => {
   const result = await run([...validArgs, '--dry-run']);
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
 
   assert.equal(plan.dryRun, true);
@@ -84,7 +96,7 @@ test('dry run stages canonical baseline and Forge arms and writes trial manifest
     assert.deepEqual(trial.harborArgv.slice(0, 2), ['run', '--path']);
     assert.equal(trial.harborArgv[trial.harborArgv.indexOf('--agent') + 1], 'claude-code');
     assert.equal(trial.harborArgv[trial.harborArgv.indexOf('--model') + 1], 'anthropic/claude-sonnet-4');
-    const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+    const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
     assert.equal(manifest.schemaVersion, 1);
     assert.equal(manifest.task, 'node-health-endpoint');
     assert.equal(manifest.arm, trial.arm);
@@ -97,6 +109,8 @@ test('dry run stages canonical baseline and Forge arms and writes trial manifest
     assert.match(manifest.images.agent, /node:22-bookworm@sha256:[a-f0-9]{64}/);
     assert.match(manifest.images.verifier, /node:22-bookworm@sha256:[a-f0-9]{64}/);
     assert.equal(Object.keys(manifest).some((key) => /key|token|secret|credential/i.test(key)), false);
+    assert.equal(JSON.stringify(manifest).includes(testRunsRoot), false);
+    assert.equal(JSON.stringify(manifest).includes(projectRoot), false);
   }
 });
 
@@ -113,7 +127,7 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   args.push('--forgekit-tarball', sourceTarball, '--dry-run');
   const result = await run(args);
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
 
   const digest = createHash('sha256').update(payload).digest('hex');
@@ -126,6 +140,8 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   };
   assert.deepEqual(plan.settings.forgekitTreatment, treatment);
   assert.equal(JSON.stringify(plan).includes(sourceTarball), false);
+  assert.equal(JSON.stringify(plan).includes(testRunsRoot), false, 'plan must use portable run-relative locators');
+  assert.equal(JSON.stringify(plan).includes(projectRoot), false, 'plan must not disclose the checkout path');
 
   const baselineEnvironment = path.join(plan.runDirectory, 'arms', 'baseline', 'environment');
   const forgeEnvironment = path.join(plan.runDirectory, 'arms', 'forge', 'environment');
@@ -142,7 +158,7 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   assert.doesNotMatch(forgeDockerfile, /operator named|FORGEKIT_INSTALL_MARKER/);
 
   for (const trial of plan.trials) {
-    const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+    const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
     assert.equal(manifest.forgekitVersion, null);
     assert.deepEqual(manifest.forgekitTreatment, treatment);
     assert.equal(JSON.stringify(manifest).includes(sourceTarball), false);
@@ -153,7 +169,7 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   const secondArgs = args.map((value) => value === sourceTarball ? secondTarball : value);
   const secondResult = await run(secondArgs);
   assert.equal(secondResult.code, 0, secondResult.stderr);
-  const secondPlan = JSON.parse(secondResult.stdout);
+  const secondPlan = parsePlan(secondResult.stdout);
   t.after(() => cleanupPlan(secondPlan));
   assert.equal(secondPlan.runId, plan.runId, 'dry-run identity must depend on payload bytes, not host path');
 });
@@ -247,22 +263,24 @@ writeFileSync(path.join(output, 'artifacts', 'app', '.forge', 'scorecard.json'),
     env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture },
   });
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   const captured = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.deepEqual(captured, [plan.trials[0].harborArgv]);
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0][captured[0].indexOf('--path') + 1], path.join(plan.runDirectory, 'arms', 'baseline'));
+  assert.equal(plan.trials[0].harborArgv[plan.trials[0].harborArgv.indexOf('--path') + 1], 'arms/baseline');
   assert.equal(plan.trials[0].status, 'verified');
   assert.equal(captured[0].includes('--n-concurrent'), true);
   assert.equal(captured[0][captured[0].indexOf('--n-concurrent') + 1], '1');
   assert.equal(captured[0].includes('--artifact'), false);
-  const manifest = JSON.parse(await readFile(plan.trials[0].manifest, 'utf8'));
+  const manifest = JSON.parse(await readFile(manifestFile(plan, plan.trials[0]), 'utf8'));
   assert.equal(manifest.harbor.version, 'harbor 0.20.0');
   assert.equal(manifest.status, 'verified');
   assert.deepEqual(manifest.resolvedAgent, { name: 'fake-agent', version: '1.2.3' });
-  assert.deepEqual(JSON.parse(await readFile(manifest.normalizedResult, 'utf8')).outcome, {
+  assert.deepEqual(JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8')).outcome, {
     functional: 1, regression: 1, tests_unchanged: 1, shippable: 1,
   });
-  const normalized = JSON.parse(await readFile(manifest.normalizedResult, 'utf8'));
+  const normalized = JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8'));
   assert.equal(normalized.instrumentation.harbor.input_tokens, 10);
   assert.equal(normalized.instrumentation.harbor.retries, 2);
 });
@@ -293,12 +311,12 @@ writeFileSync(path.join(output, 'artifacts', '.forge', 'session.json'), '{}');
   args[args.indexOf('--repetitions') + 1] = '1';
   const result = await run(args, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture } });
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   const invoked = JSON.parse((await readFile(capture, 'utf8')).trim());
   assert.equal(invoked[invoked.indexOf('--artifact') + 1], '/app/.forge');
-  const manifest = JSON.parse(await readFile(plan.trials[0].manifest, 'utf8'));
-  const normalized = JSON.parse(await readFile(manifest.normalizedResult, 'utf8'));
+  const manifest = JSON.parse(await readFile(manifestFile(plan, plan.trials[0]), 'utf8'));
+  const normalized = JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8'));
   assert.equal(normalized.instrumentation.available, true);
   assert.match(normalized.instrumentation.forge.artifactPath, /\.forge$/);
 });
@@ -331,7 +349,7 @@ test('seeded paired schedules replay deterministically and persist exact counter
   const seededArgs = [...validArgs, '--seed', 'replay-seed_2026', '--dry-run'];
   const firstResult = await run(seededArgs);
   assert.equal(firstResult.code, 0, firstResult.stderr);
-  const first = JSON.parse(firstResult.stdout);
+  const first = parsePlan(firstResult.stdout);
   t.after(() => cleanupPlan(first));
 
   const persisted = JSON.parse(await readFile(path.join(first.runDirectory, 'plan.json'), 'utf8'));
@@ -360,7 +378,7 @@ test('seeded paired schedules replay deterministically and persist exact counter
   assert.deepEqual(first.trials.map((trial) => trial.executionIndex), [null, null, null, null]);
 
   for (const trial of first.trials) {
-    const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+    const manifest = JSON.parse(await readFile(manifestFile(first, trial), 'utf8'));
     assert.equal(manifest.seed, first.settings.seed);
     assert.equal(manifest.category, 'feature');
     assert.deepEqual(manifest.corpus, first.corpus);
@@ -374,7 +392,7 @@ test('seeded paired schedules replay deterministically and persist exact counter
 
   const secondResult = await run(seededArgs);
   assert.equal(secondResult.code, 0, secondResult.stderr);
-  const second = JSON.parse(secondResult.stdout);
+  const second = parsePlan(secondResult.stdout);
   t.after(() => cleanupPlan(second));
   assert.equal(second.runId, first.runId);
   assert.deepEqual(second.schedule, first.schedule);
@@ -393,7 +411,7 @@ test('odd paired schedules disclose their one-first-position imbalance', async (
   args[args.indexOf('--repetitions') + 1] = '3';
   const result = await run(args);
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   const otherArm = plan.schedule.startingArm === 'baseline' ? 'forge' : 'baseline';
   assert.deepEqual(plan.schedule.firstArmCounts, {
@@ -418,7 +436,7 @@ test('single-arm schedules remain one ordinary trial per repetition', async (t) 
   args[args.indexOf('--repetitions') + 1] = '3';
   const result = await run(args);
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   assert.equal(plan.schedule.strategy, 'single-arm');
   assert.equal(plan.schedule.startingArm, null);
@@ -473,7 +491,7 @@ event('end');
   });
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /3 trial\(s\) failed/);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   assert.equal(plan.status, 'completed-with-failures');
   assert.equal(plan.trials.length, 6);
@@ -496,7 +514,7 @@ event('end');
     const secondStart = events.findIndex((event) => event.name === 'start' && event.jobName === trials[1].trialId);
     assert.ok(firstEnd >= 0 && secondStart > firstEnd, `repetition ${repetition} arms must execute serially`);
     for (const trial of trials) {
-      const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+      const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
       assert.equal(manifest.executionIndex, trial.executionIndex);
       assert.equal(manifest.startedAt, trial.startedAt);
       assert.equal(manifest.finishedAt, trial.finishedAt);
