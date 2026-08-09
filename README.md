@@ -70,6 +70,7 @@ forgekit/
   templates/adr/                # decisions.md, ADR index, hooks
   docs/usage.md                 # how-to tutorial (start here)
   docs/forge.md                 # pointer → skill copy
+  docs/agentic-evals.md         # run Forge vs no-Forge Harbor evaluations
   skills/forge/docs/forge.md    # full Forge reference (ships with skill)
   docs/thorough-code-review.md
 ```

@@ -10,6 +10,9 @@ paired A/B arms:
   installs a selected published Forgekit version and receives the Forge
   workflow instructions.
 
+For a step-by-step operator walkthrough, including a paired Forge versus
+no-Forge run and result inspection, see [`docs/agentic-evals.md`](../docs/agentic-evals.md).
+
 The benchmark is deliberately graded outside Forgekit. A Harbor verifier owns
 the hidden checks and emits numeric outcome rewards. Forge's scorecard and
 `.forge/` process artifacts are secondary instrumentation: they help explain
