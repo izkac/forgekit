@@ -1,0 +1,15 @@
+{
+  "change": "f95-checkpoint-visibility",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Session creation exposes configured but unavailable checkpoints",
+      "library": "packages/cli/src/new-session.mjs",
+      "runtimeOwner": "forge new",
+      "writes": "stdout checkpointWarning and stderr warning",
+      "reads": ".forge/config.json git checkpoint policy and current Git branch",
+      "uiConsumer": "CLI operator / JSON consumer",
+      "evidence": "packages/cli/src/new-session.test.mjs"
+    }
+  ]
+}
