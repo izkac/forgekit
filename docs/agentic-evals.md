@@ -219,6 +219,14 @@ node evals/harbor/run.mjs \
   | tee /tmp/forge-eval-pagination-boundary.json
 ```
 
+During real execution the runner writes sanitized `[eval-progress]` lifecycle
+messages to stderr and a heartbeat every 30 seconds, while stdout remains one
+JSON plan suitable for `tee`. Use `--progress-interval-seconds N` (0–86400) to change the
+heartbeat cadence or `0` to disable periodic heartbeats; start and terminal
+lifecycle messages remain enabled. Progress lines contain safe run/trial/task identities, arm, status, ordinal,
+trial/outcome counts, and elapsed time only—never prompts, credentials, or host
+paths.
+
 Confirm credentials, builds, rewards, normalized results, and actual cost. Then
 choose a repetition count justified by the trial plan and budget. Use the same
 agent, model and model settings, treatment bytes, seed, repetitions,
@@ -282,8 +290,10 @@ records:
 
 Each `trials/<trial-id>/manifest.json` binds its trial to that provenance and
 records Harbor argv/version with the exact run-relative locators used during
-execution, requested inputs, resolved agent information when available,
-schedule/arm ordinal,
+execution, requested inputs, and path-safe resolved identity fields (`name`,
+numeric `version`, and `model_info.name`/`provider`) when the safe identity matches the requested
+agent/model. Unknown agent-info fields are omitted and invalid identity leaves become `null`.
+Manifests also record schedule/arm ordinal,
 status/timestamps, errors, and reward,
 Harbor result, Forge summary, and normalized-result references when available.
 A manifest status of `verified` means an external verifier reward was found and
@@ -375,11 +385,15 @@ locators and omit the absolute run directory. Locate a run by combining its
 default `evals/.runs`. Harbor executes from that run directory using the exact
 relative argv recorded in provenance.
 
-Logs and downloaded artifacts can still include host paths, source files,
-hidden-verifier output, model transcripts, Forge process data, and provider
-metadata. Although the local tarball source path is omitted and credential
-values are not intentionally written, inspect and redact the entire run before
-moving, sharing, or archiving it. Never commit run artifacts.
+Forge artifact summaries and normalized telemetry use a trial-Harbor-output-relative
+`artifactLocator` plus a relative file inventory; resolve the locator beneath
+`$RUN_DIR/trials/<trial-id>/harbor`. They do not serialize the host-absolute
+artifact discovery path. Raw Harbor logs and downloaded artifacts
+can still include host paths, source files, hidden-verifier output, model
+transcripts, Forge process data, and provider metadata. Although the local
+tarball source path is omitted and credential values are not intentionally
+written, inspect and redact the entire run before moving, sharing, or archiving
+it. Never commit run artifacts.
 
 Preserve unmodified `plan.json`, manifests, normalized records, logs, corpus
 revision, task revision, harness revision, treatment digest/version, agent and

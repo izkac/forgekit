@@ -1,0 +1,24 @@
+{
+  "change": "eval-live-progress-portable-telemetry",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Long-running trials expose sanitized progress",
+      "library": "evals/harbor/run.mjs",
+      "runtimeOwner": "Harbor evaluation runner CLI",
+      "writes": "stderr lifecycle and heartbeat stream",
+      "reads": "trial schedule, status, monotonic elapsed time",
+      "uiConsumer": "terminal/operator log",
+      "evidence": "evals/harbor/run.test.mjs"
+    },
+    {
+      "capability": "Forge artifact telemetry is portable",
+      "library": "evals/harbor/run.mjs",
+      "runtimeOwner": "post-trial normalization path",
+      "writes": "forge-summary.json and normalized-result.json",
+      "reads": "Harbor artifact tree",
+      "uiConsumer": "aggregate-results.mjs and operator inspection",
+      "evidence": "evals/harbor/run.test.mjs"
+    }
+  ]
+}

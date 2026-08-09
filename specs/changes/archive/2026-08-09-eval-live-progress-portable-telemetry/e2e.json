@@ -1,0 +1,15 @@
+{
+  "change": "eval-live-progress-portable-telemetry",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "produce-consume-assert-runner-progress",
+      "cmd": "node --test evals/harbor/run.test.mjs",
+      "expect": "long real trial emits sanitized lifecycle heartbeats"
+    }
+  ]
+}

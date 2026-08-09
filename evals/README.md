@@ -269,6 +269,15 @@ Aggregation computes summaries only. It performs no hypothesis test, power
 analysis, uncertainty estimate, practical-significance threshold, or automatic
 "ship"/effectiveness verdict.
 
+## Live Progress
+
+Real runs keep stdout as one final JSON plan and write sanitized `[eval-progress]`
+lifecycle messages to stderr. A heartbeat appears every 30 seconds by default so
+long Harbor setup or model work does not look hung. Set
+`--progress-interval-seconds N` (0–86400) to change the cadence or `0` to disable only
+periodic heartbeats. Messages include safe run/trial/task ids, arm, status, ordinal,
+trial/outcome counts, and elapsed seconds; they exclude prompts, credentials, and paths.
+
 ## Provenance, Reproducibility, And Privacy
 
 Every run persists `evals/.runs/<run-id>/plan.json` plus one
@@ -277,8 +286,11 @@ and revision, task/category and task revision, harness revision, selected seed
 and exact schedule, images, agent/model, treatment identity, settings, arm
 staging, trial order/status, and timestamps. Each manifest binds a trial to the
 same provenance and records planned versus actual execution order, Harbor argv/version with the
-exact run-relative locators used for execution, requested and resolved agent
-information when available, reward
+exact run-relative locators used for execution, requested agent inputs, and a
+path-safe resolved-agent identity whitelist (`name`, numeric `version`, and
+`model_info.name`/`provider`) when the safe identity matches the requested
+agent/model. Unknown resolved-agent fields are
+omitted and invalid identity leaves become `null`. Manifests also record reward
 and result references, status, errors, and normalized-result references.
 Plans and manifests are written before execution and updated during/after it,
 so partial and failed runs remain auditable.
@@ -295,12 +307,16 @@ absolute run directory. `runId` is the stable locator: the operator combines it
 with the configured runs root (or the default `evals/.runs`). Harbor is invoked
 from that run root with the exact relative argv recorded in provenance.
 
-Artifacts and logs may still contain host paths, source, hidden-verifier
-output, model transcripts, Forge telemetry, and provider metadata. The local
-tarball's source host path is deliberately omitted, and credential values are
-not intended to be recorded, but operators must inspect and redact a run before
-sharing or archiving it. Never commit run artifacts or put secrets in tasks,
-instructions, model identifiers, agent identifiers, or seeds.
+Forge artifact summaries and normalized telemetry use a trial-Harbor-output-relative
+`artifactLocator` plus relative file names. Resolve the locator beneath
+`$RUN_DIR/trials/<trial-id>/harbor`; the host-absolute discovery path is not
+serialized. Raw artifacts and logs may still contain host paths, source,
+hidden-verifier output, model transcripts, Forge telemetry, and provider
+metadata. The local tarball's source host path is deliberately omitted, and
+credential values are not intended to be recorded, but operators must inspect
+and redact a run before sharing or archiving it. Never commit run artifacts or
+put secrets in tasks, instructions, model identifiers, agent identifiers, or
+seeds.
 
 ## Interpretation Limits
 
