@@ -23,6 +23,7 @@ import {
   unregisterSession,
   watchEntries,
 } from './lib/fleet.mjs';
+import { installFsFaults } from './test-support/fs-fault.mjs';
 import { saveSession } from './lib.mjs';
 
 const FLEET_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fleet.mjs');
@@ -338,8 +339,10 @@ test('a session that cannot be registered says so instead of vanishing', () => {
 
 test('permission-denied register writes fleet-pending.json and names Cursor sandbox recovery', () => {
   const fleetRoot = tmp('fleet-ro-');
-  fs.chmodSync(fleetRoot, 0o555);
   process.env.FORGEKIT_FLEET_DIR = path.join(fleetRoot, 'sessions');
+  const restoreFault = installFsFaults([
+    { method: 'mkdirSync', path: process.env.FORGEKIT_FLEET_DIR, code: 'EACCES' },
+  ]);
   process.env.CURSOR_SANDBOX = 'native';
   const project = tmp('fleet-proj-');
   const sessionDir = makeProject(project, 's-pending');
@@ -356,7 +359,7 @@ test('permission-denied register writes fleet-pending.json and names Cursor sand
   } finally {
     process.stderr.write = original;
     delete process.env.CURSOR_SANDBOX;
-    fs.chmodSync(fleetRoot, 0o755);
+    restoreFault();
   }
 
   const pending = path.join(sessionDir, 'fleet-pending.json');
@@ -433,8 +436,10 @@ test('registerSession keeps scratch projects out of the default registry', () =>
   const scratchProject = tmp('forge-scratch-project-');
   const prevFleet = process.env.FORGEKIT_FLEET_DIR;
   const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
   delete process.env.FORGEKIT_FLEET_DIR;
   process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
   try {
     const registry = path.join(fakeHome, '.forgekit', 'fleet', 'sessions');
     registerSession(scratchProject, makeSession('sess-scratch'));
@@ -454,7 +459,10 @@ test('registerSession keeps scratch projects out of the default registry', () =>
   } finally {
     if (prevFleet === undefined) delete process.env.FORGEKIT_FLEET_DIR;
     else process.env.FORGEKIT_FLEET_DIR = prevFleet;
-    process.env.HOME = prevHome;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     fs.rmSync(fakeHome, { recursive: true, force: true });
   }
 });

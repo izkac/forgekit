@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { reviewLabel } from './review-label.mjs';
 import { readReviewerSidecars } from './metrics/review-evidence.mjs';
+import { fsFaultEnv } from './test-support/fs-fault.mjs';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'review-label-cli.mjs');
 
@@ -31,8 +32,9 @@ function makeProject(sessionId) {
   return dir;
 }
 
-function run(dir, args = []) {
-  return spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8' });
+function run(dir, args = [], { faults = [] } = {}) {
+  const env = faults.length > 0 ? fsFaultEnv(faults) : process.env;
+  return spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, env, encoding: 'utf8' });
 }
 
 /** Plant one sidecar pair carrying `description`, and read it back. */
@@ -159,7 +161,7 @@ test('the label module is importable in a project with no active session', () =>
       '--input-type=module',
       '-e',
       `import { reviewLabel, isReviewUnit } from ${JSON.stringify(
-        path.join(path.dirname(SCRIPT), 'review-label.mjs'),
+        pathToFileURL(path.join(path.dirname(SCRIPT), 'review-label.mjs')).href,
       )};
        process.stdout.write(reviewLabel('final', 's1') + '|' + isReviewUnit('final'));`,
     ],
@@ -229,23 +231,21 @@ test('a session that cannot be read is a candidate, not a silent drop', () => {
   const broken = path.join(dir, '.forge', 'sessions', '20260727T090000Z-broken-bbb222');
   fs.mkdirSync(broken, { recursive: true });
 
-  for (const [label, prepare] of [
-    ['truncated', () => fs.writeFileSync(path.join(broken, 'session.json'), '{"id":"bro')],
+  const sessionFile = path.join(broken, 'session.json');
+  for (const [label, prepare, faults = []] of [
+    ['truncated', () => fs.writeFileSync(sessionFile, '{"id":"bro')],
     [
       'unreadable',
-      () => {
-        fs.writeFileSync(path.join(broken, 'session.json'), '{}');
-        fs.chmodSync(path.join(broken, 'session.json'), 0o000);
-      },
+      () => fs.writeFileSync(sessionFile, '{}'),
+      [{ method: 'readFileSync', path: sessionFile, code: 'EACCES' }],
     ],
   ]) {
     prepare();
-    const r = run(dir);
+    const r = run(dir, [], { faults });
     assert.notEqual(r.status, 0, `${label}: guessed instead of refusing`);
     assert.equal(r.stdout.trim(), '', label);
     assert.match(r.stderr, /Refusing to guess/i, label);
     assert.match(r.stderr, /unreadable/i, `${label}: and says why it cannot judge it`);
-    fs.chmodSync(path.join(broken, 'session.json'), 0o644);
   }
 
   // A directory with no session.json at all is genuinely not a session, and

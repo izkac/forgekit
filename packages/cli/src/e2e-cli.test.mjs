@@ -171,7 +171,7 @@ test('/forge:harness templates stay in sync and teach setup + probe', () => {
     const text = fs.readFileSync(file, 'utf8');
     // Drop the frontmatter only — `.pop()` here would silently shrink the
     // compared region to whatever follows the last markdown rule in the body.
-    const [, ...body] = text.split('\n---\n');
+    const [, ...body] = text.split(/\r?\n---\r?\n/);
     return body.join('\n---\n').replace(/~\/\.(claude|cursor)\//g, '~/.AGENT/');
   });
   assert.equal(bodies[0], bodies[1], 'claude and cursor harness templates have drifted');

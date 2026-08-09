@@ -1,0 +1,5 @@
+{
+  "change": "windows-ci-portability",
+  "notApplicable": "test-fixture portability for existing CI paths; no new product producer/consumer loop",
+  "rows": []
+}
