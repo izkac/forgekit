@@ -290,6 +290,9 @@ async function grade() {
     const initialProtected = protectedContractMatches();
     const regression = runVisibleSuite() ? 1 : 0;
     const meaningfulTest = addedTestsKillConcurrencyMutant(addedTestFiles());
+    const postTestProtected = protectedContractMatches();
+    let postTestTreeRegular = true;
+    try { assertRegularTree(APP_DIR); } catch { postTestTreeRegular = false; }
 
     // Candidate tests ran in separate processes. Restore the byte-for-byte
     // submitted tree before the trusted hidden harness starts its worker.
@@ -297,7 +300,8 @@ async function grade() {
     const behavior = await hiddenProbe();
     const finalProtected = protectedContractMatches();
     assertRegularTree(APP_DIR);
-    const testsUnchanged = initialProtected && finalProtected ? 1 : 0;
+    const testsUnchanged = initialProtected && postTestProtected
+      && postTestTreeRegular && finalProtected ? 1 : 0;
     const functional = meaningfulTest && behavior ? 1 : 0;
     return {
       functional,
