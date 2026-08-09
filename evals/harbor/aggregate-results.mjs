@@ -149,12 +149,13 @@ function planCohort(plan, label) {
     model: requireString(settings.model, `${label}.settings.model`),
     forgekit_treatment: treatment,
     harness_revision: requireString(plan.harnessRevision, `${label}.harnessRevision`),
+    corpus: stableValue(requireObject(plan.corpus, `${label}.corpus`)),
     settings: relevantSettings(settings, `${label}.settings`),
   };
 }
 
 function assertSameCohort(expected, actual, runId) {
-  for (const name of ['agent', 'model', 'forgekit_treatment', 'harness_revision', 'settings']) {
+  for (const name of ['agent', 'model', 'forgekit_treatment', 'harness_revision', 'corpus', 'settings']) {
     if (!sameValue(expected[name], actual[name])) {
       throw new Error(`mixed cohort: ${name} differs in run ${runId}`);
     }
@@ -169,6 +170,7 @@ function validatePlan(plan, runDirectory) {
   requireSafeId(plan.category, 'plan.json.category');
   requireString(plan.taskRevision, 'plan.json.taskRevision');
   requireString(plan.harnessRevision, 'plan.json.harnessRevision');
+  requireObject(plan.images, 'plan.json.images');
   if (plan.dryRun !== false) throw new Error(`plan ${runId} must describe a completed non-dry run`);
   if (!['completed', 'completed-with-failures'].includes(plan.status)) throw new Error(`plan ${runId}.status must be terminal`);
   if (!Array.isArray(plan.trials) || plan.trials.length === 0) throw new Error(`plan ${runId}.trials must be a non-empty array`);
@@ -189,6 +191,11 @@ function assertManifestMatchesPlan(manifest, plan, trialEntry, cohort, label) {
   requireSafeId(manifest.category, `${label}.category`);
   requireString(manifest.taskRevision, `${label}.taskRevision`);
   requireString(manifest.harnessRevision, `${label}.harnessRevision`);
+  requireObject(manifest.corpus, `${label}.corpus`);
+  requireObject(manifest.images, `${label}.images`);
+  requireObject(manifest.harbor, `${label}.harbor`);
+  requireString(manifest.harbor.executable, `${label}.harbor.executable`);
+  if (!Array.isArray(manifest.harbor.argv)) throw new Error(`${label}.harbor.argv must be an array`);
   requirePositiveInteger(manifest.repetition, `${label}.repetition`);
   if (!ARMS.includes(manifest.arm)) throw new Error(`${label}.arm must be baseline or forge`);
   if (!['verified', 'failed'].includes(manifest.status)) throw new Error(`${label}.status must be verified or failed`);
@@ -198,11 +205,15 @@ function assertManifestMatchesPlan(manifest, plan, trialEntry, cohort, label) {
     ['runId', plan.runId], ['task', plan.task], ['category', plan.category],
     ['taskRevision', plan.taskRevision], ['harnessRevision', plan.harnessRevision],
     ['trialId', trialEntry.trialId], ['arm', trialEntry.arm], ['repetition', trialEntry.repetition],
-    ['status', trialEntry.status],
+    ['status', trialEntry.status], ['scheduleIndex', trialEntry.scheduleIndex],
+    ['executionIndex', trialEntry.executionIndex], ['armOrdinal', trialEntry.armOrdinal],
   ];
   for (const [name, expected] of matches) {
     if (manifest[name] !== expected) throw new Error(`${label}.${name} does not match its plan`);
   }
+  if (!sameValue(manifest.armOrder, trialEntry.armOrder)) throw new Error(`${label}.armOrder does not match its plan`);
+  if (!sameValue(manifest.corpus, plan.corpus)) throw new Error(`${label}.corpus does not match its plan`);
+  if (!sameValue(manifest.images, plan.images)) throw new Error(`${label}.images does not match its plan`);
   if (manifest.agent !== cohort.agent) throw new Error(`${label}.agent does not match its cohort`);
   if (manifest.model !== cohort.model) throw new Error(`${label}.model does not match its cohort`);
   if (!sameValue(manifest.forgekitTreatment, cohort.forgekit_treatment)) {
@@ -258,6 +269,10 @@ async function readRun(candidate) {
     requireSafeId(trialEntry.trialId, `plan ${runId}.trials[${index}].trialId`);
     if (!ARMS.includes(trialEntry.arm)) throw new Error(`plan ${runId}.trials[${index}].arm is invalid`);
     requirePositiveInteger(trialEntry.repetition, `plan ${runId}.trials[${index}].repetition`);
+    requirePositiveInteger(trialEntry.scheduleIndex, `plan ${runId}.trials[${index}].scheduleIndex`);
+    requirePositiveInteger(trialEntry.executionIndex, `plan ${runId}.trials[${index}].executionIndex`);
+    requirePositiveInteger(trialEntry.armOrdinal, `plan ${runId}.trials[${index}].armOrdinal`);
+    if (!Array.isArray(trialEntry.armOrder)) throw new Error(`plan ${runId}.trials[${index}].armOrder must be an array`);
     const manifestFile = await requireRegularFile(runDirectory, trialEntry.manifest, `manifest for ${trialEntry.trialId}`);
     const manifest = await readJsonFile(manifestFile, `manifest for ${trialEntry.trialId}`);
     assertManifestMatchesPlan(manifest, plan, trialEntry, cohort, `manifest ${trialEntry.trialId}`);
@@ -274,6 +289,11 @@ async function readRun(candidate) {
       repetition: manifest.repetition,
       arm: manifest.arm,
       status: manifest.status,
+      provenance: stableValue({
+        task_revision: manifest.taskRevision,
+        corpus: manifest.corpus,
+        images: manifest.images,
+      }),
       ...values,
     });
   }
@@ -284,26 +304,40 @@ function mean(values) {
   return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function operationSummary(observations) {
+  return {
+    planned: observations.length,
+    verified: observations.filter((observation) => observation.status === 'verified').length,
+    failed: observations.filter((observation) => observation.status === 'failed').length,
+  };
+}
+
 function armSummary(observations) {
+  const verified = observations.filter((observation) => observation.outcome !== null);
   const outcomes = {};
   for (const metric of OUTCOME_METRICS) {
-    const successes = observations.reduce((sum, observation) => sum + observation.outcome[metric], 0);
+    const successes = verified.reduce((sum, observation) => sum + observation.outcome[metric], 0);
     outcomes[metric] = {
-      observations: observations.filter((observation) => observation.outcome !== null).length,
+      observations: verified.length,
       successes,
-      rate: observations.length === 0 ? null : successes / observations.length,
+      rate: verified.length === 0 ? null : successes / verified.length,
     };
   }
   const instrumentation = {};
   for (const metric of INSTRUMENTATION_METRICS) {
-    const values = observations.map((observation) => observation.instrumentation[metric]).filter((value) => value !== null);
+    const values = verified.map((observation) => observation.instrumentation[metric]).filter((value) => value !== null);
     instrumentation[metric] = {
       observations: values.length,
-      missing: observations.length - values.length,
+      missing: verified.length - values.length,
       mean: mean(values),
     };
   }
-  return { observations: observations.length, outcomes, instrumentation };
+  return {
+    observations: verified.length,
+    operations: operationSummary(observations),
+    outcomes,
+    instrumentation,
+  };
 }
 
 function pairKey(observation) {
@@ -317,6 +351,10 @@ function sortedPairCells(observations) {
     if (!cells.has(key)) cells.set(key, { task: observation.task, category: observation.category, repetition: observation.repetition });
     const cell = cells.get(key);
     if (cell.category !== observation.category) throw new Error(`task ${observation.task} has inconsistent categories`);
+    const mate = ARMS.map((arm) => cell[arm]).find(Boolean);
+    if (mate && !sameValue(mate.provenance, observation.provenance)) {
+      throw new Error(`task revision or provenance differs for task ${observation.task} repetition ${observation.repetition}`);
+    }
     if (Object.hasOwn(cell, observation.arm)) {
       throw new Error(`duplicate cell for task ${observation.task} repetition ${observation.repetition} arm ${observation.arm}`);
     }
@@ -336,6 +374,7 @@ function pairSummary(observations) {
       repetition: cell.repetition,
       present_arms: present,
       missing_arms: ARMS.filter((arm) => !cell[arm]?.outcome),
+      arm_statuses: Object.fromEntries(ARMS.filter((arm) => cell[arm]).map((arm) => [arm, cell[arm].status])),
     };
   });
   const outcomes = {};
@@ -368,7 +407,7 @@ function pairSummary(observations) {
 }
 
 function armsSummary(observations) {
-  return Object.fromEntries(ARMS.map((arm) => [arm, armSummary(observations.filter((item) => item.arm === arm && item.outcome !== null))]));
+  return Object.fromEntries(ARMS.map((arm) => [arm, armSummary(observations.filter((item) => item.arm === arm))]));
 }
 
 function groupedSummaries(observations, property) {
@@ -398,6 +437,7 @@ async function aggregate(runDirectories) {
     cohort,
     run_ids: runs.map((run) => run.runId),
     observations: observations.filter((observation) => observation.outcome !== null).length,
+    operations: operationSummary(observations),
     arms: armsSummary(observations),
     categories: groupedSummaries(observations, 'category'),
     tasks,

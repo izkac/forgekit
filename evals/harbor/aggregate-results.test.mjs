@@ -47,6 +47,8 @@ function createRun(root, {
   harnessRevision = 'harness-abc',
   treatment = { kind: 'published-version', version: '1.2.3' },
   selectedArm = 'both',
+  taskRevision = `revision-${task}`,
+  corpus = { id: 'test-corpus', revision: 'corpus-v1' },
 } = {}) {
   const directory = path.join(root, runId);
   mkdirSync(path.join(directory, 'trials'), { recursive: true });
@@ -64,7 +66,8 @@ function createRun(root, {
       trialId,
       task,
       category,
-      taskRevision: `revision-${task}`,
+      taskRevision,
+      corpus,
       harnessRevision,
       arm: cell.arm,
       repetition: cell.repetition,
@@ -74,6 +77,11 @@ function createRun(root, {
       images: { agent: 'node@sha256:aaa', verifier: 'node@sha256:bbb' },
       settings: { repetitions: 2, concurrency: 1 },
       seed: 'experiment-seed',
+      scheduleIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
+      executionIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
+      armOrder: ['baseline', 'forge'],
+      armOrdinal: cell.arm === 'baseline' ? 1 : 2,
+      harbor: { executable: 'harbor', version: '0.20.0', versionSource: 'harbor --version', argv: ['run'] },
       status,
       ...(status === 'verified' ? { normalizedResult: resultPath } : { error: cell.error ?? 'Harbor failed' }),
     };
@@ -92,6 +100,10 @@ function createRun(root, {
       trialId,
       arm: cell.arm,
       repetition: cell.repetition,
+      scheduleIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
+      executionIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
+      armOrder: ['baseline', 'forge'],
+      armOrdinal: cell.arm === 'baseline' ? 1 : 2,
       manifest: manifestPath,
       status,
     });
@@ -104,7 +116,8 @@ function createRun(root, {
     status: cells.some((cell) => cell.status === 'failed') ? 'completed-with-failures' : 'completed',
     task,
     category,
-    taskRevision: `revision-${task}`,
+    taskRevision,
+    corpus,
     harnessRevision,
     images: { agent: 'node@sha256:aaa', verifier: 'node@sha256:bbb' },
     settings: {
@@ -159,6 +172,7 @@ test('aggregates coherent runs by arm, category, and task using complete pairs o
     model: 'example/model',
     forgekit_treatment: { kind: 'published-version', version: '1.2.3' },
     harness_revision: 'harness-abc',
+    corpus: { id: 'test-corpus', revision: 'corpus-v1' },
     settings: { repetitions: 2, concurrency: 1, seed: 'experiment-seed' },
   });
   assert.deepEqual(report.arms.baseline.outcomes.shippable, { observations: 3, successes: 2, rate: 2 / 3 });
@@ -175,7 +189,10 @@ test('aggregates coherent runs by arm, category, and task using complete pairs o
     repetition: 2,
     present_arms: ['baseline'],
     missing_arms: ['forge'],
+    arm_statuses: { baseline: 'verified', forge: 'failed' },
   }]);
+  assert.deepEqual(report.operations, { planned: 6, verified: 5, failed: 1 });
+  assert.deepEqual(report.arms.forge.operations, { planned: 3, verified: 2, failed: 1 });
   assert.deepEqual(report.pairs.outcomes.shippable, {
     pairs: 2,
     baseline_successes: 1,
@@ -245,6 +262,24 @@ test('pairs baseline and forge observations from separate single-arm run directo
   const report = JSON.parse(result.stdout);
   assert.equal(report.pairs.complete, 1);
   assert.equal(report.pairs.outcomes.shippable.wins, 1);
+});
+
+test('refuses to pair split arms from different task or corpus revisions', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-provenance-'));
+  const baseline = createRun(root, {
+    runId: 'revision-a', task: 'same-task', category: 'bug', selectedArm: 'baseline',
+    taskRevision: 'revision-a',
+    cells: [{ arm: 'baseline', repetition: 1, shippable: 0 }],
+  });
+  const forge = createRun(root, {
+    runId: 'revision-b', task: 'same-task', category: 'bug', selectedArm: 'forge',
+    taskRevision: 'revision-b',
+    cells: [{ arm: 'forge', repetition: 1, shippable: 1 }],
+  });
+  const result = invoke([baseline, forge]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /task revision|provenance|cohort/i);
+  assert.equal(result.stdout, '');
 });
 
 test('refuses mixed cohorts without emitting an aggregate', () => {
