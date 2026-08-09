@@ -129,6 +129,9 @@ const args = [...(entry.prependArgs ?? []), ...rest].map((arg, i, all) =>
   i > 0 && all[i - 1] === '--cwd' && !path.isAbsolute(arg) ? path.resolve(invokedFrom, arg) : arg,
 );
 
+const stdioGuardOption = `--require=${JSON.stringify(path.join(SRC, 'stdio-guard.cjs'))}`;
+const childNodeOptions = [stdioGuardOption, process.env.NODE_OPTIONS].filter(Boolean).join(' ');
+
 const r = spawnSync(process.execPath, [path.join(SRC, entry.script), ...args], {
   stdio: 'inherit',
   cwd: repoRoot,
@@ -137,6 +140,8 @@ const r = spawnSync(process.execPath, [path.join(SRC, entry.script), ...args], {
     FORGE_INVOKED_FROM: invokedFrom,
     FORGEKIT_ROOT: path.resolve(__dirname, '..', '..', '..'),
     FORGEKIT_CLI_ROOT: path.resolve(__dirname, '..'),
+    NODE_OPTIONS: childNodeOptions,
+    FORGEKIT_STDIO_GUARD_OPTION: stdioGuardOption,
   },
 });
 

@@ -1,0 +1,11 @@
+{
+  "change": "f96-epipe-guard",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "pipe-forge-prefs",
+      "cmd": "bash -o pipefail -c 'node packages/cli/bin/forge.mjs prefs | head -n 1'",
+      "expect": "pace="
+    }
+  ]
+}
