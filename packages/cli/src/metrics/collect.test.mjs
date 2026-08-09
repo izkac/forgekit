@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { collectMetrics, writeMetrics } from './collect.mjs';
+import { installFsFaults } from '../test-support/fs-fault.mjs';
 import { EMPTY_DISPATCHES } from './dispatches.mjs';
 import {
   DEFAULT_HOST_ID,
@@ -175,18 +176,19 @@ test('collectMetrics still harvests both transcripts, but names the id, when one
     configDir,
     sessionId: SECOND_HOST_ID,
     lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })],
-    // An (empty) subagents directory, so there is a host session directory to
-    // chmod — a session that dispatched nothing has no such directory at all.
+    // An (empty) subagents directory, so there is a host session directory whose sidecar path
+    // can receive the exact stat fault — a session that dispatched nothing has no such directory at all.
     subagents: {},
   });
 
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const secondHostDir = path.join(project, SECOND_HOST_ID);
-  fs.chmodSync(secondHostDir, 0o000);
+  const secondSidecarPath = path.join(secondHostDir, 'subagents');
+  const restore = installFsFaults([{ method: 'statSync', path: secondSidecarPath, code: 'EACCES' }]);
   try {
     // Prove the fixture is genuinely unreadable where it matters, and that the
     // sibling transcript is not — or the assertions below pass for free.
-    assert.throws(() => fs.statSync(path.join(secondHostDir, 'subagents')), /EACCES/);
+    assert.throws(() => fs.statSync(secondSidecarPath), /EACCES/);
     assert.equal(fs.statSync(path.join(project, `${SECOND_HOST_ID}.jsonl`)).isFile(), true);
 
     const doc = collectMetrics({
@@ -205,7 +207,7 @@ test('collectMetrics still harvests both transcripts, but names the id, when one
     // lost. That is the distinction a bare id could not make.
     assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: true }]);
   } finally {
-    fs.chmodSync(secondHostDir, 0o755);
+    restore();
   }
 });
 
@@ -239,11 +241,12 @@ test('collectMetrics harvests only the readable session, and names the other as 
     jsonl([assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })]),
   );
 
-  fs.chmodSync(projectB, 0o000);
+  const blockedTranscript = path.join(projectB, `${SECOND_HOST_ID}.jsonl`);
+  const restore = installFsFaults([{ method: 'statSync', path: blockedTranscript, code: 'EACCES' }]);
   try {
     // Prove the fixture is genuinely unreadable where it matters, and that the
     // other project directory is not — or the assertions below pass for free.
-    assert.throws(() => fs.statSync(path.join(projectB, `${SECOND_HOST_ID}.jsonl`)), /EACCES/);
+    assert.throws(() => fs.statSync(blockedTranscript), /EACCES/);
     assert.equal(fs.statSync(path.join(projectA, `${HOST_ID}.jsonl`)).isFile(), true);
 
     const doc = collectMetrics({
@@ -260,7 +263,7 @@ test('collectMetrics harvests only the readable session, and names the other as 
     // the sidecar-only miss above.
     assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: false }]);
   } finally {
-    fs.chmodSync(projectB, 0o755);
+    restore();
   }
 });
 
@@ -281,9 +284,8 @@ test('collectMetrics names the blocked id, not "pruned", when the sole bound ses
   // `unreadable` and it never reaches `found` — `bound.length === 0`, exactly
   // the branch this guard-order bug hits.
   const configDir = plantHost({ sessionId: HOST_ID, lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z' })] });
-  const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const transcript = transcriptPath(configDir, HOST_ID);
-  fs.chmodSync(project, 0o000);
+  const restore = installFsFaults([{ method: 'statSync', path: transcript, code: 'EACCES' }]);
   try {
     // The fixture is only meaningful if the process genuinely cannot see
     // inside the directory — or the assertions below pass for free.
@@ -318,7 +320,7 @@ test('collectMetrics names the blocked id, not "pruned", when the sole bound ses
     // tempted to add it while fixing the reason above.
     assert.equal('unread' in doc, false);
   } finally {
-    fs.chmodSync(project, 0o755);
+    restore();
   }
 });
 
@@ -357,12 +359,15 @@ test('collectMetrics does not count a session whose transcript was located but c
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const secondHostDir = path.join(project, SECOND_HOST_ID);
   const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
-  fs.chmodSync(secondHostDir, 0o000);
-  fs.chmodSync(secondTranscript, 0o000);
+  const secondSidecarPath = path.join(secondHostDir, 'subagents');
+  const restore = installFsFaults([
+    { method: 'statSync', path: secondSidecarPath, code: 'EACCES' },
+    { method: 'readFileSync', path: secondTranscript, code: 'EACCES' },
+  ]);
   try {
     // Prove both halves of the fixture are genuinely blocked where it
     // matters — or the assertions below pass for free.
-    assert.throws(() => fs.statSync(path.join(secondHostDir, 'subagents')), /EACCES/);
+    assert.throws(() => fs.statSync(secondSidecarPath), /EACCES/);
     assert.equal(fs.statSync(secondTranscript).isFile(), true, 'stat alone must still succeed');
     assert.throws(() => fs.readFileSync(secondTranscript, 'utf8'), /EACCES/);
 
@@ -378,8 +383,7 @@ test('collectMetrics does not count a session whose transcript was located but c
     assert.deepEqual(doc.tokens, sumTokens(r1));
     assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: false }]);
   } finally {
-    fs.chmodSync(secondHostDir, 0o755);
-    fs.chmodSync(secondTranscript, 0o644);
+    restore();
   }
 });
 
@@ -419,7 +423,7 @@ test('collectMetrics reports an unflagged id as unread, not counted, when its tr
   });
 
   const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
-  fs.chmodSync(secondTranscript, 0o000);
+  const restore = installFsFaults([{ method: 'readFileSync', path: secondTranscript, code: 'EACCES' }]);
   try {
     // Guard: prove the fixture is genuinely unreadable where it matters — or
     // the assertions below pass for free.
@@ -438,7 +442,7 @@ test('collectMetrics reports an unflagged id as unread, not counted, when its tr
     assert.deepEqual(doc.tokens, sumTokens(r1));
     assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: false }]);
   } finally {
-    fs.chmodSync(secondTranscript, 0o644);
+    restore();
   }
 });
 
@@ -462,11 +466,12 @@ test('collectMetrics still counts a session whose transcript is readable but gen
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const secondHostDir = path.join(project, SECOND_HOST_ID);
   const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
-  fs.chmodSync(secondHostDir, 0o000);
+  const secondSidecarPath = path.join(secondHostDir, 'subagents');
+  const restore = installFsFaults([{ method: 'statSync', path: secondSidecarPath, code: 'EACCES' }]);
   try {
     // Prove the fixture is genuinely empty-but-readable, not accidentally
     // missing or blocked — or the assertion below passes for free.
-    assert.throws(() => fs.statSync(path.join(secondHostDir, 'subagents')), /EACCES/);
+    assert.throws(() => fs.statSync(secondSidecarPath), /EACCES/);
     assert.equal(fs.readFileSync(secondTranscript, 'utf8'), '');
 
     const doc = collectMetrics({
@@ -480,7 +485,7 @@ test('collectMetrics still counts a session whose transcript is readable but gen
     assert.deepEqual(doc.tokens, sumTokens(r1));
     assert.deepEqual(doc.source.unread, [{ sessionId: SECOND_HOST_ID, counted: true }]);
   } finally {
-    fs.chmodSync(secondHostDir, 0o755);
+    restore();
   }
 });
 
@@ -495,7 +500,7 @@ test('collectMetrics surfaces a doubly-flagged id once — sidecar-blocked AND c
   // that concatenated the two lists, or that decided `counted` from whichever
   // witness it read first, would still have passed every test in this file.
   //
-  // The fixture blocks both layers on the same id, and each `chmod` is doing
+  // The fixture blocks both layers on the same id, and each injected fault does
   // one specific job:
   //   - `000` on the host *session* directory: `statSync` on `subagents/`
   //     inside it throws EACCES, so the id lands in `unreadable`. The
@@ -517,21 +522,24 @@ test('collectMetrics surfaces a doubly-flagged id once — sidecar-blocked AND c
     configDir,
     sessionId: SECOND_HOST_ID,
     lines: [assistantLine({ requestId: 'req_2', at: '2026-07-27T10:06:00.000Z', tokens: r2 })],
-    // An (empty) subagents directory, so there is a host session directory to
-    // chmod — a session that dispatched nothing has no such directory at all.
+    // An (empty) subagents directory, so there is a host session directory whose sidecar path
+    // can receive the exact stat fault — a session that dispatched nothing has no such directory at all.
     subagents: {},
   });
 
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const secondHostDir = path.join(project, SECOND_HOST_ID);
   const secondTranscript = transcriptPath(configDir, SECOND_HOST_ID);
-  fs.chmodSync(secondHostDir, 0o000);
-  fs.chmodSync(secondTranscript, 0o000);
+  const secondSidecarPath = path.join(secondHostDir, 'subagents');
+  const restore = installFsFaults([
+    { method: 'statSync', path: secondSidecarPath, code: 'EACCES' },
+    { method: 'readFileSync', path: secondTranscript, code: 'EACCES' },
+  ]);
   try {
     // Guards for BOTH memberships — without these the assertions below could
     // pass for free on a fixture that only ever blocked one layer.
     assert.throws(
-      () => fs.statSync(path.join(secondHostDir, 'subagents')),
+      () => fs.statSync(secondSidecarPath),
       /EACCES/,
       'the sidecar stat must genuinely fail — this is what puts the id in `unreadable`',
     );
@@ -568,8 +576,7 @@ test('collectMetrics surfaces a doubly-flagged id once — sidecar-blocked AND c
   } finally {
     // Restored even if an assertion above throws: a stuck `000` directory
     // breaks every test that runs after this one.
-    fs.chmodSync(secondHostDir, 0o755);
-    fs.chmodSync(secondTranscript, 0o644);
+    restore();
   }
 });
 
@@ -906,7 +913,7 @@ test('collectMetrics names the read failure, not merely "no readable lines", whe
     lines: [assistantLine({ requestId: 'req_1', at: '2026-07-27T10:05:00.000Z' })],
   });
   const transcript = transcriptPath(configDir, HOST_ID);
-  fs.chmodSync(transcript, 0o000);
+  const restore = installFsFaults([{ method: 'readFileSync', path: transcript, code: 'EACCES' }]);
   try {
     // The fixture is only meaningful if the read genuinely fails, and the
     // file is genuinely still there — or the assertion below passes for free.
@@ -928,7 +935,7 @@ test('collectMetrics names the read failure, not merely "no readable lines", whe
     // `err.code` verbatim, and Node's own EACCES always carries that code.
     assert.match(doc.reason, /EACCES/);
   } finally {
-    fs.chmodSync(transcript, 0o644);
+    restore();
   }
 });
 
@@ -954,7 +961,7 @@ test('the read-failure header counts the transcripts that failed, not the transc
   });
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const blocked = path.join(project, `${SECOND_HOST_ID}.jsonl`);
-  fs.chmodSync(blocked, 0o000);
+  const restore = installFsFaults([{ method: 'readFileSync', path: blocked, code: 'EACCES' }]);
   try {
     assert.throws(() => fs.readFileSync(blocked, 'utf8'), /EACCES/);
     assert.equal(fs.statSync(blocked).isFile(), true);
@@ -971,7 +978,7 @@ test('the read-failure header counts the transcripts that failed, not the transc
     assert.match(doc.reason, new RegExp(SECOND_HOST_ID));
     assert.doesNotMatch(doc.reason, new RegExp(`${HOST_ID}[^;]*EACCES`));
   } finally {
-    fs.chmodSync(blocked, 0o644);
+    restore();
   }
 });
 

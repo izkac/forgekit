@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { CENSUS_RULE, FINAL_REVIEW_REQUEST_FLOOR, reviewCensus } from './review-census.mjs';
 import { writeStamp } from './review-stamp.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
+import { installFsFaults } from './test-support/fs-fault.mjs';
 import {
   assistantLine,
   meta,
@@ -1760,7 +1761,9 @@ test('the join: a half-read host binding does not reach the one genuine host sel
   //   fixed:  evidence unavailable → prose decides → `independent` / `inferred`
   const dir = sessionWith({}, 'Reviewer: claude-opus-5 (final-reviewer)\n\n**READY**\n');
 
-  fs.chmodSync(secondHostDir, 0o000);
+  const restore = installFsFaults([
+    { method: 'statSync', path: secondSidecarPath, code: 'EACCES' },
+  ]);
   try {
     // The fixture is only meaningful if the process genuinely cannot read it.
     assert.throws(() => fs.statSync(secondSidecarPath), /EACCES/);
@@ -1799,7 +1802,7 @@ test('the join: a half-read host binding does not reach the one genuine host sel
     // neighbouring evidence tests in this file make.
     assert.deepEqual(census, bare, 'exactly what the prose rule alone returns');
   } finally {
-    fs.chmodSync(secondHostDir, 0o755);
+    restore();
   }
 });
 

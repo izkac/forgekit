@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { bindHost, detectHost, findTranscripts } from './host.mjs';
+import { installFsFaults } from '../test-support/fs-fault.mjs';
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
@@ -357,11 +358,12 @@ test('findTranscripts finds a transcript in the second project directory after a
   // this id unreadable even though it was found — this is the guard against
   // over-reporting the brief calls out as the dangerous direction.
   const { configDir, projA, projB } = fixture('forge-host-eacces-found-');
-  fs.chmodSync(projA, 0o000);
+  const blockedPath = path.join(projA, `${ID_B}.jsonl`);
+  const restore = installFsFaults([{ method: 'statSync', path: blockedPath, code: 'EACCES' }]);
   try {
     // Prove the fixture is genuinely unreadable before trusting the assertions
-    // below — a quietly-readable directory would make this test pass for free.
-    assert.throws(() => fs.statSync(path.join(projA, `${ID_B}.jsonl`)), /EACCES/);
+    // below — a quietly-readable path would make this test pass for free.
+    assert.throws(() => fs.statSync(blockedPath), /EACCES/);
 
     // This test's discriminating power — catching `if (blocked)` in place of
     // `if (!matched && blocked)` — depends on readdirSync visiting the
@@ -384,11 +386,11 @@ test('findTranscripts finds a transcript in the second project directory after a
     ]);
     assert.deepEqual(unreadable, []);
   } finally {
-    fs.chmodSync(projA, 0o755);
+    restore();
   }
 });
 
-test('findTranscripts scopes `blocked` to one id, not the whole call', () => {
+test('findTranscripts scopes `blocked` to one id, not the whole call', (t) => {
   // Pins the boundary the reviewer's mutant erases: hoist `let blocked = null`
   // one scope out of `for (const sessionId of ids)` and it survives across
   // ids instead of resetting per id. A second id, absent everywhere and never
@@ -406,6 +408,8 @@ test('findTranscripts scopes `blocked` to one id, not the whole call', () => {
   const BLOCKED_ID = 'blocker/deadbeef';
   const ABSENT_ID = 'cccccccc-0000-4000-8000-000000000009';
   const blockedPath = path.join(proj, `${BLOCKED_ID}.jsonl`);
+  const restore = installFsFaults([{ method: 'statSync', path: blockedPath, code: 'ENOTDIR' }]);
+  t.after(restore);
   assert.throws(
     () => fs.statSync(blockedPath),
     /ENOTDIR/,
@@ -428,9 +432,10 @@ test('findTranscripts reports an id as unreadable when it is found in no project
   // concluded, and the id must be reported unreadable rather than silently
   // dropped the way a pruned transcript would be.
   const { configDir, projA } = fixture('forge-host-eacces-miss-');
-  fs.chmodSync(projA, 0o000);
+  const blockedPath = path.join(projA, `${ID_C}.jsonl`);
+  const restore = installFsFaults([{ method: 'statSync', path: blockedPath, code: 'EACCES' }]);
   try {
-    assert.throws(() => fs.statSync(path.join(projA, `${ID_C}.jsonl`)), /EACCES/);
+    assert.throws(() => fs.statSync(blockedPath), /EACCES/);
 
     const { found, unreadable } = findTranscripts([ID_C], { configDir });
 
@@ -440,7 +445,7 @@ test('findTranscripts reports an id as unreadable when it is found in no project
     assert.equal(unreadable[0].path, path.join(projA, `${ID_C}.jsonl`));
     assert.match(unreadable[0].reason, /EACCES/);
   } finally {
-    fs.chmodSync(projA, 0o755);
+    restore();
   }
 });
 

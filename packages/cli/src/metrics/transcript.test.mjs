@@ -10,6 +10,7 @@ import {
   readSubagents,
   usageByRequest,
 } from './transcript.mjs';
+import { installFsFaults } from '../test-support/fs-fault.mjs';
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
@@ -147,13 +148,11 @@ test('readJsonl reports a directory path as EISDIR instead of throwing', () => {
 // ---------------------------------------------------------------------------
 
 test('readJsonl reports a content-unreadable file as a failure carrying the error code, not as an empty read', () => {
-  // `chmod 000` on the *file* — its directory is left alone — is what
-  // reproduces the gap `readJsonl` currently papers over: `fs.statSync` still
-  // sees the file (it only reads the parent directory's entry) while
-  // `fs.readFileSync` throws EACCES. Verified by two reviewers in the change
-  // this test pins; confirmed again here via the guard below.
+  // Inject only `readFileSync(file)` with EACCES: `fs.statSync` must still see
+  // the file while its content cannot be opened. Exact method/path injection
+  // preserves that distinction on hosts without POSIX permission semantics.
   const file = transcriptFile('{"n":1}\n');
-  fs.chmodSync(file, 0o000);
+  const restore = installFsFaults([{ method: 'readFileSync', path: file, code: 'EACCES' }]);
   try {
     // Guard: prove the fixture is genuinely content-unreadable, or the
     // assertions below would pass for free.
@@ -163,9 +162,7 @@ test('readJsonl reports a content-unreadable file as a failure carrying the erro
     assert.equal(result.error.code, 'EACCES');
     assert.deepEqual(result.lines, []);
   } finally {
-    // A stuck 000 fixture breaks every test that runs after this one in the
-    // same file, so the mode is restored even if an assertion above throws.
-    fs.chmodSync(file, 0o644);
+    restore();
   }
 });
 

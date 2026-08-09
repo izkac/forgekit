@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { readStamps, writeStamp } from './review-stamp.mjs';
+import { installFsFaults } from './test-support/fs-fault.mjs';
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
@@ -187,17 +188,16 @@ test('readStamps returns [] for a malformed or wrongly-shaped file, and never th
 });
 
 test('readStamps returns [] rather than throwing when the file cannot be opened at all', () => {
-  if (process.getuid && process.getuid() === 0) return; // root ignores the permission bit
   const sessionDir = tmp('review-stamp-unreadable-');
   const dir = path.join(sessionDir, 'reviews');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'dispatches.json');
   fs.writeFileSync(file, JSON.stringify({ version: 1, stamps: [] }));
-  fs.chmodSync(file, 0o000);
+  const restore = installFsFaults([{ method: 'readFileSync', path: file, code: 'EACCES' }]);
   try {
     assert.deepEqual(readStamps(sessionDir), []);
   } finally {
-    fs.chmodSync(file, 0o644);
+    restore();
   }
 });
 
@@ -275,14 +275,14 @@ test('writeStamp never throws when reading the existing file fails for a reason 
 });
 
 test('writeStamp never throws when the reviews directory cannot be created', () => {
-  if (process.getuid && process.getuid() === 0) return; // root ignores the permission bit
   const sessionDir = tmp('review-stamp-nowrite-');
-  fs.chmodSync(sessionDir, 0o555); // readable/traversable, not writable
+  const reviewsDir = path.join(sessionDir, 'reviews');
+  const restore = installFsFaults([{ method: 'mkdirSync', path: reviewsDir, code: 'EACCES' }]);
   try {
     const result = writeStamp(sessionDir, { unit: 'final', label: 'l', sessionId: 's1' });
     assert.equal(result.ok, false);
     assert.ok(isNonEmptyString(result.reason));
   } finally {
-    fs.chmodSync(sessionDir, 0o755);
+    restore();
   }
 });

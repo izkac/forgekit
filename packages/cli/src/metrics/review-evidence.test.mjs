@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { readReviewerSidecars, reviewEvidence } from './review-evidence.mjs';
+import { installFsFaults } from '../test-support/fs-fault.mjs';
 import {
   DEFAULT_HOST_ID,
   assistantLine,
@@ -671,7 +672,7 @@ test('reviewEvidence cannot tell when the sidecar directory exists but cannot be
     },
   });
   const dir = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit', HOST_ID, 'subagents');
-  fs.chmodSync(dir, 0o000);
+  const restore = installFsFaults([{ method: 'readdirSync', path: dir, code: 'EACCES' }]);
   try {
     // The fixture is only meaningful if the process genuinely cannot read it.
     assert.throws(() => fs.readdirSync(dir), /EACCES/);
@@ -691,7 +692,7 @@ test('reviewEvidence cannot tell when the sidecar directory exists but cannot be
     assert.match(result.reason, new RegExp(HOST_ID));
     assert.match(result.reason, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally {
-    fs.chmodSync(dir, 0o755);
+    restore();
   }
 });
 
@@ -970,7 +971,9 @@ test('reviewEvidence stays unavailable when only one of two bound host sessions 
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const secondHostDir = path.join(project, SECOND_HOST_ID);
   const secondSidecarPath = path.join(secondHostDir, 'subagents');
-  fs.chmodSync(secondHostDir, 0o000);
+  const restore = installFsFaults([
+    { method: 'statSync', path: secondSidecarPath, code: 'EACCES' },
+  ]);
   try {
     // Prove the fixture is genuinely unreadable, and that the sibling
     // transcript is not — or the assertion below would be passing for free.
@@ -999,7 +1002,7 @@ test('reviewEvidence stays unavailable when only one of two bound host sessions 
     // placeholder every unavailable answer carries.
     assert.equal(result.partial, false);
   } finally {
-    fs.chmodSync(secondHostDir, 0o755);
+    restore();
   }
 });
 
@@ -1024,7 +1027,7 @@ test('reviewEvidence names the blocked id and path, not "pruned", when every bou
   const configDir = plantHost({ sessionId: HOST_ID, lines: PARENT, subagents: null });
   const project = path.join(configDir, 'projects', '-home-iztok-Projects-forgekit');
   const transcript = path.join(project, `${HOST_ID}.jsonl`);
-  fs.chmodSync(project, 0o000);
+  const restore = installFsFaults([{ method: 'statSync', path: transcript, code: 'EACCES' }]);
   try {
     // The fixture is only meaningful if the process genuinely cannot see
     // inside the directory, and genuinely could locate the file before it was
@@ -1057,7 +1060,7 @@ test('reviewEvidence names the blocked id and path, not "pruned", when every bou
     // caught missing its path.
     assert.doesNotMatch(result.reason, /pruned or written elsewhere/);
   } finally {
-    fs.chmodSync(project, 0o755);
+    restore();
   }
 });
 
@@ -1083,7 +1086,7 @@ test('reviewEvidence cannot tell when a dispatch record in the window cannot be 
     'subagents',
     'agent-a1.meta.json',
   );
-  fs.chmodSync(metaFile, 0o000);
+  const restore = installFsFaults([{ method: 'readFileSync', path: metaFile, code: 'EACCES' }]);
   try {
     assert.throws(() => fs.readFileSync(metaFile, 'utf8'), /EACCES/);
 
@@ -1096,7 +1099,7 @@ test('reviewEvidence cannot tell when a dispatch record in the window cannot be 
     assert.equal(result.available, false);
     assert.match(result.reason, /could not be read/i);
   } finally {
-    fs.chmodSync(metaFile, 0o644);
+    restore();
   }
 });
 

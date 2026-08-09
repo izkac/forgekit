@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defaultSession, findRepoRoot, sessionAgeDays, writeJson } from './lib.mjs';
 
 const SESSION_STATUS = path.join(
@@ -487,7 +487,7 @@ test('a stray file in .forge/sessions is not an unreadable session', () => {
     [
       '--input-type=module',
       '-e',
-      `import { unfinishedSessions } from ${JSON.stringify(path.join(path.dirname(SESSION_STATUS), 'lib.mjs'))};
+      `import { unfinishedSessions } from ${JSON.stringify(pathToFileURL(path.join(path.dirname(SESSION_STATUS), 'lib.mjs')).href)};
        process.stdout.write(JSON.stringify(unfinishedSessions()));`,
     ],
     { cwd: root, encoding: 'utf8' },
@@ -657,7 +657,7 @@ test('a session is what has a session.json, whatever its dirent says', () => {
       [
         '--input-type=module',
         '-e',
-        `import { unfinishedSessions } from ${JSON.stringify(path.join(path.dirname(SESSION_STATUS), 'lib.mjs'))};
+        `import { unfinishedSessions } from ${JSON.stringify(pathToFileURL(path.join(path.dirname(SESSION_STATUS), 'lib.mjs')).href)};
          process.stdout.write(JSON.stringify(unfinishedSessions().map((c) => c.id).sort()));`,
       ],
       { cwd: root, encoding: 'utf8' },
