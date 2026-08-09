@@ -1,6 +1,7 @@
 # Why agent-written software degrades — evidence survey and forgekit roadmap
 
-Status: Proposed (research synthesis; Tier 1 entering Forge 2026-08-07)
+Status: Proposed; R1/R2/R12 shipped 2026-08-08. The unshipped built-in R4
+in-place mutator was retired 2026-08-09; external-tool R4 remains proposed.
 Date: 2026-08-07
 Companion: `2026-08-07-close-the-scorecard-gaps.md` (this doc endorses and extends it)
 Full evidence survey with all sources: `docs/research/2026-08-07-agentic-code-quality-evidence.md`
@@ -70,7 +71,7 @@ The gap: forgekit's *TDD core is still entirely advisory*. Nothing verifies red-
 
 **R3. Independent test authorship for spec scenarios.** The delta specs already contain GIVEN/WHEN/THEN scenarios. Add an optional (pace-gated: standard+) step where a *separate* test-writer subagent turns the scenarios into acceptance tests before the implementer is dispatched; tests are committed first and covered by R1's tamper guard. AgentCoder evidence (+8.6pp) plus the SWE-bench held-out-test design rationale. The implementer prompt already forbids stubs; this makes the oracle independent of the code.
 
-**R4. Mutation gate on new tests (pace-gated).** `forge mutate` in the verify phase: run a mutation tool (StrykerJS/mutmut/PIT/cargo-mutants, recorded per-project in `.forge/config.json` like the e2e harness — recorded, never detected) scoped to the change's diff; new/changed tests must kill mutants or the scorer deducts / thorough-pace gates. Meta ACH is the strongest result in the survey; this is the direct countermeasure to weak-oracle passes (31% of SWE-bench "successes").
+**R4. External mutation gate on new tests (pace-gated, proposed).** Retire the built-in in-place mutator experiment; Forge must not own source backup/restore, locking, signal handling, or crash recovery for mutation runs. A future gate may invoke StrykerJS, mutmut, PIT, cargo-mutants, or another established tool only when the project records the exact tool and command in `.forge/config.json` — recorded, never detected. It must first execute and pass the current unmutated baseline, then accept only fresh, complete evidence bound to the source/revision, scope, command, tool version and configuration, and execution time. The evidence must be protected from ordinary implementing-agent writes. Stale, partial, capped, skipped, unsupported, invalid, missing, or otherwise unverifiable results are uncertainty and must never score or gate as clean. With those preconditions, new/changed tests must kill the selected mutants or the scorer deducts / thorough-pace gates. Meta ACH remains the strongest result in the survey; retiring one unsafe architecture does not reject mutation testing. Decision record: `docs/research/2026-08-09-built-in-mutation-gate-retrospective.md`.
 
 ### Tier 2 — quality ratchet (targets the measured degradation signature)
 
@@ -105,6 +106,8 @@ The gap: forgekit's *TDD core is still entirely advisory*. Nothing verifies red-
 - **No promotion of LLM review to a gate.** ~30% independent precision; it stays advisory behind executed checks (forgekit's current stance is correct).
 - **No single-number maintainability score.** Gate on specific, validated, diff-scoped metrics instead.
 - **No transcript-shaping incentives.** Never make "clean narration" a scored target; gate on independently executed outcomes.
+- **No Forge-owned in-place mutation.** Do not revive the built-in mutator or make Forge responsible for source backup/restore, locks, signals, or crash recovery. Use a project-recorded external tool or isolation boundary.
+- **No uncertainty presented as clean mutation evidence.** Stale, partial, capped, skipped, unsupported, invalid, missing, unprotected, or unverifiable results cannot satisfy R4.
 
 ## 5. Suggested sequencing
 
@@ -113,5 +116,6 @@ The gap: forgekit's *TDD core is still entirely advisory*. Nothing verifies red-
 3. **R8** (W2/W4 from the scorecard-gaps plan) — already designed, converts known decay into refusals.
 4. **R9 + R14** — small integrity-check additions, quick wins.
 5. **R5** (ratchet) — the first genuinely new subsystem; pilot on this repo (dogfood) before templating.
-6. **R3, R4, R7, R10, R13** — pace-gated depth features, in whatever order project pain dictates.
+6. **R3, R7, R10, R13** — pace-gated depth features, in whatever order project pain dictates.
 7. **R6, R11** — advisory nudges, cheap to add alongside neighboring work.
+8. **R4** — only after approving the recorded external-tool and protected-evidence contract, including a current passing baseline, provenance/freshness, completeness, and fail-closed handling of every uncertain result. Do not sequence another built-in in-place mutator.

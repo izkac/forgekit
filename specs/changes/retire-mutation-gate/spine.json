@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "change": "retire-mutation-gate",
+  "notApplicable": "Documentation and local-ledger retirement only; no runtime capability is added or changed.",
+  "rows": []
+}

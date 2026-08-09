@@ -42,8 +42,11 @@ scorecard data ("advice decays, gates hold").
   evidence routes through `forge tdd run`, allowances are
   coordinator-mediated and review-blocking.
 
-Deferred to follow-up changes: independent test-writer subagent (R3),
-mutation gate (R4).
+Deferred to follow-up changes: independent test-writer subagent (R3). R4 now
+follows the 2026-08-09 decision to retire Forge's built-in in-place mutator;
+mutation testing remains proposed only through recorded external tools and
+fresh, complete, protected evidence. See
+`docs/research/2026-08-09-built-in-mutation-gate-retrospective.md`.
 
 ## Capabilities
 

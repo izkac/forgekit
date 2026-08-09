@@ -1,0 +1,49 @@
+<!-- forge-brief-specs-hash:02bc5744ce84c14a -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retire the built-in mutation gate experiment</title>
+  <style>
+    body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem; color: #202124; font: 16px/1.6 system-ui, sans-serif; }
+    h1, h2 { line-height: 1.2; }
+    code { background: #f2f3f5; padding: 0.1rem 0.3rem; }
+  </style>
+</head>
+<body>
+  <h1>Retire the built-in mutation gate experiment</h1>
+
+  <h2>TL;DR</h2>
+  <p>The unmerged mutation-gate branch will be deleted because its in-place source editing and evidence model are too risky for a quality gate. Its measured lessons will remain in the repository, and mutation testing will stay on the roadmap through established project-provided tools.</p>
+
+  <h2>What you'll get</h2>
+  <ul>
+    <li>No unsafe partial mutation command or unsupported public API on <code>main</code>.</li>
+    <li>A retrospective that prevents future work from repeating the same safety and evidence mistakes.</li>
+    <li>An updated R4 roadmap entry with explicit acceptance constraints.</li>
+    <li>An open-findings list without issues that only applied to the deleted branch.</li>
+  </ul>
+
+  <h2>How it works</h2>
+  <p>No runtime commits are salvaged because the useful tests and helpers are coupled to the unsafe process supervisor. Documentation preserves the evidence; local finding records and branch state are then converged.</p>
+
+  <h2>What changes for you</h2>
+  <p>There is no new command. If mutation testing is revisited, it starts from a fresh proposal using a recorded external tool rather than this branch.</p>
+
+  <h2>Risks and open questions</h2>
+  <ul>
+    <li>Forge still does not mechanically measure whether tests detect broken behavior.</li>
+    <li>The discarded branch may rot, but its reusable conclusions remain documented.</li>
+  </ul>
+
+  <h2>Out of scope</h2>
+  <p>This change does not implement an external mutation-tool adapter and does not resolve unrelated findings discovered during the mutation session.</p>
+
+  <h2>Work overview</h2>
+  <ul>
+    <li>Preserve the decision and future constraints: 1 task.</li>
+    <li>Converge findings, session, documentation, and branch state: 2 tasks.</li>
+  </ul>
+</body>
+</html>
