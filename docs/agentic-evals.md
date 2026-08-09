@@ -221,7 +221,7 @@ node evals/harbor/run.mjs \
 
 During real execution the runner writes sanitized `[eval-progress]` lifecycle
 messages to stderr and a heartbeat every 30 seconds, while stdout remains one
-JSON plan suitable for `tee`. Use `--progress-interval-seconds N` to change the
+JSON plan suitable for `tee`. Use `--progress-interval-seconds N` (0–86400) to change the
 heartbeat cadence or `0` to disable periodic heartbeats; start and terminal
 lifecycle messages remain enabled. Progress lines contain run/trial identities,
 arm, status, and elapsed time only—never prompts, credentials, or host paths.

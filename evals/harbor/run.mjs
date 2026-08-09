@@ -69,7 +69,7 @@ function parseArgs(argv) {
     seed: raw['--seed'] ?? 'default',
     forgekitVersion: raw['--forgekit-version'] ?? null,
     forgekitTarball: raw['--forgekit-tarball'] ?? null,
-    progressIntervalSeconds: parseNonNegativeInteger(raw['--progress-interval-seconds'] ?? '30', 'progress-interval-seconds'),
+    progressIntervalSeconds: parseProgressInterval(raw['--progress-interval-seconds'] ?? '30'),
     dryRun,
   };
   validate(config);
@@ -83,9 +83,11 @@ function parsePositiveInteger(value, name) {
   return Number(value);
 }
 
-function parseNonNegativeInteger(value, name) {
-  if (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value))) {
-    throw new Error(`${name} must be a non-negative integer`);
+function parseProgressInterval(value) {
+  if (!/^(?:0|[1-9]\d*)$/.test(value)
+    || !Number.isSafeInteger(Number(value))
+    || Number(value) > 86_400) {
+    throw new Error('progress-interval-seconds must be an integer between 0 and 86400');
   }
   return Number(value);
 }

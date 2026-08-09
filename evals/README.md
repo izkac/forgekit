@@ -274,7 +274,7 @@ analysis, uncertainty estimate, practical-significance threshold, or automatic
 Real runs keep stdout as one final JSON plan and write sanitized `[eval-progress]`
 lifecycle messages to stderr. A heartbeat appears every 30 seconds by default so
 long Harbor setup or model work does not look hung. Set
-`--progress-interval-seconds N` to change the cadence or `0` to disable only
+`--progress-interval-seconds N` (0–86400) to change the cadence or `0` to disable only
 periodic heartbeats. Messages include safe run/trial ids, arm, status, ordinal,
 and elapsed seconds; they exclude prompts, credentials, and paths.
 
