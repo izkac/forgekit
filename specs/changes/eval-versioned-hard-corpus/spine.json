@@ -1,25 +1,33 @@
 {
   "change": "eval-versioned-hard-corpus",
-  "capabilities": [
+  "notApplicable": null,
+  "rows": [
     {
-      "capability": "benchmark-harness",
-      "entrypoints": [
-        "evals/harbor/run.mjs"
-      ],
-      "tests": [
-        "evals/harbor/run.test.mjs"
-      ],
-      "evidence": "Explicit allowlisted corpus selection, legacy default, v1 lock"
+      "capability": "Allowlisted versioned corpus selection and v1 immutability",
+      "library": "evals/harbor/corpus-selection.mjs and evals/harbor/run.mjs",
+      "runtimeOwner": "Harbor evaluation runner CLI",
+      "writes": "portable plan and trial-manifest corpus/task provenance",
+      "reads": "checked-in corpus registry, manifest, task tree, and v1 lock",
+      "uiConsumer": "operator automation and aggregate-results.mjs",
+      "evidence": "evals/harbor/corpus-selection.test.mjs, corpus-v1-lock.test.mjs, run.test.mjs, aggregate-results.test.mjs"
     },
     {
-      "capability": "evaluation-corpus",
-      "entrypoints": [
-        "evals/harbor/tasks/forgekit-hard-v2/reservation-confirmation-race"
-      ],
-      "tests": [
-        "evals/harbor/corpus-hard-v2-reservation.test.mjs"
-      ],
-      "evidence": "Deterministic barrier verification, mutants, oracle and alternate positive"
+      "capability": "Hard reservation confirmation concurrency exemplar",
+      "library": "evals/harbor/tasks/forgekit-hard-v2/reservation-confirmation-race",
+      "runtimeOwner": "separate no-network verifier and UID-dropped candidate worker",
+      "writes": "four binary verifier rewards",
+      "reads": "protected submitted app, deterministic RPC barrier outcomes, semantic mutant tests",
+      "uiConsumer": "Harbor normalized results and paired aggregation",
+      "evidence": "evals/harbor/corpus-hard-v2-reservation-confirmation-race.test.mjs"
+    },
+    {
+      "capability": "Isolated hard-v2 smoke validation",
+      "library": "evals/harbor/smoke-hard-v2.mjs",
+      "runtimeOwner": "local smoke command",
+      "writes": "machine-readable hard-v2 smoke report",
+      "reads": "hard-v2 manifest, dry-run staging, host verifier matrix, three Docker contexts",
+      "uiConsumer": "operator and CI preflight",
+      "evidence": "evals/harbor/smoke.test.mjs"
     }
   ]
 }
