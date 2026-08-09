@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "corpus_id": "forgekit-held-out-v1",
+  "manifest": {
+    "path": "corpus.json",
+    "sha256": "7944317cae758bee17714c76800b1e1f92a86457968cf9fb36c1b3c55bf1856d"
+  },
+  "tasks": {
+    "audit-log-wiring": "4d8815b91d563b81f2dc71d6f5f8e743f061b713322c1e1d15cffa699b85c458",
+    "csv-formula-regression": "1df60c7f8be0f3b6e3134922d8316b7902cd8f4e6502437dd25b5506dba182bd",
+    "encoded-path-traversal": "fb62b7cdbf5d8427a234b6f72296c0b86fffa609bbce34a0086318aa1c189dcd",
+    "node-health-endpoint": "537b619518bfdd6f9cb2d4ff222b1fcf602c04847b66e8ac3370180fca5d76c1",
+    "pagination-boundary": "926c9c18abf0968b19fe1fbbc15b39f259814671832522cefa170ba9fd388889",
+    "router-extraction": "dcde33d304e4628f09004aaf0d3d0d4bddf74e75157f34685a0a73797f6e0ea5"
+  }
+}

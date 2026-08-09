@@ -14,23 +14,23 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { defaultCorpusId, selectCorpus } from './corpus-selection.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsRoot = path.resolve(here, '..');
-const canonicalRoot = path.join(here, 'tasks');
-const corpusPath = path.join(here, 'corpus.json');
 const runsRoot = process.env.FORGEKIT_EVAL_RUNS_ROOT
   ? path.resolve(process.env.FORGEKIT_EVAL_RUNS_ROOT)
   : path.join(evalsRoot, '.runs');
 const normalizer = path.join(here, 'normalize-results.mjs');
+const corpusSelector = path.join(here, 'corpus-selection.mjs');
 const installMarker = '# FORGEKIT_INSTALL_MARKER: the Forge arm may replace this line with its pinned Forgekit install command.';
 const valueOptions = new Set([
   '--task', '--arm', '--repetitions', '--concurrency', '--agent', '--model', '--seed',
-  '--forgekit-version', '--forgekit-tarball', '--progress-interval-seconds',
+  '--forgekit-version', '--forgekit-tarball', '--progress-interval-seconds', '--corpus',
 ]);
 
 function usage() {
-  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> [--seed <safe-identifier>]\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n  [--progress-interval-seconds <non-negative-int; default 30>]\n`;
+  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> [--seed <safe-identifier>]\n  [--corpus <forgekit-held-out-v1|forgekit-hard-v2>]\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n  [--progress-interval-seconds <non-negative-int; default 30>]\n`;
 }
 
 function parseArgs(argv) {
@@ -67,12 +67,14 @@ function parseArgs(argv) {
     agent: raw['--agent'],
     model: raw['--model'],
     seed: raw['--seed'] ?? 'default',
+    corpusId: raw['--corpus'] ?? defaultCorpusId,
     forgekitVersion: raw['--forgekit-version'] ?? null,
     forgekitTarball: raw['--forgekit-tarball'] ?? null,
     progressIntervalSeconds: parseProgressInterval(raw['--progress-interval-seconds'] ?? '30'),
     dryRun,
   };
   validate(config);
+  selectCorpus(config.corpusId);
   return config;
 }
 
@@ -119,29 +121,37 @@ function validate(config) {
   }
 }
 
-async function loadCorpusTask(task) {
+async function loadCorpusTask(selection, task) {
+  const manifestName = path.basename(selection.manifestPath);
   let bytes;
   let parsed;
   try {
-    bytes = await readFile(corpusPath);
+    bytes = await readFile(selection.manifestPath);
     parsed = JSON.parse(bytes);
   } catch {
-    throw new Error('corpus.json must be readable valid JSON');
+    throw new Error(`${manifestName} must be readable valid JSON`);
   }
   if (!Number.isSafeInteger(parsed.schema_version)
-    || typeof parsed.corpus_id !== 'string'
-    || !/^[a-z0-9][a-z0-9-]*$/.test(parsed.corpus_id)
+    || parsed.corpus_id !== selection.id
     || !Array.isArray(parsed.tasks)) {
-    throw new Error('corpus.json has invalid identity or task catalog');
+    throw new Error(`${manifestName} has invalid identity or task catalog`);
   }
   const matches = parsed.tasks.filter((entry) => entry?.id === task);
-  if (matches.length !== 1) throw new Error(`task is not listed exactly once in corpus.json: ${task}`);
+  if (matches.length !== 1) throw new Error(`task is not listed exactly once in ${manifestName}: ${task}`);
   const [entry] = matches;
   if (typeof entry.category !== 'string' || !/^[a-z][a-z0-9-]*$/.test(entry.category)) {
     throw new Error(`corpus category must be safe for task: ${task}`);
   }
+  const expectedTaskPath = path.posix.join(selection.taskRootLocator, task);
+  if (entry.task_path !== undefined && entry.task_path !== expectedTaskPath) {
+    throw new Error(`corpus task_path does not match its allowlisted root for task: ${task}`);
+  }
+  if (entry.version !== undefined && !/^\d+\.\d+\.\d+$/.test(entry.version)) {
+    throw new Error(`corpus task version must be semantic for task: ${task}`);
+  }
   return {
     category: entry.category,
+    manifestTaskVersion: entry.version ?? null,
     corpus: {
       id: parsed.corpus_id,
       schemaVersion: parsed.schema_version,
@@ -200,6 +210,14 @@ async function assertCanonicalTask(taskDirectory) {
   }
 }
 
+async function taskVersionFrom(taskDirectory) {
+  const source = await readFile(path.join(taskDirectory, 'task.toml'), 'utf8');
+  const taskSection = source.match(/^\[task\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m)?.[1];
+  const version = taskSection?.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m)?.[1];
+  if (version === undefined) throw new Error('task.toml [task] version must be semantic');
+  return version;
+}
+
 async function hashDirectory(directory) {
   const hash = createHash('sha256');
   async function visit(current, relative = '') {
@@ -219,7 +237,7 @@ async function hashDirectory(directory) {
 
 async function hashHarness() {
   const hash = createHash('sha256');
-  for (const file of [fileURLToPath(import.meta.url), normalizer]) {
+  for (const file of [fileURLToPath(import.meta.url), normalizer, corpusSelector]) {
     hash.update(path.basename(file));
     hash.update(await readFile(file));
   }
@@ -283,7 +301,11 @@ function scheduleFor(config, taskRevision) {
 
 function runIdFor(config, forgekitTreatment) {
   if (config.dryRun) {
-    const identity = { ...config, forgekitTarball: undefined, progressIntervalSeconds: undefined, forgekitTreatment };
+    const { corpusId, ...legacyConfig } = config;
+    const selectedConfig = corpusId === defaultCorpusId
+      ? legacyConfig
+      : { ...legacyConfig, corpusId };
+    const identity = { ...selectedConfig, forgekitTarball: undefined, progressIntervalSeconds: undefined, forgekitTreatment };
     const digest = createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 12);
     return `dry-run-${digest}`;
   }
@@ -640,10 +662,15 @@ async function main(argv) {
     return;
   }
 
-  const { category, corpus } = await loadCorpusTask(config.task);
+  const selection = selectCorpus(config.corpusId);
+  const { category, corpus, manifestTaskVersion } = await loadCorpusTask(selection, config.task);
   const forgekitTreatment = await prepareForgekitTreatment(config);
-  const canonicalTask = path.join(canonicalRoot, config.task);
+  const canonicalTask = path.join(selection.taskRoot, config.task);
   await assertCanonicalTask(canonicalTask);
+  const taskVersion = await taskVersionFrom(canonicalTask);
+  if (manifestTaskVersion !== null && manifestTaskVersion !== taskVersion) {
+    throw new Error(`corpus and task.toml versions disagree for task: ${config.task}`);
+  }
   const revision = await hashDirectory(canonicalTask);
   const harnessRevision = await hashHarness();
   const schedule = scheduleFor(config, revision);
@@ -695,6 +722,7 @@ async function main(argv) {
         runId,
         trialId,
         task: config.task,
+        taskVersion,
         category,
         corpus,
         taskRevision: revision,
@@ -713,7 +741,7 @@ async function main(argv) {
         resolvedAgent: null,
         images,
         settings: { repetitions: config.repetitions, concurrency: config.concurrency, seed: config.seed },
-        canonicalTask: `tasks/${config.task}`,
+        canonicalTask: path.posix.join(selection.taskRootLocator, config.task),
         stagedTask: `arms/${arm}`,
         startedAt: null,
         finishedAt: null,
@@ -756,6 +784,7 @@ async function main(argv) {
     dryRun: config.dryRun,
     status: config.dryRun ? 'dry-run' : 'planned',
     task: config.task,
+    taskVersion,
     category,
     corpus,
     taskRevision: revision,
