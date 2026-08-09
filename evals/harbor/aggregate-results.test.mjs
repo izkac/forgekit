@@ -55,6 +55,7 @@ function createRun(root, {
     const trialDirectory = path.join(directory, 'trials', trialId);
     mkdirSync(trialDirectory);
     const resultPath = path.join('trials', trialId, 'normalized-result.json');
+    const status = cell.status ?? 'verified';
     const manifestPath = path.join('trials', trialId, 'manifest.json');
     const manifest = {
       schemaVersion: 1,
@@ -72,23 +73,26 @@ function createRun(root, {
       images: { agent: 'node@sha256:aaa', verifier: 'node@sha256:bbb' },
       settings: { repetitions: 2, concurrency: 1 },
       seed: 'experiment-seed',
-      status: 'verified',
-      normalizedResult: resultPath,
+      status,
+      ...(status === 'verified' ? { normalizedResult: resultPath } : { error: cell.error ?? 'Harbor failed' }),
     };
     writeFileSync(path.join(directory, manifestPath), `${JSON.stringify(manifest)}\n`);
-    writeFileSync(path.join(directory, resultPath), `${JSON.stringify(normalized({
-      arm: cell.arm,
-      task,
-      trial: cell.repetition,
-      shippable: cell.shippable,
-      cost: cell.cost,
-      seconds: cell.seconds,
-    }))}\n`);
+    if (status === 'verified') {
+      writeFileSync(path.join(directory, resultPath), `${JSON.stringify(normalized({
+        arm: cell.arm,
+        task,
+        trial: cell.repetition,
+        shippable: cell.shippable,
+        cost: cell.cost,
+        seconds: cell.seconds,
+      }))}\n`);
+    }
     trials.push({
       trialId,
       arm: cell.arm,
       repetition: cell.repetition,
       manifest: manifestPath,
+      status,
     });
   }
   const plan = {
@@ -96,6 +100,7 @@ function createRun(root, {
     runId,
     runDirectory: directory,
     dryRun: false,
+    status: cells.some((cell) => cell.status === 'failed') ? 'completed-with-failures' : 'completed',
     task,
     category,
     taskRevision: `revision-${task}`,
@@ -131,6 +136,7 @@ test('aggregates coherent runs by arm, category, and task using complete pairs o
       { arm: 'baseline', repetition: 1, shippable: 0, cost: 1, seconds: 10 },
       { arm: 'forge', repetition: 1, shippable: 1, cost: 1.5, seconds: 8 },
       { arm: 'baseline', repetition: 2, shippable: 1, cost: 1.2, seconds: 11 },
+      { arm: 'forge', repetition: 2, status: 'failed', error: 'Harbor exited with code 1' },
     ],
   });
   const second = createRun(root, {
