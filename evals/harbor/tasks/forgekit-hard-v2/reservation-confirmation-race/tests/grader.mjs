@@ -223,8 +223,12 @@ async function grade() {
 try {
   writeReward(await grade());
 } catch (error) {
-  try { makeOwnerWritable(APP_DIR); } catch {}
-  try { writeReward({ functional: 0, regression: 0, tests_unchanged: 0, shippable: 0 }); } catch {}
+  try { makeOwnerWritable(APP_DIR); } catch {
+    // Best effort after verifier infrastructure failure.
+  }
+  try { writeReward({ functional: 0, regression: 0, tests_unchanged: 0, shippable: 0 }); } catch {
+    // The outer stderr and non-zero exit remain the fail-closed signal.
+  }
   console.error("Verifier infrastructure error:", error);
   process.exitCode = 1;
 }
