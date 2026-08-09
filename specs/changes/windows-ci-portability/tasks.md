@@ -10,4 +10,4 @@
 
 ## 3. Matrix verification
 
-- [ ] 3.1 Run full tests/lint locally and validate Ubuntu/Windows on Node 20 and 22 in CI. Record exact totals and archive the change only when the matrix is green.
+- [x] 3.1 Run full tests/lint locally and validate Ubuntu/Windows on Node 20 and 22 in CI. Record exact totals and archive the change only when the matrix is green.
