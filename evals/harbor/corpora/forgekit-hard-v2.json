@@ -5,7 +5,7 @@
   "tasks": [
     {
       "id": "reservation-confirmation-race",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "category": "bug",
       "difficulty": "hard",
       "task_path": "tasks/forgekit-hard-v2/reservation-confirmation-race",

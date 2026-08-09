@@ -41,7 +41,7 @@ v1 must not be changed in place. A substantive change requires a new corpus ID.
 
 | Category | Task id | Task version | Requested work |
 | --- | --- | --- | --- |
-| bug | `reservation-confirmation-race` | `1.0.0` | Repair confirmation races and add a deterministic overlap test. |
+| bug | `reservation-confirmation-race` | `1.0.1` | Repair confirmation races and add a deterministic overlap test. |
 
 Hard-v2 is an **incomplete one-category foundation**. It is not yet a complete
 six-category corpus, and its infrastructure, oracle runs, and verifier tests

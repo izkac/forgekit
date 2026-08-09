@@ -158,7 +158,8 @@ const fileSet = new Set(files);
 const hasFile = Set.prototype.has.bind(fileSet);
 let passed = 0;
 let bodyAssertionFailures = 0;
-let bootstrapOrOtherFailures = 0;
+let bodyOtherFailures = 0;
+let bootstrapFailures = 0;
 function isAssertion(error) {
   for (let value = error; value && typeof value === "object"; value = value.cause) {
     if (value.code === "ERR_ASSERTION") return true;
@@ -177,25 +178,37 @@ function isRegisteredBody(event) {
   for await (const event of stream) {
     if (event.type === "test:pass" && isRegisteredBody(event)) passed += 1;
     if (event.type === "test:fail") {
-      if (isRegisteredBody(event) && isAssertion(event.data?.details?.error)) bodyAssertionFailures += 1;
-      else bootstrapOrOtherFailures += 1;
+      if (!isRegisteredBody(event)) bootstrapFailures += 1;
+      else if (isAssertion(event.data?.details?.error)) bodyAssertionFailures += 1;
+      else bodyOtherFailures += 1;
     }
   }
-  const result = { passed, bodyAssertionFailures, bootstrapOrOtherFailures };
+  const result = { passed, bodyAssertionFailures, bodyOtherFailures, bootstrapFailures };
   safeWrite(3, "HARBOR_ASSERTION_" + nonce + " " + safeStringify(result) + "\\n");
 })().catch(() => { process.exitCode = 1; });
 `;
 }
 
 function emptyClassifiedResult() {
-  return { completed: false, passed: 0, bodyAssertionFailures: 0, bootstrapOrOtherFailures: 0 };
+  return {
+    completed: false,
+    passed: 0,
+    bodyAssertionFailures: 0,
+    bodyOtherFailures: 0,
+    bootstrapFailures: 0,
+  };
 }
 
 function validClassifiedShape(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const keys = Object.keys(value).sort().join(",");
-  if (keys !== "bodyAssertionFailures,bootstrapOrOtherFailures,passed") return false;
-  return [value.passed, value.bodyAssertionFailures, value.bootstrapOrOtherFailures]
+  if (keys !== "bodyAssertionFailures,bodyOtherFailures,bootstrapFailures,passed") return false;
+  return [
+    value.passed,
+    value.bodyAssertionFailures,
+    value.bodyOtherFailures,
+    value.bootstrapFailures,
+  ]
     .every((item) => Number.isSafeInteger(item) && item >= 0);
 }
 
@@ -231,7 +244,9 @@ function addedTestsKillConcurrencyMutant(testFiles) {
   if (testFiles.length === 0) return false;
   const normal = runClassifiedTests(testFiles);
   if (!normal.completed || normal.passed < 1
-      || normal.bodyAssertionFailures !== 0 || normal.bootstrapOrOtherFailures !== 0) return false;
+      || normal.bodyAssertionFailures !== 0
+      || normal.bodyOtherFailures !== 0
+      || normal.bootstrapFailures !== 0) return false;
 
   const submittedService = readFileSync(SERVICE_FILE);
   try {
@@ -243,7 +258,7 @@ function addedTestsKillConcurrencyMutant(testFiles) {
     const mutated = runClassifiedTests(testFiles);
     return mutated.completed
       && mutated.bodyAssertionFailures > 0
-      && mutated.bootstrapOrOtherFailures === 0;
+      && mutated.bootstrapFailures === 0;
   } finally {
     chmodSync(SERVICE_FILE, 0o644);
     writeFileSync(SERVICE_FILE, submittedService);

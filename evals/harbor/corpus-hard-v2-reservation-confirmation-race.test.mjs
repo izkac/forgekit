@@ -62,7 +62,7 @@ test("hard-v2 reservation manifest binds the versioned hard bug task and its vis
   assert.equal(manifest.corpus_id, "forgekit-hard-v2");
   assert.deepEqual(manifest.tasks, [{
     id: "reservation-confirmation-race",
-    version: "1.0.0",
+    version: "1.0.1",
     category: "bug",
     difficulty: "hard",
     task_path: "tasks/forgekit-hard-v2/reservation-confirmation-race",
@@ -88,6 +88,21 @@ test("known-good oracle earns every binary reward", () => {
 test("structurally different alternate solution also earns every binary reward", () => {
   const fixture = copyFixture();
   apply(fixture, "fixtures/alternate-positive/solve.sh");
+  assert.deepEqual(grade(fixture), passingReward);
+});
+
+test("calibration solution with multiple assertion and follow-on mutant failures still qualifies", () => {
+  const fixture = copyFixture();
+  apply(fixture, "solution/solve.sh");
+  for (const name of readdirSync(path.join(fixture.app, "src"))) {
+    if (name.endsWith(".test.mjs") && name !== "confirmation-service.test.mjs") {
+      rmSync(path.join(fixture.app, "src", name));
+    }
+  }
+  cpSync(
+    path.join(task, "fixtures", "calibration-positive", "confirmation-concurrency.test.mjs"),
+    path.join(fixture.app, "src", "confirmation-concurrency.test.mjs")
+  );
   assert.deepEqual(grade(fixture), passingReward);
 });
 
