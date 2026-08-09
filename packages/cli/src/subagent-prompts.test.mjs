@@ -32,7 +32,7 @@ test('reviewer packet validates flagged tasks from the same executed ledger', ()
 test('implement phase tells the coordinator to fill every evidence target placeholder', () => {
   const text = fs.readFileSync(path.join(skillsRoot, 'forge', 'phases', 'implement.md'), 'utf8');
   for (const placeholder of ['{SESSION_ID}', '{TASK_ID}', '{TDD_EVIDENCE_ENABLED}']) {
-    assert.match(text, new RegExp(placeholder.replace(/[{}]/g, '\$&')));
+    assert.match(text, new RegExp(placeholder.replace(/[{}]/g, '\\$&')));
   }
   assert.match(text, /forge tdd run --session <id> --task <task-id>/);
 });
