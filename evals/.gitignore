@@ -1,0 +1,17 @@
+# Local Harbor run output.
+/.runs/
+
+# Runner-generated task and arm staging.
+/.staging/
+/staging/
+**/.staging/
+**/staging/
+
+# Python and Harbor caches, scoped to evals/.
+**/__pycache__/
+*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.cache/
+**/.harbor/

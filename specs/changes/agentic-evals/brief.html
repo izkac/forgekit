@@ -1,0 +1,38 @@
+<!-- forge-brief-specs-hash:c14f3b90e9269e38 -->
+<!-- forge-brief-specs-hash:pending -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief - Agentic coding evaluation harness</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #1a1a1a; }
+code { background: #f2f2f2; padding: .1em .3em; border-radius: 4px; }
+.box { border: 1px solid #ddd; border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body>
+<h1>Measure Forgekit without trusting Forgekit</h1>
+<div class="box"><strong>In one sentence:</strong> add a Harbor-backed,
+containerized A/B harness that runs the same coding task with and without
+Forgekit and grades the result in a separate verifier.</div>
+<h2>What gets added</h2>
+<ul>
+<li><code>evals/</code> holds task fixtures, the Harbor runner, result
+normalization, and authoring guidance.</li>
+<li>The baseline and Forge arms are staged from one canonical task, so their
+starting repository cannot drift.</li>
+<li>The smoke task's verifier stays outside the agent image and emits numeric
+functional, regression, test-tamper, and shippable metrics.</li>
+</ul>
+<h2>What this does not claim</h2>
+<p>The first task only proves that the harness is wired correctly. It is not an
+effect-size result. Meaningful conclusions require a held-out corpus, repeated
+paired trials, and cost/time analysis.</p>
+<h2>How it is used</h2>
+<p>Install Harbor separately with <code>uv tool install harbor</code>, inspect a
+dry run locally, then invoke the runner with a selected agent and model. Run
+artifacts stay under ignored <code>evals/.runs/</code>.</p>
+</body>
+</html>

@@ -12,7 +12,10 @@
     "forge": "node packages/cli/bin/forge.mjs",
     "review": "node packages/cli/bin/review.mjs",
     "test": "npm run test --workspace=@izkac/forgekit",
-    "lint": "eslint scripts && npm run lint --workspace=@izkac/forgekit",
+    "test:evals": "node --test evals/harbor/*.test.mjs",
+    "lint": "eslint scripts evals && npm run lint --workspace=@izkac/forgekit",
+    "lint:evals": "eslint evals",
+    "smoke:evals": "node evals/harbor/smoke.mjs",
     "prepack": "npm run prepack --workspace=@izkac/forgekit",
     "install:link": "npm install && npm link --workspace=@izkac/forgekit"
   },
