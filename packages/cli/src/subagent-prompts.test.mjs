@@ -21,18 +21,18 @@ test('implementer packet targets the coordinator session and returns its execute
 
 test('reviewer packet validates flagged tasks from the same executed ledger', () => {
   const text = fs.readFileSync(packet('task-reviewer-prompt.md'), 'utf8');
-  assert.match(text, /\{SESSION_ID\}/);
-  assert.match(text, /\{TASK_ID\}/);
-  assert.match(text, /\{TDD_EVIDENCE_ENABLED\}/);
-  assert.match(text, /\.forge\/sessions\/\{SESSION_ID\}\/tasks\/\{TASK_ID\}\/tdd-runs\.jsonl/);
+  assert.match(text, /\{TASK_EVIDENCE_TARGETS\}/);
+  assert.match(text, /one entry per reviewed task/i);
+  assert.match(text, /inspect every listed ledger/i);
   assert.match(text, /plain .*test-evidence\.md.*supplemental/is);
 });
 
 
 test('implement phase tells the coordinator to fill every evidence target placeholder', () => {
   const text = fs.readFileSync(path.join(skillsRoot, 'forge', 'phases', 'implement.md'), 'utf8');
-  for (const placeholder of ['{SESSION_ID}', '{TASK_ID}', '{TDD_EVIDENCE_ENABLED}']) {
+  for (const placeholder of ['{SESSION_ID}', '{TASK_ID}', '{TASK_EVIDENCE_TARGETS}']) {
     assert.match(text, new RegExp(placeholder.replace(/[{}]/g, '\\$&')));
   }
   assert.match(text, /forge tdd run --session <id> --task <task-id>/);
+  assert.match(text, /one entry per reviewed task/i);
 });

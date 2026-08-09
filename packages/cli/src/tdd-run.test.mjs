@@ -129,7 +129,7 @@ test('contradiction (fail expected pass): a failing command with --expect pass e
   assert.match(r.stderr, /expected=pass.*childExit=1.*ok=false/);
 });
 
-test('signal-terminated command never becomes a usable expected RED stamp', () => {
+test('signal-terminated command never becomes a usable expected RED stamp', { skip: process.platform === 'win32' }, () => {
   const { root, sessionDir } = makeProject();
   const r = runTddRun(root, [
     'run', '--task', '01-signal', '--expect', 'fail', '--',

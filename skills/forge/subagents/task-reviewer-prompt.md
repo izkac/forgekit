@@ -23,14 +23,11 @@ Capability specs beat narrow task wording when they conflict. See
 
 Diff range: {DIFF_RANGE}   <!-- `forge checkpoint --range --last` → paste its `reviewTarget` (scopes to this group; names untracked files a diff hides). No checkpoints: `git diff` + the untracked files in `git status`. -->
 
-## Forge evidence target
+## Forge evidence targets
 
-- Session ID: `{SESSION_ID}`
-- Task ID: `{TASK_ID}`
-- Executed-evidence gate enabled: `{TDD_EVIDENCE_ENABLED}`
-- Executed ledger: `.forge/sessions/{SESSION_ID}/tasks/{TASK_ID}/tdd-runs.jsonl`
+{TASK_EVIDENCE_TARGETS} <!-- coordinator: one entry per reviewed task, each naming task id, whether executed evidence is enabled, and `.forge/sessions/<session-id>/tasks/<task-id>/tdd-runs.jsonl` -->
 
-When the gate is enabled for a behavior-changing task, read that ledger and require an ok expected RED before an ok GREEN for identical command argv. Plain `test-evidence.md` is supplemental only; it never substitutes for the executed pair. A valid `--no-tdd` declaration is acceptable only when the task changed no behavior.
+Inspect every listed ledger. For each enabled behavior-changing task, require an ok expected RED before an ok GREEN for identical command argv. Plain `test-evidence.md` is supplemental only; it never substitutes for the executed pair. A valid `--no-tdd` declaration is acceptable only when that task changed no behavior.
 
 ## Guard allowances open on this session
 
