@@ -9,5 +9,5 @@
 
 - [x] 2.1 Resolve mutation-only findings F97-F102, preserve F95/F96, and mark
       the abandoned mutation session skipped.
-- [ ] 2.2 Verify documentation references and the open-finding list, commit the
+- [x] 2.2 Verify documentation references and the open-finding list, commit the
       documentation to `main`, and delete `feat/mutation-gate`.
