@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync, chownSync, cpSync, lstatSync, mkdirSync, mkdtempSync,
@@ -135,19 +135,6 @@ function addedTestFiles() {
   }
 }
 
-function runNodeTests(testFiles) {
-  if (testFiles.length === 0) return false;
-  const result = spawnSync(process.execPath, ["--test", ...testFiles], {
-    cwd: APP_DIR,
-    encoding: "utf8",
-    timeout: 30_000,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: untrustedEnvironment(),
-    ...configuredIdentity()
-  });
-  return !result.error && result.status === 0;
-}
-
 function runVisibleSuite() {
   const result = spawnSync("npm", ["test"], {
     cwd: APP_DIR,
@@ -160,9 +147,15 @@ function runVisibleSuite() {
   return !result.error && result.status === 0;
 }
 
-const ASSERTION_RUNNER = `import { run } from "node:test";
-const files = JSON.parse(process.env.HARBOR_TEST_FILES);
-const stream = run({ files, concurrency: false, isolation: "none" });
+function classifiedRunnerSource(testFiles, nonce) {
+  return `const { writeSync } = require("node:fs");
+const { run } = require("node:test");
+const files = ${JSON.stringify(testFiles)};
+const nonce = ${JSON.stringify(nonce)};
+const safeWrite = writeSync.bind(null);
+const safeStringify = JSON.stringify.bind(JSON);
+const fileSet = new Set(files);
+const hasFile = Set.prototype.has.bind(fileSet);
 let passed = 0;
 let bodyAssertionFailures = 0;
 let bootstrapOrOtherFailures = 0;
@@ -177,49 +170,65 @@ function isRegisteredBody(event) {
   return typeof data.file === "string"
     && typeof data.line === "number"
     && typeof data.name === "string"
-    && !files.includes(data.name);
+    && !hasFile(data.name);
 }
-for await (const event of stream) {
-  if (event.type === "test:pass" && isRegisteredBody(event)) passed += 1;
-  if (event.type === "test:fail") {
-    if (isRegisteredBody(event) && isAssertion(event.data?.details?.error)) bodyAssertionFailures += 1;
-    else bootstrapOrOtherFailures += 1;
+(async () => {
+  const stream = run({ files, concurrency: false, isolation: "none" });
+  for await (const event of stream) {
+    if (event.type === "test:pass" && isRegisteredBody(event)) passed += 1;
+    if (event.type === "test:fail") {
+      if (isRegisteredBody(event) && isAssertion(event.data?.details?.error)) bodyAssertionFailures += 1;
+      else bootstrapOrOtherFailures += 1;
+    }
   }
-}
-console.log("HARBOR_ASSERTION_RESULT " + JSON.stringify({ passed, bodyAssertionFailures, bootstrapOrOtherFailures }));
+  const result = { passed, bodyAssertionFailures, bootstrapOrOtherFailures };
+  safeWrite(3, "HARBOR_ASSERTION_" + nonce + " " + safeStringify(result) + "\\n");
+})().catch(() => { process.exitCode = 1; });
 `;
+}
+
+function emptyClassifiedResult() {
+  return { completed: false, passed: 0, bodyAssertionFailures: 0, bootstrapOrOtherFailures: 0 };
+}
+
+function validClassifiedShape(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort().join(",");
+  if (keys !== "bodyAssertionFailures,bootstrapOrOtherFailures,passed") return false;
+  return [value.passed, value.bodyAssertionFailures, value.bootstrapOrOtherFailures]
+    .every((item) => Number.isSafeInteger(item) && item >= 0);
+}
 
 function runClassifiedTests(testFiles) {
-  if (testFiles.length === 0) {
-    return { completed: true, passed: 0, bodyAssertionFailures: 0, bootstrapOrOtherFailures: 0 };
-  }
-  const runner = join(tmpdir(), `harbor-assertion-runner-${randomUUID()}.mjs`);
-  writeFileSync(runner, ASSERTION_RUNNER, { mode: 0o444 });
+  if (testFiles.length === 0) return emptyClassifiedResult();
+  const nonce = randomBytes(32).toString("hex");
+  const prefix = `HARBOR_ASSERTION_${nonce} `;
   try {
-    const result = spawnSync(process.execPath, [runner], {
+    const result = spawnSync(process.execPath, [], {
       cwd: APP_DIR,
       encoding: "utf8",
+      input: classifiedRunnerSource(testFiles, nonce),
       timeout: 30_000,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: untrustedEnvironment({ HARBOR_TEST_FILES: JSON.stringify(testFiles) }),
+      stdio: ["pipe", "ignore", "ignore", "pipe"],
+      env: untrustedEnvironment(),
       ...configuredIdentity()
     });
-    if (result.error || result.status !== 0) {
-      return { completed: false, passed: 0, bodyAssertionFailures: 0, bootstrapOrOtherFailures: 0 };
+    if (result.error || result.status !== 0 || typeof result.output[3] !== "string") {
+      return emptyClassifiedResult();
     }
-    const line = result.stdout.split("\n")
-      .findLast((value) => value.startsWith("HARBOR_ASSERTION_RESULT "));
-    if (!line) return { completed: false, passed: 0, bodyAssertionFailures: 0, bootstrapOrOtherFailures: 0 };
-    return { completed: true, ...JSON.parse(line.slice("HARBOR_ASSERTION_RESULT ".length)) };
+    const authenticated = result.output[3].split("\n")
+      .filter((line) => line.startsWith(prefix));
+    if (authenticated.length !== 1) return emptyClassifiedResult();
+    const value = JSON.parse(authenticated[0].slice(prefix.length));
+    if (!validClassifiedShape(value)) return emptyClassifiedResult();
+    return { completed: true, ...value };
   } catch {
-    return { completed: false, passed: 0, bodyAssertionFailures: 0, bootstrapOrOtherFailures: 0 };
-  } finally {
-    rmSync(runner, { force: true });
+    return emptyClassifiedResult();
   }
 }
 
 function addedTestsKillConcurrencyMutant(testFiles) {
-  if (testFiles.length === 0 || !runNodeTests(testFiles)) return false;
+  if (testFiles.length === 0) return false;
   const normal = runClassifiedTests(testFiles);
   if (!normal.completed || normal.passed < 1
       || normal.bodyAssertionFailures !== 0 || normal.bootstrapOrOtherFailures !== 0) return false;
@@ -229,9 +238,8 @@ function addedTestsKillConcurrencyMutant(testFiles) {
     chmodSync(SERVICE_FILE, 0o644);
     writeFileSync(SERVICE_FILE, readFileSync(`${TESTS_DIR}/mutants/confirmation-service.mjs`));
     chmodSync(SERVICE_FILE, 0o444);
-    // A real mutant kill must fail the ordinary runner and be attributable to
-    // an assertion thrown from a registered test callback, not module bootstrap.
-    if (runNodeTests(testFiles)) return false;
+    // Normal and mutant executions use the identical trusted runner protocol.
+    // Only a registered test-body assertion may qualify the semantic kill.
     const mutated = runClassifiedTests(testFiles);
     return mutated.completed
       && mutated.bodyAssertionFailures > 0

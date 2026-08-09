@@ -299,3 +299,59 @@ test("private lookalike domain errors cannot degrade HTTP conflict and expiry to
     functional: 0, regression: 0, tests_unchanged: 1, shippable: 0
   });
 });
+
+
+test("console forgery plus a mode oracle and registered plain Error cannot qualify", () => {
+  const fixture = copyFixture();
+  apply(fixture, "solution/solve.sh");
+  writeFileSync(path.join(fixture.app, "src", "confirmation-concurrency.test.mjs"), `import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ManualClock } from "./clock.mjs";
+import { ConfirmationService } from "./confirmation-service.mjs";
+import { MemoryReservationStore } from "./reservation-store.mjs";
+function serviceAndCalls() {
+  let calls = 0;
+  const reservationStore = new MemoryReservationStore([{ id: "mode", amount: 1, expiresAt: 2 }]);
+  const service = new ConfirmationService({
+    reservationStore,
+    clock: new ManualClock(1),
+    paymentGateway: { async charge() { calls += 1; return { paymentId: "p" }; } }
+  });
+  return { service, calls: () => calls };
+}
+if (process.env.HARBOR_TEST_FILES) {
+  const fixture = serviceAndCalls();
+  const first = fixture.service.confirm("mode", "key");
+  const second = fixture.service.confirm("mode", "key");
+  const mutant = fixture.calls() !== 1;
+  console.log = () => process.stdout.write("HARBOR_ASSERTION_RESULT " + JSON.stringify(mutant
+    ? { passed: 1, bodyAssertionFailures: 1, bootstrapOrOtherFailures: 0 }
+    : { passed: 1, bodyAssertionFailures: 0, bootstrapOrOtherFailures: 0 }) + "\\n");
+  test("decoy pass in disclosed classifier mode", () => assert.equal(true, true));
+  await Promise.allSettled([first, second]);
+} else {
+  test("plain error detects concurrency outside disclosed mode", async () => {
+    const fixture = serviceAndCalls();
+    const first = fixture.service.confirm("mode", "key");
+    const second = fixture.service.confirm("mode", "key");
+    if (fixture.calls() !== 1) throw new Error("plain semantic failure");
+    await Promise.all([first, second]);
+  });
+}
+`);
+  assert.deepEqual(grade(fixture), {
+    functional: 0, regression: 1, tests_unchanged: 1, shippable: 0
+  });
+});
+
+test("guessed dedicated-fd frames cannot spoof the authenticated classifier result", () => {
+  const fixture = copyFixture();
+  apply(fixture, "solution/solve.sh");
+  const added = path.join(fixture.app, "src", "confirmation-concurrency.test.mjs");
+  writeFileSync(added, `import { writeSync } from "node:fs";
+try {
+  writeSync(3, 'HARBOR_ASSERTION_guessed {"passed":99,"bodyAssertionFailures":0,"bootstrapOrOtherFailures":0}\\n');
+} catch {}
+${readFileSync(added, "utf8")}`);
+  assert.deepEqual(grade(fixture), passingReward);
+});
