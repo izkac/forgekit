@@ -499,6 +499,8 @@ event('end');
   });
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /3 trial\(s\) failed/);
+  assert.match(result.stderr, /event=trial-failed arm=baseline/);
+  assert.match(result.stderr, /event=run-completed status=completed-with-failures verified=3 failed=3/);
   const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   assert.equal(plan.status, 'completed-with-failures');
