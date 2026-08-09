@@ -1,0 +1,5 @@
+{
+  "change": "eval-local-checkout",
+  "notApplicable": "developer-only benchmark treatment input; no product producer/consumer loop",
+  "rows": []
+}
