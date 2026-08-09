@@ -1,17 +1,25 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const corpus = JSON.parse(readFileSync(path.join(here, 'corpus.json'), 'utf8'));
+const temporaryDirectories = new Set();
+
+after(() => {
+  for (const directory of temporaryDirectories) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 function solvedFixture(taskId) {
   const task = path.join(here, 'tasks', taskId);
   const directory = mkdtempSync(path.join(tmpdir(), `forgekit-antitamper-${taskId}-`));
+  temporaryDirectories.add(directory);
   const app = path.join(directory, 'app');
   cpSync(path.join(task, 'environment', 'app'), app, { recursive: true });
   const result = spawnSync('sh', [path.join(task, 'solution', 'solve.sh')], {
@@ -32,6 +40,19 @@ function grade(fixture) {
 }
 
 for (const { id } of corpus.tasks) {
+  for (const relativePath of ['package.json', 'src/server.test.mjs']) {
+    test(`${id}: a symlinked protected ${relativePath} is rejected`, () => {
+      const fixture = solvedFixture(id);
+      const protectedFile = path.join(fixture.app, relativePath);
+      const backingFile = `${protectedFile}.backing`;
+      renameSync(protectedFile, backingFile);
+      symlinkSync(path.basename(backingFile), protectedFile);
+      const reward = grade(fixture);
+      assert.equal(reward.tests_unchanged, 0);
+      assert.equal(reward.shippable, 0);
+    });
+  }
+
   test(`${id}: changing the test command is detected before agent code runs`, () => {
     const fixture = solvedFixture(id);
     const packageFile = path.join(fixture.app, 'package.json');
@@ -41,6 +62,29 @@ for (const { id } of corpus.tasks) {
 `);
     const reward = grade(fixture);
     assert.equal(reward.tests_unchanged, 0);
+    assert.equal(reward.shippable, 0);
+  });
+
+  test(`${id}: an irrelevant passing added test does not satisfy requested test coverage`, () => {
+    const fixture = solvedFixture(id);
+    const sourceDir = path.join(fixture.app, 'src');
+    const additions = readdirSync(sourceDir).filter((name) => name.endsWith('.test.mjs') && name !== 'server.test.mjs');
+    assert.ok(additions.length > 0, `${id} solution must add a separate test`);
+    writeFileSync(path.join(sourceDir, 'irrelevant-helper.mjs'), 'export const alwaysTrue = true;\n');
+    for (const name of additions) {
+      const file = path.join(sourceDir, name);
+      const oracleSourceAsInertData = JSON.stringify(readFileSync(file, 'utf8'));
+      writeFileSync(file, `import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { alwaysTrue } from './irrelevant-helper.mjs';
+
+const irrelevantTokens = ${oracleSourceAsInertData};
+void irrelevantTokens;
+test('trivial unrelated assertion', () => assert.equal(alwaysTrue, true));
+`);
+    }
+    const reward = grade(fixture);
+    assert.equal(reward.functional, 0);
     assert.equal(reward.shippable, 0);
   });
 
