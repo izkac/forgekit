@@ -26,6 +26,7 @@ import { resolveSessionPaceFields } from './preferences.mjs';
 import { warnIfDoctorFails } from './doctor.mjs';
 import { liveOverlaps, queueMessage, sessionDirFor } from './lib/fleet.mjs';
 import { matchingOpenBugs } from './findings.mjs';
+import { loadProjectConfig } from './config.mjs';
 
 function usage() {
   process.stderr.write(
@@ -83,6 +84,23 @@ if (head.status === 0) {
   if (branch.status === 0) session.branch = branch.stdout.trim();
 }
 
+let checkpointWarning = null;
+const projectConfig = loadProjectConfig(REPO_ROOT);
+const checkpointMode = projectConfig?.git?.checkpoint ?? 'off';
+const defaultBranch = session.branch === 'main' || session.branch === 'master';
+if (
+  (checkpointMode === 'per-group' || checkpointMode === 'per-task') &&
+  defaultBranch &&
+  projectConfig?.git?.allowDefaultBranch !== true
+) {
+  checkpointWarning = {
+    mode: checkpointMode,
+    branch: session.branch,
+    advice:
+      'Create and switch to a feature branch before implementation, or explicitly set git.allowDefaultBranch: true if checkpoint commits on this branch are intended.',
+  };
+}
+
 const paceFields = resolveSessionPaceFields({
   forgeDir: FORGE_DIR,
   slug: session.slug,
@@ -122,6 +140,13 @@ const out = {
     reason: session.paceReason,
   },
 };
+if (checkpointWarning) {
+  out.checkpointWarning = checkpointWarning;
+  process.stderr.write(
+    `[forge] WARNING: checkpoint mode "${checkpointWarning.mode}" is configured but unavailable on default branch "${checkpointWarning.branch}". ${checkpointWarning.advice}
+`,
+  );
+}
 if (overlaps.length > 0) {
   out.overlaps = overlaps.map((o) => ({
     sessionId: o.sessionId,

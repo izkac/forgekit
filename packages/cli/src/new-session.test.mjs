@@ -74,3 +74,38 @@ test('forge new: does not rewrite an already-existing session (no retroactive fl
   const untouched = JSON.parse(fs.readFileSync(path.join(legacyDir, 'session.json'), 'utf8'));
   assert.equal(untouched.features, undefined);
 });
+
+
+test('forge new: warns when configured checkpoints are unavailable on a protected default branch', () => {
+  for (const branch of ['main', 'master']) {
+    const root = makeRepo(`new-session-checkpoint-warning-${branch}-`);
+    if (branch === 'master') git(root, 'branch', '-m', 'master');
+    fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.forge', 'config.json'), JSON.stringify({ git: { checkpoint: 'per-group' } }));
+
+    const r = runNewSession(root, [`checkpoint-warning-${branch}`]);
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(out.checkpointWarning?.mode, 'per-group');
+    assert.equal(out.checkpointWarning?.branch, branch);
+    assert.match(out.checkpointWarning?.advice ?? '', /branch|allowDefaultBranch/i);
+    assert.match(r.stderr, new RegExp(`warning.*checkpoint.*${branch}`, 'is'));
+  }
+});
+
+test('forge new: checkpoint warning stays quiet when disabled, eligible, or explicitly allowed', () => {
+  for (const fixture of [
+    { name: 'off', branch: 'main', gitConfig: { checkpoint: 'off' } },
+    { name: 'feature', branch: 'feature-x', gitConfig: { checkpoint: 'per-task' } },
+    { name: 'allowed', branch: 'main', gitConfig: { checkpoint: 'per-group', allowDefaultBranch: true } },
+  ]) {
+    const root = makeRepo(`new-session-checkpoint-${fixture.name}-`);
+    if (fixture.branch !== 'main') git(root, 'switch', '-q', '-c', fixture.branch);
+    fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.forge', 'config.json'), JSON.stringify({ git: fixture.gitConfig }));
+    const r = runNewSession(root, [`checkpoint-${fixture.name}`]);
+    assert.equal(r.status, 0, `${fixture.name}: ${r.stderr}`);
+    assert.equal(JSON.parse(r.stdout).checkpointWarning, undefined, fixture.name);
+    assert.doesNotMatch(r.stderr, /checkpoint.*unavailable|warning.*checkpoint/is, fixture.name);
+  }
+});
