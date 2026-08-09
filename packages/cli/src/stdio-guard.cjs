@@ -1,3 +1,5 @@
+const process = globalThis.process;
+
 function removeInjectedNodeOption(options, injectedOption) {
   if (options === injectedOption) return '';
   const prefix = `${injectedOption} `;
