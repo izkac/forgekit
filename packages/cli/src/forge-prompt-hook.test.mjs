@@ -30,6 +30,7 @@ import { resolveTemplatesRoot } from './init.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SRC, '..', '..', '..');
+const POSIX_ONLY = { skip: process.platform === 'win32' };
 
 const HOOK_NAMES = ['forge-prompt-hook.mjs', 'forge-triage-hook.mjs'];
 const TEMPLATE_HOOKS = Object.fromEntries(
@@ -137,7 +138,7 @@ function runHook(hookPath, root, opts) {
 for (const name of HOOK_NAMES) {
   const HOOK = TEMPLATE_HOOKS[name];
 
-  test(`${name}: never executes shell metacharacters embedded in the prompt (command injection)`, () => {
+  test(`${name}: never executes shell metacharacters embedded in the prompt (command injection)`, POSIX_ONLY, () => {
     // A stub `forge` on PATH keeps `forge triage --check` deterministic (exit
     // 0 always) so the run reaches every prompt-carrying site regardless of
     // the real CLI's own triage heuristic — without it, a prompt that the
@@ -155,7 +156,7 @@ for (const name of HOOK_NAMES) {
     assert.ok(!fs.existsSync(marker), 'prompt text must never reach a shell as a command');
   });
 
-  test(`${name}: relays a prompt with shell metacharacters to forge byte-for-byte unchanged at every prompt-bearing spawn site`, () => {
+  test(`${name}: relays a prompt with shell metacharacters to forge byte-for-byte unchanged at every prompt-bearing spawn site`, POSIX_ONLY, () => {
     const root = makeProject();
     const stubDir = tmp('hook-injection-stub-');
     const logFile = path.join(stubDir, 'calls.jsonl');
