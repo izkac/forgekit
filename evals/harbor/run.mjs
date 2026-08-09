@@ -24,11 +24,12 @@ const runsRoot = process.env.FORGEKIT_EVAL_RUNS_ROOT
 const normalizer = path.join(here, 'normalize-results.mjs');
 const installMarker = '# FORGEKIT_INSTALL_MARKER: the Forge arm may replace this line with its pinned Forgekit install command.';
 const valueOptions = new Set([
-  '--task', '--arm', '--repetitions', '--concurrency', '--agent', '--model', '--forgekit-version',
+  '--task', '--arm', '--repetitions', '--concurrency', '--agent', '--model',
+  '--forgekit-version', '--forgekit-tarball',
 ]);
 
 function usage() {
-  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> --forgekit-version <published-version> [--dry-run]\n`;
+  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id>\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n`;
 }
 
 function parseArgs(argv) {
@@ -52,7 +53,7 @@ function parseArgs(argv) {
     index += 1;
   }
 
-  const required = ['--task', '--agent', '--model', '--forgekit-version'];
+  const required = ['--task', '--agent', '--model'];
   for (const option of required) {
     if (!Object.hasOwn(raw, option)) throw new Error(`${option} is required`);
   }
@@ -64,7 +65,8 @@ function parseArgs(argv) {
     concurrency: parsePositiveInteger(raw['--concurrency'] ?? '1', 'concurrency'),
     agent: raw['--agent'],
     model: raw['--model'],
-    forgekitVersion: raw['--forgekit-version'],
+    forgekitVersion: raw['--forgekit-version'] ?? null,
+    forgekitTarball: raw['--forgekit-tarball'] ?? null,
     dryRun,
   };
   validate(config);
@@ -88,9 +90,43 @@ function validate(config) {
   const identifier = /^[A-Za-z0-9][A-Za-z0-9._@/:+-]*$/;
   if (!identifier.test(config.agent)) throw new Error('agent must be a non-empty identifier');
   if (!identifier.test(config.model)) throw new Error('model must be a non-empty identifier');
+  if ((config.forgekitVersion === null) === (config.forgekitTarball === null)) {
+    throw new Error('exactly one of --forgekit-version and --forgekit-tarball is required');
+  }
   const semver = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-  if (!semver.test(config.forgekitVersion)) {
+  if (config.forgekitVersion !== null && !semver.test(config.forgekitVersion)) {
     throw new Error('forgekit-version must be a published semantic version (for example, 0.3.37)');
+  }
+}
+
+async function prepareForgekitTreatment(config) {
+  if (config.forgekitVersion !== null) {
+    return {
+      metadata: { kind: 'published-version', version: config.forgekitVersion },
+      bytes: null,
+    };
+  }
+
+  let handle;
+  try {
+    handle = await open(path.resolve(config.forgekitTarball), 'r');
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error('not a regular file');
+    const bytes = await handle.readFile();
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    return {
+      metadata: {
+        kind: 'local-tarball',
+        sha256,
+        byteSize: bytes.length,
+        stagedFilename: `forgekit-treatment-${sha256}.tgz`,
+      },
+      bytes,
+    };
+  } catch {
+    throw new Error('forgekit-tarball must be a readable regular file');
+  } finally {
+    await handle?.close();
   }
 }
 
@@ -150,30 +186,42 @@ function selectedArms(arm) {
   return arm === 'both' ? ['baseline', 'forge'] : [arm];
 }
 
-function runIdFor(config) {
+function runIdFor(config, forgekitTreatment) {
   if (config.dryRun) {
-    const digest = createHash('sha256').update(JSON.stringify(config)).digest('hex').slice(0, 12);
+    const identity = { ...config, forgekitTarball: undefined, forgekitTreatment };
+    const digest = createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 12);
     return `dry-run-${digest}`;
   }
   const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
   return `${timestamp}-${randomUUID().slice(0, 8)}`;
 }
 
-async function stageArm(canonicalTask, stagedTask, arm, version) {
+async function stageArm(canonicalTask, stagedTask, arm, treatment) {
   await cp(canonicalTask, stagedTask, { recursive: true, force: true });
   const instructionPath = path.join(stagedTask, 'instruction.md');
   const canonicalInstruction = (await readFile(instructionPath, 'utf8')).trimEnd();
-  const treatment = arm === 'forge'
+  const treatmentInstructions = arm === 'forge'
     ? `## Evaluation arm: forge\n\nUse the installed Forge CLI and Forge workflow for this task. Announce that you are using Forge, triage the request, and for substantial work start a session with \`forge new <slug>\`. Follow a tracked plan, use test-driven red/green evidence, then verify and review before completion. Preserve Forge process artifacts in the working repository.`
     : `## Evaluation arm: baseline\n\nComplete this task using the agent's normal workflow.`;
-  await writeFile(instructionPath, `${canonicalInstruction}\n\n---\n\n${treatment}\n`);
+  await writeFile(instructionPath, `${canonicalInstruction}\n\n---\n\n${treatmentInstructions}\n`);
 
   if (arm === 'forge') {
     const dockerfilePath = path.join(stagedTask, 'environment', 'Dockerfile');
     const dockerfile = await readFile(dockerfilePath, 'utf8');
     const occurrences = dockerfile.split(installMarker).length - 1;
     if (occurrences !== 1) throw new Error(`Forgekit install marker must occur exactly once (found ${occurrences})`);
-    const install = `RUN npm install --global @izkac/forgekit@${version}`;
+    let install;
+    if (treatment.metadata.kind === 'published-version') {
+      install = `RUN npm install --global @izkac/forgekit@${treatment.metadata.version}`;
+    } else {
+      const { sha256, stagedFilename } = treatment.metadata;
+      const environmentDirectory = path.dirname(dockerfilePath);
+      await writeFile(path.join(environmentDirectory, stagedFilename), treatment.bytes);
+      install = [
+        `COPY ${stagedFilename} /tmp/forgekit-treatment.tgz`,
+        `RUN echo '${sha256}  /tmp/forgekit-treatment.tgz' | sha256sum --check --strict && npm install --global --ignore-scripts --no-audit --no-fund /tmp/forgekit-treatment.tgz && rm -f /tmp/forgekit-treatment.tgz`,
+      ].join('\n');
+    }
     await writeFile(dockerfilePath, dockerfile.replace(installMarker, install));
   }
 }
@@ -349,11 +397,12 @@ async function main(argv) {
     return;
   }
 
+  const forgekitTreatment = await prepareForgekitTreatment(config);
   const canonicalTask = path.join(canonicalRoot, config.task);
   await assertCanonicalTask(canonicalTask);
   const revision = await hashDirectory(canonicalTask);
   const harnessRevision = await hashHarness();
-  const runId = runIdFor(config);
+  const runId = runIdFor(config, forgekitTreatment.metadata);
   const runDirectory = path.join(runsRoot, runId);
   if (config.dryRun) await rm(runDirectory, { recursive: true, force: true });
   await mkdir(path.join(runDirectory, 'arms'), { recursive: true });
@@ -362,7 +411,7 @@ async function main(argv) {
   const stagedTasks = {};
   for (const arm of arms) {
     const stagedTask = path.join(runDirectory, 'arms', arm);
-    await stageArm(canonicalTask, stagedTask, arm, config.forgekitVersion);
+    await stageArm(canonicalTask, stagedTask, arm, forgekitTreatment);
     stagedTasks[arm] = stagedTask;
   }
 
@@ -398,6 +447,7 @@ async function main(argv) {
         agent: config.agent,
         model: config.model,
         forgekitVersion: config.forgekitVersion,
+        forgekitTreatment: forgekitTreatment.metadata,
         resolvedAgent: null,
         images,
         settings: { repetitions: config.repetitions, concurrency: config.concurrency },
@@ -438,6 +488,7 @@ async function main(argv) {
       agent: config.agent,
       model: config.model,
       forgekitVersion: config.forgekitVersion,
+      forgekitTreatment: forgekitTreatment.metadata,
     },
     arms: arms.map((arm) => ({ arm, stagedTask: stagedTasks[arm] })),
     trials: trials.map(({ manifestData, ...trial }) => trial),

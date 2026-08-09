@@ -135,3 +135,12 @@ process.stdout.write(result.stdout);
   const runDirectory = await readFile(capture, 'utf8');
   await assert.rejects(stat(runDirectory), { code: 'ENOENT' });
 });
+
+
+test('concurrent smoke CLIs isolate their dry-run staging', async () => {
+  const results = await Promise.all(Array.from({ length: 4 }, () => runSmoke()));
+  for (const result of results) {
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /PASS baseline\/Forge staging and verifier isolation/);
+  }
+});

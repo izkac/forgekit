@@ -7,8 +7,8 @@ paired A/B arms:
 - **Baseline** uses the selected agent and model without Forgekit installed or
   injected workflow instructions.
 - **Forge** uses the same task, agent, and model, while its treatment image
-  installs a selected published Forgekit version and receives the Forge
-  workflow instructions.
+  installs either a selected published Forgekit version or an explicitly built
+  local tarball and receives the Forge workflow instructions.
 
 For a step-by-step operator walkthrough, including a paired Forge versus
 no-Forge run and result inspection, see [`docs/agentic-evals.md`](../docs/agentic-evals.md).
@@ -49,6 +49,29 @@ node evals/harbor/run.mjs \
   --dry-run
 ```
 
+To evaluate this checkout without publishing it, build the package explicitly
+and select the resulting immutable payload instead of `--forgekit-version`:
+
+```bash
+TARBALL_DIR="$(mktemp -d)"
+npm pack --workspace=@izkac/forgekit --pack-destination "$TARBALL_DIR"
+FORGEKIT_TARBALL="$(find "$TARBALL_DIR" -maxdepth 1 -name '*.tgz' -print -quit)"
+
+node evals/harbor/run.mjs \
+  --task node-health-endpoint \
+  --arm both \
+  --repetitions 1 \
+  --concurrency 1 \
+  --agent <agent> \
+  --model <model-id> \
+  --forgekit-tarball "$FORGEKIT_TARBALL" \
+  --dry-run
+```
+
+`npm pack` runs this checkout's trusted `prepack` lifecycle to refresh the
+ignored vendored assets. The evaluator runner itself never invokes packaging
+scripts and never publishes. Pass a tarball only from a source you trust.
+
 Real run, using the same inputs without `--dry-run`:
 
 ```bash
@@ -74,11 +97,14 @@ result for every successful trial. A Harbor process exit alone is not recorded
 as an outcome pass.
 
 The runner validates the task, arm, positive repetition and concurrency
-values, model and agent parameters, and the Forgekit package version before
-starting a trial. `--forgekit-version` refers to a published package version:
-the baseline image must not install Forgekit, and the Forge image installs the
-selected package inside the container. The local checkout is not implicitly
-measured, and Harbor is not added to the published `packages/cli` dependencies.
+values, model and agent parameters, and exactly one Forgekit treatment selector
+before starting a trial. `--forgekit-version` refers to a published package;
+`--forgekit-tarball` snapshots a readable local file and records its SHA-256 and
+byte size without recording the operator's host path. The baseline image never
+receives Forgekit. The Forge image verifies the local digest before installing
+with lifecycle scripts disabled. The local checkout is never selected
+implicitly, and Harbor is not added to the published `packages/cli`
+dependencies.
 
 ## Task Contract
 
@@ -198,8 +224,10 @@ across a larger held-out corpus, with outcome and cost/time comparisons.
 - Hold the task, agent, model, model settings, container inputs, repetition
   count, and concurrency constant across a comparison. Change only the Forge
   treatment.
-- Pin and record the Forgekit package version, Harbor version, task revision,
-  harness revision, image versions, and any supported random seed. The smoke
+- Pin and record the Forgekit treatment (published version or local tarball
+  SHA-256), Harbor version, task revision, harness revision, image versions,
+  and any supported random seed. A local tarball digest identifies the Forgekit
+  payload bytes but does not pin registry-resolved transitive dependencies. The smoke
   task pins its Node base image by registry digest and avoids mutable package
   installation in the task Dockerfiles. Real manifests record Harbor's
   resolved agent name/version from its trial result, plus the requested agent,

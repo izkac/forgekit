@@ -2,13 +2,12 @@
 
 ## 1. Local treatment contract
 
-- [ ] 1.1 Add CLI-level red/green coverage for mutually exclusive published/tarball selectors, missing/non-file tarballs, unsafe source names, and a local dry-run whose Forge Docker context contains only the digest-bound archive treatment. Assert plan and trial manifests expose authoritative package provenance while baseline remains Forge-free.
-- [ ] 1.2 Implement single-read tarball snapshotting/hashing, Forge-only staging, digest verification/install with lifecycle scripts disabled, and structured manifest provenance in `evals/harbor/run.mjs` without shell interpolation.
+- [x] 1.1 Add CLI-level red/green coverage and implementation for mutually exclusive published/tarball selectors, missing/non-file tarballs, unsafe source names, and a local dry-run whose Forge Docker context contains only the digest-bound archive treatment. Implement single-read snapshotting/hashing, Forge-only staging, digest verification/install with lifecycle scripts disabled, and structured plan/manifest provenance without shell interpolation.
 
 ## 2. Operator and smoke path
 
-- [ ] 2.1 Update `evals/README.md` and `docs/agentic-evals.md` with exact `npm pack` commands for the current checkout, local dry/real runs, trusted-tarball warnings, digest inspection, transitive-dependency limitation, and selector rules.
-- [ ] 2.2 Add regression coverage for the shared deterministic-run cleanup race so evaluator tests and smoke validation can execute concurrently without deleting one another's staged arms.
+- [x] 2.1 Update `evals/README.md` and `docs/agentic-evals.md` with exact `npm pack` commands for the current checkout, local dry/real runs, trusted-tarball warnings, digest inspection, transitive-dependency limitation, and selector rules.
+- [x] 2.2 Add regression coverage for the shared deterministic-run cleanup race so evaluator tests and smoke validation can execute concurrently without deleting one another's staged arms.
 
 ## 3. Verification
 
