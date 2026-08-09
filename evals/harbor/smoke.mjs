@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '..', '..');
-const taskId = 'node-health-endpoint';
-const taskRoot = path.join(here, 'tasks', taskId);
+const corpus = JSON.parse(await readFile(path.join(here, 'corpus.json'), 'utf8'));
+const corpusTasks = corpus.tasks;
 const runner = process.env.FORGEKIT_SMOKE_RUNNER || path.join(here, 'run.mjs');
 const forgekitVersion = '0.3.37';
 const rewardKeys = ['functional', 'regression', 'tests_unchanged', 'shippable'];
@@ -68,7 +68,7 @@ function numericValue(section, key) {
   return Number(match[1]);
 }
 
-async function validateTaskContract() {
+async function validateTaskContract(taskId, taskRoot) {
   await requireFiles(taskRoot, [
     'task.toml',
     'instruction.md',
@@ -144,13 +144,14 @@ function changedFiles(canonical, staged) {
   return [...names].filter((name) => canonical.get(name) !== staged.get(name)).sort();
 }
 
-async function stageAndValidate(workDirectory) {
+async function stageAndValidate(workDirectory, taskId, taskRoot) {
   const result = await run(process.execPath, [
     runner,
     '--task', taskId,
     '--arm', 'both',
     '--repetitions', '1',
     '--concurrency', '1',
+    '--seed', 'smoke-corpus-v1',
     '--agent', 'smoke-local',
     '--model', 'local/not-executed',
     '--forgekit-version', forgekitVersion,
@@ -226,7 +227,7 @@ function validateReward(value, label) {
   }
 }
 
-async function gradeFixture(appDirectory, rewardDirectory) {
+async function gradeFixture(appDirectory, rewardDirectory, taskRoot) {
   const rewardFile = path.join(rewardDirectory, 'reward.json');
   const result = await run(process.execPath, [path.join(taskRoot, 'tests', 'grader.mjs')], {
     env: {
@@ -246,7 +247,7 @@ async function gradeFixture(appDirectory, rewardDirectory) {
   return reward;
 }
 
-async function validateVerifier(workDirectory) {
+async function validateVerifier(workDirectory, taskRoot) {
   const fixture = path.join(taskRoot, 'environment', 'app');
   const untouchedApp = path.join(workDirectory, 'untouched', 'app');
   const knownGoodApp = path.join(workDirectory, 'known-good', 'app');
@@ -255,7 +256,7 @@ async function validateVerifier(workDirectory) {
     cp(fixture, knownGoodApp, { recursive: true }),
   ]);
 
-  const untouched = await gradeFixture(untouchedApp, path.join(workDirectory, 'untouched', 'reward'));
+  const untouched = await gradeFixture(untouchedApp, path.join(workDirectory, 'untouched', 'reward'), taskRoot);
   const expectedUntouched = { functional: 0, regression: 1, tests_unchanged: 1, shippable: 0 };
   requireCondition(JSON.stringify(untouched) === JSON.stringify(expectedUntouched), `untouched verifier reward was ${JSON.stringify(untouched)}`);
   process.stdout.write('PASS hidden verifier: untouched fixture\n');
@@ -264,7 +265,7 @@ async function validateVerifier(workDirectory) {
     env: { HARBOR_APP_DIR: knownGoodApp },
   });
   if (solve.code !== 0) throw new Error(`known-good solution failed: ${solve.stderr.trim() || solve.stdout.trim()}`);
-  const knownGood = await gradeFixture(knownGoodApp, path.join(workDirectory, 'known-good', 'reward'));
+  const knownGood = await gradeFixture(knownGoodApp, path.join(workDirectory, 'known-good', 'reward'), taskRoot);
   const expectedKnownGood = { functional: 1, regression: 1, tests_unchanged: 1, shippable: 1 };
   requireCondition(JSON.stringify(knownGood) === JSON.stringify(expectedKnownGood), `known-good verifier reward was ${JSON.stringify(knownGood)}`);
   process.stdout.write('PASS hidden verifier: known-good fixture\n');
@@ -292,24 +293,27 @@ async function validateBuildContext(label, dockerfile, context) {
   }
 }
 
-async function validateDocker(stagedByArm) {
-  const contexts = [
+function dockerContexts(taskId, stagedByArm) {
+  return [
     {
-      label: 'baseline-agent',
+      label: `${taskId}:baseline-agent`,
       context: path.join(stagedByArm.baseline, 'environment'),
       dockerfile: path.join(stagedByArm.baseline, 'environment', 'Dockerfile'),
     },
     {
-      label: 'forge-agent',
+      label: `${taskId}:forge-agent`,
       context: path.join(stagedByArm.forge, 'environment'),
       dockerfile: path.join(stagedByArm.forge, 'environment', 'Dockerfile'),
     },
     {
-      label: 'separate-verifier',
+      label: `${taskId}:separate-verifier`,
       context: path.join(stagedByArm.baseline, 'tests'),
       dockerfile: path.join(stagedByArm.baseline, 'tests', 'Dockerfile'),
     },
   ];
+}
+
+async function validateDocker(contexts) {
 
   for (const item of contexts) {
     await validateBuildContext(item.label, item.dockerfile, item.context);
@@ -331,7 +335,7 @@ async function validateDocker(stagedByArm) {
     }
   }
 
-  process.stdout.write('PASS Docker validation: baseline agent, Forge agent, separate verifier\n');
+  process.stdout.write(`PASS Docker validation: ${contexts.length} corpus build contexts\n`);
   return {
     status: 'validated',
     method: 'docker build --check',
@@ -340,18 +344,28 @@ async function validateDocker(stagedByArm) {
 }
 
 async function main() {
-  let plan;
+  const plans = [];
   const workDirectory = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-smoke-'));
   try {
-    await validateTaskContract();
-    process.stdout.write('PASS task metadata and required structure\n');
+    const taskSummaries = {};
+    const contexts = [];
+    for (const entry of corpusTasks) {
+      const taskId = entry.id;
+      const taskRoot = path.join(here, 'tasks', taskId);
+      const taskWork = path.join(workDirectory, taskId);
+      await validateTaskContract(taskId, taskRoot);
+      process.stdout.write(`PASS task metadata and required structure: ${taskId}\n`);
 
-    const staged = await stageAndValidate(workDirectory);
-    plan = staged.plan;
-    process.stdout.write('PASS baseline/Forge staging and verifier isolation\n');
+      const staged = await stageAndValidate(taskWork, taskId, taskRoot);
+      plans.push(staged.plan);
+      process.stdout.write(`PASS baseline/Forge staging and verifier isolation: ${taskId}\n`);
 
-    const verifier = await validateVerifier(workDirectory);
-    const docker = await validateDocker(staged.stagedByArm);
+      const verifier = await validateVerifier(taskWork, taskRoot);
+      taskSummaries[taskId] = { category: entry.category, verifier };
+      contexts.push(...dockerContexts(taskId, staged.stagedByArm));
+    }
+
+    const docker = await validateDocker(contexts);
     const modelHarbor = {
       status: 'skipped',
       modelExecuted: false,
@@ -360,10 +374,10 @@ async function main() {
     process.stdout.write('SKIP model/Harbor execution: local smoke validation only; no model was invoked\n');
 
     const summary = {
-      schemaVersion: 1,
-      task: taskId,
+      schemaVersion: 2,
+      corpusId: corpus.corpus_id,
       arms: ['baseline', 'forge'],
-      verifier,
+      tasks: taskSummaries,
       docker,
       modelHarbor,
     };
@@ -371,7 +385,7 @@ async function main() {
   } finally {
     await Promise.all([
       rm(workDirectory, { recursive: true, force: true }),
-      plan?.runDirectory ? rm(plan.runDirectory, { recursive: true, force: true }) : Promise.resolve(),
+      ...plans.map((plan) => rm(plan.runDirectory, { recursive: true, force: true })),
     ]);
   }
 }
