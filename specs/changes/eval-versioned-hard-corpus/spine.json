@@ -1,0 +1,25 @@
+{
+  "change": "eval-versioned-hard-corpus",
+  "capabilities": [
+    {
+      "capability": "benchmark-harness",
+      "entrypoints": [
+        "evals/harbor/run.mjs"
+      ],
+      "tests": [
+        "evals/harbor/run.test.mjs"
+      ],
+      "evidence": "Explicit allowlisted corpus selection, legacy default, v1 lock"
+    },
+    {
+      "capability": "evaluation-corpus",
+      "entrypoints": [
+        "evals/harbor/tasks/forgekit-hard-v2/reservation-confirmation-race"
+      ],
+      "tests": [
+        "evals/harbor/corpus-hard-v2-reservation.test.mjs"
+      ],
+      "evidence": "Deterministic barrier verification, mutants, oracle and alternate positive"
+    }
+  ]
+}
