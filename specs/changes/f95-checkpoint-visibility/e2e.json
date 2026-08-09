@@ -1,0 +1,15 @@
+{
+  "change": "f95-checkpoint-visibility",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "create-session-with-checkpoint-policy",
+      "cmd": "node --test packages/cli/src/new-session.test.mjs",
+      "expect": "warns when configured checkpoints are unavailable on a protected default branch"
+    }
+  ]
+}
