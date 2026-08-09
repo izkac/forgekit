@@ -322,7 +322,11 @@ writeFileSync(path.join(output, 'artifacts', '.forge', 'session.json'), '{}');
   const manifest = JSON.parse(await readFile(manifestFile(plan, plan.trials[0]), 'utf8'));
   const normalized = JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8'));
   assert.equal(normalized.instrumentation.available, true);
-  assert.match(normalized.instrumentation.forge.artifactPath, /\.forge$/);
+  assert.equal(normalized.instrumentation.forge.artifactPath, undefined);
+  assert.match(normalized.instrumentation.forge.artifactLocator, /(?:^|\/)artifacts\/(?:app\/)?\.forge$/);
+  assert.equal(path.isAbsolute(normalized.instrumentation.forge.artifactLocator), false);
+  assert.equal(JSON.stringify(normalized).includes(testRunsRoot), false);
+  assert.equal(JSON.stringify(normalized).includes(projectRoot), false);
 });
 
 

@@ -385,9 +385,10 @@ async function summarizeForgeArtifacts(trial) {
   const artifactPath = directories[0];
   const files = await findEntries(artifactPath, (entry) => entry.isFile());
   const summaryPath = path.join(trial.trialDirectory, 'forge-summary.json');
+  const artifactLocator = path.relative(trial.trialOutput, artifactPath).split(path.sep).join('/');
   await writeFile(summaryPath, `${JSON.stringify({
-    artifactPath,
-    files: files.map((file) => path.relative(artifactPath, file)).sort(),
+    artifactLocator,
+    files: files.map((file) => path.relative(artifactPath, file).split(path.sep).join('/')).sort(),
   }, null, 2)}
 `);
   return summaryPath;
