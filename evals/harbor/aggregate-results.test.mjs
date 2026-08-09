@@ -46,6 +46,7 @@ function createRun(root, {
   model = 'example/model',
   harnessRevision = 'harness-abc',
   treatment = { kind: 'published-version', version: '1.2.3' },
+  selectedArm = 'both',
 } = {}) {
   const directory = path.join(root, runId);
   mkdirSync(path.join(directory, 'trials'), { recursive: true });
@@ -107,7 +108,7 @@ function createRun(root, {
     harnessRevision,
     images: { agent: 'node@sha256:aaa', verifier: 'node@sha256:bbb' },
     settings: {
-      arm: 'both',
+      arm: selectedArm,
       repetitions: 2,
       concurrency: 1,
       seed: 'experiment-seed',
@@ -158,7 +159,7 @@ test('aggregates coherent runs by arm, category, and task using complete pairs o
     model: 'example/model',
     forgekit_treatment: { kind: 'published-version', version: '1.2.3' },
     harness_revision: 'harness-abc',
-    settings: { arm: 'both', repetitions: 2, concurrency: 1, seed: 'experiment-seed' },
+    settings: { repetitions: 2, concurrency: 1, seed: 'experiment-seed' },
   });
   assert.deepEqual(report.arms.baseline.outcomes.shippable, { observations: 3, successes: 2, rate: 2 / 3 });
   assert.deepEqual(report.arms.forge.outcomes.shippable, { observations: 2, successes: 1, rate: 0.5 });
@@ -198,6 +199,24 @@ test('aggregates coherent runs by arm, category, and task using complete pairs o
   assert.match(report.limitations.join(' '), /causal|representative|held.out/i);
   assert.equal(Object.hasOwn(report, 'verdict'), false);
   assert.equal(Object.hasOwn(report, 'effectiveness'), false);
+});
+
+
+test('pairs baseline and forge observations from separate single-arm run directories', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-arms-'));
+  const baseline = createRun(root, {
+    runId: 'run-baseline', task: 'split-task', category: 'tests', selectedArm: 'baseline',
+    cells: [{ arm: 'baseline', repetition: 1, shippable: 0 }],
+  });
+  const forge = createRun(root, {
+    runId: 'run-forge', task: 'split-task', category: 'tests', selectedArm: 'forge',
+    cells: [{ arm: 'forge', repetition: 1, shippable: 1 }],
+  });
+  const result = invoke([baseline, forge]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.pairs.complete, 1);
+  assert.equal(report.pairs.outcomes.shippable.wins, 1);
 });
 
 test('refuses mixed cohorts without emitting an aggregate', () => {

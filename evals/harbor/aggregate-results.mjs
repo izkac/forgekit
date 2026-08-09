@@ -130,11 +130,11 @@ function sameValue(left, right) {
 function relevantSettings(settings, label) {
   requireObject(settings, label);
   const selected = {};
-  for (const name of ['arm', 'repetitions', 'concurrency', 'seed']) {
+  for (const name of ['repetitions', 'concurrency', 'seed']) {
     if (!Object.hasOwn(settings, name)) throw new Error(`${label}.${name} is required`);
     selected[name] = settings[name];
   }
-  if (!['baseline', 'forge', 'both'].includes(selected.arm)) throw new Error(`${label}.arm is invalid`);
+  if (!['baseline', 'forge', 'both'].includes(settings.arm)) throw new Error(`${label}.arm is invalid`);
   requirePositiveInteger(selected.repetitions, `${label}.repetitions`);
   requirePositiveInteger(selected.concurrency, `${label}.concurrency`);
   requireString(selected.seed, `${label}.seed`);
