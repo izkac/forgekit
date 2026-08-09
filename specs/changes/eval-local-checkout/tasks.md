@@ -11,4 +11,4 @@
 
 ## 3. Verification
 
-- [ ] 3.1 Run evaluator tests, evaluator lint, Docker-enabled smoke when host access is available, full workspace tests/lint, spec/spine/brief checks, and `git diff --check`. Record Docker/model/provider limitations honestly.
+- [x] 3.1 Run evaluator tests, evaluator lint, Docker-enabled smoke when host access is available, full workspace tests/lint, spec/spine/brief checks, and `git diff --check`. Record Docker/model/provider limitations honestly.

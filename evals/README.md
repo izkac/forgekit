@@ -178,13 +178,20 @@ Docker build contexts. If the Docker daemon is accessible it also runs
 `docker build --check` for the baseline image, Forge image, and separate
 verifier image. It never invokes Harbor or a model.
 
-For the 2026-08-09 local verification, all 22 evaluator tests and lint passed. The
-hidden verifier produced `{functional:0, regression:1, tests_unchanged:1,
+For the 2026-08-09 local-tarball verification, all 25 evaluator tests and
+lint passed, including concurrent evaluator/smoke execution. The hidden
+verifier produced `{functional:0, regression:1, tests_unchanged:1,
 shippable:0}` for the untouched fixture and all ones for the known-good
-solution. Docker validation was skipped because this host could not access the
-Docker daemon; Harbor/model execution and credentials were intentionally not
-used. The existing full workspace test command reported 1,154 passing, zero failing, and one todo test; full lint also passed. The full
-workspace commands are:
+solution. Docker access was repaired and `docker build --check` passed for the
+baseline agent, Forge agent, and verifier contexts. A real local tarball image
+then built successfully, verified its SHA-256 during the build, and returned
+`forge 0.3.37` plus working help output with install lifecycle scripts disabled.
+Harbor 0.20.0 completed separate no-model `nop` trials for both arms and the
+runner normalized their verifier-owned untouched rewards; this validates the
+container/job/artifact boundary without claiming a coding-agent result. No
+provider-backed model was executed because credentials were not configured.
+The full workspace test command reported 1,154 passing, zero failing, and one
+todo test; full lint also passed. The full workspace commands are:
 
 ```bash
 npm test
