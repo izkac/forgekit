@@ -120,7 +120,20 @@
  *               `forge integrity-check`, not the hook — refuses a modified
  *               and a deleted baseline test with no allowance, naming both,
  *               then clears once both are allowanced, with a clean
- *               before/after run proving the guard finding is what moved it
+ *               before/after run proving the guard finding is what moved it.
+ *               Two more, product-loop acceptance for F79/F90 (both fixed on
+ *               this branch): the installed `.claude/hooks/forge-prompt-hook.mjs`
+ *               (the exact file `forge init` wrote above) is fed a
+ *               `/forge …; touch <marker> #` prompt over stdin with a real
+ *               `forge` relay first on PATH — not a stub — so the assertion
+ *               is that the marker is never created AND that the relay
+ *               logged the real spawn carrying the prompt unchanged (F79);
+ *               and, because the classifier only folds case on darwin/win32
+ *               and this runner is Linux, a small spawned driver imports the
+ *               shipped `classifyGuarded`/`makeGitLsTree` directly and calls
+ *               them once with `caseInsensitive: true` and once with
+ *               `false` against a case-variant of a tracked baseline test —
+ *               guarded under folding, not guarded under exact match (F90)
  *
  * TDD-evidence loop (specs/changes/tdd-evidence-guard/e2e.json), its own
  * scratch project (no git needed — this loop never reads the worktree),
@@ -341,6 +354,63 @@ function git(cwd, ...args) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} (in ${cwd}): ${r.stderr}`);
   return r.stdout.trim();
+}
+
+/**
+ * A `forge` executable placed first on PATH for the F79 hook-injection check
+ * below. Unlike a stub, it relays every call straight through to the
+ * SHIPPED `FORGE_BIN` (after logging the argv it received) — the injection
+ * assertion only means something if the real CLI runs at the far end of the
+ * hook's spawn; a double that merely proves the hook didn't crash would
+ * prove nothing about the fix.
+ * @param {string} shimDir
+ * @param {string} logFile
+ */
+function makeForgeRelay(shimDir, logFile) {
+  fs.mkdirSync(shimDir, { recursive: true });
+  const shimPath = path.join(shimDir, 'forge');
+  fs.writeFileSync(
+    shimPath,
+    [
+      '#!/usr/bin/env node',
+      'const fs = require("node:fs");',
+      'const { spawnSync } = require("node:child_process");',
+      `fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({ argv: process.argv.slice(2) }) + "\\n");`,
+      `const r = spawnSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(FORGE_BIN)}, ...process.argv.slice(2)], { stdio: "inherit" });`,
+      'process.exit(typeof r.status === "number" ? r.status : 1);',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  fs.chmodSync(shimPath, 0o755);
+}
+
+/**
+ * Writes a tiny ESM driver that imports the SHIPPED `classifyGuarded` /
+ * `makeGitLsTree` from `guard.mjs` and prints one classification's result —
+ * spawned as its own process so the platform decision under test
+ * (`caseInsensitive`) is exactly the argument given, never this harness
+ * process's own `process.platform` (Linux on CI, which would answer `false`
+ * no matter what). This drives the shipped module's exported functions
+ * directly, not a reimplementation of the fold logic.
+ * @param {string} scriptPath
+ */
+function writeCaseFoldDriver(scriptPath) {
+  fs.writeFileSync(
+    scriptPath,
+    [
+      "import { pathToFileURL } from 'node:url';",
+      '',
+      'const [, , guardModulePath, cwd, baseCommit, relPath, caseInsensitiveFlag] = process.argv;',
+      "const { classifyGuarded, makeGitLsTree } = await import(pathToFileURL(guardModulePath).href);",
+      "const caseInsensitive = caseInsensitiveFlag === 'true';",
+      'const gitLsTree = makeGitLsTree({ cwd, baseCommit, caseInsensitive });',
+      'const result = classifyGuarded({ relPath, config: {}, gitLsTree, caseInsensitive });',
+      'process.stdout.write(`${JSON.stringify({ guarded: result.guarded, rule: result.rule })}\\n`);',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
 }
 
 /* ---------- tdd-evidence fixture ---------- */
@@ -2110,6 +2180,64 @@ if (phase === 'boot') {
     `${JSON.stringify({ notApplicable: 'test-guard e2e fixture — no runtime spine' }, null, 2)}\n`,
   );
 
+  // --- F79, AGAINST THE SHIPPED BINARY: the UserPromptSubmit hook `forge
+  // init` just installed above never lets a shell metacharacter in the
+  // prompt execute. Drive that exact installed file (not a copy) over
+  // stdin, with a real `forge` — a relay onto the SHIPPED FORGE_BIN, not a
+  // stub — first on PATH, so the hook's real spawn site is what runs.
+  const promptHookPath = path.join(dir, '.claude', 'hooks', 'forge-prompt-hook.mjs');
+  if (!fs.existsSync(promptHookPath)) {
+    fail('forge init did not install .claude/hooks/forge-prompt-hook.mjs', init.out);
+  }
+  const injectionMarker = path.join(dir, '.forge', 'f79-injection-marker');
+  const forgeRelayDir = path.join(dir, '.forge', 'f79-forge-relay');
+  const forgeRelayLog = path.join(forgeRelayDir, 'calls.jsonl');
+  makeForgeRelay(forgeRelayDir, forgeRelayLog);
+  // `/forge` opens the hook's own gate (isForgeInvocation); `; touch … #` is
+  // the shape that a bare `shell: true` spawn (the pre-fix code) executes as
+  // a second shell command — under the fixed `shell: false` spawn it can
+  // only ever be inert text inside one `--prompt` argv value.
+  const injectionPrompt = `/forge do the thing; touch ${injectionMarker} #`;
+  const hookEnv = {
+    ...process.env,
+    CLAUDE_PROJECT_DIR: dir,
+    FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet'),
+    PATH: `${forgeRelayDir}${path.delimiter}${process.env.PATH ?? ''}`,
+  };
+  delete hookEnv.CLAUDE_CODE_SESSION_ID;
+  const hookRun = spawnSync(process.execPath, [promptHookPath], {
+    input: JSON.stringify({ prompt: injectionPrompt }),
+    encoding: 'utf8',
+    cwd: dir,
+    env: hookEnv,
+  });
+  if (hookRun.status !== 0) {
+    fail(`forge-prompt-hook.mjs exited ${hookRun.status}`, `${hookRun.stdout}${hookRun.stderr}`);
+  }
+  if (fs.existsSync(injectionMarker)) {
+    fail(
+      'F79: the shipped prompt hook let a shell metacharacter in the prompt execute (command injection)',
+      hookRun.stdout,
+    );
+  }
+  // Not just "no crash": the relay logged the call it actually received,
+  // proving the real forge spawn ran and carried the prompt byte-for-byte —
+  // a hook that silently failed to reach `forge` at all would also leave the
+  // marker absent, and would pass the check above for the wrong reason.
+  if (!fs.existsSync(forgeRelayLog)) {
+    fail('F79: the hook never reached the forge spawn at all — the marker check above proves nothing', hookRun.stdout);
+  }
+  const relayCalls = fs
+    .readFileSync(forgeRelayLog, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line).argv);
+  const promptBearingCall = relayCalls.find((argv) => argv[0] === 'reminder');
+  if (!promptBearingCall || !promptBearingCall.includes(injectionPrompt)) {
+    fail('F79: the real forge spawn did not carry the exact injection prompt', JSON.stringify(relayCalls));
+  }
+  process.stdout.write('F79 HOOK INJECTION GREEN\n');
+
   const relFoo = 'packages/cli/src/foo.test.mjs';
   const relNew = 'packages/cli/src/new.test.mjs';
   const relBar = 'packages/cli/src/bar.test.mjs';
@@ -2167,6 +2295,51 @@ if (phase === 'boot') {
     fail('the allowance reason did not surface on the flipped check', recheck.stdout);
   }
   process.stdout.write('GUARD CHECK/ALLOW GREEN\n');
+
+  // 4a. F90 — the classifier folds case on darwin/win32 only, and this
+  // runner is Linux, so the platform decision cannot be observed by driving
+  // `forge guard check` alone (`guard-cli.mjs` exposes no flag/env to force
+  // it — checked; there is none). Instead drive the SHIPPED, exported
+  // `classifyGuarded`/`makeGitLsTree` directly, from a spawned driver, with
+  // an explicit `caseInsensitive` on each of the two calls: a case-variant
+  // of the tracked baseline `foo.test.mjs` must be guarded when folding is
+  // forced on, and NOT guarded under an exact-match comparison — both
+  // directions, against the same real git repo and baseCommit used above.
+  const relFooCaseVariant = relFoo.replace('/foo.test.mjs', '/Foo.TEST.mjs');
+  const caseFoldDriver = path.join(dir, '.forge', 'f90-case-fold-driver.mjs');
+  writeCaseFoldDriver(caseFoldDriver);
+  const guardModulePath = path.join(REPO, 'packages', 'cli', 'src', 'guard.mjs');
+  function runCaseFold(caseInsensitive) {
+    const r = spawnSync(
+      process.execPath,
+      [caseFoldDriver, guardModulePath, dir, baseCommit, relFooCaseVariant, String(caseInsensitive)],
+      { encoding: 'utf8' },
+    );
+    if (r.status !== 0) fail(`F90: case-fold driver exited ${r.status}`, `${r.stdout}${r.stderr}`);
+    try {
+      return JSON.parse(r.stdout);
+    } catch {
+      fail('F90: case-fold driver printed no parseable JSON', `${r.stdout}${r.stderr}`);
+    }
+    return undefined;
+  }
+  const folded = runCaseFold(true);
+  if (!folded.guarded) {
+    fail(
+      `F90: classifyGuarded/makeGitLsTree(caseInsensitive: true) did not guard ${relFooCaseVariant}, ` +
+        `a case-variant of the tracked baseline test ${relFoo}`,
+      JSON.stringify(folded),
+    );
+  }
+  const exact = runCaseFold(false);
+  if (exact.guarded) {
+    fail(
+      `F90: classifyGuarded/makeGitLsTree(caseInsensitive: false) guarded ${relFooCaseVariant}, which is not ` +
+        'literally tracked — the fixture no longer discriminates folding from exact match',
+      JSON.stringify(exact),
+    );
+  }
+  process.stdout.write('F90 CASE-FOLD GUARD GREEN\n');
 
   // 4b. FINAL-REVIEW C1 — the guard's own control surface is not classified
   //     as unguarded by the very classifier it configures: `guard.testGlobs:

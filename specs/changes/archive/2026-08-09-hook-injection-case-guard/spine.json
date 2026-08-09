@@ -1,0 +1,24 @@
+{
+  "change": "hook-injection-case-guard",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "project-wiring: hooks never pass untrusted text through a shell",
+      "library": "templates/project/claude/hooks/forge-prompt-hook.mjs, forge-triage-hook.mjs (spawn without shell except win32)",
+      "runtimeOwner": "Claude Code UserPromptSubmit hooks, wired in .claude/settings.json and shipped to projects by forge init",
+      "writes": "the forge subprocess invocation; injected artifacts no longer created",
+      "reads": "the raw user prompt from the hook stdin payload",
+      "uiConsumer": "operator terminal (reminder/triage output), and the agent's own context",
+      "evidence": ".forge/sessions/20260808T194309Z-hook-injection-case-guard-b54d32/e2e-results.json (test-guard step)"
+    },
+    {
+      "capability": "test-guard: path spelling does not bypass the guard",
+      "library": "packages/cli/src/guard.mjs (makeGitLsTree case-folded lookup, platform injected)",
+      "runtimeOwner": "forge guard check CLI and runIntegrityChecks — the same two callers the classifier already serves",
+      "writes": "guard deny/allow decision for case-variant paths",
+      "reads": "git ls-tree names at baseCommit, the injected platform flag",
+      "uiConsumer": "Claude Code hook deny message, forge phase done refusal",
+      "evidence": ".forge/sessions/20260808T194309Z-hook-injection-case-guard-b54d32/e2e-results.json (test-guard step)"
+    }
+  ]
+}

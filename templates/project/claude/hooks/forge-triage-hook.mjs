@@ -44,25 +44,33 @@ function emit(message) {
   process.stdout.write(`<system-reminder>\n${message}\n</system-reminder>\n`);
 }
 
+// `forge` is a `.cmd` shim on win32, so it can only be found via the shell —
+// but shell:true joins argv into an unquoted command string, so the prompt
+// must be quoted by hand there. Everywhere else, shell:false passes argv
+// straight to execve, so `prompt` reaches `forge` untouched regardless of
+// shell metacharacters.
+const useShell = process.platform === 'win32';
+
 function runForge(args) {
   return spawnSync('forge', args, {
     encoding: 'utf8',
     cwd: REPO_ROOT,
-    shell: true,
+    shell: useShell,
   });
 }
 
 const raw = await readStdin();
 const prompt = extractPrompt(raw);
 if (!prompt) process.exit(0);
+const promptArg = useShell ? `"${prompt.replaceAll('"', '""')}"` : prompt;
 
-const check = runForge(['triage', '--check', prompt]);
+const check = runForge(['triage', '--check', promptArg]);
 if (check.status !== 0) process.exit(0);
 
 const hasSession = fs.existsSync(ACTIVE_FILE);
 const args = ['triage', '--message'];
 if (hasSession) args.push('--has-session');
-args.push(prompt);
+args.push(promptArg);
 
 const msg = runForge(args);
 if (msg.status === 0 && msg.stdout.trim()) {
