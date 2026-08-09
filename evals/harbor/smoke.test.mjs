@@ -56,28 +56,28 @@ exit 99
   assert.match(result.stdout, /SKIP model\/Harbor execution: .*no model was invoked/i);
 
   const summary = resultFrom(result.stdout);
-  assert.equal(summary.schemaVersion, 1);
-  assert.equal(summary.task, 'node-health-endpoint');
+  assert.equal(summary.schemaVersion, 2);
+  assert.equal(summary.corpusId, 'forgekit-held-out-v1');
+  assert.deepEqual(Object.keys(summary.tasks).sort(), [
+    'audit-log-wiring', 'csv-formula-regression', 'encoded-path-traversal',
+    'node-health-endpoint', 'pagination-boundary', 'router-extraction',
+  ]);
   assert.deepEqual(summary.arms, ['baseline', 'forge']);
-  assert.deepEqual(summary.verifier.untouched, {
-    functional: 0,
-    regression: 1,
-    tests_unchanged: 1,
-    shippable: 0,
-  });
-  assert.deepEqual(summary.verifier.knownGood, {
-    functional: 1,
-    regression: 1,
-    tests_unchanged: 1,
-    shippable: 1,
-  });
+  for (const task of Object.values(summary.tasks)) {
+    assert.deepEqual(task.verifier.untouched, {
+      functional: 0, regression: 1, tests_unchanged: 1, shippable: 0,
+    });
+    assert.deepEqual(task.verifier.knownGood, {
+      functional: 1, regression: 1, tests_unchanged: 1, shippable: 1,
+    });
+  }
   assert.equal(summary.modelHarbor.status, 'skipped');
   assert.equal(summary.modelHarbor.modelExecuted, false);
   assert.equal(summary.docker.status, 'skipped');
   await assert.rejects(stat(harborCapture), { code: 'ENOENT' });
 });
 
-test('smoke CLI validates all three Docker build contexts when a daemon is available', async (t) => {
+test('smoke CLI validates every corpus Docker build context when a daemon is available', async (t) => {
   const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-smoke-docker-'));
   const capture = path.join(bin, 'docker-argv.jsonl');
   const docker = path.join(bin, 'docker');
@@ -90,17 +90,17 @@ test('smoke CLI validates all three Docker build contexts when a daemon is avail
     DOCKER_CAPTURE: capture,
   });
   assert.equal(result.code, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /PASS Docker validation: baseline agent, Forge agent, separate verifier/);
+  assert.match(result.stdout, /PASS Docker validation: 18 corpus build contexts/);
   const summary = resultFrom(result.stdout);
-  assert.deepEqual(summary.docker, {
-    status: 'validated',
-    method: 'docker build --check',
-    contexts: ['baseline-agent', 'forge-agent', 'separate-verifier'],
-  });
+  assert.equal(summary.docker.status, 'validated');
+  assert.equal(summary.docker.method, 'docker build --check');
+  assert.equal(summary.docker.contexts.length, 18);
+  assert.ok(summary.docker.contexts.includes('node-health-endpoint:baseline-agent'));
+  assert.ok(summary.docker.contexts.includes('encoded-path-traversal:separate-verifier'));
 
   const calls = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.deepEqual(calls[0], ['info', '--format', '{{.ServerVersion}}']);
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 19);
   for (const call of calls.slice(1)) {
     assert.deepEqual(call.slice(0, 2), ['build', '--check']);
     assert.ok(call.includes('--file'));
@@ -119,8 +119,9 @@ import path from 'node:path';
 const result = spawnSync(process.execPath, [process.env.REAL_RUNNER, ...process.argv.slice(2)], { encoding: 'utf8', env: process.env });
 if (result.status !== 0) { process.stderr.write(result.stderr); process.exit(result.status); }
 const plan = JSON.parse(result.stdout);
-appendFileSync(path.join(plan.runDirectory, 'arms', 'forge', 'solution', 'solve.sh'), '\\n# unexpected staging mutation\\n');
-writeFileSync(process.env.RUN_DIRECTORY_CAPTURE, plan.runDirectory);
+const runDirectory = path.join(process.env.FORGEKIT_EVAL_RUNS_ROOT, plan.runId);
+appendFileSync(path.join(runDirectory, 'arms', 'forge', 'solution', 'solve.sh'), '\\n# unexpected staging mutation\\n');
+writeFileSync(process.env.RUN_DIRECTORY_CAPTURE, runDirectory);
 process.stdout.write(result.stdout);
 `);
   await chmod(fakeRunner, 0o755);

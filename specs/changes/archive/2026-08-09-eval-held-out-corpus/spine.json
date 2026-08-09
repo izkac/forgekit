@@ -1,0 +1,33 @@
+{
+  "change": "eval-held-out-corpus",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Versioned multi-category corpus",
+      "library": "evals/harbor/corpus.json and evals/harbor/tasks/*",
+      "runtimeOwner": "evals/harbor/run.mjs and Harbor separate verifier",
+      "writes": "verifier reward.json and normalized-result.json",
+      "reads": "canonical task fixtures and hidden verifier checks",
+      "uiConsumer": "evaluation operator and aggregate-results.mjs",
+      "evidence": "evals/harbor/corpus.test.mjs"
+    },
+    {
+      "capability": "Reproducible counterbalanced arm schedule",
+      "library": "evals/harbor/run.mjs",
+      "runtimeOwner": "run.mjs trial scheduler",
+      "writes": "plan.json and trial manifest schedule fields",
+      "reads": "seed, task revision, arm, repetitions",
+      "uiConsumer": "Harbor executor and evaluation operator",
+      "evidence": "evals/harbor/run.test.mjs"
+    },
+    {
+      "capability": "Honest paired aggregation",
+      "library": "evals/harbor/aggregate-results.mjs",
+      "runtimeOwner": "aggregate-results CLI",
+      "writes": "versioned aggregate JSON",
+      "reads": "run plan, manifests, normalized results",
+      "uiConsumer": "evaluation operator/reporting workflow",
+      "evidence": "evals/harbor/aggregate-results.test.mjs"
+    }
+  ]
+}

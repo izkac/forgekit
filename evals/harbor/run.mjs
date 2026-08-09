@@ -18,18 +18,19 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsRoot = path.resolve(here, '..');
 const canonicalRoot = path.join(here, 'tasks');
+const corpusPath = path.join(here, 'corpus.json');
 const runsRoot = process.env.FORGEKIT_EVAL_RUNS_ROOT
   ? path.resolve(process.env.FORGEKIT_EVAL_RUNS_ROOT)
   : path.join(evalsRoot, '.runs');
 const normalizer = path.join(here, 'normalize-results.mjs');
 const installMarker = '# FORGEKIT_INSTALL_MARKER: the Forge arm may replace this line with its pinned Forgekit install command.';
 const valueOptions = new Set([
-  '--task', '--arm', '--repetitions', '--concurrency', '--agent', '--model',
+  '--task', '--arm', '--repetitions', '--concurrency', '--agent', '--model', '--seed',
   '--forgekit-version', '--forgekit-tarball',
 ]);
 
 function usage() {
-  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id>\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n`;
+  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> [--seed <safe-identifier>]\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n`;
 }
 
 function parseArgs(argv) {
@@ -65,6 +66,7 @@ function parseArgs(argv) {
     concurrency: parsePositiveInteger(raw['--concurrency'] ?? '1', 'concurrency'),
     agent: raw['--agent'],
     model: raw['--model'],
+    seed: raw['--seed'] ?? 'default',
     forgekitVersion: raw['--forgekit-version'] ?? null,
     forgekitTarball: raw['--forgekit-tarball'] ?? null,
     dryRun,
@@ -90,6 +92,9 @@ function validate(config) {
   const identifier = /^[A-Za-z0-9][A-Za-z0-9._@/:+-]*$/;
   if (!identifier.test(config.agent)) throw new Error('agent must be a non-empty identifier');
   if (!identifier.test(config.model)) throw new Error('model must be a non-empty identifier');
+  if (config.seed.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.seed)) {
+    throw new Error('seed must be a safe identifier of at most 128 letters, digits, dots, underscores, or hyphens');
+  }
   if ((config.forgekitVersion === null) === (config.forgekitTarball === null)) {
     throw new Error('exactly one of --forgekit-version and --forgekit-tarball is required');
   }
@@ -97,6 +102,37 @@ function validate(config) {
   if (config.forgekitVersion !== null && !semver.test(config.forgekitVersion)) {
     throw new Error('forgekit-version must be a published semantic version (for example, 0.3.37)');
   }
+}
+
+async function loadCorpusTask(task) {
+  let bytes;
+  let parsed;
+  try {
+    bytes = await readFile(corpusPath);
+    parsed = JSON.parse(bytes);
+  } catch {
+    throw new Error('corpus.json must be readable valid JSON');
+  }
+  if (!Number.isSafeInteger(parsed.schema_version)
+    || typeof parsed.corpus_id !== 'string'
+    || !/^[a-z0-9][a-z0-9-]*$/.test(parsed.corpus_id)
+    || !Array.isArray(parsed.tasks)) {
+    throw new Error('corpus.json has invalid identity or task catalog');
+  }
+  const matches = parsed.tasks.filter((entry) => entry?.id === task);
+  if (matches.length !== 1) throw new Error(`task is not listed exactly once in corpus.json: ${task}`);
+  const [entry] = matches;
+  if (typeof entry.category !== 'string' || !/^[a-z][a-z0-9-]*$/.test(entry.category)) {
+    throw new Error(`corpus category must be safe for task: ${task}`);
+  }
+  return {
+    category: entry.category,
+    corpus: {
+      id: parsed.corpus_id,
+      schemaVersion: parsed.schema_version,
+      revision: createHash('sha256').update(bytes).digest('hex'),
+    },
+  };
 }
 
 async function prepareForgekitTreatment(config) {
@@ -186,6 +222,50 @@ function selectedArms(arm) {
   return arm === 'both' ? ['baseline', 'forge'] : [arm];
 }
 
+function scheduleFor(config, taskRevision) {
+  if (config.arm !== 'both') {
+    return {
+      strategy: 'single-arm',
+      seed: config.seed,
+      startHash: null,
+      startingArm: null,
+      armOrders: Array.from({ length: config.repetitions }, () => [config.arm]),
+      firstArmCounts: {
+        baseline: config.arm === 'baseline' ? config.repetitions : 0,
+        forge: config.arm === 'forge' ? config.repetitions : 0,
+      },
+      imbalance: null,
+    };
+  }
+
+  const startHash = createHash('sha256')
+    .update(`${config.seed}\0${config.task}\0${taskRevision}`)
+    .digest('hex');
+  const startingArm = Number.parseInt(startHash.slice(0, 2), 16) % 2 === 0
+    ? 'baseline'
+    : 'forge';
+  const otherArm = startingArm === 'baseline' ? 'forge' : 'baseline';
+  const armOrders = Array.from({ length: config.repetitions }, (_, index) => (
+    index % 2 === 0 ? [startingArm, otherArm] : [otherArm, startingArm]
+  ));
+  const firstArmCounts = { baseline: 0, forge: 0 };
+  for (const [firstArm] of armOrders) firstArmCounts[firstArm] += 1;
+  const firstPositionDifference = Math.abs(firstArmCounts.baseline - firstArmCounts.forge);
+  return {
+    strategy: 'seeded-counterbalanced-pairs',
+    seed: config.seed,
+    startHash,
+    startingArm,
+    armOrders,
+    firstArmCounts,
+    imbalance: {
+      present: firstPositionDifference !== 0,
+      firstPositionDifference,
+      favoredArm: firstPositionDifference === 0 ? null : startingArm,
+    },
+  };
+}
+
 function runIdFor(config, forgekitTreatment) {
   if (config.dryRun) {
     const identity = { ...config, forgekitTarball: undefined, forgekitTreatment };
@@ -240,12 +320,13 @@ function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm }) {
   return argv;
 }
 
-function spawnHarbor(argv, stdout, stderr) {
+function spawnHarbor(argv, stdout, stderr, cwd) {
   return new Promise((resolve, reject) => {
     const child = spawn('harbor', argv, {
       shell: false,
       stdio: ['ignore', stdout, stderr],
       env: process.env,
+      cwd,
     });
     child.on('error', (error) => reject(new Error(`failed to invoke Harbor: ${error.message}`)));
     child.on('close', (code, signal) => {
@@ -336,9 +417,9 @@ async function normalizeTrial(trial) {
   if (harborJobResult) argv.push('--harbor-job-result', harborJobResult);
   const result = await captureProcess(process.execPath, argv);
   await writeFile(normalizedResult, result.stdout);
-  trial.manifestData.reward = rewards[0];
-  trial.manifestData.harborResult = harborTrialResult;
-  trial.manifestData.harborJobResult = harborJobResult;
+  trial.manifestData.reward = path.relative(trial.runDirectory, rewards[0]);
+  trial.manifestData.harborResult = harborTrialResult ? path.relative(trial.runDirectory, harborTrialResult) : null;
+  trial.manifestData.harborJobResult = harborJobResult ? path.relative(trial.runDirectory, harborJobResult) : null;
   if (harborTrialResult) {
     try {
       const parsedTrialResult = JSON.parse(await readFile(harborTrialResult, 'utf8'));
@@ -347,8 +428,8 @@ async function normalizeTrial(trial) {
       trial.manifestData.resolvedAgent = null;
     }
   }
-  trial.manifestData.forgeSummary = forgeSummary;
-  trial.manifestData.normalizedResult = normalizedResult;
+  trial.manifestData.forgeSummary = forgeSummary ? path.relative(trial.runDirectory, forgeSummary) : null;
+  trial.manifestData.normalizedResult = path.relative(trial.runDirectory, normalizedResult);
   return normalizedResult;
 }
 
@@ -358,22 +439,29 @@ async function writeManifest(trial) {
 
 async function executeTrial(trial) {
   trial.status = 'running';
+  trial.startedAt = new Date().toISOString();
   trial.manifestData.status = 'running';
+  trial.manifestData.startedAt = trial.startedAt;
   await writeManifest(trial);
-  const stdout = await open(path.join(trial.trialDirectory, 'harbor.stdout.log'), 'w');
-  const stderr = await open(path.join(trial.trialDirectory, 'harbor.stderr.log'), 'w');
+  let stdout;
+  let stderr;
   try {
-    await spawnHarbor(trial.harborArgv, stdout.fd, stderr.fd);
+    stdout = await open(path.join(trial.trialDirectory, 'harbor.stdout.log'), 'w');
+    stderr = await open(path.join(trial.trialDirectory, 'harbor.stderr.log'), 'w');
+    await spawnHarbor(trial.harborArgv, stdout.fd, stderr.fd, trial.runDirectory);
     await normalizeTrial(trial);
     trial.status = 'verified';
     trial.manifestData.status = 'verified';
   } catch (error) {
     trial.status = 'failed';
+    trial.error = error.message;
     trial.manifestData.status = 'failed';
     trial.manifestData.error = error.message;
     throw error;
   } finally {
-    await Promise.all([stdout.close(), stderr.close()]);
+    await Promise.all([stdout?.close(), stderr?.close()]);
+    trial.finishedAt = new Date().toISOString();
+    trial.manifestData.finishedAt = trial.finishedAt;
     await writeManifest(trial);
   }
 }
@@ -390,6 +478,34 @@ async function runWithConcurrency(items, limit, action) {
   await Promise.all(workers);
 }
 
+function trialPlanData(trial) {
+  return {
+    trialId: trial.trialId,
+    arm: trial.arm,
+    repetition: trial.repetition,
+    scheduleIndex: trial.scheduleIndex,
+    executionIndex: trial.executionIndex,
+    armOrder: trial.armOrder,
+    armOrdinal: trial.armOrdinal,
+    manifest: trial.manifestRelative,
+    harborArgv: trial.manifestData.harbor.argv,
+    startedAt: trial.startedAt,
+    finishedAt: trial.finishedAt,
+    status: trial.status,
+    ...(trial.error ? { error: trial.error } : {}),
+  };
+}
+
+function publicPlanData(plan) {
+  const { runDirectory, ...data } = plan;
+  return data;
+}
+
+async function persistPlan(plan, trials) {
+  plan.trials = trials.map(trialPlanData);
+  await writeFile(path.join(plan.runDirectory, 'plan.json'), `${JSON.stringify(publicPlanData(plan), null, 2)}\n`);
+}
+
 async function main(argv) {
   const config = parseArgs(argv);
   if (config.help) {
@@ -397,11 +513,13 @@ async function main(argv) {
     return;
   }
 
+  const { category, corpus } = await loadCorpusTask(config.task);
   const forgekitTreatment = await prepareForgekitTreatment(config);
   const canonicalTask = path.join(canonicalRoot, config.task);
   await assertCanonicalTask(canonicalTask);
   const revision = await hashDirectory(canonicalTask);
   const harnessRevision = await hashHarness();
+  const schedule = scheduleFor(config, revision);
   const runId = runIdFor(config, forgekitTreatment.metadata);
   const runDirectory = path.join(runsRoot, runId);
   if (config.dryRun) await rm(runDirectory, { recursive: true, force: true });
@@ -425,8 +543,13 @@ async function main(argv) {
     : (await captureProcess('harbor', ['--version'])).stdout.trim();
 
   const trials = [];
+  let scheduleIndex = 0;
   for (let repetition = 1; repetition <= config.repetitions; repetition += 1) {
-    for (const arm of arms) {
+    const armOrder = schedule.armOrders[repetition - 1];
+    for (let armIndex = 0; armIndex < armOrder.length; armIndex += 1) {
+      const arm = armOrder[armIndex];
+      scheduleIndex += 1;
+      const armOrdinal = armIndex + 1;
       const trialId = `${config.task}-${arm}-${String(repetition).padStart(3, '0')}`;
       const trialDirectory = path.join(runDirectory, 'trials', trialId);
       const trialOutput = path.join(trialDirectory, 'harbor');
@@ -434,66 +557,137 @@ async function main(argv) {
       const argvForHarbor = harborArgv({
         stagedTask: stagedTasks[arm], agent: config.agent, model: config.model, trialOutput, trialId, arm,
       });
+      const portableHarborArgv = [...argvForHarbor];
+      portableHarborArgv[portableHarborArgv.indexOf('--path') + 1] = `arms/${arm}`;
+      portableHarborArgv[portableHarborArgv.indexOf('--jobs-dir') + 1] = `trials/${trialId}/harbor`;
       const manifest = path.join(trialDirectory, 'manifest.json');
       const manifestData = {
         schemaVersion: 1,
         runId,
         trialId,
         task: config.task,
+        category,
+        corpus,
         taskRevision: revision,
         harnessRevision,
+        seed: config.seed,
         arm,
         repetition,
+        scheduleIndex,
+        executionIndex: null,
+        armOrder,
+        armOrdinal,
         agent: config.agent,
         model: config.model,
         forgekitVersion: config.forgekitVersion,
         forgekitTreatment: forgekitTreatment.metadata,
         resolvedAgent: null,
         images,
-        settings: { repetitions: config.repetitions, concurrency: config.concurrency },
-        canonicalTask,
-        stagedTask: stagedTasks[arm],
+        settings: { repetitions: config.repetitions, concurrency: config.concurrency, seed: config.seed },
+        canonicalTask: `tasks/${config.task}`,
+        stagedTask: `arms/${arm}`,
+        startedAt: null,
+        finishedAt: null,
         status: config.dryRun ? 'dry-run' : 'planned',
         harbor: {
           executable: 'harbor',
           version: harborVersion,
           versionSource: config.dryRun ? 'not-probed-dry-run' : 'harbor --version',
-          argv: argvForHarbor,
+          argv: portableHarborArgv,
         },
       };
       const trial = {
-        trialId, arm, repetition, trialDirectory, trialOutput, manifest, harborArgv: argvForHarbor,
-        status: manifestData.status, manifestData,
+        trialId,
+        arm,
+        repetition,
+        scheduleIndex,
+        executionIndex: null,
+        armOrder,
+        armOrdinal,
+        runDirectory,
+        trialDirectory,
+        trialOutput,
+        manifest,
+        manifestRelative: path.relative(runDirectory, manifest),
+        harborArgv: portableHarborArgv,
+        startedAt: null,
+        finishedAt: null,
+        status: manifestData.status,
+        manifestData,
       };
       await writeManifest(trial);
       trials.push(trial);
     }
   }
 
-  if (!config.dryRun) await runWithConcurrency(trials, config.concurrency, executeTrial);
-
   const plan = {
     schemaVersion: 1,
     runId,
     runDirectory,
     dryRun: config.dryRun,
+    status: config.dryRun ? 'dry-run' : 'planned',
     task: config.task,
+    category,
+    corpus,
     taskRevision: revision,
     harnessRevision,
+    seed: config.seed,
+    schedule,
     images,
     settings: {
       arm: config.arm,
       repetitions: config.repetitions,
       concurrency: config.concurrency,
+      seed: config.seed,
       agent: config.agent,
       model: config.model,
       forgekitVersion: config.forgekitVersion,
       forgekitTreatment: forgekitTreatment.metadata,
     },
-    arms: arms.map((arm) => ({ arm, stagedTask: stagedTasks[arm] })),
-    trials: trials.map(({ manifestData, ...trial }) => trial),
+    arms: arms.map((arm) => ({ arm, stagedTask: `arms/${arm}` })),
+    startedAt: null,
+    finishedAt: null,
+    trials: [],
   };
-  process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+  await persistPlan(plan, trials);
+
+  const failures = [];
+  if (!config.dryRun) {
+    let executionIndex = 0;
+    plan.status = 'running';
+    plan.startedAt = new Date().toISOString();
+    await persistPlan(plan, trials);
+    const attempt = async (trial) => {
+      executionIndex += 1;
+      trial.executionIndex = executionIndex;
+      trial.manifestData.executionIndex = executionIndex;
+      try {
+        await executeTrial(trial);
+      } catch (error) {
+        failures.push({ trialId: trial.trialId, error: error.message });
+      }
+    };
+
+    if (config.arm === 'both') {
+      const pairBlocks = Array.from({ length: config.repetitions }, (_, index) => (
+        trials.filter((trial) => trial.repetition === index + 1)
+      ));
+      await runWithConcurrency(pairBlocks, config.concurrency, async (pair) => {
+        for (const trial of pair) await attempt(trial);
+      });
+    } else {
+      await runWithConcurrency(trials, config.concurrency, attempt);
+    }
+    plan.finishedAt = new Date().toISOString();
+    plan.status = failures.length === 0 ? 'completed' : 'completed-with-failures';
+    await persistPlan(plan, trials);
+  }
+
+  process.stdout.write(`${JSON.stringify(publicPlanData(plan), null, 2)}\n`);
+  if (failures.length !== 0) {
+    const details = failures.map(({ trialId, error }) => `${trialId}: ${error}`).join('; ');
+    throw new Error(`${failures.length} trial(s) failed; see persisted plan and manifests: ${details}`);
+  }
 }
 
 main(process.argv.slice(2)).catch((error) => {

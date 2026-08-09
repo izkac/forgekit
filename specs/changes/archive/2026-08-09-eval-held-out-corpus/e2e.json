@@ -1,0 +1,15 @@
+{
+  "change": "eval-held-out-corpus",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "produce-consume-assert-held-out-pilot",
+      "cmd": "npm run smoke:evals",
+      "expect": "PASS Docker validation: 18 corpus build contexts"
+    }
+  ]
+}

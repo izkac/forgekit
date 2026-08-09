@@ -37,7 +37,19 @@ const validArgs = [
   '--agent', 'claude-code',
   '--model', 'anthropic/claude-sonnet-4',
   '--forgekit-version', '0.3.37',
-];
+ ];
+
+function parsePlan(stdout) {
+  const plan = JSON.parse(stdout);
+  Object.defineProperty(plan, 'runDirectory', {
+    value: path.join(testRunsRoot, plan.runId), enumerable: false,
+  });
+  return plan;
+}
+
+function manifestFile(plan, trial) {
+  return path.join(plan.runDirectory, trial.manifest);
+}
 
 async function cleanupPlan(plan) {
   if (plan?.runDirectory) await rm(plan.runDirectory, { recursive: true, force: true });
@@ -46,15 +58,16 @@ async function cleanupPlan(plan) {
 test('dry run stages canonical baseline and Forge arms and writes trial manifests', async (t) => {
   const result = await run([...validArgs, '--dry-run']);
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
 
   assert.equal(plan.dryRun, true);
   assert.match(plan.harnessRevision, /^[a-f0-9]{64}$/);
   assert.equal(plan.trials.length, 4);
-  assert.deepEqual(plan.trials.map(({ arm, repetition }) => [arm, repetition]), [
-    ['baseline', 1], ['forge', 1], ['baseline', 2], ['forge', 2],
-  ]);
+  assert.deepEqual(plan.trials.map(({ arm, repetition }) => [arm, repetition]),
+    plan.schedule.armOrders.flatMap((armOrder, index) => (
+      armOrder.map((arm) => [arm, index + 1])
+    )));
 
   const baseline = path.join(plan.runDirectory, 'arms', 'baseline');
   const forge = path.join(plan.runDirectory, 'arms', 'forge');
@@ -83,7 +96,7 @@ test('dry run stages canonical baseline and Forge arms and writes trial manifest
     assert.deepEqual(trial.harborArgv.slice(0, 2), ['run', '--path']);
     assert.equal(trial.harborArgv[trial.harborArgv.indexOf('--agent') + 1], 'claude-code');
     assert.equal(trial.harborArgv[trial.harborArgv.indexOf('--model') + 1], 'anthropic/claude-sonnet-4');
-    const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+    const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
     assert.equal(manifest.schemaVersion, 1);
     assert.equal(manifest.task, 'node-health-endpoint');
     assert.equal(manifest.arm, trial.arm);
@@ -96,6 +109,8 @@ test('dry run stages canonical baseline and Forge arms and writes trial manifest
     assert.match(manifest.images.agent, /node:22-bookworm@sha256:[a-f0-9]{64}/);
     assert.match(manifest.images.verifier, /node:22-bookworm@sha256:[a-f0-9]{64}/);
     assert.equal(Object.keys(manifest).some((key) => /key|token|secret|credential/i.test(key)), false);
+    assert.equal(JSON.stringify(manifest).includes(testRunsRoot), false);
+    assert.equal(JSON.stringify(manifest).includes(projectRoot), false);
   }
 });
 
@@ -112,7 +127,7 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   args.push('--forgekit-tarball', sourceTarball, '--dry-run');
   const result = await run(args);
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
 
   const digest = createHash('sha256').update(payload).digest('hex');
@@ -125,6 +140,9 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   };
   assert.deepEqual(plan.settings.forgekitTreatment, treatment);
   assert.equal(JSON.stringify(plan).includes(sourceTarball), false);
+  assert.equal(result.stdout.includes(testRunsRoot), false, 'serialized plan must use portable run-relative locators');
+  assert.equal(JSON.stringify(plan).includes(testRunsRoot), false, 'plan must use portable run-relative locators');
+  assert.equal(JSON.stringify(plan).includes(projectRoot), false, 'plan must not disclose the checkout path');
 
   const baselineEnvironment = path.join(plan.runDirectory, 'arms', 'baseline', 'environment');
   const forgeEnvironment = path.join(plan.runDirectory, 'arms', 'forge', 'environment');
@@ -141,7 +159,7 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   assert.doesNotMatch(forgeDockerfile, /operator named|FORGEKIT_INSTALL_MARKER/);
 
   for (const trial of plan.trials) {
-    const manifest = JSON.parse(await readFile(trial.manifest, 'utf8'));
+    const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
     assert.equal(manifest.forgekitVersion, null);
     assert.deepEqual(manifest.forgekitTreatment, treatment);
     assert.equal(JSON.stringify(manifest).includes(sourceTarball), false);
@@ -152,7 +170,7 @@ test('dry run stages an immutable local tarball only in the Forge arm', async (t
   const secondArgs = args.map((value) => value === sourceTarball ? secondTarball : value);
   const secondResult = await run(secondArgs);
   assert.equal(secondResult.code, 0, secondResult.stderr);
-  const secondPlan = JSON.parse(secondResult.stdout);
+  const secondPlan = parsePlan(secondResult.stdout);
   t.after(() => cleanupPlan(secondPlan));
   assert.equal(secondPlan.runId, plan.runId, 'dry-run identity must depend on payload bytes, not host path');
 });
@@ -246,22 +264,24 @@ writeFileSync(path.join(output, 'artifacts', 'app', '.forge', 'scorecard.json'),
     env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture },
   });
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   const captured = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(captured.length, 1);
   assert.deepEqual(captured, [plan.trials[0].harborArgv]);
+  assert.equal(plan.trials[0].harborArgv[plan.trials[0].harborArgv.indexOf('--path') + 1], 'arms/baseline');
   assert.equal(plan.trials[0].status, 'verified');
   assert.equal(captured[0].includes('--n-concurrent'), true);
   assert.equal(captured[0][captured[0].indexOf('--n-concurrent') + 1], '1');
   assert.equal(captured[0].includes('--artifact'), false);
-  const manifest = JSON.parse(await readFile(plan.trials[0].manifest, 'utf8'));
+  const manifest = JSON.parse(await readFile(manifestFile(plan, plan.trials[0]), 'utf8'));
   assert.equal(manifest.harbor.version, 'harbor 0.20.0');
   assert.equal(manifest.status, 'verified');
   assert.deepEqual(manifest.resolvedAgent, { name: 'fake-agent', version: '1.2.3' });
-  assert.deepEqual(JSON.parse(await readFile(manifest.normalizedResult, 'utf8')).outcome, {
+  assert.deepEqual(JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8')).outcome, {
     functional: 1, regression: 1, tests_unchanged: 1, shippable: 1,
   });
-  const normalized = JSON.parse(await readFile(manifest.normalizedResult, 'utf8'));
+  const normalized = JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8'));
   assert.equal(normalized.instrumentation.harbor.input_tokens, 10);
   assert.equal(normalized.instrumentation.harbor.retries, 2);
 });
@@ -292,12 +312,12 @@ writeFileSync(path.join(output, 'artifacts', '.forge', 'session.json'), '{}');
   args[args.indexOf('--repetitions') + 1] = '1';
   const result = await run(args, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture } });
   assert.equal(result.code, 0, result.stderr);
-  const plan = JSON.parse(result.stdout);
+  const plan = parsePlan(result.stdout);
   t.after(() => cleanupPlan(plan));
   const invoked = JSON.parse((await readFile(capture, 'utf8')).trim());
   assert.equal(invoked[invoked.indexOf('--artifact') + 1], '/app/.forge');
-  const manifest = JSON.parse(await readFile(plan.trials[0].manifest, 'utf8'));
-  const normalized = JSON.parse(await readFile(manifest.normalizedResult, 'utf8'));
+  const manifest = JSON.parse(await readFile(manifestFile(plan, plan.trials[0]), 'utf8'));
+  const normalized = JSON.parse(await readFile(path.join(plan.runDirectory, manifest.normalizedResult), 'utf8'));
   assert.equal(normalized.instrumentation.available, true);
   assert.match(normalized.instrumentation.forge.artifactPath, /\.forge$/);
 });
@@ -323,4 +343,197 @@ writeFileSync(path.join(job, 'trial', 'artifacts', 'app', '.forge', 'verifier', 
   const result = await run(args, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /verifier reward\.json/);
+});
+
+
+test('seeded paired schedules replay deterministically and persist exact counterbalance metadata', async (t) => {
+  const seededArgs = [...validArgs, '--seed', 'replay-seed_2026', '--dry-run'];
+  const firstResult = await run(seededArgs);
+  assert.equal(firstResult.code, 0, firstResult.stderr);
+  const first = parsePlan(firstResult.stdout);
+  t.after(() => cleanupPlan(first));
+
+  const persisted = JSON.parse(await readFile(path.join(first.runDirectory, 'plan.json'), 'utf8'));
+  assert.deepEqual(persisted, first);
+  assert.equal(first.seed, 'replay-seed_2026');
+  assert.equal(first.settings.seed, first.seed);
+  assert.equal(first.category, 'feature');
+  assert.match(first.corpus.id, /^[a-z0-9-]+$/);
+  assert.match(first.corpus.revision, /^[a-f0-9]{64}$/);
+  assert.match(first.schedule.startHash, /^[a-f0-9]{64}$/);
+  assert.ok(['baseline', 'forge'].includes(first.schedule.startingArm));
+  assert.deepEqual(first.schedule.firstArmCounts, { baseline: 1, forge: 1 });
+  assert.deepEqual(first.schedule.imbalance, {
+    present: false,
+    firstPositionDifference: 0,
+    favoredArm: null,
+  });
+
+  const byRepetition = Map.groupBy(first.trials, (trial) => trial.repetition);
+  assert.deepEqual([...byRepetition.values()].map((pair) => pair.map((trial) => trial.arm)), [
+    first.schedule.armOrders[0],
+    first.schedule.armOrders[1],
+  ]);
+  assert.deepEqual(first.schedule.armOrders[1], [...first.schedule.armOrders[0]].reverse());
+  assert.deepEqual(first.trials.map((trial) => trial.scheduleIndex), [1, 2, 3, 4]);
+  assert.deepEqual(first.trials.map((trial) => trial.executionIndex), [null, null, null, null]);
+
+  for (const trial of first.trials) {
+    const manifest = JSON.parse(await readFile(manifestFile(first, trial), 'utf8'));
+    assert.equal(manifest.seed, first.settings.seed);
+    assert.equal(manifest.category, 'feature');
+    assert.deepEqual(manifest.corpus, first.corpus);
+    assert.equal(manifest.scheduleIndex, trial.scheduleIndex);
+    assert.equal(manifest.executionIndex, null);
+    assert.deepEqual(manifest.armOrder, first.schedule.armOrders[trial.repetition - 1]);
+    assert.equal(manifest.armOrdinal, manifest.armOrder.indexOf(manifest.arm) + 1);
+    assert.equal(manifest.startedAt, null);
+    assert.equal(manifest.finishedAt, null);
+  }
+
+  const secondResult = await run(seededArgs);
+  assert.equal(secondResult.code, 0, secondResult.stderr);
+  const second = parsePlan(secondResult.stdout);
+  t.after(() => cleanupPlan(second));
+  assert.equal(second.runId, first.runId);
+  assert.deepEqual(second.schedule, first.schedule);
+  assert.deepEqual(
+    second.trials.map(({ arm, repetition, scheduleIndex, armOrder, armOrdinal }) => (
+      { arm, repetition, scheduleIndex, armOrder, armOrdinal }
+    )),
+    first.trials.map(({ arm, repetition, scheduleIndex, armOrder, armOrdinal }) => (
+      { arm, repetition, scheduleIndex, armOrder, armOrdinal }
+    )),
+  );
+});
+
+test('odd paired schedules disclose their one-first-position imbalance', async (t) => {
+  const args = [...validArgs, '--seed', 'odd-seed', '--dry-run'];
+  args[args.indexOf('--repetitions') + 1] = '3';
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  const otherArm = plan.schedule.startingArm === 'baseline' ? 'forge' : 'baseline';
+  assert.deepEqual(plan.schedule.firstArmCounts, {
+    [plan.schedule.startingArm]: 2,
+    [otherArm]: 1,
+  });
+  assert.deepEqual(plan.schedule.imbalance, {
+    present: true,
+    firstPositionDifference: 1,
+    favoredArm: plan.schedule.startingArm,
+  });
+  assert.deepEqual(plan.schedule.armOrders, [
+    [plan.schedule.startingArm, otherArm],
+    [otherArm, plan.schedule.startingArm],
+    [plan.schedule.startingArm, otherArm],
+  ]);
+});
+
+test('single-arm schedules remain one ordinary trial per repetition', async (t) => {
+  const args = [...validArgs, '--seed', 'single-arm-seed', '--dry-run'];
+  args[args.indexOf('--arm') + 1] = 'forge';
+  args[args.indexOf('--repetitions') + 1] = '3';
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  assert.equal(plan.schedule.strategy, 'single-arm');
+  assert.equal(plan.schedule.startingArm, null);
+  assert.deepEqual(plan.schedule.armOrders, [['forge'], ['forge'], ['forge']]);
+  assert.deepEqual(plan.schedule.firstArmCounts, { baseline: 0, forge: 3 });
+  assert.equal(plan.schedule.imbalance, null);
+  assert.deepEqual(plan.trials.map((trial) => [trial.arm, trial.repetition, trial.armOrdinal]), [
+    ['forge', 1, 1], ['forge', 2, 1], ['forge', 3, 1],
+  ]);
+});
+
+test('rejects unsafe seeds before creating a run', async (t) => {
+  const isolatedRuns = await mkdtemp(path.join(os.tmpdir(), 'forgekit-invalid-seed-runs-'));
+  t.after(() => rm(isolatedRuns, { recursive: true, force: true }));
+  for (const seed of ['', '../escape', 'contains space', 'semi;colon', 'x'.repeat(129)]) {
+    const result = await run([...validArgs, '--seed', seed, '--dry-run'], {
+      env: { FORGEKIT_EVAL_RUNS_ROOT: isolatedRuns },
+    });
+    assert.notEqual(result.code, 0, `seed ${JSON.stringify(seed)} should fail`);
+    assert.match(result.stderr, /seed must be a safe identifier/);
+  }
+  assert.deepEqual(await readdir(isolatedRuns), []);
+});
+
+test('paired execution serializes each pair, records actual order, and continues after failures', async (t) => {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-pair-bin-'));
+  const capture = path.join(bin, 'events.jsonl');
+  const fakeHarbor = path.join(bin, 'harbor');
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('harbor 0.20.0'); process.exit(0); }
+const jobName = args[args.indexOf('--job-name') + 1];
+const event = (name) => appendFileSync(process.env.HARBOR_CAPTURE_FILE, JSON.stringify({ name, jobName, at: Date.now() }) + '\\n');
+event('start');
+await new Promise((resolve) => setTimeout(resolve, 40));
+if (jobName.includes('-baseline-')) { event('end'); process.exit(9); }
+const job = path.join(args[args.indexOf('--jobs-dir') + 1], 'job');
+mkdirSync(path.join(job, 'trial', 'verifier'), { recursive: true });
+writeFileSync(path.join(job, 'trial', 'verifier', 'reward.json'), '{"functional":1,"regression":1,"tests_unchanged":1,"shippable":1}');
+event('end');
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const args = [...validArgs, '--seed', 'pair-failure-seed'];
+  args[args.indexOf('--repetitions') + 1] = '3';
+  args[args.indexOf('--concurrency') + 1] = '2';
+  const result = await run(args, {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture },
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /3 trial\(s\) failed/);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  assert.equal(plan.status, 'completed-with-failures');
+  assert.equal(plan.trials.length, 6);
+  assert.deepEqual(plan.trials.map((trial) => trial.status).sort(), [
+    'failed', 'failed', 'failed', 'verified', 'verified', 'verified',
+  ]);
+  assert.deepEqual(
+    [...plan.trials].sort((left, right) => left.executionIndex - right.executionIndex)
+      .map((trial) => trial.executionIndex),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.ok(plan.trials.every((trial) => trial.startedAt && trial.finishedAt));
+  assert.deepEqual(JSON.parse(await readFile(path.join(plan.runDirectory, 'plan.json'), 'utf8')), plan);
+
+  const events = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
+  for (let repetition = 1; repetition <= 3; repetition += 1) {
+    const trials = plan.trials.filter((trial) => trial.repetition === repetition);
+    assert.deepEqual(trials.map((trial) => trial.arm), trials[0].armOrder);
+    const firstEnd = events.findIndex((event) => event.name === 'end' && event.jobName === trials[0].trialId);
+    const secondStart = events.findIndex((event) => event.name === 'start' && event.jobName === trials[1].trialId);
+    assert.ok(firstEnd >= 0 && secondStart > firstEnd, `repetition ${repetition} arms must execute serially`);
+    for (const trial of trials) {
+      const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
+      assert.equal(manifest.executionIndex, trial.executionIndex);
+      assert.equal(manifest.startedAt, trial.startedAt);
+      assert.equal(manifest.finishedAt, trial.finishedAt);
+      assert.equal(manifest.status, trial.status);
+    }
+  }
+});
+
+
+test('rejects tasks outside the versioned corpus before creating a run', async (t) => {
+  const isolatedRuns = await mkdtemp(path.join(os.tmpdir(), 'forgekit-unlisted-task-runs-'));
+  t.after(() => rm(isolatedRuns, { recursive: true, force: true }));
+  const args = [...validArgs];
+  args[args.indexOf('--task') + 1] = 'unlisted-safe-task';
+  const result = await run([...args, '--dry-run'], {
+    env: { FORGEKIT_EVAL_RUNS_ROOT: isolatedRuns },
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /not listed exactly once in corpus\.json/);
+  assert.deepEqual(await readdir(isolatedRuns), []);
 });

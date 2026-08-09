@@ -1,12 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createTcpServer } from "node:net";
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 const APP_DIR = process.env.HARBOR_APP_DIR || "/app";
+const ORIGINAL_SOURCE_DIR = fileURLToPath(new URL("./original-src/", import.meta.url));
 const TEST_FILE = `${APP_DIR}/src/server.test.mjs`;
+const PACKAGE_FILE = `${APP_DIR}/package.json`;
+const EXPECTED_PACKAGE_SHA256 = "f4fc7c2da6a123aa26ce29697d1c6a58d5db9f8996c33ba3a16e4050699898c3";
 const REWARD_DIR = process.env.HARBOR_REWARD_DIR || "/logs/verifier";
 const REWARD_FILE = process.env.HARBOR_REWARD_FILE || `${REWARD_DIR}/reward.json`;
 // Hash the complete original visible regression file. Agents add new tests in
@@ -82,16 +86,90 @@ function writeReward(reward) {
   writeFileSync(REWARD_FILE, `${JSON.stringify(reward)}\n`, "utf8");
 }
 
-function visibleTestIsUnchanged() {
-  let source;
+function protectedFileMatches(file, expectedHash) {
   try {
-    source = readFileSync(TEST_FILE, "utf8");
+    const info = lstatSync(file);
+    return info.isFile()
+      && !info.isSymbolicLink()
+      && createHash("sha256").update(readFileSync(file)).digest("hex") === expectedHash;
   } catch {
     return false;
   }
+}
 
-  const actualHash = createHash("sha256").update(source, "utf8").digest("hex");
-  return actualHash === EXPECTED_VISIBLE_TEST_SHA256;
+function visibleTestIsUnchanged() {
+  return protectedFileMatches(TEST_FILE, EXPECTED_VISIBLE_TEST_SHA256);
+}
+
+function packageContractIsUnchanged() {
+  return protectedFileMatches(PACKAGE_FILE, EXPECTED_PACKAGE_SHA256);
+}
+
+function addedTestFiles() {
+  try {
+    return readdirSync(`${APP_DIR}/src`)
+      .filter((name) => name.endsWith(".test.mjs") && name !== "server.test.mjs")
+      .filter((name) => {
+        const info = lstatSync(`${APP_DIR}/src/${name}`);
+        return info.isFile() && !info.isSymbolicLink();
+      });
+  } catch {
+    return [];
+  }
+}
+
+function runAddedTests(testFiles) {
+  const result = spawnSync(process.execPath, [
+    "--test",
+    ...testFiles.map((name) => `${APP_DIR}/src/${name}`)
+  ], {
+    cwd: APP_DIR,
+    encoding: "utf8",
+    timeout: 30_000,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: untrustedEnvironment(),
+    ...configuredIdentity()
+  });
+  return !result.error && result.status === 0;
+}
+
+function addedTestsAreMeaningful(testFiles) {
+  if (testFiles.length === 0 || !runAddedTests(testFiles)) return false;
+
+  const sourceDir = `${APP_DIR}/src`;
+  const backupDir = `${APP_DIR}/.harbor-source-${randomUUID()}`;
+  const originalNames = new Set(readdirSync(ORIGINAL_SOURCE_DIR));
+  const retainedFiles = readdirSync(sourceDir).filter((name) => !originalNames.has(name));
+  if (retainedFiles.some((name) => {
+    const info = lstatSync(`${sourceDir}/${name}`);
+    return !info.isFile() || info.isSymbolicLink();
+  })) return false;
+
+  const appMode = lstatSync(APP_DIR).mode & 0o777;
+  const sourceMode = lstatSync(sourceDir).mode & 0o777;
+  let sourceMoved = false;
+  try {
+    chmodSync(APP_DIR, 0o755);
+    renameSync(sourceDir, backupDir);
+    sourceMoved = true;
+    chmodSync(backupDir, 0o700);
+    cpSync(ORIGINAL_SOURCE_DIR, sourceDir, { recursive: true });
+    for (const name of retainedFiles) {
+      cpSync(`${backupDir}/${name}`, `${sourceDir}/${name}`);
+    }
+    makeReadOnly(sourceDir);
+    chmodSync(APP_DIR, appMode);
+    return !runAddedTests(testFiles);
+  } finally {
+    if (sourceMoved) {
+      chmodSync(APP_DIR, 0o755);
+      makeOwnerWritable(sourceDir);
+      rmSync(sourceDir, { recursive: true, force: true });
+      renameSync(backupDir, sourceDir);
+      chmodSync(sourceDir, sourceMode);
+    }
+    chmodSync(APP_DIR, appMode);
+  }
 }
 
 function runVisibleSuite() {
@@ -108,19 +186,6 @@ function runVisibleSuite() {
     return false;
   }
   return result.status === 0;
-}
-
-function hasAddedHealthTest() {
-  try {
-    return readdirSync(`${APP_DIR}/src`)
-      .filter((name) => name.endsWith(".test.mjs") && name !== "server.test.mjs")
-      .some((name) => {
-        const source = readFileSync(`${APP_DIR}/src/${name}`, "utf8");
-        return source.includes("/health") && /\b(?:assert|test)\b/.test(source);
-      });
-  } catch {
-    return false;
-  }
 }
 
 function getFreePort() {
@@ -272,9 +337,9 @@ async function checkOtherRoutes(baseURL) {
 
 async function grade() {
   lockVerifierBoundary();
-  const testsUnchanged = visibleTestIsUnchanged() ? 1 : 0;
+  const testsUnchanged = visibleTestIsUnchanged() && packageContractIsUnchanged() ? 1 : 0;
   const visibleSuitePassed = runVisibleSuite();
-  const addedHealthTest = hasAddedHealthTest();
+  const addedHealthTest = addedTestsAreMeaningful(addedTestFiles());
   let functional = 0;
   let regression = 0;
   let app = null;
