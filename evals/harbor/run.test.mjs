@@ -748,7 +748,7 @@ test('explicit hard-v2 selection stages only its allowlisted root and records co
   t.after(() => cleanupPlan(plan));
 
   assert.equal(plan.task, 'reservation-confirmation-race');
-  assert.equal(plan.taskVersion, '1.0.0');
+  assert.equal(plan.taskVersion, '1.0.1');
   assert.equal(plan.category, 'bug');
   assert.equal(plan.corpus.id, 'forgekit-hard-v2');
   assert.equal(plan.corpus.schemaVersion, 1);
