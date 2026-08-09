@@ -169,6 +169,16 @@ test('findAllowance returns the matching entry (exact match, not prefix), or nul
   assert.equal(findAllowance([], 'packages/cli/src/foo.test.mjs'), null);
 });
 
+test('F90: allowances follow case variants only when path comparison folds', () => {
+  const match = { path: 'src/a.test.mjs', reason: 'r1', at: 'x', phase: null };
+  const allowances = [match];
+
+  assert.deepEqual(findAllowance(allowances, 'src/a.TEST.mjs', true), match);
+  assert.equal(hasAllowance(allowances, 'SRC/A.TEST.MJS', true), true);
+  assert.equal(findAllowance(allowances, 'src/a.TEST.mjs', false), null);
+  assert.equal(hasAllowance(allowances, 'SRC/A.TEST.MJS', false), false);
+});
+
 test('classifyGuarded accepts the full documented call shape, including session', () => {
   // session carries no weight in the decision — baseCommit tracking is fully
   // delegated to gitLsTree — but the exported signature accepts it for

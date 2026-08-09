@@ -327,18 +327,27 @@ export function addAllowance(sessionDir, { path: rawPath, reason, phase } = {}) 
 /**
  * @param {Array<{ path: string }>} allowances
  * @param {string} relPath
+ * @param {boolean} [caseInsensitive]
  * @returns {{ path: string, reason: string, at: string, phase: string | null } | null}
  */
-export function findAllowance(allowances, relPath) {
+export function findAllowance(allowances, relPath, caseInsensitive = DEFAULT_CASE_INSENSITIVE) {
   const normalized = normalizePath(relPath);
-  return (allowances ?? []).find((a) => a && normalizePath(a.path) === normalized) ?? null;
+  const comparisonPath = caseInsensitive ? normalized.toLowerCase() : normalized;
+  return (
+    (allowances ?? []).find((a) => {
+      if (!a) return false;
+      const allowancePath = normalizePath(a.path);
+      return (caseInsensitive ? allowancePath.toLowerCase() : allowancePath) === comparisonPath;
+    }) ?? null
+  );
 }
 
 /**
  * @param {Array<{ path: string }>} allowances
  * @param {string} relPath
+ * @param {boolean} [caseInsensitive]
  * @returns {boolean}
  */
-export function hasAllowance(allowances, relPath) {
-  return findAllowance(allowances, relPath) !== null;
+export function hasAllowance(allowances, relPath, caseInsensitive = DEFAULT_CASE_INSENSITIVE) {
+  return findAllowance(allowances, relPath, caseInsensitive) !== null;
 }

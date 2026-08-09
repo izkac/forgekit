@@ -2305,7 +2305,7 @@ if (phase === 'boot') {
   // of the tracked baseline `foo.test.mjs` must be guarded when folding is
   // forced on, and NOT guarded under an exact-match comparison — both
   // directions, against the same real git repo and baseCommit used above.
-  const relFooCaseVariant = relFoo.replace('/foo.test.mjs', '/Foo.test.mjs');
+  const relFooCaseVariant = relFoo.replace('/foo.test.mjs', '/Foo.TEST.mjs');
   const caseFoldDriver = path.join(dir, '.forge', 'f90-case-fold-driver.mjs');
   writeCaseFoldDriver(caseFoldDriver);
   const guardModulePath = path.join(REPO, 'packages', 'cli', 'src', 'guard.mjs');

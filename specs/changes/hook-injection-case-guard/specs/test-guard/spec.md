@@ -46,3 +46,10 @@ total bypass.
 - GIVEN the same tracked file
 - WHEN the classifier evaluates `src/other.mjs` on either platform
 - THEN it is not guarded
+
+#### Scenario: An allowance follows case variants only on a folding platform
+
+- GIVEN an allowance recorded for `src/a.test.mjs`
+- WHEN the guard evaluates `src/a.TEST.mjs` on a case-insensitive platform
+- THEN the allowance applies
+- AND the same variant does not inherit the allowance on a case-sensitive platform

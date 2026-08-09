@@ -41,3 +41,13 @@
       injected artifact, and — on a folding platform, simulated via the
       injected flag rather than the host — a case-variant path is denied.
       Recorded as a green `forge e2e run`.
+
+## 4. Final-review follow-ups
+
+- [x] 4.1 Make guard allowances follow the same platform-conditional path
+      comparison as guarded-path classification, so an allowance for
+      `src/a.test.mjs` also covers `src/a.TEST.mjs` on a folding platform but
+      not on an exact platform. Extend the product loop's F90 fixture to vary
+      the `.test.` glob token as well as the filename, proving both comparison
+      sites independently. Verify with `guard.test.mjs` and the `test-guard`
+      e2e phase.
