@@ -124,9 +124,19 @@ export function suggestPaceFromPlan(facts) {
     return { pace: 'standard', reason: 'could not read the plan — failing closed to standard' };
   }
   if (facts.highRisk) {
+    // Deliberately `standard`, not `thorough`. Risk is a property of a *task*,
+    // and the per-task hard floor (`shouldReviewTask`) already dispatches an
+    // immediate reviewer for every task that carries it, on every pace. Setting
+    // the session to `thorough` on top of that bought nothing for the risky
+    // tasks and a full per-task reviewer for every low-risk task sharing the
+    // change — one mention of "refund" in a proposal doubled the reviewer count
+    // for the docs and config tasks next to it. Measured on the hard-v2 eval
+    // arm: whole-plan escalation was the common case, not the exception.
+    // `forge prefs thorough` still pins thorough when an operator wants it.
     return {
-      pace: 'thorough',
-      reason: 'plan touches money/auth/contracts/migrations — hard floor is thorough',
+      pace: 'standard',
+      reason:
+        'plan touches money/auth/contracts/migrations — per-task review floor covers the risky tasks',
     };
   }
   if (facts.tasks >= STANDARD_TASKS) {

@@ -94,7 +94,10 @@ test('a wired spine escalates to standard even when the task list is short', () 
   assert.match(reason, /3 spine row/);
 });
 
-test('money/auth anywhere in the plan forces thorough', () => {
+test('money/auth anywhere in the plan holds standard, not thorough', () => {
+  // The per-task hard floor already reviews the risky tasks. Escalating the
+  // whole session to thorough also bought a per-task reviewer for every
+  // low-risk task sharing the change, which is where the cost went.
   const root = tmp('forge-facts-risk-');
   makeChange(root, {
     tasks: tasksMd([['Refund', 2]]),
@@ -105,8 +108,25 @@ test('money/auth anywhere in the plan forces thorough', () => {
   const facts = collectPlanFacts({ cwd: root, session });
   assert.equal(facts.highRisk, true);
   const { pace, reason } = suggestPaceFromPlan(facts);
-  assert.equal(pace, 'thorough');
+  assert.equal(pace, 'standard');
   assert.match(reason, /money|auth|risk/i);
+  assert.match(reason, /per-task/i);
+});
+
+test('a high-risk plan never resolves to brisk, however small it is', () => {
+  // Two tasks, one capability, no spine rows — the brisk shape exactly. Risk
+  // has to outrank it, or the floor is the only thing left standing.
+  const root = tmp('forge-facts-risk-small-');
+  makeChange(root, {
+    tasks: tasksMd([['Rotate', 2]]),
+    proposal: '# Why\n\nRotate the signing secret used by the webhook.\n',
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['webhook'],
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.highRisk, true);
+  assert.equal(suggestPaceFromPlan(facts).pace, 'standard');
 });
 
 test('risk in the spine counts even when the proposal never says it', () => {
@@ -116,7 +136,9 @@ test('risk in the spine counts even when the proposal never says it', () => {
     spine: { rows: [{ capability: 'export', runtimeOwner: 'authorization gate on GET /export' }], notApplicable: null },
   });
 
-  assert.equal(suggestPaceFromPlan(collectPlanFacts({ cwd: root, session })).pace, 'thorough');
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.highRisk, true);
+  assert.equal(suggestPaceFromPlan(facts).pace, 'standard');
 });
 
 test('forge phase implement re-resolves auto pace from the plan', () => {

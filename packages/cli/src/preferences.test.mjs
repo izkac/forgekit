@@ -20,10 +20,16 @@ function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
 }
 
-test('suggestPaceFromSignals: thorough for money/auth', () => {
-  assert.equal(suggestPaceFromSignals('add stripe refund flow').pace, 'thorough');
-  assert.equal(suggestPaceFromSignals('OIDC auth hardening').pace, 'thorough');
-  assert.equal(suggestPaceFromSignals('mongo migration for orders').pace, 'thorough');
+test('suggestPaceFromSignals: money/auth holds standard, and never falls to brisk', () => {
+  // Matches suggestPaceFromPlan: risk raises the floor to standard and the
+  // per-task hard floor reviews the risky tasks themselves. Two resolvers
+  // disagreeing about the same signal would be the bug.
+  assert.equal(suggestPaceFromSignals('add stripe refund flow').pace, 'standard');
+  assert.equal(suggestPaceFromSignals('OIDC auth hardening').pace, 'standard');
+  assert.equal(suggestPaceFromSignals('mongo migration for orders').pace, 'standard');
+  // "tweak" alone is brisk; the secret in the same breath outranks it.
+  assert.equal(suggestPaceFromSignals('tweak the hmac secret rotation').pace, 'standard');
+  assert.match(suggestPaceFromSignals('add stripe refund flow').reason, /per-task/i);
 });
 
 test('suggestPaceFromSignals: standard for ecosystem/api', () => {

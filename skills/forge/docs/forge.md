@@ -104,11 +104,13 @@ User request
                  Phase: Implement
                           │
             ┌─────────────┴─────────────┐
-            │  PER TASK (loop until done) │
+            │  PER UNIT (loop until done) │
+            │  unit = one tasks.md group, │
+            │  ≤4 tasks; high-risk = 1:1  │
             │  1. Subagent implementer  │
-            │  2. TDD (scoped tests)    │
-            │  3. Reviewer (pace):      │
-            │     thorough=per task     │
+            │     (TDD per task inside) │
+            │  2. Reviewer (pace):      │
+            │     thorough=per unit     │
             │     standard=per group    │
             │     └─ fail ──► retry     │
             │  (tier 2 narrow evidence) │
@@ -183,9 +185,9 @@ See the Forge skill’s [references/plan-routing.md](../references/plan-routing.
 | **triage** | Substantial? Skip allowed? Bootstrap session | `forge` skill |
 | **brainstorm** | Explore intent, approaches, approval | `skills/brainstorming` |
 | **plan** | Tracked-change propose; **`forge spine init` every change** (rows or `notApplicable`); rows → `forge e2e init` (steps are a plan deliverable); wiring + product-loop tasks when async | [plan-routing.md](../references/plan-routing.md) |
-| **implement** | Subagent per task, TDD, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../references/test-strategy.md) |
+| **implement** | Subagent per work unit (one `tasks.md` group by default; 1:1 for high-risk), TDD per task, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../references/test-strategy.md) |
 | **verify** | Audit tier 2; tier 3; green `forge e2e run`; `forge integrity-check` | `skills/verification-before-completion` + `verify-evidence.md` |
-| **review** | Combined task reviewer (spec + quality) per task; final review (spine + executed e2e) | `skills/requesting-code-review` |
+| **review** | Combined task reviewer (spec + quality) per unit, scoped to the diff range; final review (spine + executed e2e) | `skills/requesting-code-review` |
 | **finish** | Archive (+ ADR if the project uses that); `forge phase done` (integrity gate); cleanup | `/opsx:archive`, `forge cleanup` |
 
 **Standalone deep review (outside Forge):** for pre-merge audits with adversarial false-positive filtering, use the **thorough code review** skill — see [thorough-code-review.md](https://github.com/izkac/forgekit/blob/main/docs/thorough-code-review.md). Forge's `requesting-code-review` stays the per-task checkpoint during `/forge:build`.
@@ -392,7 +394,8 @@ depth) is controlled by a **pace** preset. Default is **`auto`**.
 that pass fails closed to `standard`. On the way into **implement** it re-resolves
 from the plan itself — task count, group count, capabilities, spine rows, and
 whether anything in the proposal/design/tasks/spine touches
-money/auth/contracts/migrations. That second pass is why `brisk` is reachable at
+money/auth/contracts/migrations — which raises the floor to `standard`, not to
+`thorough` (the per-task hard floor covers the risky tasks). That second pass is why `brisk` is reachable at
 all: classifying a slug returned `standard` on every real session, three of them
 via "unrecognized scope — failing closed". The session records
 `paceResolvedFrom: "plan"` and a reason naming the facts (`plan: 3 tasks, single
@@ -427,7 +430,7 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 
 **`auto`** is not a preset — it picks one of the four once at session start (sticky):
 
-1. money / payment / auth / secret / migration / contract / gdpr → **thorough**
+1. money / payment / auth / secret / migration / contract / gdpr → **standard** (never `brisk`/`lite`) — risk raises the floor; the **per-task** hard floor below reviews the risky tasks themselves
 2. ecosystem / API / multi-file / shared package / worker / job queue / pipeline / etl / platform / orchestration / openspec → **standard**
 3. docs / typo / rename / scaffold / changelog → **lite**
 4. fix / tweak / toolbar / style / padding (explicitly small) → **brisk**
@@ -604,12 +607,13 @@ forge phase done        # same checks; exit 1 if incomplete
 
 ## Subagent model
 
-Each implementation task:
+The unit of dispatch is a **work unit** — by default one `tasks.md` group, at
+most 4 tasks, and always 1:1 for money/auth/contracts/migrations. Each unit:
 
-1. Coordinator writes `tasks/<nn>-<slug>/brief.md` (task text + file paths + constraints — **no chat history**).
-2. **Implementer** subagent — must follow `skills/test-driven-development` first.
-3. **Task reviewer** subagent (spec then quality) — unless pace skips low-risk tasks.
-4. Mark task complete (`tasks.md` checkbox or session progress).
+1. Coordinator writes the unit's `brief.md` (every task's text + file paths + constraints — **no chat history**).
+2. **Implementer** subagent — must follow `skills/test-driven-development` first, one task at a time, red→green stamps per task.
+3. **Task reviewer** subagent (spec then quality) — unless pace skips low-risk work — reading the unit's **diff range**, not the repository.
+4. Mark each finished task complete (`tasks.md` checkbox or session progress).
 5. After all tasks: **verify** (tier 3 scope from pace) → **final reviewer** (unless pace skips; dispatch it with the Task description exactly what `forge review-label final` prints, which also stamps the dispatch into `reviews/dispatches.json` so the evidence survives host-transcript pruning — see [phases/review.md](../phases/review.md)) → finish.
 
 Test tiers: [test-strategy.md](../references/test-strategy.md) — scoped TDD per task, narrow evidence per task, full workspace **once** at verify when pace requires it (not every task).

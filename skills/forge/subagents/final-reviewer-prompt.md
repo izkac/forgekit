@@ -17,9 +17,23 @@ the capability specs. See [references/runtime-integrity.md](../references/runtim
 
 ## Scope
 
-All files changed in this session (use git diff or explicit list):
+Session diff range: {DIFF_RANGE}   <!-- REQUIRED. `forge checkpoint --range` (no `--last`) → the whole session from `session.baseCommit`. No checkpoints: `git diff` against that base + the untracked files in `git status`. -->
+
+Files changed in this session:
 
 {CHANGED_FILES}
+
+**The session diff is your scope.** Read it in full, plus every untracked file
+listed with it. If the range is empty or unfilled, return `NEEDS_CONTEXT` rather
+than reconstructing it by exploring the repository.
+
+Your two required sections below — the spec-to-runtime trace and product-loop
+acceptance — send you outside the diff on purpose: follow a capability to its
+production caller, read `spine.json` and `e2e.json`, open the file a spine row
+names. That is directed reading and the whole point of this review. Everything
+else stays inside the diff: no directory sweeps, no grepping for related code,
+no reading modules this session never touched to see how the project generally
+works.
 
 ## Spec-to-runtime trace (required)
 

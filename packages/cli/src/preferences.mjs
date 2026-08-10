@@ -165,7 +165,16 @@ export function suggestPaceFromSignals(signalText = '') {
     return { pace: 'standard', reason: 'no signals; fail closed to standard' };
   }
   if (THOROUGH_RE.test(text)) {
-    return { pace: 'thorough', reason: 'high-risk signals (money/auth/contracts/migrations/secrets)' };
+    // `standard`, not `thorough` — same call as `suggestPaceFromPlan`, and for
+    // the same reason: the per-task hard floor already reviews every high-risk
+    // task on every pace, so escalating the session only bought per-task
+    // reviewers for the low-risk work sitting next to it. What this branch
+    // still does is outrank `brisk`/`lite` below, so a high-risk signal can
+    // never resolve to a pace that skips reviews.
+    return {
+      pace: 'standard',
+      reason: 'high-risk signals (money/auth/contracts/migrations/secrets) — per-task review floor applies',
+    };
   }
   if (STANDARD_RE.test(text)) {
     return { pace: 'standard', reason: 'multi-surface / API / ecosystem / orchestration signals' };
