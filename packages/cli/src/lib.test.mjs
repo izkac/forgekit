@@ -839,3 +839,15 @@ test('forge cleanup says why a named session survived', () => {
   assert.match(bare.stderr, /--session needs a session id/);
   assert.equal(/ERR_INVALID_ARG_TYPE/.test(bare.stderr), false, 'and must not be a stack trace');
 });
+
+test('hasBlockedMarker: whole-line discipline (F89)', async () => {
+  const { hasBlockedMarker } = await import('./lib.mjs');
+  // Markers: a line owned by BLOCKED, bare or as a heading.
+  assert.equal(hasBlockedMarker('BLOCKED: cannot verify\n'), true);
+  assert.equal(hasBlockedMarker('# Verify\n\nBLOCKED — no runtime owner.\n'), true);
+  assert.equal(hasBlockedMarker('## BLOCKED\n\nThe queue worker is down.\n'), true);
+  // Prose: a mid-sentence mention is not a marker.
+  assert.equal(hasBlockedMarker('The subagent reported BLOCKED in its status.\n'), false);
+  assert.equal(hasBlockedMarker('See the BLOCKED section of the runbook.\n'), false);
+  assert.equal(hasBlockedMarker(''), false);
+});

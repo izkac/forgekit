@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { e2ePath, e2eStepsHash, loadE2eResults } from './integrity.mjs';
-import { readJson } from './lib.mjs';
+import { hasBlockedMarker, readJson } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { readPlanTaskProgress } from './plan-progress.mjs';
 
@@ -105,7 +105,7 @@ export function sessionHealth(opts) {
   // --- an explicit BLOCKED beats any inference we could make ---
   try {
     const verify = path.join(sessionDir, 'verify-evidence.md');
-    if (fs.existsSync(verify) && /\bBLOCKED\b/.test(fs.readFileSync(verify, 'utf8'))) {
+    if (fs.existsSync(verify) && hasBlockedMarker(fs.readFileSync(verify, 'utf8'))) {
       reasons.push('verify-evidence records BLOCKED — product loop not proven');
       escalate('red');
     }

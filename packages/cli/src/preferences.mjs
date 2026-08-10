@@ -50,9 +50,17 @@ export const BRAINSTORM_DEPTH = Object.freeze(['full', 'short', 'minimal']);
  * (public|data|api|openapi|cli|wire|schema|smart|service|breaking|interface)
  * and the contracts?+(test|tests|testing|breach) family are pinned by the
  * thorough-re corpus (thorough-re-narrowing / F11).
+ *
+ * The security arm (F103) exists because a session opened with "fix shell
+ * injection in the hooks" resolved to brisk — one review round, no mandatory
+ * final review — although a command-injection fix is exactly the work that
+ * needs the high-risk floor. `injection` is qualifier-gated
+ * (sql|command|shell|prompt|code|os|ldap|xpath|template|header|path) so
+ * "dependency injection" stays benign; standalone `shell` and `escape` are
+ * deliberately absent (too much benign prose: shell script, escape hatch).
  */
 const THOROUGH_RE =
-  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|(?:public|data|api|openapi|cli|wire|schema|smart|service|breaking|interface)\s+contracts?|contracts?\s+(?:test|tests|testing|breach)|gdpr|pci|wallet|checkout[- ](?:session|sessions|flow|flows|page|pages|form|forms|button)|(?:guest|express|one[- ]page)[- ]checkout)\b/i;
+  /\b(money|payment|payments|stripe|billing|invoice|refund|auth|authn|authz|oauth|oidc|authenticat\w*|authori[sz]ation|authori[sz]e\w*|authori[sz]ed|unauthori[sz]ed|hmac|secret|secrets|credential|migrat(?:e|ion|ions)|(?:public|data|api|openapi|cli|wire|schema|smart|service|breaking|interface)\s+contracts?|contracts?\s+(?:test|tests|testing|breach)|gdpr|pci|wallet|checkout[- ](?:session|sessions|flow|flows|page|pages|form|forms|button)|(?:guest|express|one[- ]page)[- ]checkout|vulnerabilit(?:y|ies)|cve|exploit\w*|saniti[sz]\w*|xss|csrf|(?:sql|command|shell|prompt|code|os|ldap|xpath|template|header|path)[- ]injection\w*)\b/i;
 
 /** Signals that suggest standard (multi-surface / API / platform / orchestration). */
 const STANDARD_RE =

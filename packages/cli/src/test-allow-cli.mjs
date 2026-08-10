@@ -16,7 +16,15 @@
  */
 
 import { REPO_ROOT, loadSession, resolveSessionOrExit } from './lib.mjs';
-import { addAllowance, findAllowance, loadAllowances, resolveFile } from './guard.mjs';
+import { loadProjectConfig } from './config.mjs';
+import {
+  addAllowance,
+  classifyGuarded,
+  findAllowance,
+  loadAllowances,
+  makeGitLsTree,
+  resolveFile,
+} from './guard.mjs';
 
 function usage() {
   process.stderr.write('Usage: forge test-allow <path> --reason "<text>" [--session <id>] [--json]\n');
@@ -89,6 +97,37 @@ if (resolved.outside) {
   process.exit(1);
 }
 const relPath = resolved.rel;
+
+// F94: refuse to record an allowance the guard can never honor. Both
+// `guard check` and the integrity backstop classify with the session's
+// baseCommit — a file is guarded only when it matches a test glob AND was
+// tracked at baseCommit, or is an integrity/forge-control artifact — so a
+// typo'd path or a glob-shaped string would sit in the ledger reading like
+// a justified escape while nothing ever consults it.
+if (typeof session.baseCommit === 'string' && session.baseCommit) {
+  let classification = null;
+  try {
+    classification = classifyGuarded({
+      relPath,
+      config: loadProjectConfig(REPO_ROOT),
+      gitLsTree: makeGitLsTree({ cwd: REPO_ROOT, baseCommit: session.baseCommit }),
+    });
+  } catch (err) {
+    // A git failure must not block the escape hatch — warn and record.
+    process.stderr.write(
+      `forge test-allow: warning — could not verify whether ${relPath} is guarded (${
+        err instanceof Error ? err.message : err
+      }); recording anyway.\n`,
+    );
+  }
+  if (classification && !classification.guarded) {
+    process.stderr.write(
+      `forge test-allow: ${relPath} is not guarded in session ${sessionId} ` +
+        '(matches no guard rule at its baseCommit) — an allowance would be inert; nothing recorded.\n',
+    );
+    process.exit(1);
+  }
+}
 
 let existing;
 try {

@@ -24,7 +24,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { readJson, writeJson } from './lib.mjs';
+import { hasBlockedMarker, readJson, writeJson } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { DEFAULT_SPECS_DIR, resolveProjectPlanEngine } from './plan-engine.mjs';
 import { classifyGuarded, findAllowance, loadAllowances, makeGitLsTree } from './guard.mjs';
@@ -1300,7 +1300,7 @@ export function runIntegrityChecks(opts) {
     }
 
     const evidenceFile = path.join(sessionDir, 'verify-evidence.md');
-    if (fs.existsSync(evidenceFile) && /\bBLOCKED\b/.test(fs.readFileSync(evidenceFile, 'utf8'))) {
+    if (fs.existsSync(evidenceFile) && hasBlockedMarker(fs.readFileSync(evidenceFile, 'utf8'))) {
       problems.push('verify-evidence.md contains BLOCKED — change cannot be marked done while E2E is blocked');
     }
   }

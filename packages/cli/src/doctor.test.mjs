@@ -84,6 +84,10 @@ test('runDoctorChecks aggregates', () => {
   const report = runDoctorChecks({
     cwd: '/repo',
     existsSync: () => true,
+    // existsSync claims the hooks dirs exist, so the check will read them;
+    // an empty listing means "no forge hooks on disk" (skipped), not a
+    // read failure (F76).
+    readdirSync: () => [],
     runCommand: () => ({ status: 0, stdout: '1.0.0', stderr: '' }),
   });
   assert.equal(report.ok, true);
@@ -717,8 +721,56 @@ test('runDoctorChecks: --install merge preserves an existing unrelated hook in s
   }
 });
 
-const FORGE_BIN = fileURLToPath(new URL('../bin/forge.mjs', import.meta.url));
+test('runDoctorChecks: --install repairs an unwired cursor surface too (F84)', () => {
+  const cwd = makeTempProject();
+  try {
+    writeJsonFile(cwd, ['.forge', 'config.json'], { plan: { engine: 'specs', dir: 'specs' } });
+    fs.mkdirSync(path.join(cwd, 'specs', 'changes'), { recursive: true });
+    fs.mkdirSync(path.join(cwd, 'specs', 'specs'), { recursive: true });
+    writeHookFiles(cwd, ['.cursor', 'hooks'], ['forge-session-start.mjs']);
+    const hooksJsonPath = path.join(cwd, '.cursor', 'hooks.json');
+    assert.equal(fs.existsSync(hooksJsonPath), false, 'fixture sanity: no hooks.json yet');
 
+    const report = runDoctorChecks({ cwd, install: true });
+
+    assert.equal(report.checks.hooks.ok, true, 'install repaired the cursor surface');
+    assert.ok(fs.existsSync(hooksJsonPath), 'hooks.json created by --install');
+    const hooksDoc = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8'));
+    assert.match(
+      JSON.stringify(hooksDoc.hooks),
+      /forge-session-start\.mjs/,
+      'the merge references the on-disk hook',
+    );
+    const recheck = checkHookWiring({ cwd });
+    assert.equal(recheck.ok, true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('checkHookWiring: an unreadable hooks dir is a failure, not a clean skip (F76)', () => {
+  const cwd = makeTempProject();
+  try {
+    writeHookFiles(cwd, ['.claude', 'hooks'], ['forge-session-start.mjs']);
+    const result = checkHookWiring({
+      cwd,
+      readdirSync: () => {
+        throw new Error('EACCES: permission denied, scandir');
+      },
+    });
+    assert.equal(result.ok, false, 'a read error must fail the check');
+    assert.equal(result.skipped, false, 'and must not be laundered into "no hooks found"');
+    assert.match(result.message, /unreadable/);
+    assert.match(result.message, /EACCES/);
+    const claude = result.surfaces.find((s) => s.surface === 'claude');
+    assert.ok(claude);
+    assert.equal(claude.ok, false);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+const FORGE_BIN = fileURLToPath(new URL('../bin/forge.mjs', import.meta.url));
 function runForge(args, cwd) {
   return spawnSync(process.execPath, [FORGE_BIN, ...args], { cwd, encoding: 'utf8' });
 }

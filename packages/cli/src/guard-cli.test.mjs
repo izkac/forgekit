@@ -429,6 +429,30 @@ test('C3: an explicit --session still evaluates only the named session (no cross
   void sessionId; // unused here — this test is about the explicit-session path only
 });
 
+// --- F91: a broken primary session must not fail open for every file -----
+
+test('F91: an unparseable primary session.json still lets the cross-session sweep deny', () => {
+  const { root, sessionDir } = makeProject({ phase: 'implement' });
+  // Torn write on the session active.json points at.
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), '{ "id": "s1",\n', 'utf8');
+  // A second, healthy in-window session guards the baseline test.
+  const otherId = 's2';
+  const otherDir = path.join(root, '.forge', 'sessions', otherId);
+  fs.mkdirSync(otherDir, { recursive: true });
+  const baseCommit = git(root, 'rev-parse', 'HEAD');
+  fs.writeFileSync(
+    path.join(otherDir, 'session.json'),
+    `${JSON.stringify({ id: otherId, slug: 'other', phase: 'implement', baseCommit })}\n`,
+    'utf8',
+  );
+
+  const r = runGuard(root, ['check', '--file', 'packages/cli/src/foo.test.mjs', '--json']);
+  assert.equal(r.status, 2, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'deny');
+  assert.equal(out.sessionId, otherId, 'the deny must come from the healthy sweeping session');
+});
+
 // --- I4: verify-evidence.md is authored during verify, so it must not be --
 // --- frozen before verify begins (F88) --------------------------------
 

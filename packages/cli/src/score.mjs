@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readJson, writeJson } from './lib.mjs';
+import { hasBlockedMarker, readJson, writeJson } from './lib.mjs';
 import { loadAllowances } from './guard.mjs';
 import {
   JOBS_SIGNAL_RE,
@@ -249,7 +249,7 @@ function scoreProductLoopBody(body, executedGreen = false) {
   const notes = [];
   let pts = 0;
   const max = 20;
-  if (/\bBLOCKED\b/.test(body)) {
+  if (hasBlockedMarker(body)) {
     notes.push('verify-evidence contains BLOCKED — product-loop not proven');
     return { points: 0, max, notes };
   }

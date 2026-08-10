@@ -621,6 +621,29 @@ test('runIntegrityChecks: BLOCKED in verify-evidence blocks even with green e2e'
   }
 });
 
+test('runIntegrityChecks: a prose mention of BLOCKED mid-line is not a block marker (F89)', () => {
+  const cwd = tmp('forge-int-blocked-prose-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    writeSpineWithRows(sessionDir);
+    writeE2eDoc(sessionDir, { notApplicable: null, steps: [greenStep()] });
+    writeE2eResults(sessionDir, runE2eSteps({ steps: [greenStep()] }));
+    fs.writeFileSync(
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\nThe review subagent reported BLOCKED in its status summary, then retried green.\n',
+      'utf8',
+    );
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: { slug: 'wire-worker-jobs', openspecChange: null },
+    });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('runIntegrityChecks: invalid spine fails even without jobs signal', () => {
   const cwd = tmp('forge-int-badspine-');
   try {

@@ -18,7 +18,7 @@ import {
   OPENSPEC_INSTALL_CMD,
   resolveProjectPlanEngine,
 } from './plan-engine.mjs';
-import { ensureClaudeHookHints } from './init.mjs';
+import { ensureClaudeHookHints, ensureCursorHookHints } from './init.mjs';
 import { collectHookCommands, isCommandReferenced } from './hooks.mjs';
 
 export { OPENSPEC_PACKAGE, OPENSPEC_INSTALL_CMD };
@@ -209,8 +209,24 @@ export function checkHookWiring(opts) {
     let entries;
     try {
       entries = readdirSync(def.hooksDir);
-    } catch {
-      entries = [];
+    } catch (err) {
+      // F76: a hooks dir that exists but cannot be read (e.g. chmod 000) is
+      // a surface-level failure — reporting it as "no forge hooks found"
+      // would tell the operator the surface is clean when doctor simply
+      // could not look.
+      const message = err instanceof Error ? err.message : String(err);
+      surfaces.push({
+        surface: def.surface,
+        hooksDir: def.hooksDir,
+        wiringPaths: [],
+        present: [],
+        unwired: [],
+        wiringError: `hooks dir unreadable: ${message}`,
+        readError: true,
+        ok: false,
+        hint: def.hint,
+      });
+      continue;
     }
     const present = entries.filter((name) => FORGE_HOOK_FILE_RE.test(name));
     if (present.length === 0) continue;
@@ -265,8 +281,9 @@ export function checkHookWiring(opts) {
     message = surfaces
       .filter((s) => !s.ok)
       .map((s) => {
-        const names = s.unwired.join(', ');
         const errPart = s.wiringError ? ` (${s.wiringError})` : '';
+        if (s.readError) return `${s.surface}: cannot inspect hooks${errPart}`;
+        const names = s.unwired.join(', ');
         return `${s.surface}: unwired hook(s) ${names}${errPart} — ${s.hint}`;
       })
       .join('; ');
@@ -282,20 +299,28 @@ export function checkHookWiring(opts) {
 }
 
 /**
- * `forge doctor --install`'s hook-repair step: when the claude surface is
- * unwired, merge the standard hooks snippet into `.claude/settings.json` —
- * the same structural merge `forge init` performs (writes the snippet file
- * too, for transparency). Cursor's `hooks.json` merge already happens inside
- * `forge init` and is out of scope for `--install`.
+ * `forge doctor --install`'s hook-repair step: for each unwired surface,
+ * merge the standard hooks snippet into that surface's wiring file — the
+ * same structural merges `forge init` performs (`.claude/settings.json` via
+ * ensureClaudeHookHints, `.cursor/hooks.json` via ensureCursorHookHints;
+ * each writes its snippet file too, for transparency).
  * @param {string} cwd
  * @param {ReturnType<typeof checkHookWiring>} hooks
  * @returns {boolean} whether a repair was attempted
  */
-function installUnwiredClaudeHooks(cwd, hooks) {
+function installUnwiredHooks(cwd, hooks) {
+  let attempted = false;
   const claude = hooks.surfaces.find((s) => s.surface === 'claude');
-  if (!claude || claude.ok) return false;
-  ensureClaudeHookHints(cwd, { force: false });
-  return true;
+  if (claude && !claude.ok && !claude.readError) {
+    ensureClaudeHookHints(cwd, { force: false });
+    attempted = true;
+  }
+  const cursor = hooks.surfaces.find((s) => s.surface === 'cursor');
+  if (cursor && !cursor.ok && !cursor.readError) {
+    ensureCursorHookHints(cwd, { force: false });
+    attempted = true;
+  }
+  return attempted;
 }
 
 /**
@@ -332,7 +357,7 @@ export function runDoctorChecks(opts = {}) {
       readFileSync: opts.readFileSync,
       readdirSync: opts.readdirSync,
     });
-    if (opts.install && !hooks.ok && installUnwiredClaudeHooks(cwd, hooks)) {
+    if (opts.install && !hooks.ok && installUnwiredHooks(cwd, hooks)) {
       hooks = checkHookWiring({
         cwd,
         existsSync: opts.existsSync,
@@ -394,7 +419,7 @@ export function runDoctorChecks(opts = {}) {
     readFileSync: opts.readFileSync,
     readdirSync: opts.readdirSync,
   });
-  if (opts.install && !hooks.ok && installUnwiredClaudeHooks(cwd, hooks)) {
+  if (opts.install && !hooks.ok && installUnwiredHooks(cwd, hooks)) {
     hooks = checkHookWiring({
       cwd,
       existsSync: opts.existsSync,

@@ -420,3 +420,18 @@ export function sessionAgeDays(session) {
   }
   return Infinity;
 }
+
+/**
+ * F89: a verify-evidence BLOCKED marker must own its line — a line starting
+ * with `BLOCKED` (optionally a Markdown heading like `## BLOCKED`). Plain
+ * `\bBLOCKED\b` matched mid-sentence prose ("the subagent reported BLOCKED
+ * in its status") and failed the done gate on a mention, not a marker; this
+ * is the same whole-line discipline the no-tdd marker got after its
+ * smuggling finding.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function hasBlockedMarker(text) {
+  return /^[ \t]*(?:#{1,6}[ \t]+)?BLOCKED\b/m.test(String(text || ''));
+}

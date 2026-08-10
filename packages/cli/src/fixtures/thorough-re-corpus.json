@@ -127,6 +127,60 @@
       "source": "packages/cli/src/preferences.test.mjs",
       "text": "fix toolbar alignment",
       "expect": "benign"
+    },
+    {
+      "id": "F103-risky-shell-injection",
+      "source": "F103",
+      "text": "fix shell injection in prompt/triage hooks",
+      "expect": "risky"
+    },
+    {
+      "id": "F103-risky-sql-injection",
+      "source": "F103",
+      "text": "patch a SQL injection in the query builder",
+      "expect": "risky"
+    },
+    {
+      "id": "F103-risky-xss-vulnerability",
+      "source": "F103",
+      "text": "close the XSS vulnerability in the profile renderer",
+      "expect": "risky"
+    },
+    {
+      "id": "F103-risky-cve",
+      "source": "F103",
+      "text": "mitigate CVE-2026-12345 in the TLS dependency",
+      "expect": "risky"
+    },
+    {
+      "id": "F103-risky-sanitise",
+      "source": "F103",
+      "text": "sanitise untrusted input before rendering",
+      "expect": "risky"
+    },
+    {
+      "id": "F103-risky-exploit",
+      "source": "F103",
+      "text": "this exploit works against the default configuration",
+      "expect": "risky"
+    },
+    {
+      "id": "F103-benign-dependency-injection",
+      "source": "F103-benign",
+      "text": "wire up dependency injection for the repository layer",
+      "expect": "benign"
+    },
+    {
+      "id": "F103-benign-escape-hatch",
+      "source": "F103-benign",
+      "text": "document the escape hatch for the guard",
+      "expect": "benign"
+    },
+    {
+      "id": "F103-benign-shell-script",
+      "source": "F103-benign",
+      "text": "add a shell script that bootstraps the dev environment",
+      "expect": "benign"
     }
   ]
 }

@@ -310,7 +310,14 @@ if (sessionResolution.id === null) {
 const sessionId = sessionResolution.id;
 
 const primary = evaluateSession(sessionId);
-if (primary.verdict === 'error') fail(primary.message);
+if (primary.verdict === 'error') {
+  // F91: an unreadable primary session.json must not fail open for EVERY
+  // file — another unfinished session may still guard this one. Sweep first,
+  // exactly like the id===null path above, and only then report the error.
+  const sweepDenial = !sessionIdArg ? denyFromAnyOtherSession(sessionId) : null;
+  if (sweepDenial) emitDeny(sweepDenial, json);
+  fail(primary.message);
+}
 if (primary.verdict === 'deny') emitDeny({ id: sessionId, rule: primary.rule }, json);
 
 // primary.verdict === 'allow' here. C3: sweep every other unfinished session

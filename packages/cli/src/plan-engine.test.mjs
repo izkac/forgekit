@@ -433,6 +433,9 @@ test('doctor: openspec engine unchanged for openspec projects', () => {
     const report = runDoctorChecks({
       cwd,
       existsSync: () => true,
+      // The hooks dirs "exist" per the stub above, so the wiring check will
+      // read them; an empty listing means skipped, not a read failure (F76).
+      readdirSync: () => [],
       runCommand: () => ({ status: 0, stdout: '1.0.0', stderr: '' }),
     });
     assert.equal(report.engine, 'openspec');

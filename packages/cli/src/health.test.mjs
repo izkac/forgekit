@@ -120,6 +120,18 @@ test('BLOCKED verify evidence is RED', () => {
   assert.match(health.reasons.join(' '), /BLOCKED/);
 });
 
+test('a prose mention of BLOCKED mid-line is not a marker (F89)', () => {
+  const p = makeProject({ phase: 'verify' });
+  fs.writeFileSync(
+    path.join(p.sessionDir, 'verify-evidence.md'),
+    '# Verify\n\n## Product loop\n\nThe subagent reported BLOCKED in its status summary, then retried green.\n',
+    'utf8',
+  );
+  const health = sessionHealth({ ...p, now: NOW });
+  assert.notEqual(health.state, 'red');
+  assert.doesNotMatch(health.reasons.join(' '), /BLOCKED/);
+});
+
 test('a finished session is neither stale nor red', () => {
   // Idle for a month and carrying an old failing run: done is done.
   const p = makeProject({ phase: 'done', updatedAt: ago(720), tasksComplete: 32 });

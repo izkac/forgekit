@@ -275,3 +275,28 @@ test('whitespace-only --reason refuses: exit non-zero, no ledger file written', 
   assert.match(r.stderr, /--reason is required/i);
   assert.equal(fs.existsSync(ledgerPath(sessionDir)), false);
 });
+
+test('F94: a path matching no guard rule refuses — an inert allowance is never recorded', () => {
+  const { root, sessionDir } = makeProject({ phase: 'implement' });
+  const r = runTestAllow(root, ['packages/cli/src/foo.tset.mjs', '--reason', 'typo']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /not guarded/);
+  assert.equal(fs.existsSync(ledgerPath(sessionDir)), false);
+});
+
+test('F94: a glob-shaped string refuses — nothing recorded', () => {
+  const { root, sessionDir } = makeProject({ phase: 'implement' });
+  const r = runTestAllow(root, ['packages/**/*.test.mjs', '--reason', 'glob-shaped']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /not guarded/);
+  assert.equal(fs.existsSync(ledgerPath(sessionDir)), false);
+});
+
+test('F94: a session-created (untracked at baseCommit) test file refuses — guard check never denies it', () => {
+  const { root, sessionDir } = makeProject({ phase: 'implement' });
+  fs.writeFileSync(path.join(root, 'packages', 'cli', 'src', 'new.test.mjs'), 'new\n', 'utf8');
+  const r = runTestAllow(root, ['packages/cli/src/new.test.mjs', '--reason', 'session-created']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /not guarded/);
+  assert.equal(fs.existsSync(ledgerPath(sessionDir)), false);
+});
