@@ -273,9 +273,12 @@ function denyFromAnyOtherSession(excludeId) {
  * @param {{ id: string, rule: string }} denial
  */
 function emitDeny(denial, json) {
+  // F92: the escape must name the governing session. With two concurrent
+  // in-window sessions, `forge test-allow` without --session hits the
+  // gate-class ambiguity refusal — the printed escape would fail verbatim.
   const message =
     `Guarded: ${rel} ${describeRule(denial.rule)}. ` +
-    `Escape: forge test-allow ${rel} --reason "<why>"`;
+    `Escape: forge test-allow ${rel} --reason "<why>" --session ${denial.id}`;
   emit(
     { decision: 'deny', reason: 'guarded', rule: denial.rule, file: rel, sessionId: denial.id, message },
     json,

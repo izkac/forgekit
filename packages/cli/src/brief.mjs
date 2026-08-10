@@ -20,13 +20,23 @@ export const BRIEF_FILE = 'brief.html';
 const HASH_MARKER = /<!--\s*forge-brief-specs-hash:([a-f0-9]+)\s*-->/;
 const SPEC_FILES = ['proposal.md', 'design.md', 'tasks.md'];
 
+/**
+ * F75: ticking a tasks.md checkbox is progress, not a spec change — but the
+ * raw byte hash sees `- [ ]` → `- [x]` as one, marking the brief stale and
+ * refusing `forge phase` progress updates mid-implement until a re-stamp
+ * (which nudges operators toward --allow-incomplete). Normalise the marker
+ * before hashing so checkbox state never affects freshness.
+ */
+const TASK_CHECKBOX_RE = /^(\s*-\s*)\[[ xX]\]/gm;
+
 /** Hash of the spec sources a brief must reflect (missing files hash as absent). */
 export function specsHash(changeDir) {
   const h = crypto.createHash('sha256');
   for (const name of SPEC_FILES) {
     const file = path.join(changeDir, name);
     h.update(name);
-    h.update(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<absent>');
+    const raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<absent>';
+    h.update(name === 'tasks.md' ? raw.replace(TASK_CHECKBOX_RE, '$1[ ]') : raw);
   }
   return h.digest('hex').slice(0, 16);
 }

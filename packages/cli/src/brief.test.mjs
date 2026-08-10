@@ -53,6 +53,19 @@ test('specsHash changes when a spec file changes', () => {
   assert.notEqual(specsHash(changeDir), before);
 });
 
+test('specsHash ignores tasks.md checkbox state (F75) but not task text edits', () => {
+  const changeDir = makeChange(tmp('brief-'), 'my-change');
+  const before = specsHash(changeDir);
+
+  // Ticking the box is progress, not a spec change — the hash must not move.
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), '# Tasks\n- [x] 1.1 do it\n', 'utf8');
+  assert.equal(specsHash(changeDir), before, 'ticking a checkbox leaves the hash unchanged');
+
+  // Editing what the task IS still invalidates the brief.
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), '# Tasks\n- [ ] 1.1 do it differently\n', 'utf8');
+  assert.notEqual(specsHash(changeDir), before, 'a task text edit still invalidates');
+});
+
 test('stampBrief injects the marker once and restamp replaces it', () => {
   const changeDir = makeChange(tmp('brief-'), 'my-change');
   writeBrief(changeDir);

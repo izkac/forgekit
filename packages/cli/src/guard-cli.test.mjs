@@ -256,6 +256,17 @@ test('deny message names the matched glob rule and the forge test-allow escape',
   assert.match(r.stdout, new RegExp(`forge test-allow ${relFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} --reason`));
 });
 
+test('F92: the printed escape names the governing session via --session', () => {
+  const { root, sessionId } = makeProject({ phase: 'implement' });
+  const r = runGuard(root, ['check', '--file', 'packages/cli/src/foo.test.mjs']);
+  assert.equal(r.status, 2);
+  assert.match(
+    r.stdout,
+    new RegExp(`forge test-allow .* --session ${sessionId}`),
+    'the escape must work verbatim even with a second in-window session open',
+  );
+});
+
 test('deny message for an integrity-artifact rule reads sensibly for an unrelated file with that basename', () => {
   const { root } = makeProject({ phase: 'implement' });
   // Not the session's own spine — an unrelated file that merely shares the
