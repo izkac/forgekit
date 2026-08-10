@@ -1,0 +1,15 @@
+{
+  "change": "add-hard-v2-evaluation-tranche",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "produce-consume-assert-four-task-hard-corpus",
+      "cmd": "npm run smoke:evals:hard-v2",
+      "expect": "SMOKE_RESULT.*reservation-confirmation-race.*tenant-signed-downloads.*partial-refund-ledger-invariants.*carrier-event-reconciliation"
+    }
+  ]
+}

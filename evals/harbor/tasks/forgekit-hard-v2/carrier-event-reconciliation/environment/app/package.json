@@ -1,0 +1,11 @@
+{
+  "name": "carrier-event-reconciliation-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test src/*.test.mjs"
+  }
+}
