@@ -37,16 +37,17 @@ The v1 manifest and complete contents of all six v1 task trees are frozen by
 `evals/harbor/corpus-v1.lock.json`. CI hashes them and fails on drift; historical
 v1 must not be changed in place. A substantive change requires a new corpus ID.
 
-`forgekit-hard-v2` is a companion corpus with only one current task:
+`forgekit-hard-v2` is a companion corpus with two reviewed tasks:
 
 | Category | Task id | Task version | Requested work |
 | --- | --- | --- | --- |
 | bug | `reservation-confirmation-race` | `1.0.1` | Repair confirmation races and add a deterministic overlap test. |
+| security | `tenant-signed-downloads` | `1.0.0` | Bind signed document downloads to authenticated, routed, capability, and stored tenant context while preserving valid responses. |
 
-Hard-v2 is an **incomplete one-category foundation**. It is not yet a complete
-six-category corpus, and its infrastructure, oracle runs, and verifier tests
-are not provider-backed evidence that Forgekit is effective. No provider
-effectiveness evidence has been produced for hard-v2 at HEAD.
+Hard-v2 remains an **incomplete two-task foundation**. It is not yet a
+complete six-category corpus, and its infrastructure, oracle runs, and
+verifier tests are not provider-backed evidence that Forgekit is effective. No
+provider effectiveness evidence has been produced for hard-v2 at HEAD.
 
 Each task's grader lives in its own `tests/` verifier context. Harbor's
 `environment_mode = "separate"` and no-network verifier keep it out of the
@@ -107,12 +108,12 @@ npm run smoke:evals:hard-v2
 tasks, baseline/Forge staging, hidden-verifier isolation, untouched and
 known-good verifier paths, and the three Docker contexts for each v1 task.
 
-`npm run smoke:evals:hard-v2` selects only the hard companion. For the current
-reservation task it validates manifest/task metadata, dry-run baseline/Forge
-staging and verifier isolation, plus the required host matrix: untouched
-negative, oracle positive, alternate positive, tamper negative, no-added-test
-negative, and mutant negative. It validates exactly three Docker build-check
-contexts—baseline agent, Forge agent, and separate verifier—running
+`npm run smoke:evals:hard-v2` selects the two reviewed hard-v2 tasks. For each
+task it validates manifest/task metadata, dry-run baseline/Forge staging and
+verifier isolation, plus the required host matrix: untouched negative, oracle
+positive, alternate positive, tamper negative, no-added-test negative, and
+mutant negative. It validates exactly three Docker build-check contexts per
+task—baseline agent, Forge agent, and separate verifier—running
 `docker build --check` when Docker is available or reporting Docker validation
 as skipped after local context-reference checks. It never invokes Harbor or a
 model.
@@ -451,14 +452,14 @@ provenance afterward.
 ## 10. Interpret The Corpora Conservatively
 
 V1 contains six small dependency-free Node fixtures and only one task per
-category. Hard-v2 currently contains one bug task, so it is an incomplete
-one-category foundation rather than a representative hard corpus. Neither
-represents other languages, large repositories,
-long-horizon maintenance, production integrations, or all coding-agent use.
-Public availability introduces contamination risk; separate hidden verifiers
-reduce execution-time leakage but cannot prove task novelty. Model
-nondeterminism, provider drift, small samples, order effects, and missing trials
-remain limitations.
+category. Hard-v2 currently contains two reviewed tasks, so it remains an
+incomplete two-task foundation rather than a representative hard corpus.
+Neither represents other languages, large repositories, long-horizon
+maintenance, production integrations, or all coding-agent use. Public
+availability introduces contamination risk; separate hidden verifiers reduce
+execution-time leakage but cannot prove task novelty. Model nondeterminism,
+provider drift, small samples, order effects, and missing trials remain
+limitations.
 
 For `reservation-confirmation-race`, the separate no-network verifier uses
 fixed inputs, a manual clock, and deferred barriers instead of timing sleeps.
@@ -476,8 +477,16 @@ HTTP 404; incompatible lookalike errors that degrade these responses to HTTP
 500 fail verification. Agent-added `src/*.test.mjs` files must pass normally
 and kill one complete API-compatible concurrency mutant with an assertion
 failure; import, syntax, bootstrap, crash, and timeout failures do not count.
-The visible test and package metadata are protected, and both reference and
+The visible tests and package metadata are protected, and both reference and
 structurally different positive solutions pass.
+
+For `tenant-signed-downloads`, the separate no-network verifier checks that
+authenticated, routed, capability-signed, and document-store tenant IDs agree.
+Capabilities must canonically bind tenant, document, and integer expiry; the
+exact expiry boundary and malformed signature input fail closed without
+exposing bytes; valid same-tenant downloads preserve their response bytes and
+headers. Its semantic mutant and protected-test checks assess this requested
+contract, not general security or production safety.
 
 Those controls test grader integrity, not every possible schedule or solution.
 The public probe can be contaminated, one mutant is only a proxy for one

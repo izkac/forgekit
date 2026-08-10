@@ -23,7 +23,7 @@ The evaluator has two checked-in, versioned corpus IDs:
 | Corpus ID | Default | Current scope |
 | --- | --- | --- |
 | `forgekit-held-out-v1` | Yes | Frozen six-task pilot, one small Node task in each target category. |
-| `forgekit-hard-v2` | No | Incomplete hard-corpus foundation: one bug task only. |
+| `forgekit-hard-v2` | No | Incomplete hard-corpus foundation: two reviewed tasks (bug and security). |
 
 Omitting `--corpus` continues to select `forgekit-held-out-v1`. Selection is
 restricted to these checked-in IDs and their mapped roots: unknown IDs,
@@ -52,20 +52,25 @@ in this public repository, so the corpus is not private and cannot be assumed
 to be free of training contamination.
 
 The companion manifest `evals/harbor/corpora/forgekit-hard-v2.json` currently
-allowlists only `reservation-confirmation-race` (task version `1.0.1`) from its
-separate task root. It asks the agent to repair overlapping reservation
-confirmations while preserving same-key sharing, different-key conflict,
-payment-failure retry, expiry-as-admission-deadline, sequential replay, and
-HTTP behavior, and to add a deterministic no-sleep concurrency regression
-test.
+allowlists two reviewed tasks: `reservation-confirmation-race` (task version
+`1.0.1`) and `tenant-signed-downloads` (task version `1.0.0`) from their
+separate task roots. The reservation task asks the agent to repair overlapping
+reservation confirmations while preserving same-key sharing, different-key
+conflict, payment-failure retry, expiry-as-admission-deadline, sequential
+replay, and HTTP behavior, and to add a deterministic no-sleep concurrency
+regression test. The Security task asks the agent to bind authenticated,
+routed, signed, and stored tenant context for HMAC document capabilities,
+canonicalize tenant/document/expiry inputs, fail closed on expiry and malformed
+signatures, and preserve valid download responses.
 
 Both corpora are public pilots, not representative samples of coding work. V1's
-six small tasks cannot establish general effectiveness. Hard-v2 is explicitly
-an **incomplete one-category foundation**, not a completed six-category corpus
+six small tasks cannot establish general effectiveness. Hard-v2 remains an
+**incomplete two-task foundation**, not a completed six-category corpus
 and not evidence about provider or Forgekit treatment effectiveness. No
 provider-backed effectiveness evidence has been produced by adding this
-infrastructure or its one task. The tools produce measurements; they do not
+infrastructure or these tasks. The tools produce measurements; they do not
 automatically decide whether Forgekit is effective.
+
 
 ## Prerequisites, Cost, And Credentials
 
@@ -98,19 +103,14 @@ npm run lint:evals
 npm run smoke:evals
 npm run smoke:evals:hard-v2
 ```
-
-`npm run smoke:evals` remains the exact v1 smoke: it checks every v1 task's
-metadata, baseline/Forge staging, verifier isolation, untouched fixture,
-known-good solution, and the three Docker contexts for each v1 task.
-
-`npm run smoke:evals:hard-v2` is isolated to the selected hard companion. For
-its current reservation task it validates manifest/task metadata, dry-run
-baseline/Forge staging and verifier isolation, and the required host matrix:
-untouched negative, oracle positive, alternate positive, tamper negative,
-no-added-test negative, and mutant negative. It then validates exactly three
-Docker build-check contexts: baseline agent, Forge agent, and separate
-verifier. When Docker is accessible it runs `docker build --check` for those
-contexts; otherwise it reports Docker validation as skipped after checking the
+`npm run smoke:evals:hard-v2` is isolated to the two selected hard-v2 tasks. For
+each task it validates manifest/task metadata, dry-run baseline/Forge staging
+and verifier isolation, and the required host matrix: untouched negative,
+oracle positive, alternate positive, tamper negative, no-added-test negative,
+and mutant negative. It then validates exactly three Docker build-check
+contexts per task: baseline agent, Forge agent, and separate verifier. When
+Docker is accessible it runs `docker build --check` for those contexts;
+otherwise it reports Docker validation as skipped after checking the
 Dockerfiles' local context references. It never invokes Harbor or a model.
 
 `test:evals` also exercises the hard-v2 host and adversarial cases. Docker
@@ -370,21 +370,23 @@ seeds.
 
 ## Hard-v2 Verifier And Mutation Limits
 
-The reservation verifier is separate, no-network, and not mounted into the
-agent environment. Its deterministic hidden harness keeps scheduling and
-assertions in a trusted parent. In the verifier container, candidate modules
-run in a child worker under the configured untrusted UID/GID and communicate
-over dedicated RPC pipes; only nonce-prefixed result frames are accepted. Fixed
-data, a manual clock, and deferred barriers replace timing sleeps. The HTTP
-probe exercises the real adapter and requires confirmation success,
-`already_confirmed` as HTTP 409, `expired` as HTTP 410 without a charge, and
-unknown-route HTTP 404. This also ensures service domain errors remain
-compatible with the HTTP adapter rather than degrading to HTTP 500.
+The reservation and Security verifiers are separate, no-network, and not
+mounted into the agent environments. The reservation harness keeps scheduling
+and assertions in a trusted parent. In its verifier container, candidate
+modules run in a child worker under the configured untrusted UID/GID and
+communicate over dedicated RPC pipes; only nonce-prefixed result frames are
+accepted. Fixed data, a manual clock, and deferred barriers replace timing
+sleeps. Its HTTP probe requires confirmation success, `already_confirmed` as
+HTTP 409, `expired` as HTTP 410 without a charge, and unknown-route HTTP 404.
+The Security verifier checks that authenticated, routed, capability-signed,
+and document-store tenant IDs agree; capabilities canonically bind tenant,
+document, and integer expiry; expiry and malformed signature input fail closed;
+and valid same-tenant downloads preserve response bytes and headers.
 
 Grading also runs agent-added `src/*.test.mjs` files against one complete
 API-compatible concurrency mutant. The tests qualify only when they pass
 normally and produce an assertion failure—not an import, syntax, bootstrap,
-crash, or timeout failure—against that mutant. The protected visible test and
+crash, or timeout failure—against that mutant. The protected visible tests and
 package metadata are digest checked, and two structurally different known-good
 fixtures exercise the positive path.
 

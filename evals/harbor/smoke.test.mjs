@@ -164,7 +164,7 @@ test('concurrent smoke CLIs isolate their dry-run staging', async () => {
 });
 
 
-test('hard-v2 smoke validates its selected task and host suite without Harbor or a provider', async (t) => {
+test('hard-v2 smoke validates its selected tasks and host suites without Harbor or a provider', async (t) => {
   const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-hard-smoke-tripwire-'));
   const harborCapture = path.join(bin, 'harbor-called');
   const harbor = path.join(bin, 'harbor');
@@ -183,19 +183,24 @@ exit 99
   });
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /PASS hard-v2 manifest and task metadata: reservation-confirmation-race/);
-  assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation/);
-  assert.match(result.stdout, /PASS hard-v2 task-specific host suite: .*untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant/i);
+  assert.match(result.stdout, /PASS hard-v2 manifest and task metadata: tenant-signed-downloads/);
+  assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation: reservation-confirmation-race/);
+  assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation: tenant-signed-downloads/);
+  assert.match(result.stdout, /PASS hard-v2 task-specific host suite: reservation-confirmation-race \(untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant\)/i);
+  assert.match(result.stdout, /PASS hard-v2 task-specific host suite: tenant-signed-downloads \(untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant\)/i);
   assert.match(result.stdout, /SKIP model\/Harbor execution: .*no model was invoked/i);
 
   const summary = resultFrom(result.stdout);
   assert.equal(summary.schemaVersion, 2);
   assert.equal(summary.corpusId, 'forgekit-hard-v2');
-  assert.deepEqual(Object.keys(summary.tasks), ['reservation-confirmation-race']);
-  assert.equal(summary.tasks['reservation-confirmation-race'].hostSuite.status, 'passed');
-  assert.deepEqual(summary.tasks['reservation-confirmation-race'].hostSuite.coverage, [
-    'untouched-negative', 'oracle-positive', 'alternate-positive',
-    'tamper-negative', 'no-added-test-negative', 'mutant-negative',
-  ]);
+  assert.deepEqual(Object.keys(summary.tasks), ['reservation-confirmation-race', 'tenant-signed-downloads']);
+  for (const taskId of Object.keys(summary.tasks)) {
+    assert.equal(summary.tasks[taskId].hostSuite.status, 'passed');
+    assert.deepEqual(summary.tasks[taskId].hostSuite.coverage, [
+      'untouched-negative', 'oracle-positive', 'alternate-positive',
+      'tamper-negative', 'no-added-test-negative', 'mutant-negative',
+    ]);
+  }
   assert.equal(summary.modelHarbor.modelExecuted, false);
   assert.equal(summary.docker.status, 'skipped');
   await assert.rejects(stat(harborCapture), { code: 'ENOENT' });
@@ -224,6 +229,10 @@ test('hard-v2 smoke discovers verifier-required semantic mutants without task-sp
       "import test from 'node:test';\ntest('fixture host suite', () => {});\n",
     ),
   ]);
+  const fixtureManifestPath = path.join(fixtureHere, 'corpora', 'forgekit-hard-v2.json');
+  const fixtureManifest = JSON.parse(await readFile(fixtureManifestPath, 'utf8'));
+  fixtureManifest.tasks = fixtureManifest.tasks.filter(({ id }) => id === taskId);
+  await writeFile(fixtureManifestPath, `${JSON.stringify(fixtureManifest)}\n`);
   const originalMutant = path.join(taskRoot, 'tests', 'mutants', 'confirmation-service.mjs');
   const semanticMutant = path.join(taskRoot, 'tests', 'mutants', mutantName);
   await rename(originalMutant, semanticMutant);
@@ -366,11 +375,12 @@ appendFileSync(process.env.DOCKER_CAPTURE, JSON.stringify(process.argv.slice(2))
   const summary = resultFrom(result.stdout);
   assert.equal(summary.docker.status, 'validated');
   assert.equal(summary.docker.method, 'docker build --check');
-  assert.deepEqual(summary.docker.contexts, [
-    'reservation-confirmation-race:baseline-agent',
-    'reservation-confirmation-race:forge-agent',
-    'reservation-confirmation-race:separate-verifier',
+  const expectedContexts = manifest.tasks.flatMap(({ id }) => [
+    `${id}:baseline-agent`,
+    `${id}:forge-agent`,
+    `${id}:separate-verifier`,
   ]);
+  assert.deepEqual(summary.docker.contexts, expectedContexts);
 
   const calls = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.deepEqual(calls[0], ['info', '--format', '{{.ServerVersion}}']);

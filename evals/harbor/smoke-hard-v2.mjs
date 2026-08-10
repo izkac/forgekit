@@ -14,6 +14,7 @@ const manifestPath = path.join(here, 'corpora', `${corpusId}.json`);
 const runner = process.env.FORGEKIT_SMOKE_RUNNER || path.join(here, 'run.mjs');
 const hostSuites = {
   'reservation-confirmation-race': path.join(here, 'corpus-hard-v2-reservation-confirmation-race.test.mjs'),
+  'tenant-signed-downloads': path.join(here, 'corpus-hard-v2-tenant-signed-downloads.test.mjs'),
 };
 const hostSuiteCoverage = [
   'untouched-negative',

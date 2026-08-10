@@ -56,19 +56,34 @@ function grade(fixture) {
   return JSON.parse(readFileSync(rewardFile, "utf8"));
 }
 
-test("hard-v2 reservation manifest binds the versioned hard bug task and its visible entrypoint", () => {
+test("hard-v2 manifest binds the reviewed versioned tasks and their visible entrypoints", () => {
   const manifest = JSON.parse(readFileSync(path.join(here, "corpora", "forgekit-hard-v2.json"), "utf8"));
   assert.equal(manifest.schema_version, 1);
   assert.equal(manifest.corpus_id, "forgekit-hard-v2");
-  assert.deepEqual(manifest.tasks, [{
-    id: "reservation-confirmation-race",
-    version: "1.0.1",
-    category: "bug",
-    difficulty: "hard",
-    task_path: "tasks/forgekit-hard-v2/reservation-confirmation-race",
-    entrypoint: "src/server.mjs",
-    visible_tests: ["src/confirmation-service.test.mjs"]
-  }]);
+  assert.deepEqual(manifest.tasks, [
+    {
+      id: "reservation-confirmation-race",
+      version: "1.0.1",
+      category: "bug",
+      difficulty: "hard",
+      task_path: "tasks/forgekit-hard-v2/reservation-confirmation-race",
+      entrypoint: "src/server.mjs",
+      visible_tests: ["src/confirmation-service.test.mjs"],
+    },
+    {
+      id: "tenant-signed-downloads",
+      version: "1.0.0",
+      category: "security",
+      difficulty: "hard",
+      task_path: "tasks/forgekit-hard-v2/tenant-signed-downloads",
+      entrypoint: "src/server.mjs",
+      visible_tests: [
+        "src/capability-service.test.mjs",
+        "src/document-store.test.mjs",
+        "src/http-app.test.mjs",
+      ],
+    },
+  ]);
   const productionModules = readdirSync(path.join(task, "environment", "app", "src"))
     .filter((name) => name.endsWith(".mjs") && !name.endsWith(".test.mjs"));
   assert.ok(productionModules.length >= 5 && productionModules.length <= 9);

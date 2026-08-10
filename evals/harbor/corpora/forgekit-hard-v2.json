@@ -13,6 +13,19 @@
       "visible_tests": [
         "src/confirmation-service.test.mjs"
       ]
+    },
+    {
+      "id": "tenant-signed-downloads",
+      "version": "1.0.0",
+      "category": "security",
+      "difficulty": "hard",
+      "task_path": "tasks/forgekit-hard-v2/tenant-signed-downloads",
+      "entrypoint": "src/server.mjs",
+      "visible_tests": [
+        "src/capability-service.test.mjs",
+        "src/document-store.test.mjs",
+        "src/http-app.test.mjs"
+      ]
     }
   ]
 }
