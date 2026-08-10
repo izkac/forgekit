@@ -128,7 +128,7 @@ class CandidateWorker {
     const lines = createInterface({ input: this.child.stdio[4] });
     lines.on("line", (line) => {
       if (!line.startsWith(this.prefix)) return;
-      try { this.#accept(JSON.parse(line.slice(this.prefix.length))); } catch {}
+      try { this.#accept(JSON.parse(line.slice(this.prefix.length))); } catch { /* ignored */ }
     });
     this.child.on("error", (error) => this.#fail(error));
     this.child.on("close", (code) => {

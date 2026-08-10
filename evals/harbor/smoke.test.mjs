@@ -184,17 +184,39 @@ exit 99
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /PASS hard-v2 manifest and task metadata: reservation-confirmation-race/);
   assert.match(result.stdout, /PASS hard-v2 manifest and task metadata: tenant-signed-downloads/);
+  assert.match(result.stdout, /PASS hard-v2 manifest and task metadata: partial-refund-ledger-invariants/);
+  assert.match(result.stdout, /PASS hard-v2 manifest and task metadata: carrier-event-reconciliation/);
   assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation: reservation-confirmation-race/);
   assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation: tenant-signed-downloads/);
+  assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation: partial-refund-ledger-invariants/);
+  assert.match(result.stdout, /PASS hard-v2 baseline\/Forge staging and verifier isolation: carrier-event-reconciliation/);
   assert.match(result.stdout, /PASS hard-v2 task-specific host suite: reservation-confirmation-race \(untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant\)/i);
   assert.match(result.stdout, /PASS hard-v2 task-specific host suite: tenant-signed-downloads \(untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant\)/i);
+  assert.match(result.stdout, /PASS hard-v2 task-specific host suite: partial-refund-ledger-invariants \(untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant\)/i);
+  assert.match(result.stdout, /PASS hard-v2 task-specific host suite: carrier-event-reconciliation \(untouched.*oracle.*alternate.*tamper.*no-added-test.*mutant\)/i);
   assert.match(result.stdout, /SKIP model\/Harbor execution: .*no model was invoked/i);
-
   const summary = resultFrom(result.stdout);
   assert.equal(summary.schemaVersion, 2);
   assert.equal(summary.corpusId, 'forgekit-hard-v2');
-  assert.deepEqual(Object.keys(summary.tasks), ['reservation-confirmation-race', 'tenant-signed-downloads']);
+
+  assert.deepEqual(Object.keys(summary.tasks), [
+    'reservation-confirmation-race',
+    'tenant-signed-downloads',
+    'partial-refund-ledger-invariants',
+    'carrier-event-reconciliation',
+  ]);
+  assert.equal(Object.keys(summary.tasks).length, 4);
+  const expectedTasks = {
+    'reservation-confirmation-race': { category: 'bug', difficulty: 'hard' },
+    'tenant-signed-downloads': { category: 'security', difficulty: 'hard' },
+    'partial-refund-ledger-invariants': { category: 'tests', difficulty: 'hard' },
+    'carrier-event-reconciliation': { category: 'integration', difficulty: 'hard' },
+  };
   for (const taskId of Object.keys(summary.tasks)) {
+    assert.deepEqual(
+      { category: summary.tasks[taskId].category, difficulty: summary.tasks[taskId].difficulty },
+      expectedTasks[taskId],
+    );
     assert.equal(summary.tasks[taskId].hostSuite.status, 'passed');
     assert.deepEqual(summary.tasks[taskId].hostSuite.coverage, [
       'untouched-negative', 'oracle-positive', 'alternate-positive',
@@ -203,6 +225,20 @@ exit 99
   }
   assert.equal(summary.modelHarbor.modelExecuted, false);
   assert.equal(summary.docker.status, 'skipped');
+  assert.deepEqual(summary.docker.contexts, [
+    'reservation-confirmation-race:baseline-agent',
+    'reservation-confirmation-race:forge-agent',
+    'reservation-confirmation-race:separate-verifier',
+    'tenant-signed-downloads:baseline-agent',
+    'tenant-signed-downloads:forge-agent',
+    'tenant-signed-downloads:separate-verifier',
+    'partial-refund-ledger-invariants:baseline-agent',
+    'partial-refund-ledger-invariants:forge-agent',
+    'partial-refund-ledger-invariants:separate-verifier',
+    'carrier-event-reconciliation:baseline-agent',
+    'carrier-event-reconciliation:forge-agent',
+    'carrier-event-reconciliation:separate-verifier',
+  ]);
   await assert.rejects(stat(harborCapture), { code: 'ENOENT' });
 });
 

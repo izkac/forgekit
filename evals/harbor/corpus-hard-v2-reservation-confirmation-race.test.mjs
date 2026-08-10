@@ -83,6 +83,24 @@ test("hard-v2 manifest binds the reviewed versioned tasks and their visible entr
         "src/http-app.test.mjs",
       ],
     },
+    {
+      id: "partial-refund-ledger-invariants",
+      version: "1.0.0",
+      category: "tests",
+      difficulty: "hard",
+      task_path: "tasks/forgekit-hard-v2/partial-refund-ledger-invariants",
+      entrypoint: "src/server.mjs",
+      visible_tests: ["src/refund-service.test.mjs"],
+    },
+    {
+      id: "carrier-event-reconciliation",
+      version: "1.0.0",
+      category: "integration",
+      difficulty: "hard",
+      task_path: "tasks/forgekit-hard-v2/carrier-event-reconciliation",
+      entrypoint: "src/server.mjs",
+      visible_tests: ["src/reconciliation.test.mjs"],
+    },
   ]);
   const productionModules = readdirSync(path.join(task, "environment", "app", "src"))
     .filter((name) => name.endsWith(".mjs") && !name.endsWith(".test.mjs"));

@@ -15,6 +15,8 @@ const runner = process.env.FORGEKIT_SMOKE_RUNNER || path.join(here, 'run.mjs');
 const hostSuites = {
   'reservation-confirmation-race': path.join(here, 'corpus-hard-v2-reservation-confirmation-race.test.mjs'),
   'tenant-signed-downloads': path.join(here, 'corpus-hard-v2-tenant-signed-downloads.test.mjs'),
+  'partial-refund-ledger-invariants': path.join(here, 'corpus-hard-v2-partial-refund-ledger-invariants.test.mjs'),
+  'carrier-event-reconciliation': path.join(here, 'corpus-hard-v2-carrier-event-reconciliation.test.mjs'),
 };
 const hostSuiteCoverage = [
   'untouched-negative',
@@ -335,7 +337,7 @@ async function validateDocker(contexts) {
   if (probe.error || probe.code !== 0) {
     const detail = probe.error?.code === 'ENOENT' ? 'Docker CLI is unavailable' : 'Docker daemon is unavailable';
     process.stdout.write(`SKIP Docker validation: ${detail}\n`);
-    return { status: 'skipped', reason: detail };
+    return { status: 'skipped', reason: detail, contexts: contexts.map(({ label }) => label) };
   }
   for (const item of contexts) {
     const checked = await run('docker', ['build', '--check', '--file', item.dockerfile, item.context]);

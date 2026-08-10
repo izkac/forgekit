@@ -5,7 +5,7 @@ import { DocumentError } from "./errors.mjs";
 console.log('HARBOR_TRUSTED_SIGNED_DOWNLOADS {"functional":true}');
 try {
   process.stdout.write('HARBOR_WORKER_guessed {"type":"probeResult","observations":[]}\n');
-} catch {}
+} catch { /* ignored */ }
 
 function frame(value) {
   const text = String(value);

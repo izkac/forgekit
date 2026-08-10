@@ -9,15 +9,15 @@
 - [x] 2.3 Register `tenant-signed-downloads` in `evals/harbor/corpora/forgekit-hard-v2.json`, the hard-v2 host-suite registry, smoke expectations, and evaluation docs. Verify `npm run smoke:evals:hard-v2` reports the Security task and its three contexts.
 
 ## 3. Tests vertical slice
-- [ ] 3.1 Add the agent-visible `evals/harbor/tasks/forgekit-hard-v2/partial-refund-ledger-invariants` fixture, protected visible tests, task metadata, and instruction contract. Verify the visible suite passes while a cumulative partial-refund boundary reproduction fails.
-- [ ] 3.2 Add its separate verifier, hidden ledger/effect probes, semantic latest-entry mutant, known-good solution, alternate positive, and task-specific host suite. Prove the required negative and positive matrix with `node --test evals/harbor/corpus-hard-v2-partial-refund-ledger-invariants.test.mjs`.
-- [ ] 3.3 Register `partial-refund-ledger-invariants` in the manifest, smoke registry/expectations, and evaluation docs. Verify `npm run smoke:evals:hard-v2` reports the Tests task and its three contexts.
+- [x] 3.1 Add the agent-visible `evals/harbor/tasks/forgekit-hard-v2/partial-refund-ledger-invariants` fixture, protected visible tests, task metadata, and instruction contract. Verify the visible suite passes while a cumulative partial-refund boundary reproduction fails.
+- [x] 3.2 Add its separate verifier, hidden ledger/effect probes, semantic latest-entry mutant, known-good solution, alternate positive, and task-specific host suite. Prove the required negative and positive matrix with `node --test evals/harbor/corpus-hard-v2-partial-refund-ledger-invariants.test.mjs`.
+- [x] 3.3 Register `partial-refund-ledger-invariants` in the manifest, smoke registry/expectations, and evaluation docs. Verify `npm run smoke:evals:hard-v2` reports the Tests task and its three contexts.
 
 ## 4. Integration vertical slice
-- [ ] 4.1 Add the agent-visible `evals/harbor/tasks/forgekit-hard-v2/carrier-event-reconciliation` fixture, protected visible tests, task metadata, and instruction contract. Verify the visible suite passes while carrier-ID collision and late-event reproductions fail.
-- [ ] 4.2 Add its separate verifier, deterministic recording-adapter probes, semantic reconciliation mutant, known-good solution, alternate positive, and task-specific host suite. Prove the required negative and positive matrix with `node --test evals/harbor/corpus-hard-v2-carrier-event-reconciliation.test.mjs`.
-- [ ] 4.3 Register `carrier-event-reconciliation` in the manifest, smoke registry/expectations, and evaluation docs. Verify `npm run smoke:evals:hard-v2` reports the Integration task and its three contexts.
+- [x] 4.1 Add the agent-visible `evals/harbor/tasks/forgekit-hard-v2/carrier-event-reconciliation` fixture, protected visible tests, task metadata, and instruction contract. Verify the visible suite passes while carrier-ID collision and late-event reproductions fail.
+- [x] 4.2 Add its separate verifier, deterministic recording-adapter probes, semantic reconciliation mutant, known-good solution, alternate positive, and task-specific host suite. Prove the required negative and positive matrix with `node --test evals/harbor/corpus-hard-v2-carrier-event-reconciliation.test.mjs`.
+- [x] 4.3 Register `carrier-event-reconciliation` in the manifest, smoke registry/expectations, and evaluation docs. Verify `npm run smoke:evals:hard-v2` reports the Integration task and its three contexts.
 
 ## 5. Product-loop and corpus verification
-- [ ] 5.1 Update `evals/README.md` and `docs/agentic-evals.md` with the four-task incomplete-corpus status, task contracts, twelve-context smoke behavior, and calibration language distinguishing one paired repetition from two-repetition counterbalancing.
-- [ ] 5.2 Run `forge e2e run`, the three task-specific host suites, `npm run test:evals`, `npm run lint:evals`, and `npm run smoke:evals:hard-v2`; record independent per-slice and final review evidence.
+- [x] 5.1 Update `evals/README.md` and `docs/agentic-evals.md` with the four-task incomplete-corpus status, task contracts, twelve-context smoke behavior, and calibration language distinguishing one paired repetition from two-repetition counterbalancing.
+- [x] 5.2 Run `forge e2e run`, the three task-specific host suites, `npm run test:evals`, `npm run lint:evals`, and `npm run smoke:evals:hard-v2`; record independent per-slice and final review evidence.

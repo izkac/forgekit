@@ -37,17 +37,25 @@ The v1 manifest and complete contents of all six v1 task trees are frozen by
 `evals/harbor/corpus-v1.lock.json`. CI hashes them and fails on drift; historical
 v1 must not be changed in place. A substantive change requires a new corpus ID.
 
-`forgekit-hard-v2` is a companion corpus with two reviewed tasks:
+`forgekit-hard-v2` is a companion corpus with four reviewed tasks:
 
-| Category | Task id | Task version | Requested work |
-| --- | --- | --- | --- |
-| bug | `reservation-confirmation-race` | `1.0.1` | Repair confirmation races and add a deterministic overlap test. |
-| security | `tenant-signed-downloads` | `1.0.0` | Bind signed document downloads to authenticated, routed, capability, and stored tenant context while preserving valid responses. |
+| Category | Task id | Version | Dominant contract | Separate verifier / semantic mutant | Three contexts |
+| --- | --- | --- | --- | --- | --- |
+| bug | `reservation-confirmation-race` | `1.0.1` | Concurrent confirmation admission, replay/conflict/retry/expiry and HTTP behavior | No-network `tests/` verifier checks deterministic overlap and HTTP outcomes; `tests/mutants/confirmation-service.mjs` permits a double charge | baseline agent `environment/`; Forge agent staged `environment/`; separate verifier `tests/` |
+| security | `tenant-signed-downloads` | `1.0.0` | Tenant binding across authenticated, routed, signed, and stored document context; canonical expiry and fail-closed downloads | No-network `tests/` verifier checks tenant/signature/expiry/download behavior; `tests/mutants/capability-service.mjs` omits tenant binding from the signed payload | baseline agent `environment/`; Forge agent staged `environment/`; separate verifier `tests/` |
+| tests | `partial-refund-ledger-invariants` | `1.0.0` | Cumulative integer-cent balance, failed-attempt non-consumption, exact boundary, idempotency and conflict effects | No-network `tests/` verifier plus required separate table-driven agent test; `tests/mutants/refund-service.mjs` accounts only for the latest successful entry | baseline agent `environment/`; Forge agent staged `environment/`; separate verifier `tests/` |
+| integration | `carrier-event-reconciliation` | `1.0.0` | Carrier normalization, `(carrier,eventId)` idempotency, append-before-project ordering and provider precedence | No-network `tests/` verifier checks normalization, deduplication, ordering and terminal delivery; `tests/mutants/reconciliation-service.mjs` removes carrier scope and permits regression | baseline agent `environment/`; Forge agent staged `environment/`; separate verifier `tests/` |
 
-Hard-v2 remains an **incomplete two-task foundation**. It is not yet a
-complete six-category corpus, and its infrastructure, oracle runs, and
-verifier tests are not provider-backed evidence that Forgekit is effective. No
-provider effectiveness evidence has been produced for hard-v2 at HEAD.
+The four rows yield exactly twelve build-check contexts. The verifier context
+is separate and no-network; neither it nor its semantic mutant is mounted into
+an agent context. These are infrastructure and verifier-integrity checks, not
+provider-backed effectiveness evidence.
+
+Hard-v2 remains an **incomplete four-task foundation**, pending the Feature
+and Refactor tasks. It is not yet a complete six-category corpus, and its
+infrastructure, oracle runs, and verifier tests are not provider-backed
+evidence that Forgekit is effective. No provider effectiveness evidence has
+been produced for hard-v2 at HEAD.
 
 Each task's grader lives in its own `tests/` verifier context. Harbor's
 `environment_mode = "separate"` and no-network verifier keep it out of the
@@ -107,13 +115,13 @@ npm run smoke:evals:hard-v2
 `npm run smoke:evals` remains the exact v1 smoke. It validates all six v1
 tasks, baseline/Forge staging, hidden-verifier isolation, untouched and
 known-good verifier paths, and the three Docker contexts for each v1 task.
-
-`npm run smoke:evals:hard-v2` selects the two reviewed hard-v2 tasks. For each
-task it validates manifest/task metadata, dry-run baseline/Forge staging and
-verifier isolation, plus the required host matrix: untouched negative, oracle
-positive, alternate positive, tamper negative, no-added-test negative, and
-mutant negative. It validates exactly three Docker build-check contexts per
-task—baseline agent, Forge agent, and separate verifier—running
+`npm run smoke:evals:hard-v2` selects the four reviewed hard-v2 tasks. For each
+task it validates manifest/task metadata, including non-empty task-local
+`semantic_mutants`, dry-run baseline/Forge staging and verifier isolation, plus
+the required host matrix: untouched negative, oracle positive, alternate
+positive, tamper negative, no-added-test negative, and mutant negative. It
+validates exactly three Docker build-check contexts per task—twelve contexts
+total: baseline agent, Forge agent, and separate verifier—running
 `docker build --check` when Docker is available or reporting Docker validation
 as skipped after local context-reference checks. It never invokes Harbor or a
 model.
@@ -206,6 +214,65 @@ runs root: concurrent writers with the same derived run id can replace or
 interleave that directory. A dry-run is not accepted by the aggregator as
 completed evidence. This hard-v2 example is deliberately dry-run only: it
 validates selection and staging without claiming a provider outcome.
+
+## Hard-v2 Calibration Protocol (Preregister Before Execution)
+
+Treat calibration as a reproducibility check, not provider-effectiveness
+evidence. Freeze and record this checklist before authorizing any model-backed
+run:
+
+- corpus `forgekit-hard-v2`, task ID, exact task version, and canonical
+  task-tree revision;
+- immutable Forgekit treatment identity: published version or artifact
+  digest (and tarball byte count/digest when applicable);
+- agent ID, model ID, model settings, Harbor/harness revision, and image
+  identities;
+- seed, `--arm both`, repetition count, `--concurrency 1`, and the planned
+  order frozen before execution (then the exact recorded order);
+- operator, start/end dates and timezone, retention/redaction procedure,
+  budget, and a spend/stop rule for cost, operational failures, or missing
+  verifier rewards.
+
+`--arm both --repetitions 1` is one paired calibration (one baseline/Forge
+pair), not an exactly counterbalanced design: the hash-selected starting arm
+has one extra first position. Report that first-position imbalance. Exact
+within-task first-position counterbalancing starts at an even repetition
+count, minimally `--repetitions 2`; keep the seed and task revision fixed.
+Do not pool a one-pair calibration with a later counterbalanced cohort unless
+that decision was preregistered.
+
+Any substantive post-calibration change to task instructions, fixtures,
+verifier, mutant, or task tree requires a task-version bump. Exclude the
+superseded calibration from effectiveness analysis and preregister the new
+revision as a new cohort. A changed treatment digest/version, agent/model,
+seed, order, concurrency, retention rule, spend/stop rule, or date window is
+also a new cohort control decision.
+
+### Copyable Templates For The Three New Tasks
+
+These commands contain placeholders only: no credentials, host paths, run IDs,
+results, or completed-run claims. A dry-run stages without a provider. Remove
+`--dry-run` only after the checklist and spend authorization are frozen.
+
+```bash
+# tenant-signed-downloads — dry-run
+node evals/harbor/run.mjs --corpus forgekit-hard-v2 --task tenant-signed-downloads --arm both --repetitions 1 --concurrency 1 --seed <calibration-seed> --agent <agent-id> --model <model-id> --forgekit-version <published-semver> --dry-run
+
+# tenant-signed-downloads — real run (one paired calibration)
+node evals/harbor/run.mjs --corpus forgekit-hard-v2 --task tenant-signed-downloads --arm both --repetitions 1 --concurrency 1 --seed <calibration-seed> --agent <agent-id> --model <model-id> --forgekit-version <published-semver>
+
+# partial-refund-ledger-invariants — dry-run
+node evals/harbor/run.mjs --corpus forgekit-hard-v2 --task partial-refund-ledger-invariants --arm both --repetitions 1 --concurrency 1 --seed <calibration-seed> --agent <agent-id> --model <model-id> --forgekit-version <published-semver> --dry-run
+
+# partial-refund-ledger-invariants — real run (one paired calibration)
+node evals/harbor/run.mjs --corpus forgekit-hard-v2 --task partial-refund-ledger-invariants --arm both --repetitions 1 --concurrency 1 --seed <calibration-seed> --agent <agent-id> --model <model-id> --forgekit-version <published-semver>
+
+# carrier-event-reconciliation — dry-run
+node evals/harbor/run.mjs --corpus forgekit-hard-v2 --task carrier-event-reconciliation --arm both --repetitions 1 --concurrency 1 --seed <calibration-seed> --agent <agent-id> --model <model-id> --forgekit-version <published-semver> --dry-run
+
+# carrier-event-reconciliation — real run (one paired calibration)
+node evals/harbor/run.mjs --corpus forgekit-hard-v2 --task carrier-event-reconciliation --arm both --repetitions 1 --concurrency 1 --seed <calibration-seed> --agent <agent-id> --model <model-id> --forgekit-version <published-semver>
+```
 
 ## 5. Understand Seed, Order, And Concurrency
 
@@ -452,8 +519,9 @@ provenance afterward.
 ## 10. Interpret The Corpora Conservatively
 
 V1 contains six small dependency-free Node fixtures and only one task per
-category. Hard-v2 currently contains two reviewed tasks, so it remains an
-incomplete two-task foundation rather than a representative hard corpus.
+category. Hard-v2 currently contains four reviewed tasks, so it remains an
+incomplete four-task foundation pending the Feature and Refactor tasks rather
+than a representative hard corpus.
 Neither represents other languages, large repositories, long-horizon
 maintenance, production integrations, or all coding-agent use. Public
 availability introduces contamination risk; separate hidden verifiers reduce
@@ -487,6 +555,26 @@ exact expiry boundary and malformed signature input fail closed without
 exposing bytes; valid same-tenant downloads preserve their response bytes and
 headers. Its semantic mutant and protected-test checks assess this requested
 contract, not general security or production safety.
+
+For `partial-refund-ledger-invariants`, the separate no-network verifier checks
+that successful refunds are accumulated in integer cents against one charge.
+Validation errors, missing charges, rejected over-limit attempts, and gateway
+failures do not consume refundable balance, even when an audit ledger records
+the failed attempt; an amount exactly equal to the remaining balance is
+accepted. Replaying a successful idempotency key returns the original result
+without another gateway call or ledger append, while reusing that key with a
+different amount fails before either effect. The task separately requires a
+table-driven agent test in a new `src/*.test.mjs` file; the protected visible
+test and package metadata remain unchanged.
+
+For `carrier-event-reconciliation`, the separate no-network verifier checks
+configured carrier normalizers that project different payload shapes into one
+canonical event. Event identity is scoped to `(carrier, eventId)`, so duplicate
+delivery has no second append or projection effect while equal provider IDs
+from different carriers remain independent. Accepted events append before
+shipment projection; provider sequence and occurred-at precedence prevent an
+older arrival from regressing a newer projection, and `delivered` is terminal.
+Unknown carriers and malformed payloads fail before either store is written.
 
 Those controls test grader integrity, not every possible schedule or solution.
 The public probe can be contaminated, one mutant is only a proxy for one
