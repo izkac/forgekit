@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,9 +27,9 @@ function runSmoke(env = {}) {
   });
 }
 
-function runHardSmoke(env = {}) {
+function runHardSmoke(env = {}, executable = hardSmoke) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [hardSmoke], {
+    const child = spawn(process.execPath, [executable], {
       cwd: projectRoot,
       env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -201,7 +201,150 @@ exit 99
   await assert.rejects(stat(harborCapture), { code: 'ENOENT' });
 });
 
-test('hard-v2 smoke checks exactly three isolated Docker contexts', async (t) => {
+test('hard-v2 smoke discovers verifier-required semantic mutants without task-specific filenames', async (t) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'forgekit-hard-smoke-mutant-'));
+  const fixtureHere = path.join(fixtureRoot, 'evals', 'harbor');
+  const taskId = 'reservation-confirmation-race';
+  const taskRoot = path.join(fixtureHere, 'tasks', 'forgekit-hard-v2', taskId);
+  const mutantName = 'semantic-mutant.mjs';
+  const sourceTaskRoot = path.join(here, 'tasks', 'forgekit-hard-v2', taskId);
+  await Promise.all([
+    mkdir(path.join(fixtureHere, 'corpora'), { recursive: true }),
+    mkdir(path.dirname(taskRoot), { recursive: true }),
+  ]);
+  await cp(sourceTaskRoot, taskRoot, { recursive: true });
+  await Promise.all([
+    cp(hardSmoke, path.join(fixtureHere, 'smoke-hard-v2.mjs')),
+    cp(
+      path.join(here, 'corpora', 'forgekit-hard-v2.json'),
+      path.join(fixtureHere, 'corpora', 'forgekit-hard-v2.json'),
+    ),
+    writeFile(
+      path.join(fixtureHere, 'corpus-hard-v2-reservation-confirmation-race.test.mjs'),
+      "import test from 'node:test';\ntest('fixture host suite', () => {});\n",
+    ),
+  ]);
+  const originalMutant = path.join(taskRoot, 'tests', 'mutants', 'confirmation-service.mjs');
+  const semanticMutant = path.join(taskRoot, 'tests', 'mutants', mutantName);
+  await rename(originalMutant, semanticMutant);
+  const graderPath = path.join(taskRoot, 'tests', 'grader.mjs');
+  await writeFile(
+    graderPath,
+    (await readFile(graderPath, 'utf8'))
+      .replace(
+        'readFileSync(`${TESTS_DIR}/mutants/confirmation-service.mjs`)',
+        `readFileSync(join(TESTS_DIR, "mutants", "${mutantName}"))`,
+      )
+      .concat(`\n// mutants/${mutantName} is documented here but task metadata is authoritative.\n`),
+  );
+  const taskTomlPath = path.join(taskRoot, 'task.toml');
+  const originalTaskToml = await readFile(taskTomlPath, 'utf8');
+  const semanticMutantMetadata = `semantic_mutants = ["tests/mutants/${mutantName}"]`;
+  const validTaskToml = /^semantic_mutants\s*=/m.test(originalTaskToml)
+    ? originalTaskToml.replace(/^semantic_mutants.*$/m, semanticMutantMetadata)
+    : originalTaskToml.replace(
+      'environment_mode = "separate"',
+      `environment_mode = "separate"\n${semanticMutantMetadata}`,
+    );
+  await writeFile(taskTomlPath, validTaskToml);
+
+  const bin = path.join(fixtureRoot, 'bin');
+  await mkdir(bin);
+  const fakeRunner = path.join(bin, 'runner.mjs');
+  const docker = path.join(bin, 'docker');
+  await writeFile(fakeRunner, `#!/usr/bin/env node
+import { copyFileSync, renameSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+const result = spawnSync(process.execPath, [process.env.REAL_RUNNER, ...process.argv.slice(2)], {
+  encoding: 'utf8',
+  env: process.env,
+});
+if (result.status !== 0) {
+  process.stderr.write(result.stderr);
+  process.exit(result.status);
+}
+const plan = JSON.parse(result.stdout);
+const runDirectory = path.join(process.env.FORGEKIT_EVAL_RUNS_ROOT, plan.runId);
+for (const arm of plan.arms) {
+  const taskRoot = path.join(runDirectory, arm.stagedTask);
+  renameSync(
+    path.join(taskRoot, 'tests', 'mutants', 'confirmation-service.mjs'),
+    path.join(taskRoot, 'tests', 'mutants', '${mutantName}'),
+  );
+  copyFileSync(
+    path.join(process.env.FIXTURE_TASK_ROOT, 'tests', 'grader.mjs'),
+    path.join(taskRoot, 'tests', 'grader.mjs'),
+  );
+  copyFileSync(
+    path.join(process.env.FIXTURE_TASK_ROOT, 'task.toml'),
+    path.join(taskRoot, 'task.toml'),
+  );
+}
+process.stdout.write(result.stdout);
+`);
+  await writeFile(docker, '#!/bin/sh\nexit 1\n');
+  await Promise.all([chmod(fakeRunner, 0o755), chmod(docker, 0o755)]);
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+
+  const env = {
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    FORGEKIT_SMOKE_RUNNER: fakeRunner,
+    REAL_RUNNER: path.join(here, 'run.mjs'),
+    FIXTURE_TASK_ROOT: taskRoot,
+  };
+  const fixtureSmoke = path.join(fixtureHere, 'smoke-hard-v2.mjs');
+  const result = await runHardSmoke(env, fixtureSmoke);
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, new RegExp(`PASS hard-v2 manifest and task metadata: ${taskId}`));
+
+  const invalidMetadata = [
+    {
+      source: validTaskToml.replace(
+        /^semantic_mutants.*$/m,
+        `# semantic_mutants = ["tests/mutants/${mutantName}"]`,
+      ),
+      error: /must declare non-empty verifier semantic_mutants/,
+    },
+    {
+      source: validTaskToml.replace(/^semantic_mutants.*$/m, 'semantic_mutants = []'),
+      error: /must declare non-empty verifier semantic_mutants/,
+    },
+    {
+      source: validTaskToml.replace(/^semantic_mutants.*$/m, 'semantic_mutants = ["/tmp/mutant.mjs"]'),
+      error: /semantic mutant path must stay within tests\/mutants/,
+    },
+    {
+      source: validTaskToml.replace(
+        /^semantic_mutants.*$/m,
+        'semantic_mutants = ["tests/mutants/../semantic-mutant.mjs"]',
+      ),
+      error: /semantic mutant path must stay within tests\/mutants/,
+    },
+    {
+      source: validTaskToml.replace(
+        /^semantic_mutants.*$/m,
+        'semantic_mutants = ["tests/mutants/semantic-mutant.txt"]',
+      ),
+      error: /semantic mutant path must end in \.mjs/,
+    },
+    {
+      source: validTaskToml.replace(
+        /^semantic_mutants.*$/m,
+        'semantic_mutants = ["tests/mutants/missing-semantic-mutant.mjs"]',
+      ),
+      error: /missing required file: tests\/mutants\/missing-semantic-mutant\.mjs/,
+    },
+  ];
+  for (const fixture of invalidMetadata) {
+    await writeFile(taskTomlPath, fixture.source);
+    const invalid = await runHardSmoke(env, fixtureSmoke);
+    assert.notEqual(invalid.code, 0, invalid.stdout);
+    assert.match(invalid.stderr, fixture.error);
+  }
+});
+
+test('hard-v2 smoke checks three isolated Docker contexts per selected task', async (t) => {
   const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-hard-smoke-docker-'));
   const capture = path.join(bin, 'docker-argv.jsonl');
   const docker = path.join(bin, 'docker');
@@ -217,7 +360,9 @@ appendFileSync(process.env.DOCKER_CAPTURE, JSON.stringify(process.argv.slice(2))
     DOCKER_CAPTURE: capture,
   });
   assert.equal(result.code, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /PASS Docker validation: 3 hard-v2 build contexts/);
+  const manifest = JSON.parse(await readFile(path.join(here, 'corpora', 'forgekit-hard-v2.json'), 'utf8'));
+  const expectedContextCount = manifest.tasks.length * 3;
+  assert.match(result.stdout, new RegExp(`PASS Docker validation: ${expectedContextCount} hard-v2 build contexts`));
   const summary = resultFrom(result.stdout);
   assert.equal(summary.docker.status, 'validated');
   assert.equal(summary.docker.method, 'docker build --check');
@@ -229,7 +374,7 @@ appendFileSync(process.env.DOCKER_CAPTURE, JSON.stringify(process.argv.slice(2))
 
   const calls = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.deepEqual(calls[0], ['info', '--format', '{{.ServerVersion}}']);
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, expectedContextCount + 1);
   for (const call of calls.slice(1)) {
     assert.deepEqual(call.slice(0, 2), ['build', '--check']);
     assert.ok(call.includes('--file'));

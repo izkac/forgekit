@@ -1,0 +1,51 @@
+{
+  "change": "add-hard-v2-evaluation-tranche",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Tenant-bound signed-download security task",
+      "library": "evals/harbor/tasks/forgekit-hard-v2/tenant-signed-downloads",
+      "runtimeOwner": "separate no-network verifier and UID-dropped candidate worker",
+      "writes": "four binary verifier rewards",
+      "reads": "protected submitted app, fixed tenant keys, manual clock, colliding document fixtures, semantic mutant tests",
+      "uiConsumer": "Harbor normalized results and paired aggregation",
+      "evidence": "evals/harbor/corpus-hard-v2-tenant-signed-downloads.test.mjs"
+    },
+    {
+      "capability": "Partial-refund ledger-invariant tests task",
+      "library": "evals/harbor/tasks/forgekit-hard-v2/partial-refund-ledger-invariants",
+      "runtimeOwner": "separate no-network verifier and UID-dropped candidate worker",
+      "writes": "four binary verifier rewards",
+      "reads": "protected submitted app, recording ledger and gateway outcomes, semantic mutant tests",
+      "uiConsumer": "Harbor normalized results and paired aggregation",
+      "evidence": "evals/harbor/corpus-hard-v2-partial-refund-ledger-invariants.test.mjs"
+    },
+    {
+      "capability": "Carrier-event reconciliation integration task",
+      "library": "evals/harbor/tasks/forgekit-hard-v2/carrier-event-reconciliation",
+      "runtimeOwner": "separate no-network verifier and UID-dropped candidate worker",
+      "writes": "four binary verifier rewards",
+      "reads": "protected submitted app, fixed carrier event sequences, recording stores, semantic mutant tests",
+      "uiConsumer": "Harbor normalized results and paired aggregation",
+      "evidence": "evals/harbor/corpus-hard-v2-carrier-event-reconciliation.test.mjs"
+    },
+    {
+      "capability": "Allowlisted four-task hard-v2 selection",
+      "library": "evals/harbor/corpora/forgekit-hard-v2.json and evals/harbor/corpus-selection.mjs",
+      "runtimeOwner": "Harbor evaluation runner CLI",
+      "writes": "portable plan and trial-manifest corpus/task provenance",
+      "reads": "checked-in corpus manifest and selected task trees",
+      "uiConsumer": "operator automation and aggregate-results.mjs",
+      "evidence": "evals/harbor/run.test.mjs and evals/harbor/smoke.test.mjs"
+    },
+    {
+      "capability": "Manifest-driven hard-v2 preflight",
+      "library": "evals/harbor/smoke-hard-v2.mjs",
+      "runtimeOwner": "npm run smoke:evals:hard-v2",
+      "writes": "machine-readable four-task smoke report",
+      "reads": "hard-v2 manifest, staged arms, task-specific host suites, semantic mutants, twelve Docker contexts",
+      "uiConsumer": "operator and CI preflight",
+      "evidence": "evals/harbor/smoke.test.mjs"
+    }
+  ]
+}

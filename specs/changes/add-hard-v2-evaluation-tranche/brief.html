@@ -1,0 +1,46 @@
+<!-- forge-brief-specs-hash:ea160b9e5e29e7a5 -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brief — Hard-v2 evaluation tranche</title>
+  <style>
+    body { max-width: 860px; margin: 3rem auto; padding: 0 1.25rem; font: 17px/1.55 system-ui, sans-serif; color: #1d2430; }
+    h1, h2 { line-height: 1.15; }
+    code { background: #eef1f5; padding: .1rem .3rem; border-radius: .25rem; }
+    .callout { border-left: .3rem solid #3659a2; padding: .7rem 1rem; background: #f5f7fb; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccd2dc; padding: .55rem; text-align: left; vertical-align: top; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Add three reviewed hard-v2 evaluation tasks</h1>
+    <p>Hard-v2 currently measures one concurrency bug. Repeating it would spend provider budget without showing whether Forgekit generalizes to different maintenance work. This change adds Security, Tests, and Integration tasks and keeps Feature and Refactor for a later tranche.</p>
+
+    <h2>What will be added</h2>
+    <table>
+      <thead><tr><th>Category</th><th>Task</th><th>Dominant contract</th></tr></thead>
+      <tbody>
+        <tr><td>Security</td><td><code>tenant-signed-downloads</code></td><td>Signed download capabilities must bind tenant, document, and expiry and reject cross-tenant replay.</td></tr>
+        <tr><td>Tests</td><td><code>partial-refund-ledger-invariants</code></td><td>Agent-added boundary tests and the repair must preserve cumulative refund, failure, and idempotency invariants.</td></tr>
+        <tr><td>Integration</td><td><code>carrier-event-reconciliation</code></td><td>Carrier-normalized events must deduplicate in carrier scope, persist before projection, and never regress shipment state.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>How grading remains trustworthy</h2>
+    <p>Each task has protected visible tests and a separate, root-owned, no-network verifier. Candidate code runs under an untrusted UID. Hidden checks use fixed inputs, manual clocks or recording adapters, not source matching or sleeps. A known-good solution and a structurally different correct implementation must both pass. Untouched, tampered, missing-test, and complete semantic-mutant submissions must remain non-shippable.</p>
+
+    <h2>Product-loop proof</h2>
+    <p><code>npm run smoke:evals:hard-v2</code> will select all four manifest tasks, dry-stage baseline and Forge arms, execute every task-specific host matrix, check verifier isolation, and validate three Docker contexts per task. It will report twelve contexts and will not invoke Harbor or a model.</p>
+
+    <div class="callout">
+      <strong>No effectiveness claim.</strong> Hard-v2 remains incomplete after this tranche. No provider run occurs during implementation. One baseline/Forge repetition is a paired calibration with order imbalance; exact within-task counterbalancing begins at two repetitions. Any task changed after calibration receives a new version and a new run.
+    </div>
+
+    <h2>Unchanged</h2>
+    <p>The frozen v1 corpus, default corpus selection, historical results, normalized reward fields, aggregation rules, package publication, and provider configuration do not change.</p>
+  </main>
+</body>
+</html>

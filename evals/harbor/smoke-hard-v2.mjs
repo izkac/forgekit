@@ -71,6 +71,21 @@ function quotedValue(section, key) {
   requireCondition(match, `task.toml is missing ${key}`);
   return match[1];
 }
+function quotedArray(section, key) {
+  const match = section.match(new RegExp(`^${key}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*$`, 'm'));
+  requireCondition(match, `task.toml must declare non-empty verifier ${key}`);
+  const values = [];
+  const remainder = match[1].replace(/"([^"\\\r\n]+)"/g, (_quoted, value) => {
+    values.push(value);
+    return '""';
+  });
+  requireCondition(
+    values.length > 0 && /^\s*(?:""\s*,\s*)*""\s*,?\s*$/.test(remainder),
+    `task.toml must declare non-empty verifier ${key} as a quoted array`,
+  );
+  return values;
+}
+
 
 function numericValue(section, key) {
   const match = section.match(new RegExp(`^${key}\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)\\s*$`, 'm'));
@@ -101,6 +116,24 @@ async function loadAndValidateManifest() {
 }
 
 async function validateTaskMetadata(entry, taskRoot) {
+  const source = await readFile(path.join(taskRoot, 'task.toml'), 'utf8');
+  requireCondition(/^schema_version\s*=\s*"1\.4"\s*$/m.test(source), 'hard-v2 task must declare Harbor schema 1.4');
+  const verifier = tomlSection(source, 'verifier');
+  const semanticMutants = quotedArray(verifier, 'semantic_mutants');
+  for (const relative of semanticMutants) {
+    const segments = relative.split('/');
+    requireCondition(
+      relative.startsWith('tests/mutants/')
+        && !path.posix.isAbsolute(relative)
+        && /^[A-Za-z0-9._/-]+$/.test(relative)
+        && segments.every((segment) => segment !== '' && segment !== '.' && segment !== '..'),
+      `hard-v2 semantic mutant path must stay within tests/mutants: ${entry.id}`,
+    );
+    requireCondition(
+      relative.endsWith('.mjs'),
+      `hard-v2 semantic mutant path must end in .mjs: ${entry.id}`,
+    );
+  }
   await requireFiles(taskRoot, [
     'task.toml',
     'instruction.md',
@@ -113,10 +146,8 @@ async function validateTaskMetadata(entry, taskRoot) {
     'tests/test.sh',
     'solution/solve.sh',
     'fixtures/alternate-positive/solve.sh',
-    'tests/mutants/confirmation-service.mjs',
+    ...semanticMutants,
   ]);
-  const source = await readFile(path.join(taskRoot, 'task.toml'), 'utf8');
-  requireCondition(/^schema_version\s*=\s*"1\.4"\s*$/m.test(source), 'hard-v2 task must declare Harbor schema 1.4');
   const task = tomlSection(source, 'task');
   requireCondition(quotedValue(task, 'name') === `${corpusId}/${entry.id}`, 'hard-v2 task.toml name does not match selected task');
   requireCondition(quotedValue(task, 'version') === entry.version, 'hard-v2 manifest and task.toml versions differ');
@@ -126,7 +157,6 @@ async function validateTaskMetadata(entry, taskRoot) {
   requireCondition(quotedValue(metadata, 'benchmark_category') === entry.category, 'hard-v2 manifest and benchmark category differ');
   requireCondition(quotedValue(metadata, 'difficulty_explanation').length > 0, 'hard-v2 difficulty explanation must not be empty');
   requireCondition(numericValue(tomlSection(source, 'agent'), 'timeout_sec') > 0, 'hard-v2 agent timeout must be positive');
-  const verifier = tomlSection(source, 'verifier');
   requireCondition(numericValue(verifier, 'timeout_sec') > 0, 'hard-v2 verifier timeout must be positive');
   requireCondition(quotedValue(verifier, 'environment_mode') === 'separate', 'hard-v2 verifier must use a separate environment');
   requireCondition(quotedValue(tomlSection(source, 'verifier.environment'), 'network_mode') === 'no-network', 'hard-v2 verifier network must be disabled');
