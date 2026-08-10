@@ -63,6 +63,11 @@ export const SKILLS = {
     nextHint:
       'ADR conflicts: invoke git-resolve-adr-conflict when two authors collide on the same NNNN.',
   },
+  'plain-language': {
+    label: 'Plain Language',
+    nextHint:
+      'Plain Language: always-on style for dev tasks. For every-session enforcement, paste PORTABLE-RULES.md into the agent’s global instructions (CLAUDE.md / AGENTS.md).',
+  },
 };
 
 export const SKILL_IDS = Object.freeze(Object.keys(SKILLS));

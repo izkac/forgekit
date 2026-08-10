@@ -65,6 +65,7 @@ forgekit/
   skills/thorough-code-review/
   skills/archive-to-adr/
   skills/git-resolve-adr-conflict/
+  skills/plain-language/
   packages/cli/                 # @izkac/forgekit → forgekit + forge + review
   templates/project/            # forge init
   templates/adr/                # decisions.md, ADR index, hooks
