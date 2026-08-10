@@ -3,7 +3,14 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['**/node_modules/**', 'packages/cli/vendor/**'],
+    ignores: [
+      '**/node_modules/**',
+      'packages/cli/vendor/**',
+      // Runner-generated output; fixtures may intentionally violate lint rules.
+      'evals/.runs/**',
+      'evals/.staging/**',
+      'evals/staging/**',
+    ],
   },
   js.configs.recommended,
   {
