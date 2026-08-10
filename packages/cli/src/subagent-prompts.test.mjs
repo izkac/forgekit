@@ -38,7 +38,7 @@ test('both reviewer packets scope the review to a required diff range', () => {
   // Reviewer input cost is repo-sized or change-sized depending on this alone.
   // A reviewer with no range rebuilds one by reading the tree, which is where
   // the input-token multiple came from.
-  for (const name of ['task-reviewer-prompt.md', 'final-reviewer-prompt.md']) {
+  for (const name of ['task-reviewer-prompt.md', 'final-reviewer-prompt.md', 'closer-prompt.md']) {
     const text = fs.readFileSync(packet(name), 'utf8');
     assert.match(text, /\{DIFF_RANGE\}/, `${name} must carry a diff-range placeholder`);
     assert.match(text, /REQUIRED/, `${name} must mark the range required`);
@@ -49,6 +49,25 @@ test('both reviewer packets scope the review to a required diff range', () => {
       `${name} must ban undirected repository exploration`,
     );
   }
+});
+
+test('closer packet is a real final reviewer: evidence targets, tier-3 command, attribution', () => {
+  const text = fs.readFileSync(packet('closer-prompt.md'), 'utf8');
+  assert.match(text, /\{TASK_EVIDENCE_TARGETS\}/);
+  assert.match(text, /\{AFFECTED_TEST_COMMAND\}/);
+  assert.match(text, /\{GUARD_ALLOWANCES\}/);
+  assert.match(text, /Reviewer: <your model> \(closer\)/);
+  assert.match(text, /READY/);
+});
+
+test('close phase labels the closer as the final reviewer and caps the fix loop', () => {
+  const text = fs.readFileSync(path.join(skillsRoot, 'forge', 'phases', 'close.md'), 'utf8');
+  assert.match(text, /forge review-label final/);
+  assert.match(text, /resolvedCeremony/);
+  assert.match(text, /at most one/i);
+  // The gates stay: close.md must route through phase done / integrity-check.
+  assert.match(text, /forge phase done/);
+  assert.match(text, /integrity-check/);
 });
 
 test('review phase tells the coordinator to fill the final reviewer diff range', () => {

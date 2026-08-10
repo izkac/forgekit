@@ -1,7 +1,9 @@
 # Forge cost and speed — plan
 
 **Date:** 2026-08-10
-**Status:** phases A–C landed; D blocked on a measured baseline; E not started
+**Status:** phases A–C landed and measured (outcome tie confirmed, cost flat); item 8
+(combined close) landed as the main cost lever after phase-level metrics located the
+spend in the verify/review tail; D still blocked on a clean measurement; item 7 not started
 **Owner:** Forgekit maintainers
 
 ## The problem, in numbers
@@ -168,18 +170,27 @@ times over. On a small change it rarely earns that.
 a reason. Needs a file-overlap check, and probably git worktree isolation. Lowest
 confidence item on this list — treat as a spike, not a commitment.
 
-### 8. A middle mode between `/forge:skip` and full Forge
+### 8. Combined close — one pass replaces verify + review on small changes — **done**
 
-**What:** a mode that keeps the tracked change, spine, e2e and integrity gates, but the
-coordinator implements directly with TDD and dispatches one review at the end — no
-per-task subagents.
+**What shipped** (narrower and better-targeted than the original "middle mode" idea,
+because the phase-level metrics said the implement side was never the problem): Forge now
+resolves **`resolvedCeremony`** (`combined` | `full`) from plan facts on the way into
+implement. `combined` — ≤2 tasks, single capability, no wired spine rows, not high-risk —
+replaces the separate verify and review phases with one **closer** subagent pass
+(`phases/close.md` + `subagents/closer-prompt.md`): diff-read, evidence-ledger audit, one
+tier-3 run, READY/NOT READY, dispatched under `forge review-label final` so all scoring
+and floor machinery is unchanged. One fix round, then escalate. Target ~10–15 requests
+against the ~50 measured.
 
-**Why:** the benchmark's real lesson is that Forge only pays where the baseline fails.
-There is a large class of work that is substantial enough to track but where full
-orchestration buys nothing. Today the only options are all or nothing.
+**Evidence it targets the right thing:** per-trial `metrics.json` across both cohorts —
+verify+review+done = 2–4M input tokens/trial; implement = 0.4–0.9M. The tail is the bill.
 
-**Risk:** a new mode is a new thing to maintain and explain. Decide after 1–6 land and we
-can see how close `brisk` already gets.
+**Guardrails:** high-risk and spine-rowed changes can never resolve to `combined`
+(resolver-enforced, one-way); no-plan sessions fail closed to `full` unless their own
+declared facts qualify; `forge phase done` integrity gates identical on both paths.
+
+**Not yet measured** — needs the same cohort rerun, read via per-phase request counts
+(not token means, which one rework trial can swing at n=2).
 
 ## Order of work
 
@@ -189,7 +200,70 @@ can see how close `brisk` already gets.
 | **B** ✅ | 1, 2 | The two biggest token cuts. Skill-prose changes, no CLI risk. |
 | **C** ✅ | 5, 6 | Cleanup that gets easier once 1 and 2 have reshaped the loop. |
 | **D** | 4 | Preset retune, last, so its effect is measurable against a settled baseline. **Blocked:** needs an eval run over A–C first — retuning `standard` before we can see what A–C bought would leave us unable to attribute a quality regression to either. |
-| **E** | 7, 8 | Spikes. Only after A–D are measured. |
+| **E** | 7, 8 | Item 8 shipped as the combined close (see above) after phase metrics showed the tail, not implement, dominates small-task cost. Item 7 (parallel implementers) still a spike, still gated on measurement. |
+
+## Measured result — phases A–C, sonnet-hard-v2 cohort, n=2/task/arm
+
+Reran the exact cohort from "The problem, in numbers" (same seed
+`sonnet-hard-v2-cohort-1`, same 4 tasks, same both-arms/2-repetitions schedule,
+Sonnet) against a tarball built from this branch. Aggregated with
+`evals/harbor/aggregate-results.mjs`.
+
+**Outcome — real, clean win.** Forge's shippable rate was 5/8 before (losing to
+baseline's 6/8, primary `mean_delta: -0.125`). It's 6/8 now — an exact tie with
+baseline, `mean_delta: 0`. Forge no longer loses to the plain agent on this
+corpus.
+
+**Cost/speed — mixed, not the predicted win.** Pooled across all 4 tasks (n=8
+pairs per arm):
+
+| Measure | Before (forge arm) | After (forge arm) | Change |
+| ------- | ------------------- | ------------------ | ------ |
+| Wall clock (mean) | 813s | 835s | +2.6% |
+| Input tokens (mean) | 5,730,316 | 6,093,859 | +6.3% |
+| Cost (mean) | $2.841 | $2.722 | −4.2% |
+
+Not the 40%+ input-token cut the plan targeted. Per-task it's a split result,
+not a uniform flat line:
+
+| Task | Wall clock | Input tokens | Cost |
+| ---- | ---------- | ------------- | ---- |
+| reservation-confirmation-race | −40% | −37% | −37% |
+| tenant-signed-downloads | −2% | −13% | −33% |
+| partial-refund-ledger-invariants | +21% | +22% | +23% |
+| carrier-event-reconciliation | +64% | +62% | +34% |
+
+**The mechanism itself is confirmed working.** Checked `session.json` directly
+for the two money/auth trials (`partial-refund-ledger-invariants`): pre-change
+both resolved `pace: thorough, reason: "high-risk signals..."`; post-change both
+resolved `pace: standard, reason: "...— per-task review floor applies"`. Phase A
+fires exactly as designed.
+
+**Two things this run surfaced that the reasoning missed:**
+
+1. **Phase B has no opportunity to pay off on this corpus.** Grouping only
+   matters when a plan has multiple tasks to group. Most trials in both cohorts
+   resolved `planType: "direct"` with `tasksTotal` 0–1 — a single-shot session,
+   never touching `tasks.md` groups at all. The hard-v2 tasks are small enough,
+   and the agent's own triage light enough, that the tracked-change flow phase B
+   targets barely engages. The 8.5× multiple in the original benchmark came from
+   *this specific corpus's* dispatch pattern, and it isn't the multi-task-group
+   pattern phase B assumed.
+2. **Within-trial rework dominates the noise floor at n=2.** The worst
+   regression (`carrier-event-reconciliation`, +64% wall clock) traces to a
+   session named `repair-carrier-event-reconciliation` — the agent restarted
+   with a fresh direct session mid-trial, which roughly doubles cost on its own
+   and has nothing to do with phases A–C. At 2 trials per arm per task, one
+   reworked trial swings that task's mean by 50%+.
+
+**Conclusion:** ship the outcome win, don't claim the cost win yet. The plan's
+cost/speed reasoning was directionally right about *where* tokens go (dispatch
+ramp-up) but wrong about *how often* this corpus creates the multi-dispatch
+situation phase B targets. Before phase D: either grow this cohort's `n` past
+where one rework cycle swings the mean, or read dispatch counts directly out of
+`metrics.json` (`byPhase` request counts) instead of inferring them from total
+tokens — that would separate "phase B didn't fire" from "phase B fired and it's
+still noisy."
 
 ## How we will know it worked
 

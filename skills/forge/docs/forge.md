@@ -186,8 +186,8 @@ See the Forge skill’s [references/plan-routing.md](../references/plan-routing.
 | **brainstorm** | Explore intent, approaches, approval | `skills/brainstorming` |
 | **plan** | Tracked-change propose; **`forge spine init` every change** (rows or `notApplicable`); rows → `forge e2e init` (steps are a plan deliverable); wiring + product-loop tasks when async | [plan-routing.md](../references/plan-routing.md) |
 | **implement** | Subagent per work unit (one `tasks.md` group by default; 1:1 for high-risk), TDD per task, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../references/test-strategy.md) |
-| **verify** | Audit tier 2; tier 3; green `forge e2e run`; `forge integrity-check` | `skills/verification-before-completion` + `verify-evidence.md` |
-| **review** | Combined task reviewer (spec + quality) per unit, scoped to the diff range; final review (spine + executed e2e) | `skills/requesting-code-review` |
+| **verify** | `combined` ceremony (small low-risk change) → one closer pass covers verify + review ([phases/close.md]). Otherwise: audit tier 2; tier 3; green `forge e2e run`; `forge integrity-check` | `skills/verification-before-completion` + `verify-evidence.md` |
+| **review** | Covered by the closer when ceremony is `combined`. Otherwise: combined task reviewer (spec + quality) per unit, scoped to the diff range; final review (spine + executed e2e) | `skills/requesting-code-review` |
 | **finish** | Archive (+ ADR if the project uses that); `forge phase done` (integrity gate); cleanup | `/opsx:archive`, `forge cleanup` |
 
 **Standalone deep review (outside Forge):** for pre-merge audits with adversarial false-positive filtering, use the **thorough code review** skill — see [thorough-code-review.md](https://github.com/izkac/forgekit/blob/main/docs/thorough-code-review.md). Forge's `requesting-code-review` stays the per-task checkpoint during `/forge:build`.
@@ -439,6 +439,17 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 When `--tasks-total N` is set with **N ≥ 15** and resolved pace is still `brisk`/`lite` (not user-pinned), Forge escalates the session to **standard**.
 
 **Unchanged on all paces:** tier-1 TDD + tier-2 evidence, no autonomous commit, OpenSpec when in Forge. Runtime integrity (below) applies at every pace.
+
+### Ceremony (session tail)
+
+Orthogonal to pace: on the way into implement, Forge resolves **`resolvedCeremony`**
+from the plan. **`combined`** — ≤2 tasks, single capability, no wired spine rows,
+not high-risk — replaces the separate verify + review phases with **one closer
+subagent pass** (diff-read, evidence audit, one tier-3 run, READY/NOT READY);
+everything else is **`full`**, the existing tail. Measured motivation: on the
+sonnet-hard-v2 cohort the tail cost 2–4M input tokens per trial against
+0.4–0.9M for implement. The `forge phase done` integrity gates are identical on
+both paths, and high-risk changes can never resolve to `combined`.
 
 Agent rules for each knob: [pace.md](../references/pace.md).
 

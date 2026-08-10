@@ -58,6 +58,16 @@ Forge escalates the session to **`standard`** with
 `paceReason: "escalated: N tasks"`. Slug keywords are a poor proxy for scope;
 task count is known at plan time.
 
+## Ceremony (session tail) — orthogonal to pace
+
+On the way into implement, Forge also resolves **`resolvedCeremony`** from the
+plan: **`combined`** (≤2 tasks, single capability, no wired spine rows, not
+high-risk → one closer pass replaces the separate verify + review phases; see
+`phases/close.md`) or **`full`** (the existing tail). Pace pinning does not
+override it — pinning `thorough` is a statement about review cadence, not a
+request for three context-reestablishing tail phases on a two-task change. The
+floor is one-way: high-risk or spine-rowed changes are always `full`.
+
 ## Runtime integrity
 
 Always-on rules (all paces): [runtime-integrity.md](./runtime-integrity.md) —

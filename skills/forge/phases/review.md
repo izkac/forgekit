@@ -1,5 +1,9 @@
 # Review phase
 
+**Ceremony check first:** if `forge status` shows `resolvedCeremony: combined`
+and the session already ran its closer per [close.md](./close.md), this phase is
+done — the closer was the final reviewer. Do not dispatch a second one.
+
 Per-task reviews happen inside [implement.md](./implement.md). This phase covers **final** review before finish.
 
 Read and follow [../skills/requesting-code-review/SKILL.md](../skills/requesting-code-review/SKILL.md).

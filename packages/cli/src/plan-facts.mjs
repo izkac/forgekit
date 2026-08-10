@@ -110,6 +110,48 @@ export function collectPlanFacts(opts) {
   return facts;
 }
 
+/** At or below this task count a clean change qualifies for the combined close. */
+const COMBINED_TASKS = 2;
+
+/**
+ * Decide the session tail: `combined` (one closer pass replaces the separate
+ * verify + review phases) or `full` (the existing pipeline).
+ *
+ * Why this exists: measured on the sonnet-hard-v2 cohort, verify + review +
+ * done cost 2–4M input tokens per trial against 0.4–0.9M for implement — on a
+ * small change the tail is most of the bill, and it re-establishes context
+ * three times to check work one diff-read can cover. The floor is one-way:
+ * high-risk changes and wired spine rows (a product loop that must be executed,
+ * not read) always keep the full tail, whatever the task count.
+ *
+ * @param {ReturnType<typeof collectPlanFacts>} facts
+ * @returns {{ ceremony: 'combined' | 'full', reason: string }}
+ */
+export function suggestCeremonyFromPlan(facts) {
+  if (!facts || !facts.readable) {
+    return { ceremony: 'full', reason: 'could not read the plan — failing closed to full' };
+  }
+  if (facts.highRisk) {
+    return { ceremony: 'full', reason: 'high-risk change — full verify and review tail' };
+  }
+  if (facts.spineRows > 0) {
+    return {
+      ceremony: 'full',
+      reason: `${facts.spineRows} spine row(s) — the product loop is executed at verify, not read`,
+    };
+  }
+  if (facts.tasks <= COMBINED_TASKS && facts.capabilities <= 1) {
+    return {
+      ceremony: 'combined',
+      reason: `${facts.tasks} task(s), single capability, no spine rows — one closer pass covers the tail`,
+    };
+  }
+  return {
+    ceremony: 'full',
+    reason: `${facts.tasks} tasks, ${facts.capabilities} capability dir(s) — full tail`,
+  };
+}
+
 /** Tasks at or above this count mean a multi-surface change. */
 const STANDARD_TASKS = 15;
 /** Below this, with nothing else going on, the ceremony is not worth it. */

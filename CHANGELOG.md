@@ -65,6 +65,34 @@ subagent for the rest of the change, so its cost scales with dispatch count whil
 its value is fixed. For OpenSpec projects this is a coordinator call made after
 propose — the vendor skill is not edited.
 
+### Combined close: one pass replaces verify + review on small changes (cost/speed plan, item 8)
+
+Phase-level metrics from the sonnet-hard-v2 cohorts showed where Forge's money
+actually goes on small tasks: verify + review + done cost 2–4M input tokens per
+trial against 0.4–0.9M for implement — three tail phases each re-establishing
+context to check work one diff-read covers, while baseline solves the whole task
+for ~0.6M.
+
+On the way into implement, Forge now resolves **`resolvedCeremony`** from the
+plan (`suggestCeremonyFromPlan`, recorded on the session with a reason):
+
+- **`combined`** — ≤2 tasks, single capability, no wired spine rows, not
+  high-risk. One **closer** subagent (new `subagents/closer-prompt.md`, ~55
+  lines) is verifier and final reviewer in a single pass: reads the session
+  diff, audits the red→green ledgers, runs the narrowest tier-3 command once,
+  returns READY/NOT READY. Dispatched with `forge review-label final --tier
+  standard`, so the census, money/auth floor and scorecard machinery are
+  unchanged. One fix round, then escalate. Target ~10–15 requests for the whole
+  tail against the ~50 measured.
+- **`full`** — everything else: the existing verify → review pipeline, untouched.
+
+The floor is one-way and enforced in the resolver: money/auth/contracts/
+migrations/secrets and any change with wired spine rows always take the full
+tail. Sessions without a readable plan (legacy `direct`) resolve from their own
+declared task count and a risk read of the slug/signal, failing closed to
+`full`. Pace pinning does not override ceremony in either direction. The
+`forge phase done` integrity gates are identical on both paths.
+
 ## 0.3.37 — 2026-08-01
 
 ### Review guidance doc contract (F36)

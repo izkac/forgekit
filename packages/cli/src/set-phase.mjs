@@ -24,7 +24,8 @@ import {
 } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
-import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
+import { collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
+import { isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
@@ -203,8 +204,53 @@ function maybeResolvePaceFromPlan() {
   }
 }
 
+/**
+ * Resolve the session tail (`combined` vs `full`) on the way into implement.
+ *
+ * Independent of pace and of pace pinning: pinning `thorough` is a statement
+ * about review cadence, not about running three context-reestablishing tail
+ * phases on a two-task change. The high-risk floor is enforced inside the
+ * resolver (and re-checked here for the no-plan fallback), so a pinned pace
+ * can never *lower* the tail below what risk demands.
+ */
+function maybeResolveCeremonyFromPlan() {
+  if (phase !== 'implement') return;
+  try {
+    const facts = collectPlanFacts({ session });
+    let suggested;
+    if (facts.readable) {
+      suggested = suggestCeremonyFromPlan(facts);
+    } else {
+      // No tracked change dir (legacy direct sessions). The same thresholds
+      // apply, from what the session itself knows: declared task count and the
+      // risk read of its slug/signal.
+      const total = Number.isInteger(session.tasksTotal) ? session.tasksTotal : null;
+      const risky = isHighRiskText([session.paceSignal, session.slug].filter(Boolean).join(' '));
+      if (risky) {
+        suggested = { ceremony: 'full', reason: 'high-risk signals — full verify and review tail' };
+      } else if (total !== null && total > 0 && total <= 2) {
+        suggested = {
+          ceremony: 'combined',
+          reason: `no readable plan; ${total} declared task(s), no high-risk signals — one closer pass covers the tail`,
+        };
+      } else {
+        suggested = { ceremony: 'full', reason: 'no readable plan — failing closed to full' };
+      }
+    }
+    if (suggested.ceremony === session.resolvedCeremony) return;
+    session.resolvedCeremony = suggested.ceremony;
+    session.ceremonyReason = suggested.reason;
+    process.stderr.write(`[forge] Ceremony → ${suggested.ceremony} (${suggested.reason})\n`);
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not resolve ceremony from the plan: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
+
 maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
+maybeResolveCeremonyFromPlan();
 
 /**
  * Hard gate: implementation may not start until the operator brief exists and

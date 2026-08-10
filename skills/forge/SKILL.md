@@ -104,8 +104,8 @@ Valid phases: `triage`, `brainstorm`, `plan`, `implement`, `verify`, `review`, `
 | brainstorm | [phases/brainstorm.md](./phases/brainstorm.md) → **skills/brainstorming** |
 | plan | [references/plan-routing.md](./references/plan-routing.md) → engine from `.forge/config.json`: **OpenSpec** ([plan-openspec.md](./phases/plan-openspec.md)) or **specs** ([plan-specs.md](./phases/plan-specs.md)) |
 | implement | [phases/implement.md](./phases/implement.md) → **subagent-driven-development** + **TDD**. One implementer per **work unit** — a `tasks.md` group, ≤4 tasks, 1:1 for money/auth/contracts/migrations — not one per task |
-| verify | [phases/verify.md](./phases/verify.md) → **verification-before-completion** |
-| review | [phases/review.md](./phases/review.md) → **requesting-code-review** |
+| verify | `resolvedCeremony: combined` (small low-risk change) → [phases/close.md](./phases/close.md) — one closer pass replaces verify + review. Otherwise [phases/verify.md](./phases/verify.md) → **verification-before-completion** |
+| review | Covered by close.md when combined; otherwise [phases/review.md](./phases/review.md) → **requesting-code-review** |
 | finish | [phases/finish.md](./phases/finish.md) |
 
 <HARD-GATE>
