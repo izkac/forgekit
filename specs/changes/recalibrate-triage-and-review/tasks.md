@@ -122,13 +122,13 @@ see design **D4**. What is missing is the record, so these tasks now cover that.
 
 ## 6. Docs, distribution, and product loop
 
-- [ ] 6.1 Update `skills/forge/references/pace.md`: the new preset matrix, the
+- [x] 6.1 Update `skills/forge/references/pace.md`: the new preset matrix, the
       two-way resolution rules, and the plan-time exit ramp. Verify: the
       documented matrix matches `preferences.defaults.json` exactly.
-- [ ] 6.2 Note in `docs/forge.md` that skill doc changes reach other machines
+- [x] 6.2 Note in `docs/forge.md` that skill doc changes reach other machines
       only after `forgekit install --skills forge --force`. Verify: the
       statement is present where the install flow is described.
-- [ ] 6.3 Add a regression test asserting the documented matrix in `pace.md`
+- [x] 6.3 Add a regression test asserting the documented matrix in `pace.md`
       matches the shipped defaults, so the two cannot drift. Verify: the test
       fails when either side is edited alone.
 ## 7. Product loop

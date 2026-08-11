@@ -96,7 +96,21 @@ Thorough currently spends 0.36 independent reviews per task against standard's
 0.13, and returns 4.7 rejections per 100 tasks against standard's 4.8. The
 cadence claim is unsupported. Depth and fix rounds are a different axis and
 remain useful on genuinely risky work, so the preset survives with a narrower
-meaning: deeper reviews and more rounds, not more reviews.
+meaning: more fix rounds, not more reviews.
+
+**Corrected during implement.** An earlier draft of this paragraph said
+"deeper reviews and more rounds". That is wrong against the table directly above
+it: `depth` is `full` for both `standard` and `thorough`, and always was. After
+this change `thorough` differs from `standard` in exactly one knob —
+`maxRounds`, 3 against 2 — and `brisk` differs from `lite` only in `verify.tier3`
+and `brainstorm.depth`, their review knobs now being identical.
+
+That weakens, without voiding, the case for keeping four presets. The rejected
+alternative above (delete `thorough`) was rejected partly on a depth difference
+that does not exist. Whether a one-knob preset earns its name is a question this
+change does not settle — it is recorded as a finding rather than answered here,
+because collapsing the matrix is a larger change than recalibrating it, and the
+yield table this change adds is what should decide it.
 
 Two deliberate inversions of today's behaviour:
 

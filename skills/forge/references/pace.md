@@ -26,10 +26,10 @@ At session start: `Using Forge for this work. Pace: auto → brisk (…)` (use
 
 | Knob | `thorough` | `standard` | `brisk` | `lite` |
 |------|------------|------------|---------|--------|
-| **review.perTask** | always | per-group | high-risk-only | never\* |
-| **review.final** | always | always | high-risk-only | never\* |
+| **review.perTask** | per-group | per-group | never\* | never\* |
+| **review.final** | always | always | always | always |
 | **review.depth** | full | full | spec-only | spec-only |
-| **review.maxRounds** | 3 | 2 | 1 | 0 |
+| **review.maxRounds** | 3 | 2 | 1 | 1 |
 | **verify.tier3** | full-workspace | full-workspace | affected-only | audit-tier2-only |
 | **models.bias** | default | default | prefer-fast | prefer-fast |
 | **brainstorm.depth** | full | full | short (≤2–3 options) | minimal |
@@ -38,9 +38,14 @@ At session start: `Using Forge for this work. Pace: auto → brisk (…)` (use
 get a per-task review (and final review if the session touched high-risk work),
 even under `lite` / `brisk` / mid-group `standard`.
 
-**`thorough` vs `standard`:** thorough reviews **every task**; standard reviews once per **OpenSpec group** (top-level `##` section in `tasks.md`), except high-risk tasks which still get an immediate per-task review.
+**`thorough` vs `standard`:** identical cadence — both review once per
+**OpenSpec group** (top-level `##` section in `tasks.md`), except high-risk
+tasks which still get an immediate per-task review — and identical review
+`depth` (`full`). They differ only in `maxRounds`: thorough allows 3
+fix→re-review rounds before escalating remaining findings to the human,
+standard allows 2.
 
-**`auto`:** resolve once at session start from signals; sticky for the session (not a separate knob matrix).
+**`auto`:** resolves from signals at session start, then may re-resolve at plan time and via task-count escalation (below) — not a separate knob matrix.
 
 ## Auto signals (stricter wins)
 
@@ -50,13 +55,57 @@ even under `lite` / `brisk` / mid-group `standard`.
 4. fix, tweak, button, toolbar, style, padding, alignment, copy, label (explicitly small) → **brisk**
 5. else (including empty / unrecognized scope) → **standard** (fail closed — never default to brisk)
 
+### Plan-time re-resolution (both directions)
+
+Long-standing since 0.3.17, **not new**: on the way into **implement**, `auto`
+pace re-resolves from the plan (`suggestPaceFromPlan`) instead of staying with
+whatever the session-start slug signal picked. By this point task count,
+capability count, wired spine rows and risk are known facts, not a guess from
+free text — and the move can go **either direction**: a small
+single-capability plan with no wired spine rows resolves down to `brisk` even
+from a `standard` start; a plan with ≥15 tasks or ≥2 spine rows resolves up to
+`standard` even from a `brisk`/`lite` start. This runs *before* the
+task-count escalation below, so a plan that lands on `brisk` here can still be
+escalated by `--tasks-total` next.
+
+What **is** new in this change is the record, not the resolution: a downward
+move sets `paceDeescalated: true` on the session so a scorecard reader can see
+the session dropped ceremony rather than reading the lower pace as if it had
+been the starting point. A user pin still short-circuits the resolved pace,
+but the plan signal is still compared against it — when the two disagree,
+`paceSuppressed.plan` records what the plan would have chosen and why.
+Agreement between the pin and the signal is not suppression and is not
+recorded.
+
 ### Task-count escalation
 
 When `forge phase … --tasks-total N` sets **N ≥ 15** and the session's
 `resolvedPace` is still `brisk` or `lite` (and pace is **not** user-pinned),
 Forge escalates the session to **`standard`** with
 `paceReason: "escalated: N tasks"`. Slug keywords are a poor proxy for scope;
-task count is known at plan time.
+task count is known at plan time. A pin here is likewise recorded, not just
+skipped: `paceSuppressed.taskCount` when a pinned session would otherwise have
+escalated.
+
+## Plan-time exit ramp
+
+New in this change: right after brainstorm, before any change directory is
+scaffolded, `forge exit-check --tasks N --capabilities N --spine-rows N
+[--high-risk]` decides whether to *offer* leaving Forge for this work — the
+agent supplies the counts because nothing is readable from disk yet to read
+them from.
+
+- Exit 0 — the shape qualifies (≤5 tasks, single capability, no wired spine
+  rows, not high-risk) — offer to leave Forge.
+- Exit 1 — proceed to plan. Also the fail-closed result for a missing,
+  non-numeric, negative, fractional, flag-shaped, or repeated count flag.
+- Zero tasks never qualifies — unshaped work is not small work.
+- High-risk never qualifies, however small.
+
+Either answer gets recorded on the session: accept with
+`forge phase skipped --exit-reason "<reason>"`, decline with
+`forge phase plan --exit-declined "<reason>"` — both take the reason
+`exit-check` printed.
 
 ## Ceremony (session tail) — orthogonal to pace
 
@@ -82,10 +131,10 @@ specs beat narrow tasks, E2E-or-BLOCKED before done. Defaults:
 
 Cadence for the task/group reviewer (name is historical — values cover more than “per task”):
 
-- `always` — dispatch task reviewer after **every** implementer (`thorough`).
-- `per-group` — dispatch one reviewer when an OpenSpec **group** completes (`standard`). A group is a top-level `##` section in `openspec/changes/<name>/tasks.md` (all `- [ ]` items under that heading until the next `##`). Mid-group low-risk tasks get a pace self-check `task-review.md` only. If `tasks.md` has **no** section headings, treat the whole file as one group (review once when all tasks are done). High-risk tasks still get an **immediate** per-task review (hard floor).
-- `high-risk-only` — skip reviewer for low-risk tasks; still write a short self-check note in `task-review.md` (`APPROVED (pace: brisk/lite — self-check)`).
-- `never` — same as high-risk-only after hard floor (low-risk may self-check only).
+- `always` — dispatch task reviewer after **every** implementer. No current preset uses this; pin it with `forge prefs -- --set review.perTask=always` for the old thorough behavior.
+- `per-group` — dispatch one reviewer when an OpenSpec **group** completes (`thorough`, `standard`). A group is a top-level `##` section in `openspec/changes/<name>/tasks.md` (all `- [ ]` items under that heading until the next `##`). Mid-group low-risk tasks get a pace self-check `task-review.md` only. If `tasks.md` has **no** section headings, treat the whole file as one group (review once when all tasks are done). High-risk tasks still get an **immediate** per-task review (hard floor).
+- `high-risk-only` — skip reviewer for low-risk tasks; still write a short self-check note in `task-review.md` (`APPROVED (pace: brisk/lite — self-check)`). No current preset uses this either.
+- `never` — same as high-risk-only after hard floor (`brisk`, `lite`; low-risk may self-check only).
 
 ### `review.final`
 

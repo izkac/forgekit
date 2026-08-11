@@ -37,6 +37,12 @@ forge init --overlay                 # optional OpenSpec vendor patches
 Hooks call `forge` on PATH. Merge the generated `forge-hooks.snippet.json`
 into your agent settings if hooks are not picked up automatically.
 
+**Editing this file, `pace.md`, or anything else under `skills/forge/`?**
+Those edits change this repo checkout, not what's installed. Every machine
+running Forge — including this one, if it already installed — keeps reading
+its old copy under `~/.claude/skills/forge/…` (or the Cursor/Codex equivalent)
+until it re-runs `forgekit install --skills forge --force`.
+
 ---
 
 ## When Forge runs
