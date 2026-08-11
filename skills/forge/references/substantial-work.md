@@ -1,10 +1,19 @@
 # Substantial work triage
 
-Run this check **before** implementation on every agent turn unless the user
-sent **`/forge:skip`**.
+**You decide** whether work is substantial enough for Forge — you can see the
+conversation, the repository and the session; the prompt-time filter cannot.
 
-**Forge = OpenSpec.** If work is substantial enough for Forge, it is substantial enough for a
-tracked OpenSpec change. Smaller work skips Forge entirely (direct execution).
+The prompt-time filter (`forge triage --check`) does not make that call. Its
+only job is to suppress the reminder — decide whether to ask you at all — for
+prompts carrying no work content: empty, `/forge:skip`, a bare conversational
+reply ("thanks", "continue"), a read-only question, or a stated trivial edit
+(typo, formatting-only, comment-only, rename with zero behavior change,
+docs-only). Everything else reaches you as a question to weigh, never a
+verdict already reached.
+
+**Forge = OpenSpec.** If work is substantial enough for Forge, it is
+substantial enough for a tracked OpenSpec change. Smaller work skips Forge
+entirely (direct execution).
 
 ## Enter Forge when ANY apply
 
@@ -16,7 +25,7 @@ tracked OpenSpec change. Smaller work skips Forge entirely (direct execution).
 - User invokes `/forge` or any `/forge:*` command (except `/forge:skip`)
 - Work would likely produce an ADR or new `openspec/specs/` capability
 
-## Skip Forge (execute directly) when ALL apply
+## Skip Forge (execute directly) when ANY apply
 
 - Pure question, explanation, or read-only review
 - Typo, comment, formatting-only, or rename with zero behavior change
@@ -33,5 +42,4 @@ tracked OpenSpec change. Smaller work skips Forge entirely (direct execution).
 
 ## Ambiguous cases
 
-Ask one clarifying question: **would this produce an OpenSpec change?** If yes → Forge (OpenSpec).
-If no → execute directly. Skip requires explicit user opt-out (`/forge:skip`).
+Ask one clarifying question: **would this produce an OpenSpec change?** If yes → Forge (OpenSpec). If no → execute directly.

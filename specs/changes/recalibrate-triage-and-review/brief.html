@@ -1,0 +1,163 @@
+<!-- forge-brief-specs-hash:0ea3a9ec1df95f18 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Recalibrate triage and review</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a1a; background: #fff;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5; padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #ebebeb; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .88em; }
+  .callout { background: #f7f9fb; border-left: 3px solid #9bb; padding: .75rem 1rem; margin: 1.25rem 0; }
+  .num { font-variant-numeric: tabular-nums; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .3rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 6px; text-align: center; }
+  .old { color: #999; text-decoration: line-through; }
+  .new { font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Recalibrate triage and review</h1>
+<p class="sub">Operator brief — change <code>recalibrate-triage-and-review</code></p>
+
+<h2>TL;DR</h2>
+<p>
+  Forge currently can't let anything through. The rule that decides "this is too
+  small for Forge" requires three things to be true at once that can't all be
+  true, so in 87 recorded sessions nothing has ever been skipped. Separately,
+  the strictest setting reviews nearly three times as often as the middle one
+  and finds the same number of problems per unit of work.
+</p>
+<p>
+  This change makes the skip rule reachable, moves the real decision to a point
+  where Forge actually knows how big the job is, and re-prices reviews so the
+  money goes where it pays.
+</p>
+
+<h2>What's wrong today</h2>
+
+<p><strong>The escape hatch is welded shut.</strong> To skip Forge, work must be
+a pure question <em>and</em> a typo fix <em>and</em> you must have typed
+<code>/forge:skip</code>. Those can't all be true. The same page then contradicts
+itself, saying that even when the answer is "no, this doesn't need Forge", you
+still need to opt out manually.</p>
+
+<p><strong>Extra reviews aren't finding extra problems.</strong> Measured from
+Forge's own records across 87 sessions:</p>
+
+<table class="num">
+  <tr><th>Setting</th><th>Tasks</th><th>Reviews per task</th><th>Problems found per 100 tasks</th></tr>
+  <tr><td>brisk</td><td>44</td><td>0.07</td><td>0.0</td></tr>
+  <tr><td>standard</td><td>187</td><td>0.13</td><td>4.8</td></tr>
+  <tr><td>thorough</td><td>717</td><td>0.36</td><td>4.7</td></tr>
+</table>
+
+<p>Thorough spends 2.8x the reviews and finds the same amount. Two honest
+caveats: "problems found" is a rough stand-in for review value, and the sample
+is small enough that this shows <em>no visible</em> return rather than proving
+there is none. It's enough to act on, and it's easy to undo.</p>
+
+<p><strong>The dial only turns one way.</strong> How much ceremony to spend is
+decided from the first word of your message — before Forge knows how many files,
+how many tasks, or what risk is involved. Nothing ever revisits it. There's a
+rule that makes sessions <em>stricter</em> when they turn out large; there's no
+rule anywhere that makes them lighter when they turn out small.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Small work can actually leave Forge — and when it does, it's recorded, so "how often does this happen" becomes a number instead of a guess.</li>
+  <li>A checkpoint after brainstorming: if the shaped-up job turns out to be two tasks in one file, Forge offers to step aside rather than write a proposal, design, task list, wiring matrix and brief for it.</li>
+  <li>Reviews re-priced — see the table below.</li>
+  <li>The ceremony dial turns both ways.</li>
+  <li><code>forge analyze</code> gains the review-yield table, so you can check this change actually worked instead of trusting it.</li>
+</ul>
+
+<h2>The new review settings</h2>
+
+<table>
+  <tr><th>Setting</th><th>After each task</th><th>After each group</th><th>At the end</th><th>Depth / fix rounds</th></tr>
+  <tr><td>lite</td><td>no</td><td>no</td><td><span class="new">yes (new)</span></td><td>quick / <span class="new">1 (was 0)</span></td></tr>
+  <tr><td>brisk</td><td>no</td><td>no</td><td><span class="new">yes (new)</span></td><td>quick / 1</td></tr>
+  <tr><td>standard</td><td>no</td><td>yes</td><td>yes</td><td>full / 2</td></tr>
+  <tr><td>thorough</td><td><span class="old">yes</span> <span class="new">no</span></td><td><span class="new">yes</span></td><td>yes</td><td>full / 3</td></tr>
+</table>
+
+<p>Two deliberate reversals. <strong>Thorough stops reviewing after every single
+task</strong> — it keeps its meaning through deeper reviews and more fix rounds,
+not more of them. And <strong>the lightest settings gain the end-of-change
+review</strong>, which today they skip. One reviewer reading the whole change is
+the cheapest useful check there is; several reviewers each reading a slice is the
+expensive one that isn't paying.</p>
+
+<div class="callout">
+  <strong>Nothing changes for risky work.</strong> Anything touching money,
+  login, shared contracts, migrations or secrets still gets reviewed immediately
+  after every single task, at every setting, exactly as today. That floor is the
+  one review rule with solid evidence behind it, and it isn't part of this
+  change.
+</div>
+
+<h2>How the decision moves</h2>
+
+<pre class="mermaid">
+flowchart TD
+  P["Your message"] --> T{"Obviously trivial?"}
+  T -->|yes| S1["Skip Forge"]
+  T -->|no| B["Brainstorm — shape the work"]
+  B --> C{"Small, one area,<br/>nothing wired, not risky?"}
+  C -->|yes| S2["Offer to step aside<br/>(recorded either way)"]
+  C -->|no| PL["Write the tracked change"]
+  PL --> D{"Plan-time facts"}
+  D --> E["Pace can go up<br/>or down"]
+</pre>
+
+<p>The first check stays cheap and stays biased toward doing the work properly.
+The decision that matters moves to after brainstorming, because that's the first
+moment Forge knows what the job actually is.</p>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li><strong>We can measure waste, not blind spots.</strong> "Problems found" goes down if reviews were pointless — but a problem nobody looked for also produces nothing. So this guardrail catches over-spending, not under-spending. Testing the other direction needs bugs traced back to the session that introduced them; noted as a follow-up, not solved here.</li>
+  <li><strong>The scoring rules have to move at the same time.</strong> The scorecard currently expects sessions to only ever get stricter, so a session that correctly gets lighter would be marked down. Fixed in the same change, not after.</li>
+  <li><strong>Other machines won't see the doc changes</strong> until <code>forgekit install --skills forge --force</code> is run there.</li>
+  <li><strong>The evidence mixes three projects</strong> and two earlier versions of the settings table. The direction is clear; the exact numbers aren't a formal result.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Changing the high-risk review floor.</li>
+  <li>Deleting the thorough setting — it keeps a narrower meaning.</li>
+  <li>Tracing later bugs back to the session that caused them (the follow-up above).</li>
+  <li>Anything to do with the campaign benchmark, which is a separate change.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What</th><th>Size</th></tr>
+  <tr><td>1</td><td>Record today's numbers as a baseline, then make the skip rule reachable</td><td>4 tasks</td></tr>
+  <tr><td>2</td><td>Re-price the four review settings</td><td>4 tasks</td></tr>
+  <tr><td>3</td><td>Let the ceremony dial turn down as well as up, and stop the scorecard punishing it</td><td>4 tasks</td></tr>
+  <tr><td>4</td><td>The step-aside offer after brainstorming, recorded whichever way it goes</td><td>4 tasks</td></tr>
+  <tr><td>5</td><td>The review-yield table in <code>forge analyze</code></td><td>4 tasks</td></tr>
+  <tr><td>6</td><td>Documentation, and a test so the docs and the code can't drift apart</td><td>3 tasks</td></tr>
+  <tr><td>7</td><td>End-to-end proof against the real command-line tool</td><td>4 tasks</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+
+</body>
+</html>

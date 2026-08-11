@@ -1,0 +1,33 @@
+{
+  "change": "recalibrate-triage-and-review",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot-scratch-project",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "triage-lets-trivial-work-through",
+      "cmd": "node scripts/e2e/assert-triage-skip.mjs",
+      "expect": "trivial prompts skipped: 5/5"
+    },
+    {
+      "name": "triage-still-catches-real-work",
+      "cmd": "node scripts/e2e/assert-triage-skip.mjs --substantial",
+      "expect": "substantial prompts caught: 4/4"
+    },
+    {
+      "name": "small-plan-lowers-pace",
+      "cmd": "node scripts/e2e/assert-pace-two-way.mjs",
+      "expect": "de-escalated: .*pinned pace unchanged"
+    },
+    {
+      "name": "yield-table-from-review-stamps",
+      "cmd": "node scripts/e2e/assert-review-yield.mjs"
+    },
+    {
+      "name": "shipped-cli-still-portable",
+      "cmd": "node scripts/e2e/harness-portability.mjs all"
+    }
+  ]
+}

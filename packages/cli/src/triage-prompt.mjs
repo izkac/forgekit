@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
- * Heuristics for Forge auto-triage on agent UserPromptSubmit hooks.
- * Mirrors references/substantial-work.md — err toward Forge when unsure.
+ * Suppression filter for Forge auto-triage on agent UserPromptSubmit hooks.
+ * references/substantial-work.md holds the agent's judgment criteria for
+ * whether work is substantial — this module does not decide that. It only
+ * decides whether to ask: it suppresses prompts that carry no work content
+ * and lets everything else reach the agent as a question, not a verdict.
  */
 
 import path from 'node:path';
@@ -19,7 +22,7 @@ export function isTrivialEdit(prompt) {
   const p = (prompt || '').trim();
   if (!p) return true;
   return (
-    /\b(typo|formatting only|whitespace only|comment only|rename only|no behavior change|zero behavior)\b/i.test(p)
+    /\b(typo|formatting[\s-]only|whitespace[\s-]only|comment[\s-]only|rename[\s-]only|no behaviou?r change|zero behaviou?r|changelog|docs[\s-]only|documentation[\s-]only)\b/i.test(p)
     || /^\s*fix(ed)?\s+(a|the)?\s*typo\b/i.test(p)
   );
 }
@@ -47,30 +50,52 @@ export function isReadOnlyQuestion(prompt) {
   return false;
 }
 
-export function isSubstantialWork(prompt) {
+// Bare acknowledgments and procedural asks that keep an existing
+// conversation moving without requesting new work. The fail-closed default
+// in hasWorkContent must not let the filter ask the agent about every reply
+// in a live session — only prompts that could plausibly be a work request
+// should reach the agent as a question.
+// "run the tests" is included: it invokes existing tooling and asks for no
+// code change, the same posture isReadOnlyQuestion already gives read-only
+// asks. A prompt that also asks for a change on top ("run the tests and fix
+// what's failing") is longer than this exact-match list and falls through
+// to the fail-closed default untouched.
+const CONVERSATIONAL_REPLIES = new Set([
+  'continue', 'ok', 'okay', 'yes', 'no', 'sure', 'thanks', 'thank you',
+  'great', 'nice', 'cool', 'got it', 'sounds good', 'go ahead',
+  'ok go ahead', 'okay go ahead', 'alright', 'yep', 'yup', 'nope',
+  'hmm', 'hm', 'k', 'kk', 'please continue', 'keep going',
+]);
+
+const RUN_TESTS_ONLY = /^\s*(please\s+)?run\s+(the\s+)?tests?\s*[.!]?\s*$/i;
+
+export function isConversationalReply(prompt) {
+  const p = (prompt || '').trim();
+  if (!p) return false;
+  const normalized = p.toLowerCase().replace(/[!.?,]+$/g, '').trim();
+  if (CONVERSATIONAL_REPLIES.has(normalized)) return true;
+  return RUN_TESTS_ONLY.test(p);
+}
+
+export function hasWorkContent(prompt) {
   const p = (prompt || '').trim();
   if (!p) return false;
   if (isForgeSkip(p)) return false;
   if (isForgeInvocation(p)) return true;
   if (isTrivialEdit(p)) return false;
   if (isReadOnlyQuestion(p)) return false;
+  if (isConversationalReply(p)) return false;
 
-  const patterns = [
-    /^\s*(please\s+)?(add|build|create|implement|develop|wire|integrate|migrate|port|enable|support|make|change|modify|update|remove|delete|refactor|fix|debug|investigate|set up|setup)\b/i,
-    /\b(add|build|implement|create|wire up|hook up)\s+(a|an|the|new)\b/i,
-    /\b(doesn'?t|does not|isn'?t)\s+(seem to|work|fire|load|trigger|run)\b/i,
-    /\b(bug|regression|broken|misconfigured|not wired)\b/i,
-    /\bnew feature\b/i,
-    /\bcheck if\b.*\b(wired|configured|working|hook)\b/i,
-    /\b(ensure|make sure)\b.*\b(wired|configured|working|fires?)\b/i,
-  ];
-
-  return patterns.some((re) => re.test(p));
+  // Fail closed: anything left is not an empty prompt, not a /forge:skip,
+  // not a trivial edit, not a read-only question, and not a conversational
+  // or procedural reply — unclear scope errs toward Forge rather than
+  // skipping it by default.
+  return true;
 }
 
 export function shouldForgeTriage(prompt) {
   if (isForgeInvocation(prompt)) return false;
-  return isSubstantialWork(prompt);
+  return hasWorkContent(prompt);
 }
 
 export function buildForgeTriageMessage(options = {}) {
@@ -81,7 +106,7 @@ export function buildForgeTriageMessage(options = {}) {
   } = options;
 
   const lines = [];
-  lines.push('[forge] Substantial work detected — triage before implementation.');
+  lines.push('[forge] Decide: does this prompt need Forge before you implement?');
   lines.push('');
   lines.push(`1. Read the Forge skill (\`${skillPath}\`) and follow triage (references/substantial-work.md).`);
   if (!hasActiveSession) {
@@ -97,7 +122,9 @@ export function buildForgeTriageMessage(options = {}) {
 
 /**
  * CLI:
- *   forge triage --check "<prompt>"     exit 0 if should triage, else 1
+ *   forge triage --check "<prompt>"     exit 0: ask the agent to decide;
+ *                                        exit 1: prompt suppressed (no work
+ *                                        content) — the agent is never asked
  *   forge triage --message "<prompt>"   print triage reminder (always)
  *   forge triage --message --has-session "<prompt>"
  */
@@ -122,11 +149,20 @@ function parseTriageArgs(argv) {
   return opts;
 }
 
-function printTriageHelp() {
-  process.stdout.write(`Usage:
+export function buildTriageHelpText() {
+  return `Usage:
   forge triage --check "<prompt>"
   forge triage --message [--has-session] "<prompt>"
-`);
+
+--check exit codes:
+  0   ask the agent to decide whether this prompt needs Forge
+  1   prompt suppressed — no work content (empty, /forge:skip, a bare
+      conversational reply, a read-only question, or a stated trivial edit)
+`;
+}
+
+function printTriageHelp() {
+  process.stdout.write(buildTriageHelpText());
 }
 
 async function triageMain(argv = process.argv.slice(2)) {
