@@ -214,7 +214,22 @@ function maybeResolvePaceFromPlan() {
  * can never *lower* the tail below what risk demands.
  */
 function maybeResolveCeremonyFromPlan() {
-  if (phase !== 'implement') return;
+  // Primary resolution point is implement. verify/done/finish are a
+  // fail-closed backstop: cohort 5 observed a session that skipped `forge
+  // phase implement` entirely, never resolved ceremony, and was
+  // indistinguishable from `full` while having followed neither path. Late
+  // resolution always records `full` — the cheap tail is granted from plan
+  // facts at implement, never retroactively at a gate — so the session is
+  // governed by the full-tail rules it de facto ran under, and the ledgers
+  // stop carrying MISSING. An already-resolved session is left alone.
+  if (!['implement', 'verify', 'done', 'finish'].includes(phase)) return;
+  if (phase !== 'implement') {
+    if (session.resolvedCeremony) return;
+    session.resolvedCeremony = 'full';
+    session.ceremonyReason = `ceremony unresolved at ${phase} — failing closed to full`;
+    process.stderr.write(`[forge] Ceremony → full (${session.ceremonyReason})\n`);
+    return;
+  }
   try {
     const facts = collectPlanFacts({ session });
     let suggested;

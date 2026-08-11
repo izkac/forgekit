@@ -1,5 +1,16 @@
 # Implement phase
 
+**Enter the phase by declaring the plan's size — before the first dispatch:**
+
+```bash
+forge phase implement --tasks-total <N>   # N = checkbox count in tasks.md
+```
+
+Pace and **ceremony** resolve from this transition. A session that never
+declares stays on the full tail even when it qualifies for the combined close
+(ceremony fails closed to `full` at the done gate) — two cohort-5 trials paid
+the full ceremony on small changes for exactly this omission.
+
 Read and follow [../skills/subagent-driven-development/SKILL.md](../skills/subagent-driven-development/SKILL.md).
 
 Every implementer subagent must follow [../references/tdd-core.md](../references/tdd-core.md) (condensed TDD rules — the brief includes the pointer; full skill only when stuck).

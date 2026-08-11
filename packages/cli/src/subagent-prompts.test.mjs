@@ -68,6 +68,10 @@ test('close phase labels the closer as the final reviewer and caps the fix loop'
   // The gates stay: close.md must route through phase done / integrity-check.
   assert.match(text, /forge phase done/);
   assert.match(text, /integrity-check/);
+  // Cohort 5: all four final reviews were saved without a Reviewer: line and
+  // graded from silence. The save step owns the attribution check.
+  assert.match(text, /first line/i);
+  assert.match(text, /Reviewer: <model> \(closer\)/);
 });
 
 test('review phase tells the coordinator to fill the final reviewer diff range', () => {

@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.3.38 — 2026-08-11
+
+### Ceremony fails closed at the gate; closers carry attribution; task counts declared at implement
+
+The three cohort-5 residual gaps, closed:
+
+- A session that skips `forge phase implement` never resolved ceremony and was
+  indistinguishable from `full` while following neither path. verify/done/finish
+  now fail it closed to `full` and record why — the cheap tail is granted from
+  plan facts at implement, never retroactively at a gate.
+- `close.md`'s save step now owns the attribution check: a closer report that
+  does not open with `Reviewer: <model> (closer)` gets the line prepended from
+  the dispatch stamp before saving — all four cohort-5 final reviews were
+  missing it and graded from silence.
+- `implement.md` opens with the declaration requirement
+  (`forge phase implement --tasks-total <N>`): pace and ceremony resolve from
+  that transition, and two cohort-5 trials paid the full ceremony on small
+  changes only because it was omitted.
 
 ### Combined close is now a rail, not a suggestion (cohort 4 follow-up)
 

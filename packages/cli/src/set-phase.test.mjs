@@ -154,6 +154,41 @@ test('phase done refuses a combined session with no final review on file', () =>
   }
 });
 
+test('ceremony missing at done fails closed to full and is recorded — skipping implement earns no cheap tail', () => {
+  // Cohort 5 observed the hole: a session that never ran `forge phase
+  // implement` never resolved ceremony, and the combined final-review gate
+  // keys on `combined` — so MISSING was indistinguishable from full while
+  // having followed neither path. Late resolution records `full` (never
+  // `combined` — the cheap tail is granted from plan facts at implement, not
+  // retroactively at the gate), so the session is governed by the full-tail
+  // rules it de facto ran under, and the ledgers stop carrying MISSING.
+  const dir = tmp('forge-done-lateresolve-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-late-full');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'direct';
+    s.slug = 'fix-pagination-boundary';
+    s.paceSignal = 'fix-pagination-boundary';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.resolvedCeremony, 'full', 'missing ceremony must resolve full at the gate');
+    assert.match(after.ceremonyReason || '', /unresolved|fail/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a phase transition appends {phase, at} to a session with no phaseHistory', () => {
   const dir = tmp('forge-phase-history-');
   try {

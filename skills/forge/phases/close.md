@@ -51,8 +51,14 @@ review, it just fails the gate later.
    workspace(s), `{GUARD_ALLOWANCES}` pasted or "none". **Model:** resolve via
    `forge resolve-model --tier standard` and honor `omitModel`/`model` literally.
 
-3. **Record.** Save the closer's report verbatim to
-   `.forge/sessions/<id>/reviews/final-review.md`. Write
+3. **Record.** Save the closer's report to
+   `.forge/sessions/<id>/reviews/final-review.md`. **Check the first line
+   before saving:** it must be the attribution — `Reviewer: <model> (closer)`.
+   If the closer's report does not open with it, prepend the line yourself
+   using the model the dispatch stamp recorded (`reviews/dispatches.json`) —
+   `forge score` classifies this file from its opening lines, and a review
+   with no attribution is graded from silence. All four combined trials in
+   cohort 5 were missing it. Below that line, save the report verbatim. Write
    `.forge/sessions/<id>/verify-evidence.md` naming the closer's tier-3 command,
    exit code, and summary (that run *is* the session's tier 3 — do not re-run
    it), or `BLOCKED: <reason>` if it could not run.
