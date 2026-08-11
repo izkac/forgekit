@@ -17,6 +17,14 @@ unchanged, so nothing rides on trust.
 finish — should land around 10–15 requests. If you find yourself far above that,
 you are re-running the full tail under another name; stop and check why.
 
+**This path is enforced, not suggested.** On a combined session:
+`forge phase verify` prints these instructions; `forge review-label final`
+defaults the reviewer tier to `standard` and refuses `--tier capable` unless
+you pass `--full-tail` (a deliberate, recorded choice to buy the full-ceremony
+reviewer anyway); and `forge phase done` refuses while
+`reviews/final-review.md` is missing — skipping the closer does not skip the
+review, it just fails the gate later.
+
 ## Steps
 
 1. **Mechanical audit (coordinator, no dispatch).** Confirm every task is

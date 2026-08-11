@@ -1,10 +1,10 @@
 # Forge cost and speed — plan
 
 **Date:** 2026-08-10
-**Status:** phases A–C landed; combined close landed, then recalibrated after cohort 3
-showed its gate never fired (threshold + negation false-positive). Cohort 4 pending.
-Outcome deltas at n=2 are inside the measured noise band — request counts are the
-only legible metric. D still blocked; item 7 not started
+**Status:** phases A–C landed; combined close landed, recalibrated (cohort 3: gate never
+fired), then hardened into CLI rails (cohort 4: gate fired 3/8, adoption 0/3 — prose is
+advisory). Cohort 5 pending. Only fire-rate/adoption/request-counts are legible at n=2.
+D still blocked; item 7 not started
 **Owner:** Forgekit maintainers
 
 ## The problem, in numbers
@@ -283,6 +283,27 @@ run-to-run noise. Two real findings out of it:
    migration … no money/auth") tripped the keyword regex — in wording our own design-skip
    rule suggested (now: negation lines are dropped before the risk read, and the plan
    phases tell planners not to enumerate disclaimed risks).
+
+## Cohort 4 — the gate fired; the path was ignored; now it's a rail
+
+Fourth run, recalibrated gate: `resolvedCeremony` came out `combined` in 3 of 8 forge
+trials (the negation fix visibly worked on carrier; both refund trials correctly held
+`full` on the money floor; 3 trials failed closed on `tasksTotal=0`). Headline numbers
+stayed in the noise band (forge 6/8 shippable — tie — $2.98/trial, 972s).
+
+Adoption of close.md was **0 of 3**: one combined session dispatched a capable final
+reviewer anyway (90 tail requests / 7M tokens — the cohort's most expensive tail), and
+two reached `done` with empty `reviews/` directories — no closer, no final review at all.
+Same lesson as the model resolver: a contract that lives in prose is advisory.
+
+Three CLI rails now enforce the path (all TDD'd): `forge phase verify` prints the
+combined-close instructions at the transition; `forge review-label final` defaults to
+`standard` tier on combined sessions and refuses `capable` without `--full-tail`;
+`forge phase done` refuses a combined session missing `reviews/final-review.md`.
+
+**Next measurement:** rerun the cohort; read (a) ceremony fire rate, (b) closer adoption
+(final-review.md headed `(closer)`, standard-tier stamp), (c) tail request counts for
+combined vs full trials. Token/outcome means stay illegible at n=2 — do not headline them.
 
 ## How we will know it worked
 

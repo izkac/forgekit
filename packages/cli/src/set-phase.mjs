@@ -248,9 +248,31 @@ function maybeResolveCeremonyFromPlan() {
   }
 }
 
+/**
+ * Say the combined-close instruction at the moment the tail starts.
+ *
+ * Cohort 4 measured why prose is not enough: three sessions resolved
+ * `combined` and none followed close.md — one dispatched a capable final
+ * reviewer anyway (the most expensive tail in the cohort), two skipped the
+ * final review entirely. The router line at the top of verify.md is advisory;
+ * the `forge phase verify` transition is a surface every session actually
+ * crosses, so the instruction fires here, imperatively.
+ */
+function announceCombinedClose() {
+  if (phase !== 'verify') return;
+  if (session.resolvedCeremony !== 'combined') return;
+  process.stderr.write(
+    '[forge] Ceremony is COMBINED for this session — follow phases/close.md:\n' +
+      '[forge]   one closer dispatch (forge review-label final → standard tier) covers verify + review.\n' +
+      '[forge]   Do not run the full tail: no separate tier-3 phase, no capable final reviewer.\n' +
+      '[forge]   forge phase done will refuse without reviews/final-review.md (the closer report).\n',
+  );
+}
+
 maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
 maybeResolveCeremonyFromPlan();
+announceCombinedClose();
 
 /**
  * Hard gate: implementation may not start until the operator brief exists and
@@ -296,6 +318,20 @@ function enforceDoneGate() {
   const problems = [];
   if (!hasEvidence) problems.push('missing verify-evidence.md');
   if (!tasksDone) problems.push(`tasks incomplete (${complete}/${total})`);
+
+  // Combined ceremony: the closer IS the final reviewer, so a combined session
+  // with no reviews/final-review.md has skipped its only review. Cohort 4
+  // measured exactly that — two combined sessions reached done with empty
+  // reviews/ directories. Full-ceremony sessions are governed by the
+  // final-review floor and pace knobs, not this check.
+  if (
+    session.resolvedCeremony === 'combined' &&
+    !fs.existsSync(path.join(dir, 'reviews', 'final-review.md'))
+  ) {
+    problems.push(
+      'combined ceremony: missing reviews/final-review.md — dispatch the closer (phases/close.md) and save its report',
+    );
+  }
 
   const integrity = runIntegrityChecks({ sessionDir: dir, session });
   problems.push(...integrity.problems);

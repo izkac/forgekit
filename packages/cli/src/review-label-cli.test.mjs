@@ -66,6 +66,48 @@ test('forge review-label final stamps the dispatch and stdout stays exactly the 
   }
 });
 
+test('combined ceremony: final label defaults to standard tier, refuses capable without --full-tail', () => {
+  // Cohort 4: a session that resolved `combined` dispatched a capable-tier
+  // final reviewer anyway — 90 tail requests on the trial marked for the
+  // cheap path. The label command is the one surface that dispatch must
+  // cross, so the rail lives here.
+  const sessionId = '20260811T000000Z-combined-rail-abc123';
+  const { dir, sessionDir } = makeProject(sessionId);
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+    s.resolvedCeremony = 'combined';
+    fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify(s)}\n`);
+
+    // No --tier → standard, not the usual capable default.
+    const r1 = run(dir, ['final']);
+    assert.equal(r1.status, 0, r1.stderr);
+    assert.match(r1.stderr, /combined/i);
+    let stamps = readStamps(sessionDir);
+    assert.equal(stamps.length, 1);
+    assert.equal(stamps[0].model.tier, 'standard');
+
+    // Explicit capable → refuse, name the override, write nothing.
+    const r2 = run(dir, ['final', '--tier', 'capable']);
+    assert.notEqual(r2.status, 0);
+    assert.match(r2.stderr, /--full-tail/);
+    assert.equal(readStamps(sessionDir).length, 1, 'refusal must not stamp');
+
+    // Explicit capable + --full-tail → allowed, recorded.
+    const r3 = run(dir, ['final', '--tier', 'capable', '--full-tail']);
+    assert.equal(r3.status, 0, r3.stderr);
+    stamps = readStamps(sessionDir);
+    assert.equal(stamps.length, 2);
+    assert.equal(stamps[1].model.tier, 'capable');
+
+    // fast stays allowed without ceremony — cheaper than the default is never
+    // the failure this rail exists for.
+    const r4 = run(dir, ['final', '--tier', 'fast']);
+    assert.equal(r4.status, 0, r4.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('--tier standard overrides the default and lands in the stamp', () => {
   const sessionId = '20260731T105409Z-stamp-tier-abc123';
   const { dir, sessionDir } = makeProject(sessionId);

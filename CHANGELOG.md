@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Combined close is now a rail, not a suggestion (cohort 4 follow-up)
+
+Cohort 4 was the first where the recalibrated gate fired (3 of 8 forge trials
+resolved `combined`; the refund trials correctly held `full` on the money
+floor). Adoption of the path itself was 0 of 3: one session dispatched a
+capable-tier final reviewer anyway — 90 tail requests, the cohort's most
+expensive tail, on the trial marked for the cheap one — and two reached `done`
+with empty `reviews/` directories. Prose routing is advisory; the agent's
+momentum wins. Three CLI rails now enforce what close.md describes, each on a
+surface every session actually crosses:
+
+- **`forge phase verify`** prints the combined-close instructions imperatively
+  on stderr at the transition — the moment the tail starts, not a line at the
+  top of a file the agent may never re-read.
+- **`forge review-label final`** on a combined session defaults the reviewer
+  tier to `standard` and refuses an explicit `--tier capable` unless
+  `--full-tail` asserts the choice; the refusal writes no stamp. `--tier fast`
+  is never refused — over-spend is the failure this rail exists for.
+- **`forge phase done`** refuses a combined session while
+  `reviews/final-review.md` is missing: the closer *is* the final reviewer, so
+  skipping it no longer slides through. `--allow-incomplete` remains the
+  recorded escape hatch.
+
+The cohort's headline numbers (forge 6/8 shippable — a tie with baseline —
+$2.98/trial) are unchanged from the noise band; with 0/3 adoption they measure
+momentum, not the treatment. Rails first, then measure again.
+
 ### Combined-close gate recalibrated after cohort 3 measured it never firing
 
 The third sonnet-hard-v2 cohort ran with the combined close in the tarball and

@@ -34,7 +34,9 @@ if (args[0] === '--help' || args[0] === '-h') {
       'Defaults to the final review — the only unit that decides the gate.\n' +
       'Pass --session when driving a session other than the active one.\n' +
       'Pass --tier to resolve the reviewer model at a tier other than capable\n' +
-      '(the dispatch stamp records whichever tier was actually resolved).\n',
+      '(the dispatch stamp records whichever tier was actually resolved).\n' +
+      'On a combined-ceremony session the final tier defaults to standard and\n' +
+      'an explicit --tier capable refuses unless --full-tail asserts the choice.\n',
   );
   process.exit(0);
 }
@@ -43,13 +45,18 @@ let sessionId = null;
 /** @type {string | null} */
 let unit = null;
 let tier = 'capable';
+let tierExplicit = false;
+let fullTail = false;
 for (let i = 0; i < args.length; i += 1) {
   if (args[i] === '--session' && args[i + 1]) {
     sessionId = args[i + 1];
     i += 1;
   } else if (args[i] === '--tier' && args[i + 1]) {
     tier = args[i + 1];
+    tierExplicit = true;
     i += 1;
+  } else if (args[i] === '--full-tail') {
+    fullTail = true;
   } else if (args[i].startsWith('-')) {
     // NOT ignored. An unknown flag used to fall through and leave `unit` at its
     // default, so asking for a group label with a typo printed the *final*
@@ -120,6 +127,30 @@ try {
     `Could not read session ${sessionId}: ${err instanceof Error ? err.message : err}\n`,
   );
   process.exit(1);
+}
+
+// COMBINED CEREMONY RAIL. Cohort 4 measured a session that resolved
+// `combined` dispatching a capable-tier final reviewer anyway — the most
+// expensive tail in the cohort, on the trial marked for the cheap path. The
+// label command is the one surface that dispatch has to cross, so the tier
+// policy is enforced here rather than in prose: default to `standard`, refuse
+// an explicit `capable` unless the operator asserts `--full-tail` (meaning: I
+// am deliberately buying the full-ceremony reviewer on a combined session).
+// Cheaper-than-default (`fast`) is never refused — over-spend is the failure
+// this rail exists for, not under-spend.
+if (unit === 'final' && resolved.resolvedCeremony === 'combined') {
+  if (!tierExplicit) {
+    tier = 'standard';
+    process.stderr.write(
+      '[forge] combined ceremony: reviewer tier defaults to standard (closer). Pass --tier explicitly to change it.\n',
+    );
+  } else if (tier === 'capable' && !fullTail) {
+    process.stderr.write(
+      'This session resolved ceremony `combined`: one standard-tier closer pass replaces the full verify+review tail (see phases/close.md).\n' +
+        'A capable-tier final reviewer is the full tail under another name. If that is a deliberate choice, re-run with --full-tail.\n',
+    );
+    process.exit(1);
+  }
 }
 
 const id = resolved.id ?? sessionId;
