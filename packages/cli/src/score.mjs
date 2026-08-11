@@ -298,7 +298,7 @@ function scoreProductLoopBody(body, executedGreen = false) {
  * prescribed — punishing the exact obedience this cap exists to reward, the
  * same failure class 0.3.24 shipped and 0.3.26 reverted, reached through the
  * knob instead of the pace. The four paces still map onto these knob values
- * 1:1 (thorough->always, standard->per-group, brisk->high-risk-only,
+ * 1:1 (thorough->always, standard->per-group, brisk->never,
  * lite->never — preferences.defaults.json's presets), so gating on the knob
  * subsumes the old pace gate for any session that never touched the knob,
  * rather than changing behaviour for it.
@@ -571,6 +571,7 @@ export function scoreSession(opts) {
     (resolved === 'brisk' || resolved === 'lite') &&
     total >= TASK_COUNT_ESCALATION_THRESHOLD &&
     session.paceEscalated !== true &&
+    session.paceDeescalated !== true &&
     session.pacePinned !== true
   ) {
     pacePts = 0;
@@ -579,6 +580,15 @@ export function scoreSession(opts) {
     );
   } else if (session.paceEscalated) {
     paceNotes.push(`escalated: ${session.paceReason ?? 'task count'}`);
+  } else if (session.paceDeescalated) {
+    // Decide from the recorded marker, not from whether brisk/lite +
+    // tasksTotal>=15 happen to coincide today — `session.tasksTotal`
+    // (coordinator-declared) and the plan's own task count can legitimately
+    // disagree and drift apart after this pace was resolved (`forge status`
+    // heals `tasksTotal` straight from tasks.md, mid-session, without
+    // re-running the escalation check above), so a plan-lowered pace must
+    // never read as a missed escalation just because tasksTotal grew later.
+    paceNotes.push(`de-escalated: ${session.paceReason ?? 'plan facts'}`);
   } else {
     paceNotes.push(`resolvedPace=${resolved ?? 'unset'}`);
   }

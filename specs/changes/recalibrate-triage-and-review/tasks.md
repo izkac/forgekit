@@ -61,20 +61,33 @@ decides substantiality, not the prompt filter*.
 
 ## 3. Two-way pace resolution
 
-- [ ] 3.1 Extend pace resolution in `packages/cli/src/preferences.mjs` with a
-      de-escalation rule using plan-time facts (task count, capability count,
-      wired spine rows, high-risk surface). Verify: unit tests for a small clean
-      plan lowering the pace and a large plan still raising it.
-- [ ] 3.2 Apply de-escalation in `packages/cli/src/set-phase.mjs` alongside the
-      existing `escalated: N tasks` path, recording a symmetric `paceReason`.
-      Verify: `set-phase` tests cover both directions and the recorded reason.
-- [ ] 3.3 Suppress both directions when the pace is user-pinned, recording that
-      a pin suppressed the adjustment. Verify: test asserts a pinned pace is
-      unchanged and the suppression is recorded.
-- [ ] 3.4 Update `packages/cli/src/score.mjs` (the escalation expectation at
-      line 578) so a legitimately lowered pace is not scored as a missing
-      escalation. Verify: `score.test.mjs` covers a de-escalated session
-      receiving no deduction.
+Re-cut mid-implement. The de-escalation behaviour these tasks were written to
+add already ships (`suggestPaceFromPlan` + `maybeResolvePaceFromPlan`, 0.3.17) —
+see design **D4**. What is missing is the record, so these tasks now cover that.
+
+- [x] 3.1 Pin down the existing two-way behaviour with tests before changing
+      anything around it: a small single-capability plan with no wired spine
+      rows lowers the pace, a large plan raises it, and a high-risk plan does
+      not lower. Verify: `plan-facts.test.mjs` covers all three, and each
+      assertion is shown to fail when the corresponding rule is broken.
+- [x] 3.2 Record the downward move symmetrically with the upward one in
+      `packages/cli/src/set-phase.mjs`: `maybeEscalatePaceForTaskCount` sets
+      `paceEscalated`, so a plan-driven lowering needs its own marker alongside
+      the existing `paceResolvedFrom: 'plan'`, which records that the plan
+      decided but not which way. Verify: `set-phase.test.mjs` asserts the marker
+      and the reason for both directions.
+- [x] 3.3 Record pin suppression in `packages/cli/src/set-phase.mjs`: both
+      `maybeEscalatePaceForTaskCount` and `maybeResolvePaceFromPlan` currently
+      return early on `pacePinned` having written nothing, so a suppressed
+      adjustment is indistinguishable from no signal. Record what the pin
+      overrode. Verify: test asserts the pinned pace is unchanged **and** the
+      suppression, including the pace that would have been chosen, is on the
+      session.
+- [x] 3.4 Make `packages/cli/src/score.mjs` read the de-escalation marker so a
+      legitimately lowered pace can never be scored as a missing escalation,
+      independent of whether today's thresholds happen to overlap. Verify:
+      `score.test.mjs` covers a de-escalated session receiving no deduction,
+      and the test fails if the marker is ignored.
 
 ## 4. Plan-time exit ramp
 

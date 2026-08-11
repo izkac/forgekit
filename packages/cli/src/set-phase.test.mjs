@@ -2345,3 +2345,198 @@ test('a failed pointer write warns instead of being swallowed', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/**
+ * A specs-engine change dir under `dir`, readable by `collectPlanFacts`.
+ * `groupSizes` builds one numbered `## N. Group` heading per entry, with that
+ * many checkbox lines under it — mirrors plan-facts.test.mjs's `tasksMd`.
+ *
+ * @param {string} dir
+ * @param {string} slug
+ * @param {{ groupSizes?: number[], capabilities?: string[] }} [opts]
+ */
+function makePaceChangeFixture(dir, slug, opts = {}) {
+  const groupSizes = opts.groupSizes ?? [3];
+  const capabilities = opts.capabilities ?? [];
+  const changeDir = path.join(dir, 'specs', 'changes', slug);
+  fs.mkdirSync(changeDir, { recursive: true });
+  fs.writeFileSync(path.join(changeDir, 'proposal.md'), '# Why\nBecause.\n', 'utf8');
+  const tasks = groupSizes
+    .map(
+      (n, idx) =>
+        `## ${idx + 1}. Group ${idx + 1}\n${Array.from({ length: n }, (_, i) => `- [ ] ${idx + 1}.${i + 1} do it`).join('\n')}`,
+    )
+    .join('\n\n');
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), tasks, 'utf8');
+  fs.writeFileSync(
+    path.join(changeDir, 'spine.json'),
+    `${JSON.stringify({ rows: [], notApplicable: 'sync only' })}\n`,
+    'utf8',
+  );
+  for (const cap of capabilities) {
+    const capDir = path.join(changeDir, 'specs', cap);
+    fs.mkdirSync(capDir, { recursive: true });
+    fs.writeFileSync(path.join(capDir, 'spec.md'), '## ADDED Requirements\n', 'utf8');
+  }
+  return changeDir;
+}
+
+test('a plan-driven downward pace move is marked paceDeescalated', () => {
+  // maybeResolvePaceFromPlan can move the pace either way. paceEscalated
+  // (set by maybeEscalatePaceForTaskCount, asserted above) marks the
+  // task-count upward path; this is its counterpart for the plan-driven
+  // downward one — paceResolvedFrom: 'plan' alone says the plan decided, not
+  // which way it moved.
+  const dir = tmp('forge-pace-deescalate-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-deesc');
+    makePaceChangeFixture(dir, 'shrink-scope', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'shrink-scope';
+    raw.pace = 'auto';
+    raw.resolvedPace = 'standard';
+    raw.paceReason = 'unrecognized scope — failing closed';
+    raw.pacePinned = false;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '3', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'brisk');
+    assert.equal(session.paceResolvedFrom, 'plan');
+    assert.equal(session.paceDeescalated, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a plan-driven upward pace move is not marked paceDeescalated', () => {
+  const dir = tmp('forge-pace-escalate-plan-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-esc-plan');
+    makePaceChangeFixture(dir, 'wire-worker', { groupSizes: [8, 8, 4] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'wire-worker';
+    raw.pace = 'auto';
+    raw.resolvedPace = 'lite';
+    raw.paceReason = 'docs/mechanical signals without high-risk terms';
+    raw.pacePinned = false;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '20', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'standard');
+    assert.equal(session.paceResolvedFrom, 'plan');
+    assert.notEqual(session.paceDeescalated, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pin suppressing a plan-driven adjustment is recorded, naming what it overrode', () => {
+  // Both maybeResolvePaceFromPlan and maybeEscalatePaceForTaskCount return
+  // early on pacePinned having written nothing, so a suppressed adjustment
+  // reads identically to no signal ever firing. Pin thorough against a plan
+  // that would resolve brisk (3 tasks, single capability, no wired spine
+  // rows) and require the pin to survive AND the override to be on record.
+  const dir = tmp('forge-pace-pin-suppress-plan-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-plan');
+    makePaceChangeFixture(dir, 'shrink-scope-pinned', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'shrink-scope-pinned';
+    raw.pace = 'thorough';
+    raw.resolvedPace = 'thorough';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '3', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'thorough', 'the pinned pace must not change');
+    assert.equal(session.paceSuppressed?.plan?.wouldHaveBeen, 'brisk');
+    assert.match(session.paceSuppressed.plan.reason, /3 tasks/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pin suppressing a task-count escalation is recorded, naming what it overrode', () => {
+  const dir = tmp('forge-pace-pin-suppress-taskcount-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-taskcount');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.pace = 'lite';
+    raw.resolvedPace = 'lite';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '20']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'lite', 'the pinned pace must not change');
+    assert.equal(session.paceSuppressed?.taskCount?.wouldHaveBeen, 'standard');
+    assert.equal(session.paceSuppressed.taskCount.reason, '20 tasks');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pin that already agrees with the plan is not recorded as a suppression', () => {
+  // The easy thing to get wrong: a pinned session where the signal agreed
+  // with the pin is not a suppression, because nothing was overridden.
+  const dir = tmp('forge-pace-pin-agrees-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-agree');
+    makePaceChangeFixture(dir, 'shrink-scope-agree', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'shrink-scope-agree';
+    raw.pace = 'brisk';
+    raw.resolvedPace = 'brisk';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '3', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'brisk');
+    assert.equal(session.paceSuppressed, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('pin suppression from the plan and from task-count are recorded independently in the same pass', () => {
+  // facts.tasks (from tasks.md) and session.tasksTotal (declared via
+  // --tasks-total) can legitimately disagree — the plan here is small enough
+  // to resolve brisk, but the declared total is >=15, so both functions have
+  // something to suppress against the same `lite` pin, with genuinely
+  // different "would have been" answers (brisk vs standard). Neither may
+  // clobber the other's record.
+  const dir = tmp('forge-pace-pin-suppress-both-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-both');
+    makePaceChangeFixture(dir, 'small-plan-big-total', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'small-plan-big-total';
+    raw.pace = 'lite';
+    raw.resolvedPace = 'lite';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '20', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'lite', 'the pinned pace must not change');
+    assert.equal(session.paceSuppressed?.plan?.wouldHaveBeen, 'brisk');
+    assert.match(session.paceSuppressed.plan.reason, /3 tasks/);
+    assert.equal(session.paceSuppressed?.taskCount?.wouldHaveBeen, 'standard');
+    assert.equal(session.paceSuppressed.taskCount.reason, '20 tasks');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

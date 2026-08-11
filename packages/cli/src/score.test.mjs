@@ -378,7 +378,7 @@ test('reviewCoverageCap: rule 1 — only applies when the effective review.perTa
   // parameter; the call site (`scoreSession`) is responsible for resolving it
   // via `resolveEffectivePreferences`. The four paces still map onto these
   // knob values 1:1 (thorough->always, standard->per-group,
-  // brisk->high-risk-only, lite->never), so this subsumes the old pace check
+  // brisk->never, lite->never), so this subsumes the old pace check
   // for any session that never touched the knob.
   const census = { independent: 0, finalReview: null };
   for (const knob of ['high-risk-only', 'never', undefined, null, 'bogus']) {
@@ -2273,6 +2273,111 @@ test('forge score CLI prints JSON', () => {
     assert.ok(card.grade);
     assert.ok(Array.isArray(card.humanPrompts));
     assert.equal(card.humanPrompts.length, 4);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 3.4: a legitimately plan-de-escalated pace must never be scored as a
+ * missing escalation, independent of whether the pace-sanity deduction's own
+ * conditions (`resolvedPace` brisk/lite + `tasksTotal >= 15`) happen to
+ * overlap today. They can: `session.tasksTotal` is healed straight from
+ * tasks.md's checkbox count by `plan-progress.mjs` (`forge status` / `forge
+ * health` / the session-reminder hook) without ever re-running
+ * `set-phase.mjs`'s task-count escalation invariant, so a session correctly
+ * de-escalated to `brisk` at 3 declared tasks can still show
+ * `tasksTotal: 20` once tasks.md grows mid-implementation — reproduced by
+ * hand against `plan-progress.mjs`'s `healSessionProgress` while building
+ * this task, and pinned by the middle fixture below.
+ */
+function paceCheck(card) {
+  const check = card.checks.find((c) => c.id === 'pace');
+  assert.ok(check, 'expected a "pace" check on the scorecard');
+  return check;
+}
+
+test('3.4 pace sanity: a plan-de-escalated brisk session is not penalised even once tasksTotal heals to >=15', () => {
+  const root = tmp('forge-score-pace-deesc-brisk-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'shrink-scope',
+      resolvedPace: 'brisk',
+      paceResolvedFrom: 'plan',
+      paceDeescalated: true,
+      tasksTotal: 20,
+      tasksComplete: 20,
+    });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const pace = paceCheck(card);
+    assert.equal(pace.points, 5);
+    assert.doesNotMatch(pace.notes.join(' '), /expected escalation/);
+
+    // Witness: the identical fixture minus paceDeescalated must still take
+    // the deduction — proves the pass above came from honouring the marker,
+    // not from a fixture that could never trigger the deduction regardless.
+    const { paceDeescalated, ...withoutMarker } = session;
+    const unmarkedCard = scoreSession({ cwd: root, sessionDir, session: withoutMarker });
+    const unmarkedPace = paceCheck(unmarkedCard);
+    assert.equal(unmarkedPace.points, 0);
+    assert.match(unmarkedPace.notes.join(' '), /expected escalation/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('3.4 pace sanity: a plan-de-escalated lite session is not penalised even once tasksTotal heals to >=15', () => {
+  const root = tmp('forge-score-pace-deesc-lite-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'trim-docs',
+      resolvedPace: 'lite',
+      paceResolvedFrom: 'plan',
+      paceDeescalated: true,
+      tasksTotal: 15,
+      tasksComplete: 15,
+    });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(paceCheck(card).points, 5);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('3.4 pace sanity: a brisk session at >=15 tasks with no escalation and no de-escalation marker still loses the point (regression guard)', () => {
+  const root = tmp('forge-score-pace-unmarked-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'unexplained-brisk',
+      resolvedPace: 'brisk',
+      tasksTotal: 20,
+      tasksComplete: 20,
+    });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const pace = paceCheck(card);
+    assert.equal(pace.points, 0);
+    assert.match(pace.notes.join(' '), /expected escalation/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

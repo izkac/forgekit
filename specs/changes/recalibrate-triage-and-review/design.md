@@ -119,19 +119,38 @@ to the volume question this change settles.
 
 **Chosen:** plan-time evidence may lower the resolved pace as well as raise it,
 using the signals escalation already uses. A user-pinned pace is never
-overridden in either direction.
+overridden in either direction, and **the suppression is recorded**.
 
-`set-phase.mjs:173` escalates brisk/lite to standard at ≥15 tasks. There is no
-inverse anywhere, which is the mechanical reason a session that starts strict
-stays strict. Symmetry costs little: the evidence and the code path already
-exist.
+**Corrected during implement.** This decision was drafted on the belief that
+`set-phase.mjs` only escalated and had no inverse. That was false. `measured: I
+called the resolver directly` — `suggestPaceFromPlan()` in `plan-facts.mjs`
+returns `brisk` for a 4-task single-capability plan with no wired spine rows,
+`standard` for a 20-task plan, and `standard` for a tiny high-risk plan; and
+`set-phase.mjs` calls `maybeResolvePaceFromPlan()` at line 287, immediately
+before `maybeEscalatePaceForTaskCount()` at 288. Both directions have shipped
+since 0.3.17, and both already respect `pacePinned`.
+
+So the behavioural half of this decision needs no work. What remains is the
+half that was never built: **the record**.
+
+- A pin makes both functions `return` early having written nothing. A session
+  where a pin suppressed an adjustment is indistinguishable from one where no
+  signal ever fired, which is exactly the auditability this change argues for
+  everywhere else.
+- `paceEscalated` marks the upward path. There is no counterpart for the
+  downward one — `paceResolvedFrom: 'plan'` records *that* the plan decided, not
+  *which way* it moved.
+- Without that marker, scoring cannot tell a legitimate de-escalation from a
+  missed escalation on principle, even where today's thresholds happen not to
+  overlap.
 
 The asymmetry that stays: a pin is an explicit human instruction and auto
 resolution is not, so `forge prefs thorough` still wins over any signal.
 
-`score.mjs:578` currently expects escalation and will fail sessions that
-legitimately de-escalate. Scoring moves with the rules in the same change, not
-after it.
+The lesson worth keeping: this change's own proposal asserted a gap in code it
+had not run. The claim survived brainstorm, planning and a spec delta because
+nothing in that chain executes anything. It was caught by reading the file
+before briefing an implementer to build what was already there.
 
 ### D5 — Set the bar before moving the ceremony
 

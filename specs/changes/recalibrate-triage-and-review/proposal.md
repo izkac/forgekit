@@ -29,12 +29,22 @@ session that genuinely dispatched nothing; see `baseline-yield.md`):
 Thorough spends 2.8x the reviews per task and finds the same number of problems
 per unit of work.
 
-**Pace only ratchets up.** Triage and pace resolve at prompt time from the
-opening verb, before task count, capability count or risk are known, with a
-documented posture of erring toward Forge. Nothing reconsiders afterwards:
-`set-phase.mjs:173` escalates at ≥15 tasks and there is no inverse. The one
-counter-example is the pattern to generalize — `plan-facts.mjs` already resolves
-`resolvedCeremony: combined` at plan time from real evidence.
+**Pace resolution is two-way already, but silent when it declines to act.**
+Triage and pace resolve at prompt time from the opening verb, before task count,
+capability count or risk are known, with a documented posture of erring toward
+Forge. An earlier draft of this proposal claimed nothing reconsiders afterwards.
+That was wrong, and the correction is recorded here rather than quietly dropped:
+`set-phase.mjs` calls `maybeResolvePaceFromPlan()` immediately before
+`maybeEscalatePaceForTaskCount()`, and `suggestPaceFromPlan()` in
+`plan-facts.mjs` returns `brisk` for a small single-capability plan with no
+wired spine rows. Both directions ship today, and both were added in 0.3.17.
+
+What is genuinely missing is the **record**. When a pace is user-pinned, both
+functions return early and write nothing, so a session cannot show that an
+adjustment was considered and suppressed — the pin looks identical to a session
+where no signal ever fired. There is also no marker distinguishing a lowered
+pace from one that was never adjusted, which is what scoring would need to tell
+a legitimate de-escalation apart from a missed escalation.
 
 ## What Changes
 

@@ -25,7 +25,7 @@ import {
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
 import { COMBINED_TASKS, collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
-import { isHighRiskText } from './preferences.mjs';
+import { CONCRETE_PACES, isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
@@ -160,18 +160,62 @@ if (tasksComplete !== null) session.tasksComplete = tasksComplete;
 if (subagentsDispatched !== null) session.subagentsDispatched = subagentsDispatched;
 
 /**
+ * Record (or clear) what a pin overrode, keyed by which signal it came from.
+ *
+ * A pin makes both `maybeEscalatePaceForTaskCount` and
+ * `maybeResolvePaceFromPlan` no-ops for `resolvedPace`, so without this a
+ * session where a pin suppressed a real adjustment reads identically to one
+ * where no signal ever fired. `entry` is `null` when the signal agreed with
+ * the pin — that is not a suppression, so any stale record for `source` (from
+ * an earlier pass, before the facts agreed) is cleared rather than left
+ * behind. Both signals write under their own key so neither can clobber the
+ * other's record in the same pass — `facts.tasks` (the plan) and
+ * `session.tasksTotal` (declared via `--tasks-total`) can legitimately
+ * disagree, and each can have a different pace it would have chosen.
+ *
+ * @param {'plan' | 'taskCount'} source
+ * @param {{ wouldHaveBeen: string, reason: string } | null} entry
+ */
+function recordPaceSuppression(source, entry) {
+  const current =
+    session.paceSuppressed && typeof session.paceSuppressed === 'object' ? { ...session.paceSuppressed } : {};
+  if (entry) {
+    current[source] = entry;
+  } else {
+    delete current[source];
+  }
+  if (Object.keys(current).length) {
+    session.paceSuppressed = current;
+  } else {
+    delete session.paceSuppressed;
+  }
+}
+
+/**
  * Escalate under-scoped auto pace when the plan is large.
  * Only when pace is not user-pinned and current resolved pace is brisk/lite.
  */
 function maybeEscalatePaceForTaskCount() {
   const total = Number(session.tasksTotal) || 0;
   if (total < TASK_COUNT_ESCALATION_THRESHOLD) return;
-  if (session.pacePinned === true) return;
   const resolved = session.resolvedPace;
-  if (resolved !== 'brisk' && resolved !== 'lite') return;
+  const wouldEscalate = resolved === 'brisk' || resolved === 'lite';
+  if (session.pacePinned === true) {
+    // Record only where the outcome would actually have differed — a pinned
+    // session already at standard/thorough was never going to be touched by
+    // this rule, pin or no pin, so that is agreement, not suppression.
+    recordPaceSuppression('taskCount', wouldEscalate ? { wouldHaveBeen: 'standard', reason: `${total} tasks` } : null);
+    return;
+  }
+  if (!wouldEscalate) return;
   session.resolvedPace = 'standard';
   session.paceReason = `escalated: ${total} tasks`;
   session.paceEscalated = true;
+  // A de-escalation `maybeResolvePaceFromPlan` just recorded (same phase
+  // transition, immediately above) no longer describes the resolved pace
+  // once this overrides it back up — leaving it would claim the session is
+  // still running at the pace the plan chose.
+  delete session.paceDeescalated;
 }
 
 /**
@@ -185,15 +229,41 @@ function maybeEscalatePaceForTaskCount() {
  */
 function maybeResolvePaceFromPlan() {
   if (phase !== 'implement') return;
-  if (session.pace !== 'auto' || session.pacePinned === true) return;
+  // A pin still short-circuits `resolvedPace` — that half is unchanged. What
+  // changed is that a pin no longer skips this function outright: it still
+  // needs to read the plan and compare, purely to record what it overrode.
+  if (session.pace !== 'auto' && session.pacePinned !== true) return;
   try {
     const facts = collectPlanFacts({ session });
     if (!facts.readable) return;
     const suggested = suggestPaceFromPlan(facts);
+    if (session.pacePinned === true) {
+      // Record only where the plan actually disagrees with the pin — a
+      // session pinned to exactly what the plan would have chosen was never
+      // overridden, so that is agreement, not suppression.
+      recordPaceSuppression(
+        'plan',
+        suggested.pace === session.resolvedPace ? null : { wouldHaveBeen: suggested.pace, reason: suggested.reason },
+      );
+      return;
+    }
     if (suggested.pace === session.resolvedPace) return;
+    // `paceEscalated` (below) marks only the ≥15-tasks upward path.
+    // `maybeResolvePaceFromPlan` can move either way — a plan can resolve a
+    // `lite` session up to `standard` just as it can resolve `standard` down
+    // to `brisk` — so the direction has to come from comparing before/after
+    // positions in CONCRETE_PACES (thorough → standard → brisk → lite), never
+    // from which function ran. A later index is less ceremony, i.e. lower.
+    const before = CONCRETE_PACES.indexOf(session.resolvedPace);
+    const after = CONCRETE_PACES.indexOf(suggested.pace);
     session.paceResolvedFrom = 'plan';
     session.resolvedPace = suggested.pace;
     session.paceReason = `plan: ${suggested.reason}`;
+    if (before !== -1 && after !== -1 && after > before) {
+      session.paceDeescalated = true;
+    } else {
+      delete session.paceDeescalated;
+    }
     process.stderr.write(`[forge] Pace auto → ${suggested.pace} (${suggested.reason})\n`);
   } catch (err) {
     // Never block a phase transition — but say so, because a silent catch

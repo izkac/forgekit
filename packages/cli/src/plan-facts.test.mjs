@@ -82,6 +82,30 @@ test('task count alone escalates to standard', () => {
   assert.match(reason, /20 tasks/);
 });
 
+test('the >=15-tasks branch itself fires, not just the same-pace default fallback', () => {
+  // The test above only asserts pace==='standard' and reason matches /20
+  // tasks/ — both of which the *default* fallback branch (reached when no
+  // other rule matches) also satisfies for any tasks>=6, since it too is
+  // 'standard' and its reason also interpolates facts.tasks. Disabling the
+  // `facts.tasks >= STANDARD_TASKS` branch by hand left that test green,
+  // proving it discriminates nothing about this specific rule. Assert the
+  // exact reason template the task-count branch alone produces (it names
+  // "across N group(s)"; the default fallback names "spine row(s) —
+  // default") so a disabled branch is caught here even though the resolved
+  // pace does not change.
+  const root = tmp('forge-facts-many-exact-');
+  makeChange(root, {
+    tasks: tasksMd([['A', 5], ['B', 5], ['C', 5]]),
+    spine: { rows: [], notApplicable: 'sync only' },
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  const { pace, reason } = suggestPaceFromPlan(facts);
+  assert.equal(pace, 'standard');
+  assert.equal(reason, `${facts.tasks} tasks across ${facts.groups} group(s)`);
+  assert.doesNotMatch(reason, /default/);
+});
+
 test('a wired spine escalates to standard even when the task list is short', () => {
   const root = tmp('forge-facts-spine-');
   makeChange(root, {
@@ -92,6 +116,26 @@ test('a wired spine escalates to standard even when the task list is short', () 
   const { pace, reason } = suggestPaceFromPlan(collectPlanFacts({ cwd: root, session }));
   assert.equal(pace, 'standard');
   assert.match(reason, /3 spine row/);
+});
+
+test('the spineRows>=2 branch itself fires, not just the same-pace default fallback', () => {
+  // Same non-discriminating shape as the >=15-tasks case above: disabling
+  // `facts.spineRows >= 2` by hand leaves the test above green, because the
+  // default fallback also returns 'standard' and its reason also
+  // interpolates `${facts.spineRows} spine row(s)` — /3 spine row/ matches
+  // whichever branch produced it. Assert the exact reason template only the
+  // spineRows branch emits ("spine rows —", not "spine row(s) — default").
+  const root = tmp('forge-facts-spine-exact-');
+  makeChange(root, {
+    tasks: tasksMd([['Worker', 4]]),
+    spine: { rows: [{ capability: 'ingest' }, { capability: 'notify' }, { capability: 'report' }], notApplicable: null },
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  const { pace, reason } = suggestPaceFromPlan(facts);
+  assert.equal(pace, 'standard');
+  assert.equal(reason, `${facts.spineRows} spine rows — wired capabilities need per-group review`);
+  assert.doesNotMatch(reason, /default/);
 });
 
 test('money/auth anywhere in the plan holds standard, not thorough', () => {
