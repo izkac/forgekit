@@ -133,17 +133,17 @@ see design **D4**. What is missing is the record, so these tasks now cover that.
       fails when either side is edited alone.
 ## 7. Product loop
 
-- [ ] 7.1 Add `scripts/e2e/assert-triage-skip.mjs`: drives `forge triage
+- [x] 7.1 Add `scripts/e2e/assert-triage-skip.mjs`: drives `forge triage
       --check` over a fixed set of trivial prompts and, with `--substantial`,
       over real-work prompts. Verify: exits nonzero if any trivial prompt still
       triggers Forge or any real-work prompt slips through.
-- [ ] 7.2 Add `scripts/e2e/assert-pace-two-way.mjs`: drives the shipped CLI in
+- [x] 7.2 Add `scripts/e2e/assert-pace-two-way.mjs`: drives the shipped CLI in
       the scratch project through a small plan and a large one, asserting the
       pace moves both ways and that a pinned pace does not move. Verify: exits
       nonzero if de-escalation is missing or a pin is overridden.
-- [ ] 7.3 Add `scripts/e2e/assert-review-yield.mjs`: asserts the yield table is
+- [x] 7.3 Add `scripts/e2e/assert-review-yield.mjs`: asserts the yield table is
       computed from review stamps, omits absent paces, and does not read failed
       telemetry as zero reviews. Verify: exits nonzero when a session with
       failed metrics collection is counted as zero reviews.
-- [ ] 7.4 Product-loop acceptance: drive the real CLI through triage, a
+- [x] 7.4 Product-loop acceptance: drive the real CLI through triage, a
       de-escalating plan, and the yield table. Verify: green `forge e2e run`.
