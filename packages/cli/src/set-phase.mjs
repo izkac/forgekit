@@ -30,6 +30,7 @@ import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
+import { appendSessionDigest } from './ledger.mjs';
 import { bindHost } from './metrics/host.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
@@ -53,7 +54,7 @@ export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--reopen-waived "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--reopen-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -73,6 +74,8 @@ let subagentsDispatched = null;
 let allowIncomplete = null;
 let finalReviewWaived = null;
 let reopenWaived = null;
+let exitReason = null;
+let exitDeclined = null;
 
 for (let i = 1; i < args.length; i += 1) {
   const flag = args[i];
@@ -100,6 +103,12 @@ for (let i = 1; i < args.length; i += 1) {
     i += 1;
   } else if (flag === '--reopen-waived' && next) {
     reopenWaived = next;
+    i += 1;
+  } else if (flag === '--exit-reason' && next) {
+    exitReason = next;
+    i += 1;
+  } else if (flag === '--exit-declined' && next) {
+    exitDeclined = next;
     i += 1;
   } else if (flag === '--allow-incomplete' && next) {
     allowIncomplete = next;
@@ -158,6 +167,39 @@ if (openspecChange !== null) session.openspecChange = openspecChange;
 if (tasksTotal !== null) session.tasksTotal = tasksTotal;
 if (tasksComplete !== null) session.tasksComplete = tasksComplete;
 if (subagentsDispatched !== null) session.subagentsDispatched = subagentsDispatched;
+
+/**
+ * Carry the plan-time exit ramp's resolved shape onto a session that took
+ * it (D2). Mirrors `--final-review-waived`: parsed into a variable above,
+ * set on the session as a field so it survives `forge cleanup`, and read
+ * back into the ledger row by `appendSessionDigest` below — never
+ * recomputed, since the change directory the shape was read from may not
+ * exist by the time anything reads this back.
+ *
+ * Scoped to the `skipped` transition itself, not to "whenever the flag is
+ * given": a `--exit-reason` passed to some other phase by mistake must not
+ * silently land on a session that did not take the ramp.
+ */
+function recordExitReason() {
+  if (phase !== 'skipped') return;
+  if (exitReason) session.exitReason = exitReason;
+}
+
+/**
+ * Carry a declined plan-time exit offer onto the session that keeps it in
+ * Forge. "Declined" alone answers no question worth asking, so the value is
+ * the same resolved-shape text an accepted offer would have carried as
+ * `exitReason` — what would have qualified, had the answer gone the other
+ * way. Scoped to `plan`, the transition the offer is answered on the way
+ * into.
+ */
+function recordExitDeclined() {
+  if (phase !== 'plan') return;
+  if (exitDeclined) session.exitDeclined = exitDeclined;
+}
+
+recordExitReason();
+recordExitDeclined();
 
 /**
  * Record (or clear) what a pin overrode, keyed by which signal it came from.
@@ -762,6 +804,25 @@ if (phase === 'done' || phase === 'finish') {
   } catch (err) {
     process.stderr.write(
       `[forge] Warning: could not write scorecard: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
+
+// A skipped session gets no scorecard — there is no implementation to grade
+// — but `writeSessionScorecard` is also the only caller of
+// `appendSessionDigest` today, so `skipped` wrote no `sessions.jsonl` row at
+// all: the GATE_PHASES comment above names the consequence, a session that
+// leaves `unfinishedSessions()`' view and is then deleted by the next bare
+// `forge cleanup` with no durable record it ever existed. Called directly,
+// with no `card`, so the row reads `score: null, grade: null` — an exit is
+// never a graded outcome, and must never look like a finished session that
+// scored zero.
+if (phase === 'skipped') {
+  try {
+    appendSessionDigest({ cwd: process.cwd(), sessionDir: dir, session });
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not append the skipped-session digest: ${err instanceof Error ? err.message : err}\n`,
     );
   }
 }

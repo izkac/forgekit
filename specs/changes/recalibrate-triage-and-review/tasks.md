@@ -91,18 +91,18 @@ see design **D4**. What is missing is the record, so these tasks now cover that.
 
 ## 4. Plan-time exit ramp
 
-- [ ] 4.1 Add exit-condition resolution beside the existing ceremony resolver in
+- [x] 4.1 Add exit-condition resolution beside the existing ceremony resolver in
       `packages/cli/src/plan-facts.mjs`: few tasks, one capability, no wired
       spine rows, no high-risk surface. Verify: unit tests for qualifying and
       non-qualifying shapes, including high-risk never qualifying.
-- [ ] 4.2 Offer the exit in `skills/forge/phases/brainstorm.md` before change
+- [x] 4.2 Offer the exit in `skills/forge/phases/brainstorm.md` before change
       artefacts are scaffolded, and document that the offer is made, not taken
       silently. Verify: the phase doc states the check and its position in the
       flow.
-- [ ] 4.3 Record an accepted exit as the skipped phase carrying the resolved
+- [x] 4.3 Record an accepted exit as the skipped phase carrying the resolved
       shape as its reason. Verify: `set-phase` test asserts the ledger row and
       the reason naming task count, capability count and spine-row absence.
-- [ ] 4.4 Record a declined offer on the session and proceed to plan. Verify:
+- [x] 4.4 Record a declined offer on the session and proceed to plan. Verify:
       test asserts the declined offer is present and the session reaches plan.
 
 ## 5. Review-yield reporting

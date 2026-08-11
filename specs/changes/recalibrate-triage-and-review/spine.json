@@ -41,11 +41,11 @@
     {
       "capability": "Plan-time exit ramp — offer, accept, decline, all recorded",
       "library": "packages/cli/src/plan-facts.mjs",
-      "runtimeOwner": "packages/cli/src/set-phase.mjs — evaluated as the session leaves brainstorm",
+      "runtimeOwner": "packages/cli/src/exit-check.mjs — `forge exit-check`, run by the agent on the shaped facts as the session leaves brainstorm, before any change directory is scaffolded; recording is `forge phase skipped --exit-reason` / `forge phase plan --exit-declined` in packages/cli/src/set-phase.mjs",
       "writes": "session phase `skipped` with the resolved shape as reason, or the declined-offer record",
-      "reads": "shaped task count, capability count, spine rows, high-risk surface",
+      "reads": "shaped task count, capability count, spine rows, high-risk surface — supplied as flags by the agent, not read off disk (no change directory exists yet at the moment the offer is made)",
       "uiConsumer": "the brainstorm-phase offer the agent presents + .forge/sessions.jsonl rows",
-      "evidence": "packages/cli/src/plan-facts.test.mjs + set-phase.test.mjs"
+      "evidence": "packages/cli/src/plan-facts.test.mjs + set-phase.test.mjs + exit-check.test.mjs"
     },
     {
       "capability": "Per-pace review-yield reporting from review stamps only",
