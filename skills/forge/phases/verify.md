@@ -1,5 +1,9 @@
 # Verify phase
 
+**Ceremony check first:** if `forge status` shows `resolvedCeremony: combined`,
+follow [close.md](./close.md) instead of this file and [review.md](./review.md) —
+one closer pass covers both. This file is the `full` tail.
+
 Read and follow [../skills/verification-before-completion/SKILL.md](../skills/verification-before-completion/SKILL.md) and [../references/test-strategy.md](../references/test-strategy.md).
 
 ## Required checks

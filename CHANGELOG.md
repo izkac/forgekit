@@ -1,5 +1,164 @@
 # Changelog
 
+## 0.3.38 — 2026-08-11
+
+### Ceremony fails closed at the gate; closers carry attribution; task counts declared at implement
+
+The three cohort-5 residual gaps, closed:
+
+- A session that skips `forge phase implement` never resolved ceremony and was
+  indistinguishable from `full` while following neither path. verify/done/finish
+  now fail it closed to `full` and record why — the cheap tail is granted from
+  plan facts at implement, never retroactively at a gate.
+- `close.md`'s save step now owns the attribution check: a closer report that
+  does not open with `Reviewer: <model> (closer)` gets the line prepended from
+  the dispatch stamp before saving — all four cohort-5 final reviews were
+  missing it and graded from silence.
+- `implement.md` opens with the declaration requirement
+  (`forge phase implement --tasks-total <N>`): pace and ceremony resolve from
+  that transition, and two cohort-5 trials paid the full ceremony on small
+  changes only because it was omitted.
+
+### Combined close is now a rail, not a suggestion (cohort 4 follow-up)
+
+Cohort 4 was the first where the recalibrated gate fired (3 of 8 forge trials
+resolved `combined`; the refund trials correctly held `full` on the money
+floor). Adoption of the path itself was 0 of 3: one session dispatched a
+capable-tier final reviewer anyway — 90 tail requests, the cohort's most
+expensive tail, on the trial marked for the cheap one — and two reached `done`
+with empty `reviews/` directories. Prose routing is advisory; the agent's
+momentum wins. Three CLI rails now enforce what close.md describes, each on a
+surface every session actually crosses:
+
+- **`forge phase verify`** prints the combined-close instructions imperatively
+  on stderr at the transition — the moment the tail starts, not a line at the
+  top of a file the agent may never re-read.
+- **`forge review-label final`** on a combined session defaults the reviewer
+  tier to `standard` and refuses an explicit `--tier capable` unless
+  `--full-tail` asserts the choice; the refusal writes no stamp. `--tier fast`
+  is never refused — over-spend is the failure this rail exists for.
+- **`forge phase done`** refuses a combined session while
+  `reviews/final-review.md` is missing: the closer *is* the final reviewer, so
+  skipping it no longer slides through. `--allow-incomplete` remains the
+  recorded escape hatch.
+
+The cohort's headline numbers (forge 6/8 shippable — a tie with baseline —
+$2.98/trial) are unchanged from the noise band; with 0/3 adoption they measure
+momentum, not the treatment. Rails first, then measure again.
+
+### Combined-close gate recalibrated after cohort 3 measured it never firing
+
+The third sonnet-hard-v2 cohort ran with the combined close in the tarball and
+it fired in **0 of 8** forge trials — the whole cohort measured an inert
+treatment (its 4/8 shippable and higher cost are run-to-run noise, which also
+means the n=2 noise band spans at least 4/8–6/8). Two distinct gate misses,
+both fixed with pinned tests:
+
+- **Task-count threshold 2 → 5** (`COMBINED_TASKS`, exported and shared with the
+  no-plan fallback). Agents split even a one-file bugfix into 3–5 micro-tasks
+  (red, green, full-suite as separate ticks), so ≤2 never matched. Task count is
+  granularity, not size; capabilities and spine rows still gate.
+- **Negated risk mentions no longer count.** A carrier-task proposal reading
+  "Risk: low — no persistence migration … design.md skipped: … no money/auth" —
+  wording our own design-skip rule suggested — tripped `isHighRiskText` and
+  forced the full tail. `collectPlanFacts` now drops negation lines
+  (`dropNegatedRiskLines`) before the risk read; affirmative mentions still
+  escalate, and only lines are dropped, never documents. The plan-phase notes
+  now also tell planners to word design-skip lines neutrally instead of
+  enumerating the risks they disclaim.
+
+
+### Risk raises the pace floor to `standard`, not `thorough` (cost/speed plan, phase A)
+
+A plan mentioning money/auth/contracts/migrations used to set the whole session
+to `thorough`, which means a per-task reviewer for **every** task — including the
+docs and config tasks that carry no risk. Risk is a property of a task, and the
+per-task hard floor (`shouldReviewTask`) already dispatches an immediate reviewer
+for every high-risk task on every pace, so the escalation bought nothing for the
+risky work and doubled the reviewer count around it. Measured on the hard-v2 eval
+arm, whole-plan escalation was the common case.
+
+Both resolvers now return `standard` on a high-risk signal —
+`suggestPaceFromPlan` (plan text, at implement) and `suggestPaceFromSignals`
+(slug, at `forge new`) — while still outranking `brisk`/`lite`, so a high-risk
+change can never land on a pace that skips reviews. The `isHighRiskText` regex is
+unchanged, as is the per-task floor. `forge prefs thorough` still pins thorough.
+
+Plan: [docs/plans/2026-08-10-cost-and-speed.md](docs/plans/2026-08-10-cost-and-speed.md).
+
+### One implementer per work unit, not per task (cost/speed plan, phase B)
+
+The dispatch unit is now a **work unit** — by default one `tasks.md` group —
+instead of one task. A subagent dispatch pays a full context ramp-up (spec,
+constraints, files), and that ramp-up, not review output, is where Forge's ~8.5×
+input-token multiple came from; a four-task group used to pay it four times.
+
+Inside a unit nothing relaxes: one task at a time, its own red→green
+`forge tdd run` stamps, its own `tasks.md` checkbox, its own entry in the review
+packet. Units split at 4 tasks, when a later task needs an earlier one's *review*
+verdict, or when the tasks share no files or spec — and money/auth/contracts/
+migrations tasks stay 1:1 with their own reviewer on every pace.
+
+Prompt placeholders follow: the implementer packet takes `{TASK_LIST}` and
+`{TASK_IDS}` where it took a single `{TASK_ID}`.
+
+### Reviewers are scoped to a diff range (cost/speed plan, phase B)
+
+`{DIFF_RANGE}` is now required in both the task and final reviewer packets, and
+both refuse with `NEEDS_CONTEXT` rather than rebuilding scope by reading the
+repository. Directed reading — a caller whose contract changed, a spec the
+excerpt cites, a spine row's file — is still expected; directory sweeps and
+grepping for related code are not. A contract test pins both packets.
+
+### Hot-path prose moved out of the phase files (cost/speed plan, phase C)
+
+`implement.md` 342 → 269 lines and `review.md` 152 → 106, with no rule dropped.
+The reasoning behind review labels, dispatch stamps and attribution — why the
+session id is load-bearing, why the match is exact, what the stamp does and does
+not prove, and the disclosed over-credit direction — now lives in
+`references/review-labels.md`, read when a gate refuses or the scoring is being
+changed. The rules stay where they are used. Phase files are read once per
+session and effectively copied into the coordinator's working context; the
+history does not need to ride along. The `list is **closed**:` phrase list stays
+in `implement.md`, where its doc contract test reads it.
+
+### `design.md` is optional on small changes (cost/speed plan, phase C)
+
+Write it for ~6+ tasks, more than one capability, anything high-risk, or a
+decision a reader would otherwise reverse-engineer. Otherwise skip it and say so
+in one line under **Impact**. A design doc is written once and then read by every
+subagent for the rest of the change, so its cost scales with dispatch count while
+its value is fixed. For OpenSpec projects this is a coordinator call made after
+propose — the vendor skill is not edited.
+
+### Combined close: one pass replaces verify + review on small changes (cost/speed plan, item 8)
+
+Phase-level metrics from the sonnet-hard-v2 cohorts showed where Forge's money
+actually goes on small tasks: verify + review + done cost 2–4M input tokens per
+trial against 0.4–0.9M for implement — three tail phases each re-establishing
+context to check work one diff-read covers, while baseline solves the whole task
+for ~0.6M.
+
+On the way into implement, Forge now resolves **`resolvedCeremony`** from the
+plan (`suggestCeremonyFromPlan`, recorded on the session with a reason):
+
+- **`combined`** — ≤2 tasks, single capability, no wired spine rows, not
+  high-risk. One **closer** subagent (new `subagents/closer-prompt.md`, ~55
+  lines) is verifier and final reviewer in a single pass: reads the session
+  diff, audits the red→green ledgers, runs the narrowest tier-3 command once,
+  returns READY/NOT READY. Dispatched with `forge review-label final --tier
+  standard`, so the census, money/auth floor and scorecard machinery are
+  unchanged. One fix round, then escalate. Target ~10–15 requests for the whole
+  tail against the ~50 measured.
+- **`full`** — everything else: the existing verify → review pipeline, untouched.
+
+The floor is one-way and enforced in the resolver: money/auth/contracts/
+migrations/secrets and any change with wired spine rows always take the full
+tail. Sessions without a readable plan (legacy `direct`) resolve from their own
+declared task count and a risk read of the slug/signal, failing closed to
+`full`. Pace pinning does not override ceremony in either direction. The
+`forge phase done` integrity gates are identical on both paths.
+
 ## 0.3.37 — 2026-08-01
 
 ### Review guidance doc contract (F36)

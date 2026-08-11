@@ -24,7 +24,8 @@ import {
 } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
-import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
+import { COMBINED_TASKS, collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
+import { isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
@@ -203,8 +204,90 @@ function maybeResolvePaceFromPlan() {
   }
 }
 
+/**
+ * Resolve the session tail (`combined` vs `full`) on the way into implement.
+ *
+ * Independent of pace and of pace pinning: pinning `thorough` is a statement
+ * about review cadence, not about running three context-reestablishing tail
+ * phases on a two-task change. The high-risk floor is enforced inside the
+ * resolver (and re-checked here for the no-plan fallback), so a pinned pace
+ * can never *lower* the tail below what risk demands.
+ */
+function maybeResolveCeremonyFromPlan() {
+  // Primary resolution point is implement. verify/done/finish are a
+  // fail-closed backstop: cohort 5 observed a session that skipped `forge
+  // phase implement` entirely, never resolved ceremony, and was
+  // indistinguishable from `full` while having followed neither path. Late
+  // resolution always records `full` — the cheap tail is granted from plan
+  // facts at implement, never retroactively at a gate — so the session is
+  // governed by the full-tail rules it de facto ran under, and the ledgers
+  // stop carrying MISSING. An already-resolved session is left alone.
+  if (!['implement', 'verify', 'done', 'finish'].includes(phase)) return;
+  if (phase !== 'implement') {
+    if (session.resolvedCeremony) return;
+    session.resolvedCeremony = 'full';
+    session.ceremonyReason = `ceremony unresolved at ${phase} — failing closed to full`;
+    process.stderr.write(`[forge] Ceremony → full (${session.ceremonyReason})\n`);
+    return;
+  }
+  try {
+    const facts = collectPlanFacts({ session });
+    let suggested;
+    if (facts.readable) {
+      suggested = suggestCeremonyFromPlan(facts);
+    } else {
+      // No tracked change dir (legacy direct sessions). The same thresholds
+      // apply, from what the session itself knows: declared task count and the
+      // risk read of its slug/signal.
+      const total = Number.isInteger(session.tasksTotal) ? session.tasksTotal : null;
+      const risky = isHighRiskText([session.paceSignal, session.slug].filter(Boolean).join(' '));
+      if (risky) {
+        suggested = { ceremony: 'full', reason: 'high-risk signals — full verify and review tail' };
+      } else if (total !== null && total > 0 && total <= COMBINED_TASKS) {
+        suggested = {
+          ceremony: 'combined',
+          reason: `no readable plan; ${total} declared task(s), no high-risk signals — one closer pass covers the tail`,
+        };
+      } else {
+        suggested = { ceremony: 'full', reason: 'no readable plan — failing closed to full' };
+      }
+    }
+    if (suggested.ceremony === session.resolvedCeremony) return;
+    session.resolvedCeremony = suggested.ceremony;
+    session.ceremonyReason = suggested.reason;
+    process.stderr.write(`[forge] Ceremony → ${suggested.ceremony} (${suggested.reason})\n`);
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not resolve ceremony from the plan: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
+
+/**
+ * Say the combined-close instruction at the moment the tail starts.
+ *
+ * Cohort 4 measured why prose is not enough: three sessions resolved
+ * `combined` and none followed close.md — one dispatched a capable final
+ * reviewer anyway (the most expensive tail in the cohort), two skipped the
+ * final review entirely. The router line at the top of verify.md is advisory;
+ * the `forge phase verify` transition is a surface every session actually
+ * crosses, so the instruction fires here, imperatively.
+ */
+function announceCombinedClose() {
+  if (phase !== 'verify') return;
+  if (session.resolvedCeremony !== 'combined') return;
+  process.stderr.write(
+    '[forge] Ceremony is COMBINED for this session — follow phases/close.md:\n' +
+      '[forge]   one closer dispatch (forge review-label final → standard tier) covers verify + review.\n' +
+      '[forge]   Do not run the full tail: no separate tier-3 phase, no capable final reviewer.\n' +
+      '[forge]   forge phase done will refuse without reviews/final-review.md (the closer report).\n',
+  );
+}
+
 maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
+maybeResolveCeremonyFromPlan();
+announceCombinedClose();
 
 /**
  * Hard gate: implementation may not start until the operator brief exists and
@@ -250,6 +333,20 @@ function enforceDoneGate() {
   const problems = [];
   if (!hasEvidence) problems.push('missing verify-evidence.md');
   if (!tasksDone) problems.push(`tasks incomplete (${complete}/${total})`);
+
+  // Combined ceremony: the closer IS the final reviewer, so a combined session
+  // with no reviews/final-review.md has skipped its only review. Cohort 4
+  // measured exactly that — two combined sessions reached done with empty
+  // reviews/ directories. Full-ceremony sessions are governed by the
+  // final-review floor and pace knobs, not this check.
+  if (
+    session.resolvedCeremony === 'combined' &&
+    !fs.existsSync(path.join(dir, 'reviews', 'final-review.md'))
+  ) {
+    problems.push(
+      'combined ceremony: missing reviews/final-review.md — dispatch the closer (phases/close.md) and save its report',
+    );
+  }
 
   const integrity = runIntegrityChecks({ sessionDir: dir, session });
   problems.push(...integrity.problems);

@@ -44,7 +44,7 @@ even under `lite` / `brisk` / mid-group `standard`.
 
 ## Auto signals (stricter wins)
 
-1. money, payment, stripe, billing, auth, oauth, hmac, secret, migration, contract, gdpr → **thorough**
+1. money, payment, stripe, billing, auth, oauth, hmac, secret, migration, contract, gdpr → **standard**, and never `brisk`/`lite`. Risk is a property of a *task*: the per-task hard floor below already reviews every high-risk task on every pace, so escalating the whole session to `thorough` only bought per-task reviewers for the low-risk work beside it. Pin with `forge prefs thorough` when you want the old behavior.
 2. ecosystem, cross-workspace, multi-file, openapi, public API, shared package, **worker**, **job queue**, **pipeline**, **etl**, **service(s)**, **platform**, **orchestration**, **openspec**, **forge:apply**, **harmonization** → **standard**
 3. docs, readme, rename, typo, scaffold, wording, comment, changelog → **lite**
 4. fix, tweak, button, toolbar, style, padding, alignment, copy, label (explicitly small) → **brisk**
@@ -57,6 +57,16 @@ When `forge phase … --tasks-total N` sets **N ≥ 15** and the session's
 Forge escalates the session to **`standard`** with
 `paceReason: "escalated: N tasks"`. Slug keywords are a poor proxy for scope;
 task count is known at plan time.
+
+## Ceremony (session tail) — orthogonal to pace
+
+On the way into implement, Forge also resolves **`resolvedCeremony`** from the
+plan: **`combined`** (≤5 tasks, single capability, no wired spine rows, not
+high-risk → one closer pass replaces the separate verify + review phases; see
+`phases/close.md`) or **`full`** (the existing tail). Pace pinning does not
+override it — pinning `thorough` is a statement about review cadence, not a
+request for three context-reestablishing tail phases on a two-task change. The
+floor is one-way: high-risk or spine-rowed changes are always `full`.
 
 ## Runtime integrity
 

@@ -84,6 +84,111 @@ function phaseHistory(sessionFile) {
   return JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phaseHistory;
 }
 
+test('phase verify announces the combined-close path imperatively on stderr', () => {
+  // Cohort 4 measured the failure this rail closes: 3 sessions resolved
+  // `combined` and 0 followed close.md — one ran a capable final reviewer
+  // anyway, two skipped the final review entirely. Prose routing at the top
+  // of verify.md is advisory; an instruction at the moment of transition is
+  // the surface the agent actually hits.
+  const dir = tmp('forge-verify-combined-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-comb-announce');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.resolvedCeremony = 'combined';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'verify'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /combined/i);
+    assert.match(r.stderr, /close\.md/);
+    assert.match(r.stderr, /do not run the full/i);
+
+    // A full-ceremony session gets no such instruction.
+    const dir2 = tmp('forge-verify-full-');
+    try {
+      makeForgeFixture(dir2, 'sess-full-quiet');
+      const r2 = spawnSync(process.execPath, [SCRIPT, 'verify'], { cwd: dir2, encoding: 'utf8' });
+      assert.equal(r2.status, 0, r2.stderr);
+      assert.doesNotMatch(r2.stderr, /close\.md/);
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done refuses a combined session with no final review on file', () => {
+  // The other half of the cohort-4 failure: two combined sessions reached
+  // done with empty reviews/ directories. The closer IS the final reviewer;
+  // a combined session with no reviews/final-review.md has skipped it.
+  const dir = tmp('forge-done-combined-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-comb-done');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.resolvedCeremony = 'combined';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const refused = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(refused.status, 0, 'must refuse without reviews/final-review.md');
+    assert.match(refused.stderr, /final-review\.md/);
+    assert.match(refused.stderr, /combined/i);
+
+    fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, 'reviews', 'final-review.md'),
+      'Reviewer: test-model (closer)\n\nREADY\n',
+    );
+    const ok = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(ok.status, 0, ok.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ceremony missing at done fails closed to full and is recorded — skipping implement earns no cheap tail', () => {
+  // Cohort 5 observed the hole: a session that never ran `forge phase
+  // implement` never resolved ceremony, and the combined final-review gate
+  // keys on `combined` — so MISSING was indistinguishable from full while
+  // having followed neither path. Late resolution records `full` (never
+  // `combined` — the cheap tail is granted from plan facts at implement, not
+  // retroactively at the gate), so the session is governed by the full-tail
+  // rules it de facto ran under, and the ledgers stop carrying MISSING.
+  const dir = tmp('forge-done-lateresolve-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-late-full');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'direct';
+    s.slug = 'fix-pagination-boundary';
+    s.paceSignal = 'fix-pagination-boundary';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.resolvedCeremony, 'full', 'missing ceremony must resolve full at the gate');
+    assert.match(after.ceremonyReason || '', /unresolved|fail/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a phase transition appends {phase, at} to a session with no phaseHistory', () => {
   const dir = tmp('forge-phase-history-');
   try {

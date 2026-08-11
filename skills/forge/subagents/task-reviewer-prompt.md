@@ -21,7 +21,21 @@ Capability specs beat narrow task wording when they conflict. See
 
 {FILE_LIST}
 
-Diff range: {DIFF_RANGE}   <!-- `forge checkpoint --range --last` → paste its `reviewTarget` (scopes to this group; names untracked files a diff hides). No checkpoints: `git diff` + the untracked files in `git status`. -->
+Diff range: {DIFF_RANGE}   <!-- REQUIRED. `forge checkpoint --range --last` → paste its `reviewTarget` (scopes to this group; names untracked files a diff hides). No checkpoints: `git diff` + the untracked files in `git status`. -->
+
+**This range is your scope, and it is not optional.** Read the diff it names,
+plus every untracked file listed with it. If the range above is empty or still
+says `{DIFF_RANGE}`, stop and return `NEEDS_CONTEXT` asking the coordinator for
+it — do not substitute a survey of the repository.
+
+**Do not explore the tree to build your own picture.** Open a file outside the
+diff only when the diff or the capability excerpt sends you there — a caller
+whose contract changed, a spec the excerpt cites, a type the change depends on.
+That is directed reading and it is expected of you. What is not: listing
+directories, grepping for related code, or reading neighbouring modules to see
+how things generally work. Undirected reading is most of what a review costs and
+almost none of what it finds, because the defects live in the lines that
+changed.
 
 ## Forge evidence targets
 
@@ -39,7 +53,7 @@ that file — "needed to make the test pass" is not a reason, it is the guard
 firing correctly. A weak or missing reason is a review finding on its own,
 independent of whether the resulting code is otherwise fine.
 
-**Read the actual code.** The summary above was written by the party under review — it is a map, not evidence. Read the changed files (or the diff range) before any verdict; verify each spec requirement against what the code does, not what the summary says it does.
+**Read the actual code.** The summary above was written by the party under review — it is a map, not evidence. Read the diff range before any verdict; verify each spec requirement against what the code does, not what the summary says it does. Reading less than the whole diff is the one economy not open to you.
 
 ## Check — spec compliance first, then quality
 

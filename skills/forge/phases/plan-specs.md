@@ -37,9 +37,31 @@ Change lives under `<plan.dir>/changes/<change-name>/`.
    Affected code/areas, risks, migration notes.
    ```
 
-   **`design.md`** (scaffold always; trim or delete when purely mechanical)
+   **`design.md`** (write it when it earns its place — skip it otherwise)
 
    Context, decisions with alternatives, risks.
+
+   **Skip `design.md`** when the change is under ~6 tasks and touches a single
+   capability, unless it makes a decision a reader would otherwise have to
+   reverse-engineer — a contract shape, a migration order, a chosen trade-off
+   between two real options. **Write it** for anything larger, anything
+   multi-capability, and anything high-risk (money, auth, contracts, migrations,
+   secrets), whatever the task count.
+
+   The reason to be strict: a design doc is written once and then read by every
+   subagent for the rest of the change, so its cost is multiplied by the number
+   of dispatches while its value is fixed. On a small change that trade rarely
+   pays. On a large or risky one it always does — a wrong decision propagated
+   through eight units costs far more than the doc.
+
+   Skipping it is a decision, not an omission: say so in `proposal.md` under
+   **Impact** in one line, so a reader knows the design was considered and found
+   obvious rather than skipped by accident. Word it neutrally — *"design.md
+   skipped: small single-capability change, no high-risk surface"* — and do
+   **not** enumerate the risk categories you are disclaiming ("no money/auth/
+   migrations"): risk detection is keyword-based, negations are filtered by a
+   heuristic, and a plan that names the categories it doesn't touch is betting
+   the cheap tail on that heuristic winning.
 
    **`tasks.md`** (required)
 
@@ -87,7 +109,7 @@ Change lives under `<plan.dir>/changes/<change-name>/`.
 
 3. Confirm `tasks.md` exists and at least one delta under `specs/` when the
    change adds/changes behavior. Apply-ready = proposal + tasks + deltas
-   (design when non-mechanical).
+   (design only when the rule above calls for it).
 4. **Spine (always) + orchestration seam** — see [../references/runtime-integrity.md](../references/runtime-integrity.md):
 
    ```bash

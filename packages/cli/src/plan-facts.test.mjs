@@ -5,7 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { collectPlanFacts, suggestPaceFromPlan } from './plan-facts.mjs';
+import { collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
 
 const SET_PHASE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 
@@ -94,7 +94,10 @@ test('a wired spine escalates to standard even when the task list is short', () 
   assert.match(reason, /3 spine row/);
 });
 
-test('money/auth anywhere in the plan forces thorough', () => {
+test('money/auth anywhere in the plan holds standard, not thorough', () => {
+  // The per-task hard floor already reviews the risky tasks. Escalating the
+  // whole session to thorough also bought a per-task reviewer for every
+  // low-risk task sharing the change, which is where the cost went.
   const root = tmp('forge-facts-risk-');
   makeChange(root, {
     tasks: tasksMd([['Refund', 2]]),
@@ -105,8 +108,25 @@ test('money/auth anywhere in the plan forces thorough', () => {
   const facts = collectPlanFacts({ cwd: root, session });
   assert.equal(facts.highRisk, true);
   const { pace, reason } = suggestPaceFromPlan(facts);
-  assert.equal(pace, 'thorough');
+  assert.equal(pace, 'standard');
   assert.match(reason, /money|auth|risk/i);
+  assert.match(reason, /per-task/i);
+});
+
+test('a high-risk plan never resolves to brisk, however small it is', () => {
+  // Two tasks, one capability, no spine rows — the brisk shape exactly. Risk
+  // has to outrank it, or the floor is the only thing left standing.
+  const root = tmp('forge-facts-risk-small-');
+  makeChange(root, {
+    tasks: tasksMd([['Rotate', 2]]),
+    proposal: '# Why\n\nRotate the signing secret used by the webhook.\n',
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['webhook'],
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.highRisk, true);
+  assert.equal(suggestPaceFromPlan(facts).pace, 'standard');
 });
 
 test('risk in the spine counts even when the proposal never says it', () => {
@@ -116,7 +136,97 @@ test('risk in the spine counts even when the proposal never says it', () => {
     spine: { rows: [{ capability: 'export', runtimeOwner: 'authorization gate on GET /export' }], notApplicable: null },
   });
 
-  assert.equal(suggestPaceFromPlan(collectPlanFacts({ cwd: root, session })).pace, 'thorough');
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.highRisk, true);
+  assert.equal(suggestPaceFromPlan(facts).pace, 'standard');
+});
+
+test('ceremony: a small clean change resolves to combined', () => {
+  // Measured on sonnet-hard-v2: verify+review+done cost 2-4M tokens per trial
+  // against 0.4-0.9M for implement. On a small change the tail IS the bill.
+  const root = tmp('forge-ceremony-small-');
+  makeChange(root, {
+    tasks: tasksMd([['Fix', 2]]),
+    spine: { rows: [], notApplicable: 'sync-only bugfix' },
+    capabilities: ['pagination'],
+  });
+
+  const { ceremony, reason } = suggestCeremonyFromPlan(collectPlanFacts({ cwd: root, session }));
+  assert.equal(ceremony, 'combined');
+  assert.match(reason, /2 task/);
+});
+
+test('ceremony: agents split small fixes into micro-tasks — 4-5 tasks still combine', () => {
+  // Cohort 3 measured the gate misfiring: every direct session declared 3-5
+  // tasks for a one-file bugfix (red, green, full-suite as separate ticks),
+  // so a <=2 threshold never fired at all. Task count is granularity, not
+  // size; capabilities and spine rows carry the size signal.
+  const root = tmp('forge-ceremony-micro-');
+  makeChange(root, {
+    tasks: tasksMd([['Fix', 5]]),
+    spine: { rows: [], notApplicable: 'sync-only bugfix' },
+    capabilities: ['reconciliation'],
+  });
+
+  assert.equal(suggestCeremonyFromPlan(collectPlanFacts({ cwd: root, session })).ceremony, 'combined');
+});
+
+test('risk read ignores negated mentions: "no money/auth impact" is not a money change', () => {
+  // Cohort 3, carrier task: the proposal said "Risk: low — no persistence
+  // migration, no API shape change" and "design.md skipped: ... no money/auth"
+  // — wording our own plan-phase rule suggests — and the keyword regex forced
+  // the full tail. Negation lines must not count; affirmative lines must.
+  const root = tmp('forge-ceremony-negation-');
+  makeChange(root, {
+    tasks: tasksMd([['Fix', 3]]),
+    proposal: [
+      '# Repair reconciliation',
+      '',
+      '## Impact',
+      '- Risk: low — in-memory stores only, no persistence migration, no API shape change.',
+      '- `design.md` skipped: single capability, under 6 tasks, no money/auth surface.',
+      '',
+    ].join('\n'),
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['reconciliation'],
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.highRisk, false);
+  assert.equal(suggestCeremonyFromPlan(facts).ceremony, 'combined');
+});
+
+test('ceremony: high-risk always gets the full tail', () => {
+  const root = tmp('forge-ceremony-risk-');
+  makeChange(root, {
+    tasks: tasksMd([['Refund', 2]]),
+    proposal: '# Why\n\nIssue partial refunds through the payment provider.\n',
+    spine: { rows: [], notApplicable: 'sync only' },
+  });
+
+  assert.equal(suggestCeremonyFromPlan(collectPlanFacts({ cwd: root, session })).ceremony, 'full');
+});
+
+test('ceremony: wired spine rows keep the full tail (product loop needs verify)', () => {
+  const root = tmp('forge-ceremony-spine-');
+  makeChange(root, {
+    tasks: tasksMd([['Worker', 2]]),
+    spine: { rows: [{ capability: 'ingest' }], notApplicable: null },
+  });
+
+  assert.equal(suggestCeremonyFromPlan(collectPlanFacts({ cwd: root, session })).ceremony, 'full');
+});
+
+test('ceremony: more tasks or capabilities keep the full tail; unreadable fails closed', () => {
+  const root = tmp('forge-ceremony-big-');
+  makeChange(root, {
+    tasks: tasksMd([['Model', 3], ['API', 2]]),
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['billing', 'reporting'],
+  });
+
+  assert.equal(suggestCeremonyFromPlan(collectPlanFacts({ cwd: root, session })).ceremony, 'full');
+  assert.equal(suggestCeremonyFromPlan(collectPlanFacts({ cwd: tmp('forge-ceremony-none-'), session })).ceremony, 'full');
 });
 
 test('forge phase implement re-resolves auto pace from the plan', () => {
@@ -166,6 +276,45 @@ test('forge phase implement re-resolves auto pace from the plan', () => {
   assert.equal(saved.resolvedPace, 'brisk');
   assert.equal(saved.paceResolvedFrom, 'plan');
   assert.match(saved.paceReason, /^plan: /);
+  // 3 tasks, single capability, spine notApplicable, no risk — combines.
+  assert.equal(saved.resolvedCeremony, 'combined');
+  assert.ok(saved.ceremonyReason);
+});
+
+test('ceremony fallback: a small direct session combines; a risky slug never does', () => {
+  // The eval cohorts ran mostly `direct` sessions with 0-1 tasks and no change
+  // dir — exactly the sessions whose tail dominates the bill. The fallback
+  // reads the session's own declared facts.
+  for (const [slug, tasksTotal, expected] of [
+    ['fix-pagination-boundary', 2, 'combined'],
+    ['fix-pagination-boundary', 5, 'combined'],
+    ['rotate-webhook-secret', 2, 'full'],
+    ['fix-pagination-boundary', 6, 'full'],
+  ]) {
+    const root = tmp('forge-ceremony-direct-');
+    const sessionDir = path.join(root, '.forge', 'sessions', 's1');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const now = new Date().toISOString();
+    fs.writeFileSync(
+      path.join(sessionDir, 'session.json'),
+      `${JSON.stringify({
+        id: 's1', slug, createdAt: now, updatedAt: now, phase: 'plan',
+        planType: 'direct', openspecChange: null, tasksTotal, tasksComplete: 0,
+        pace: 'auto', resolvedPace: 'standard', paceReason: 'test', paceSignal: slug, pacePinned: false,
+      })}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(root, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`, 'utf8');
+
+    execFileSync(
+      process.execPath,
+      [SET_PHASE, 'implement', '--tasks-total', String(tasksTotal), '--allow-incomplete', 'no brief in test'],
+      { cwd: root, env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('facts-fleet-'), 's') } },
+    );
+
+    const saved = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+    assert.equal(saved.resolvedCeremony, expected, `${slug} tasksTotal=${tasksTotal}`);
+  }
 });
 
 test('an unreadable plan fails closed to standard, never to brisk', () => {
