@@ -85,6 +85,56 @@ test('a new payment endpoint is substantial', () => {
   assert.equal(hasWorkContent('add a new payment endpoint'), true);
 });
 
+// I1 (final review of recalibrate-triage-and-review): `changelog`,
+// `docs-only`, `documentation-only` and `rename-only` were widened to bare
+// substrings anywhere in the prompt, which silences real work that merely
+// mentions one of those words while building something new — including a
+// payments feature, where suppression means no session is ever created and
+// the high-risk floor never gets a chance to engage. The shared shape: the
+// marker sits inside a compound noun or a subordinate clause describing what
+// is being BUILT, not the direct object of an edit to existing trivial
+// content. `changelog` is the clearest case — unlike the other three markers
+// it is a plain noun, not an assertion about the edit's nature.
+test('a payments feature request is substantial even though it calls itself a rename-only change', () => {
+  const prompt = 'Implement payment refunds — this is a rename-only change to the Stripe adapter';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('a changelog-generator feature request is substantial ("changelog" is an incidental noun, not the edit target)', () => {
+  const prompt = 'Add a changelog generator that reads git history and writes CHANGELOG.md';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('a docs-only publishing pipeline is substantial ("docs-only" describes the pipeline\'s output, not the edit)', () => {
+  const prompt = 'Build a docs-only publishing pipeline for the API reference';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+// Two more work requests in the same family (compound noun / new artifact),
+// deliberately not lifted from the reviewer's four probes, so the fix is not
+// tuned to exactly those phrasings.
+test('a rename-only migration tool is substantial ("rename-only" describes the tool being built, not an edit)', () => {
+  const prompt = 'Add a rename-only migration tool that renames legacy tables in bulk';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('a documentation-only site generator is substantial ("documentation-only" describes the generator\'s output, not the edit)', () => {
+  const prompt = 'Build a documentation-only site generator for the API reference';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+// Still suppressed: the marker IS the direct object of an edit verb, not a
+// modifier inside something new being built.
+test('"update the changelog" (the actual edit target) is still trivial', () => {
+  assert.equal(hasWorkContent('update the changelog'), false);
+  assert.equal(shouldForgeTriage('update the changelog'), false);
+});
+
 // This prompt has no trivial marker, no read-only question shape, and no
 // verb the "enter Forge" pattern list happens to enumerate — it must not
 // fall through to "not substantial" by default.

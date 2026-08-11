@@ -17,8 +17,11 @@
  *
  * Also asserts:
  *   - a pace nothing was ever recorded at emits no row (no zero-row clutter);
- *   - a `pace: null` session (one that left through the plan-time exit ramp,
- *     D2) produces no bucket and no division error.
+ *   - a `phase: "skipped"` session (one that left through the plan-time exit
+ *     ramp, D2) carries a real, already-resolved pace — `forge new` resolves
+ *     one immediately, so this does NOT carry `pace: null` — and must not
+ *     count toward that pace's `sessions`, since it never reached review
+ *     ceremony at it.
  *
  * Drives the SHIPPED binary (`forge analyze` and `forge analyze --json`)
  * against a scratch `.forge/sessions.jsonl` — never a real ledger in this
@@ -78,12 +81,12 @@ ensureBootedProject(SCRATCH);
  * One `.forge/sessions.jsonl` digest line, the shape `appendSessionDigest`
  * (packages/cli/src/ledger.mjs) writes.
  */
-function digestLine({ sessionId, pace, tasksComplete, tasksTotal, independent, rejections, metricsAvailable, subagentsDispatched, endedAt }) {
+function digestLine({ sessionId, phase = 'done', pace, tasksComplete, tasksTotal, independent, rejections, metricsAvailable, subagentsDispatched, endedAt }) {
   return JSON.stringify({
     sessionId,
     slug: sessionId,
     change: null,
-    phase: 'done',
+    phase,
     planType: 'specs',
     pace,
     tasks: `${tasksComplete}/${tasksTotal}`,
@@ -145,11 +148,18 @@ const ZERO_TASKS = digestLine({
   endedAt: at(30),
 });
 
-// A session that left through the plan-time exit ramp (D2): pace null,
-// 0/0 tasks. Must not create a `null` bucket and must not divide by zero.
+// A session that left through the plan-time exit ramp (D2). `forge new`
+// resolves a pace immediately, so this does NOT carry `pace: null` — it
+// carries the real, already-resolved pace and `phase: 'skipped'`, `tasks:
+// '0/0'`. It never reached review ceremony at that pace, so it must produce
+// no row (not a zero row) for it. Uses `thorough` deliberately — no other
+// fixture runs at `thorough`, so a stray row is unambiguous, and the "absent
+// paces" loop below (which already checks `thorough`) is what proves the
+// exclusion.
 const EXIT_RAMP = digestLine({
   sessionId: 'fixture-exit-ramp',
-  pace: null,
+  phase: 'skipped',
+  pace: 'thorough',
   tasksComplete: 0,
   tasksTotal: 0,
   independent: 0,
@@ -223,16 +233,18 @@ if (!Number.isFinite(standard.rejectionsPer100Tasks) || standard.rejectionsPer10
   );
 }
 
-// --- absent paces emit no row ---
+// --- absent paces emit no row — "thorough" doubles as the exit-ramp proof: ---
+// EXIT_RAMP carries `pace: 'thorough'` and `phase: 'skipped'`, and no other
+// fixture runs at `thorough`, so a row appearing here means the exit-ramp
+// exclusion broke, not that a real session ran unrecorded.
 for (const absent of ['thorough']) {
   if (Object.prototype.hasOwnProperty.call(yieldTable, absent)) {
-    fail(`reviewYield has a row for "${absent}", which no fixture session ever ran at`, JSON.stringify(yieldTable, null, 2));
+    fail(
+      `reviewYield has a row for "${absent}" — either a fixture ran there unexpectedly, or the ` +
+        'phase:"skipped" (exit-ramp) exclusion broke and let EXIT_RAMP count toward it',
+      JSON.stringify(yieldTable, null, 2),
+    );
   }
-}
-
-// --- the exit-ramp session (pace: null) makes no bucket and causes no crash ---
-if (Object.prototype.hasOwnProperty.call(yieldTable, 'null')) {
-  fail('reviewYield has a "null" bucket — a pace: null (exit-ramp) session must not create one', JSON.stringify(yieldTable, null, 2));
 }
 for (const [pace, row] of Object.entries(yieldTable)) {
   if (!Number.isFinite(row.reviewsPerTask) || !Number.isFinite(row.rejectionsPer100Tasks)) {
@@ -254,5 +266,5 @@ process.stdout.write(
   `review-yield: lite=${lite.independentReviews}/${lite.tasks} (failed-telemetry session counted from stamps), ` +
     `brisk=${brisk.independentReviews}/${brisk.tasks} rej/100=${brisk.rejectionsPer100Tasks}, ` +
     `standard=${standard.independentReviews}/${standard.tasks} (guarded, no NaN), ` +
-    'absent paces: no row, exit-ramp (pace:null): no bucket\n',
+    'absent paces: no row, exit-ramp (phase:skipped, real pace): no bucket\n',
 );

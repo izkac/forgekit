@@ -1,8 +1,15 @@
 /**
- * Guards against `skills/forge/references/pace.md`'s preset effort matrix
- * drifting away from `preferences.defaults.json` — the file that actually
- * runs. The matrix is prose an agent reads every session; the JSON is the
- * behaviour. Nothing stops them disagreeing except this test.
+ * Guards against the preset effort matrix drifting away from
+ * `preferences.defaults.json` — the file that actually runs. The matrix is
+ * prose an agent reads every session; the JSON is the behaviour. Nothing
+ * stops them disagreeing except this test.
+ *
+ * The matrix ships in TWO files, not one: `skills/forge/references/pace.md`
+ * (the detail reference) and `skills/forge/docs/forge.md` (the file
+ * `SKILL.md` calls the full reference, and the `/forge` command template
+ * tells agents to read). Both are checked below — a table that only guards
+ * one copy lets the other drift silently, which is exactly how the second
+ * copy shipped stale (C1, final review of `recalibrate-triage-and-review`).
  *
  * Parsing is defensive on purpose (see `parsePaceMatrix`): a regex that
  * matches nothing, or matches the wrong rows, must be distinguishable from a
@@ -20,7 +27,13 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULTS_PATH } from './preferences.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PACE_MD_PATH = path.resolve(__dirname, '../../../skills/forge/references/pace.md');
+const SKILL_ROOT = path.resolve(__dirname, '../../../skills/forge');
+
+/** Every doc that carries a full copy of the preset effort matrix. */
+const DOC_PATHS = Object.freeze([
+  path.join(SKILL_ROOT, 'references/pace.md'),
+  path.join(SKILL_ROOT, 'docs/forge.md'),
+]);
 
 // Mirrors plan-facts.mjs's FENCE_RE/stripFencedBlocks (not exported there, so
 // duplicated here rather than reaching into an unexported internal). Keeps a
@@ -152,25 +165,29 @@ function getPath(obj, dotPath) {
   return dotPath.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
 }
 
-test('pace.md matrix: parser actually finds the table (row/column counts, not values)', () => {
-  const text = fs.readFileSync(PACE_MD_PATH, 'utf8');
-  const { presets, matrix } = parsePaceMatrix(text);
+for (const docPath of DOC_PATHS) {
+  const label = path.relative(SKILL_ROOT, docPath);
 
-  // Fail here, distinctly from a value mismatch below, if the regex matched
-  // nothing useful or the wrong rows — e.g. a reflow that shifted the table
-  // and left the parser reading zero or the wrong number of rows, which
-  // would otherwise let every value comparison "pass" by comparing nothing.
-  assert.deepEqual(
-    presets,
-    EXPECTED_PRESETS,
-    `expected preset columns ${JSON.stringify(EXPECTED_PRESETS)}, parsed ${JSON.stringify(presets)}`,
-  );
-  assert.deepEqual(
-    Object.keys(matrix),
-    EXPECTED_KNOBS,
-    `expected knob rows ${JSON.stringify(EXPECTED_KNOBS)}, parsed ${JSON.stringify(Object.keys(matrix))}`,
-  );
-});
+  test(`${label} matrix: parser actually finds the table (row/column counts, not values)`, () => {
+    const text = fs.readFileSync(docPath, 'utf8');
+    const { presets, matrix } = parsePaceMatrix(text);
+
+    // Fail here, distinctly from a value mismatch below, if the regex matched
+    // nothing useful or the wrong rows — e.g. a reflow that shifted the table
+    // and left the parser reading zero or the wrong number of rows, which
+    // would otherwise let every value comparison "pass" by comparing nothing.
+    assert.deepEqual(
+      presets,
+      EXPECTED_PRESETS,
+      `${label}: expected preset columns ${JSON.stringify(EXPECTED_PRESETS)}, parsed ${JSON.stringify(presets)}`,
+    );
+    assert.deepEqual(
+      Object.keys(matrix),
+      EXPECTED_KNOBS,
+      `${label}: expected knob rows ${JSON.stringify(EXPECTED_KNOBS)}, parsed ${JSON.stringify(Object.keys(matrix))}`,
+    );
+  });
+}
 
 test('parsePaceMatrix ignores a decoy table inside a fenced code block', () => {
   // A fenced example table earlier in the doc must not hijack the header
@@ -208,25 +225,29 @@ test('parsePaceMatrix ignores a decoy table inside a fenced code block', () => {
   );
 });
 
-test('pace.md matrix matches preferences.defaults.json, cell for cell', () => {
-  const text = fs.readFileSync(PACE_MD_PATH, 'utf8');
-  const { presets, matrix } = parsePaceMatrix(text);
-  const defaults = JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8'));
+for (const docPath of DOC_PATHS) {
+  const label = path.relative(SKILL_ROOT, docPath);
 
-  for (const knob of EXPECTED_KNOBS) {
-    presets.forEach((preset, columnIndex) => {
-      const documented = matrix[knob][columnIndex];
-      const shipped = getPath(defaults.presets[preset], knob);
-      assert.notEqual(
-        shipped,
-        undefined,
-        `preferences.defaults.json has no presets.${preset}.${knob} — pace.md documents a knob that does not exist`,
-      );
-      assert.equal(
-        documented,
-        String(shipped),
-        `pace.md presets.${preset}.${knob} documents "${documented}" but preferences.defaults.json ships "${shipped}"`,
-      );
-    });
-  }
-});
+  test(`${label} matrix matches preferences.defaults.json, cell for cell`, () => {
+    const text = fs.readFileSync(docPath, 'utf8');
+    const { presets, matrix } = parsePaceMatrix(text);
+    const defaults = JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8'));
+
+    for (const knob of EXPECTED_KNOBS) {
+      presets.forEach((preset, columnIndex) => {
+        const documented = matrix[knob][columnIndex];
+        const shipped = getPath(defaults.presets[preset], knob);
+        assert.notEqual(
+          shipped,
+          undefined,
+          `${label}: preferences.defaults.json has no presets.${preset}.${knob} — the doc documents a knob that does not exist`,
+        );
+        assert.equal(
+          documented,
+          String(shipped),
+          `${label}: presets.${preset}.${knob} documents "${documented}" but preferences.defaults.json ships "${shipped}"`,
+        );
+      });
+    }
+  });
+}

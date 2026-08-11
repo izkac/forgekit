@@ -661,6 +661,34 @@ test('the yield table has one row per pace present, summed from the fixture', ()
   assert.equal(cells[6], expectedByPace.brisk.rejectionsPer100Tasks.toFixed(1));
 });
 
+// I3 (final review of recalibrate-triage-and-review): the plan-time exit
+// ramp does NOT carry `pace: null` — `forge new` resolves a pace onto the
+// session immediately, so a `phase: 'skipped'` digest line always carries a
+// real pace and `tasks: '0/0'`. That session never reached review ceremony
+// at the pace it resolved, so counting it would inflate the `sessions`
+// column for a pace the session never ran at — the one column
+// `baseline-yield.md` (which predates the exit ramp and has no such rows)
+// cannot be compared against. Exclude `phase: 'skipped'` rows from the
+// by-pace aggregation; the `pace: null` guard above stays as defensive
+// handling for a shape the product does not actually emit.
+test('a phase:"skipped" row (the real exit-ramp shape) carries a real pace but must not count toward that pace\'s sessions', () => {
+  const exited = digest('exit-ramp-1', {
+    phase: 'skipped',
+    pace: 'thorough',
+    tasks: '0/0',
+    metrics: { available: false },
+    reviews: { total: 0, independent: 0, selfChecks: 0, rejections: 0, final: null },
+  });
+  const analysis = buildAnalysis({ cwd: project({ digests: [exited] }) });
+
+  assert.equal(
+    Object.hasOwn(analysis.reviewYield, 'thorough'),
+    false,
+    'a phase:"skipped" session must not create a row for the pace it exited at',
+  );
+  assert.equal(analysis.coverage.sessionsTotal, 1, 'the skipped session still counts toward overall coverage');
+});
+
 test('a session that never resolved a pace does not create a null-pace row or count as a zero-yield session', () => {
   const skipped = digest('skipped-1', {
     pace: null,

@@ -302,6 +302,15 @@ export function appendSessionDigest(opts) {
       // reviewer was declined evaporated at cleanup — while the cap it explains
       // survived in the score.
       finalReviewWaived: session.finalReviewWaived ?? null,
+      // I5 (final review): `paceSuppressed` and `exitDeclined` were written
+      // by `set-phase.mjs` (`recordPaceSuppression`, `recordExitDeclined`)
+      // and read by nothing in production — session-only, so both died with
+      // the session directory at 14-day cleanup. Same argument as
+      // `exitReason` above: a suppressed adjustment (D4) or a declined exit
+      // offer must stay countable past the session that recorded it, never
+      // recomputed here.
+      paceSuppressed: session.paceSuppressed ?? null,
+      exitDeclined: session.exitDeclined ?? null,
       durationHours,
       startedAt: session.createdAt ?? null,
       endedAt: session.updatedAt ?? null,

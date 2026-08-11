@@ -160,10 +160,19 @@ export function buildAnalysis(options = {}) {
     }
     if (typeof grade === 'string' && grade) grades[grade] = (grades[grade] ?? 0) + 1;
 
-    // A session that never resolved a pace (the plan-time exit ramp) carries
-    // `pace: null` and `tasks: "0/0"` — it must not create a `null` bucket or
-    // fold in as a zero-yield session for a pace it never ran at.
-    if (typeof entry.pace === 'string' && entry.pace) {
+    // The plan-time exit ramp (D2) does NOT carry `pace: null`. `forge new`
+    // resolves a pace onto the session immediately, so a `phase: 'skipped'`
+    // digest line always carries a real, already-resolved pace alongside
+    // `tasks: "0/0"` (the live forgekit ledger has zero `pace: null` rows in
+    // 44). That session never reached review ceremony at the pace it
+    // resolved, so folding it in would inflate the `sessions` column for a
+    // pace it never ran at — the one column `baseline-yield.md` (which
+    // predates the exit ramp, and has no such rows) cannot be compared
+    // against. Exclude `phase: "skipped"` rows here. The `pace: null` check
+    // below is kept as defensive, null-safe handling — it guards a shape a
+    // hand-edited or pre-digest-schema ledger line could carry, not one the
+    // product actually emits.
+    if (entry.phase !== 'skipped' && typeof entry.pace === 'string' && entry.pace) {
       const row = (byPace[entry.pace] ??= {
         sessions: 0,
         tasks: 0,

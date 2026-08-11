@@ -2664,3 +2664,90 @@ test('--exit-declined on a non-plan transition is not recorded — the field is 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// I5 (final review of recalibrate-triage-and-review): `paceSuppressed` and
+// `exitDeclined` were written onto the session (by `recordPaceSuppression`
+// and `recordExitDeclined` above) but never read by `appendSessionDigest`
+// (ledger.mjs), so both died with the session directory at 14-day cleanup —
+// visible only by reading a live session's JSON. D4's argument for
+// `exitReason` (carried into the digest by this same change, with the
+// comment "session-only records evaporate at cleanup") applies unchanged to
+// these two. Follow that field's exact pattern: read back whatever the
+// session already carries, never recompute.
+// ---------------------------------------------------------------------------
+
+test('paceSuppressed reaches the session ledger — same "session-only records evaporate at cleanup" argument as exitReason', () => {
+  const dir = tmp('forge-pace-suppressed-ledger-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pace-suppressed');
+    const sessionDir = path.dirname(sessionFile);
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    // Written the way `recordPaceSuppression` (set-phase.mjs) actually shapes
+    // it — keyed by which signal it came from — rather than re-deriving the
+    // resolution logic in this test.
+    raw.paceSuppressed = { plan: { wouldHaveBeen: 'brisk', reason: '3 tasks, single capability, no wired spine rows' } };
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.sessionId, 'sess-pace-suppressed');
+    assert.deepEqual(entry.paceSuppressed, {
+      plan: { wouldHaveBeen: 'brisk', reason: '3 tasks, single capability, no wired spine rows' },
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a session with no suppressed pace carries paceSuppressed: null in the ledger — never absent, never a stale value', () => {
+  const dir = tmp('forge-pace-suppressed-absent-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pace-suppressed-absent');
+    const sessionDir = path.dirname(sessionFile);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.paceSuppressed, null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('exitDeclined reaches the session ledger — a declined exit stays countable past the session that declined it', () => {
+  const dir = tmp('forge-exit-declined-ledger-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-exit-declined-ledger');
+    const sessionDir = path.dirname(sessionFile);
+    const reason = '2 task(s), single capability, no spine rows — small enough to leave Forge';
+    runSetPhase(dir, ['plan', '--exit-declined', reason]);
+
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    runSetPhase(dir, ['done']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.sessionId, 'sess-exit-declined-ledger');
+    assert.equal(entry.exitDeclined, reason);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
