@@ -56,7 +56,12 @@ Change lives under `<plan.dir>/changes/<change-name>/`.
 
    Skipping it is a decision, not an omission: say so in `proposal.md` under
    **Impact** in one line, so a reader knows the design was considered and found
-   obvious rather than skipped by accident.
+   obvious rather than skipped by accident. Word it neutrally — *"design.md
+   skipped: small single-capability change, no high-risk surface"* — and do
+   **not** enumerate the risk categories you are disclaiming ("no money/auth/
+   migrations"): risk detection is keyword-based, negations are filtered by a
+   heuristic, and a plan that names the categories it doesn't touch is betting
+   the cheap tail on that heuristic winning.
 
    **`tasks.md`** (required)
 

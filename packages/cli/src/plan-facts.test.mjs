@@ -156,6 +156,46 @@ test('ceremony: a small clean change resolves to combined', () => {
   assert.match(reason, /2 task/);
 });
 
+test('ceremony: agents split small fixes into micro-tasks — 4-5 tasks still combine', () => {
+  // Cohort 3 measured the gate misfiring: every direct session declared 3-5
+  // tasks for a one-file bugfix (red, green, full-suite as separate ticks),
+  // so a <=2 threshold never fired at all. Task count is granularity, not
+  // size; capabilities and spine rows carry the size signal.
+  const root = tmp('forge-ceremony-micro-');
+  makeChange(root, {
+    tasks: tasksMd([['Fix', 5]]),
+    spine: { rows: [], notApplicable: 'sync-only bugfix' },
+    capabilities: ['reconciliation'],
+  });
+
+  assert.equal(suggestCeremonyFromPlan(collectPlanFacts({ cwd: root, session })).ceremony, 'combined');
+});
+
+test('risk read ignores negated mentions: "no money/auth impact" is not a money change', () => {
+  // Cohort 3, carrier task: the proposal said "Risk: low — no persistence
+  // migration, no API shape change" and "design.md skipped: ... no money/auth"
+  // — wording our own plan-phase rule suggests — and the keyword regex forced
+  // the full tail. Negation lines must not count; affirmative lines must.
+  const root = tmp('forge-ceremony-negation-');
+  makeChange(root, {
+    tasks: tasksMd([['Fix', 3]]),
+    proposal: [
+      '# Repair reconciliation',
+      '',
+      '## Impact',
+      '- Risk: low — in-memory stores only, no persistence migration, no API shape change.',
+      '- `design.md` skipped: single capability, under 6 tasks, no money/auth surface.',
+      '',
+    ].join('\n'),
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['reconciliation'],
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.highRisk, false);
+  assert.equal(suggestCeremonyFromPlan(facts).ceremony, 'combined');
+});
+
 test('ceremony: high-risk always gets the full tail', () => {
   const root = tmp('forge-ceremony-risk-');
   makeChange(root, {
@@ -236,8 +276,8 @@ test('forge phase implement re-resolves auto pace from the plan', () => {
   assert.equal(saved.resolvedPace, 'brisk');
   assert.equal(saved.paceResolvedFrom, 'plan');
   assert.match(saved.paceReason, /^plan: /);
-  // 3 tasks is above the combined-close threshold — the tail stays full.
-  assert.equal(saved.resolvedCeremony, 'full');
+  // 3 tasks, single capability, spine notApplicable, no risk — combines.
+  assert.equal(saved.resolvedCeremony, 'combined');
   assert.ok(saved.ceremonyReason);
 });
 
@@ -247,8 +287,9 @@ test('ceremony fallback: a small direct session combines; a risky slug never doe
   // reads the session's own declared facts.
   for (const [slug, tasksTotal, expected] of [
     ['fix-pagination-boundary', 2, 'combined'],
+    ['fix-pagination-boundary', 5, 'combined'],
     ['rotate-webhook-secret', 2, 'full'],
-    ['fix-pagination-boundary', 5, 'full'],
+    ['fix-pagination-boundary', 6, 'full'],
   ]) {
     const root = tmp('forge-ceremony-direct-');
     const sessionDir = path.join(root, '.forge', 'sessions', 's1');

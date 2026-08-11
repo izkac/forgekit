@@ -24,7 +24,7 @@ import {
 } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
-import { collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
+import { COMBINED_TASKS, collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
 import { isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
@@ -228,7 +228,7 @@ function maybeResolveCeremonyFromPlan() {
       const risky = isHighRiskText([session.paceSignal, session.slug].filter(Boolean).join(' '));
       if (risky) {
         suggested = { ceremony: 'full', reason: 'high-risk signals — full verify and review tail' };
-      } else if (total !== null && total > 0 && total <= 2) {
+      } else if (total !== null && total > 0 && total <= COMBINED_TASKS) {
         suggested = {
           ceremony: 'combined',
           reason: `no readable plan; ${total} declared task(s), no high-risk signals — one closer pass covers the tail`,

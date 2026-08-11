@@ -13,7 +13,9 @@ Thin wrapper around the project **`openspec-propose`** skill (or `/opsx:propose`
    capability, is high-risk (money, auth, contracts, migrations, secrets), or
    makes a decision a reader would otherwise have to reverse-engineer. Otherwise
    delete it and note in `proposal.md` under **Impact** that the design was
-   obvious. A design doc is written once and read by every subagent for the rest
+   obvious — worded neutrally ("no high-risk surface"), never as a list of the
+   risk categories the change doesn't touch, which can trip keyword-based risk
+   detection. A design doc is written once and read by every subagent for the rest
    of the change, so its cost scales with dispatches while its value does not.
    Do **not** edit the vendor skill to change what it scaffolds — this is the
    coordinator's call, made after propose.

@@ -61,7 +61,7 @@ task count is known at plan time.
 ## Ceremony (session tail) — orthogonal to pace
 
 On the way into implement, Forge also resolves **`resolvedCeremony`** from the
-plan: **`combined`** (≤2 tasks, single capability, no wired spine rows, not
+plan: **`combined`** (≤5 tasks, single capability, no wired spine rows, not
 high-risk → one closer pass replaces the separate verify + review phases; see
 `phases/close.md`) or **`full`** (the existing tail). Pace pinning does not
 override it — pinning `thorough` is a statement about review cadence, not a

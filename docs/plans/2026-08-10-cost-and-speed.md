@@ -1,9 +1,10 @@
 # Forge cost and speed — plan
 
 **Date:** 2026-08-10
-**Status:** phases A–C landed and measured (outcome tie confirmed, cost flat); item 8
-(combined close) landed as the main cost lever after phase-level metrics located the
-spend in the verify/review tail; D still blocked on a clean measurement; item 7 not started
+**Status:** phases A–C landed; combined close landed, then recalibrated after cohort 3
+showed its gate never fired (threshold + negation false-positive). Cohort 4 pending.
+Outcome deltas at n=2 are inside the measured noise band — request counts are the
+only legible metric. D still blocked; item 7 not started
 **Owner:** Forgekit maintainers
 
 ## The problem, in numbers
@@ -264,6 +265,24 @@ where one rework cycle swings the mean, or read dispatch counts directly out of
 `metrics.json` (`byPhase` request counts) instead of inferring them from total
 tokens — that would separate "phase B didn't fire" from "phase B fired and it's
 still noisy."
+
+## Cohort 3 (combined close) — the treatment never fired
+
+Third run, same seed and settings, tarball carrying the combined close: forge arm 4/8
+shippable, $3.86/trial — worse on both axes. Root cause: `resolvedCeremony` came out
+`full` in **all 8 trials**, so the cohort measured an inert treatment and its deltas are
+run-to-run noise. Two real findings out of it:
+
+1. **The n=2 noise band is at least 4/8–6/8 shippable and ~$2.7–$3.9.** Cohorts 2 and 3
+   ran effectively identical treatments and landed on opposite ends. The cohort-2
+   "outcome win" (5/8 → 6/8) is inside this band and should not be claimed. Only per-phase
+   request counts are legible at this sample size.
+2. **Two gate misses, both fixed with pinned tests:** the ≤2-task threshold never matched
+   because agents split one-file bugfixes into 3–5 micro-tasks (now `COMBINED_TASKS = 5`,
+   shared with the no-plan fallback); and a proposal *disclaiming* risk ("no persistence
+   migration … no money/auth") tripped the keyword regex — in wording our own design-skip
+   rule suggested (now: negation lines are dropped before the risk read, and the plan
+   phases tell planners not to enumerate disclaimed risks).
 
 ## How we will know it worked
 

@@ -101,17 +101,50 @@ export function collectPlanFacts(opts) {
   }
 
   // Risk read across everything the plan says, including the spine — the same
-  // fail-closed rule the scorer uses.
+  // fail-closed rule the scorer uses. Negation lines are dropped first (see
+  // dropNegatedRiskLines): "no money/auth impact" is a disclaimer, not a risk.
   facts.highRisk = isHighRiskText(
     [proposalBody, designBody, tasksBody, spineBody, opts.session?.paceSignal, opts.session?.slug]
       .filter(Boolean)
+      .map((body) => dropNegatedRiskLines(String(body)))
       .join(' '),
   );
   return facts;
 }
 
-/** At or below this task count a clean change qualifies for the combined close. */
-const COMBINED_TASKS = 2;
+/**
+ * At or below this task count a clean change qualifies for the combined close.
+ *
+ * 5, not 2: cohort 3 measured agents splitting a one-file bugfix into 3–5
+ * micro-tasks (red, green, full-suite as separate ticks), so a ≤2 threshold
+ * never fired once across eight trials. Task count is granularity, not size —
+ * the size signals are capabilities and spine rows, and both still gate.
+ */
+export const COMBINED_TASKS = 5;
+
+/**
+ * Drop lines whose only risk mention is negated ("no persistence migration",
+ * "no money/auth surface") before the risk read. Cohort 3 measured the
+ * failure: a proposal *disclaiming* risk — in exactly the wording the
+ * plan-phase design-skip rule suggests — tripped the keyword regex and forced
+ * the full tail on a reconciliation bugfix. A genuinely risky plan names its
+ * risk affirmatively somewhere (a task line, the spine, the proposal's What
+ * Changes), so dropping negation lines cannot hide it; only lines are
+ * dropped, never the whole document.
+ */
+const NEGATED_RISK_LINE_RE =
+  /\b(?:no|not|none|never|without|non|un-?affected|does\s+not|doesn'?t|skips?|skipped|zero)\b[^\n]{0,80}?\b(?:money|payments?|billing|refunds?|auth\w*|oauth|migrat\w*|contracts?|secrets?|credentials?|gdpr|pci)\b/i;
+
+/**
+ * @param {string} body
+ * @returns {string}
+ */
+function dropNegatedRiskLines(body) {
+  return body
+    .split('\n')
+    .filter((line) => !NEGATED_RISK_LINE_RE.test(line))
+    .join('\n');
+}
 
 /**
  * Decide the session tail: `combined` (one closer pass replaces the separate

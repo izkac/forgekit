@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Combined-close gate recalibrated after cohort 3 measured it never firing
+
+The third sonnet-hard-v2 cohort ran with the combined close in the tarball and
+it fired in **0 of 8** forge trials — the whole cohort measured an inert
+treatment (its 4/8 shippable and higher cost are run-to-run noise, which also
+means the n=2 noise band spans at least 4/8–6/8). Two distinct gate misses,
+both fixed with pinned tests:
+
+- **Task-count threshold 2 → 5** (`COMBINED_TASKS`, exported and shared with the
+  no-plan fallback). Agents split even a one-file bugfix into 3–5 micro-tasks
+  (red, green, full-suite as separate ticks), so ≤2 never matched. Task count is
+  granularity, not size; capabilities and spine rows still gate.
+- **Negated risk mentions no longer count.** A carrier-task proposal reading
+  "Risk: low — no persistence migration … design.md skipped: … no money/auth" —
+  wording our own design-skip rule suggested — tripped `isHighRiskText` and
+  forced the full tail. `collectPlanFacts` now drops negation lines
+  (`dropNegatedRiskLines`) before the risk read; affirmative mentions still
+  escalate, and only lines are dropped, never documents. The plan-phase notes
+  now also tell planners to word design-skip lines neutrally instead of
+  enumerating the risks they disclaim.
+
+
 ### Risk raises the pace floor to `standard`, not `thorough` (cost/speed plan, phase A)
 
 A plan mentioning money/auth/contracts/migrations used to set the whole session

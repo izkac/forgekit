@@ -443,7 +443,7 @@ When `--tasks-total N` is set with **N ≥ 15** and resolved pace is still `bris
 ### Ceremony (session tail)
 
 Orthogonal to pace: on the way into implement, Forge resolves **`resolvedCeremony`**
-from the plan. **`combined`** — ≤2 tasks, single capability, no wired spine rows,
+from the plan. **`combined`** — ≤5 tasks, single capability, no wired spine rows,
 not high-risk — replaces the separate verify + review phases with **one closer
 subagent pass** (diff-read, evidence audit, one tier-3 run, READY/NOT READY);
 everything else is **`full`**, the existing tail. Measured motivation: on the
