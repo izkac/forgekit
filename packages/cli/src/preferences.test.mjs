@@ -67,7 +67,7 @@ test('resolveEffectivePreferences surfaces integrity defaults', () => {
 
 test('expandPace brisk matrix', () => {
   const expanded = expandPace({ pace: 'brisk', defaults: JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8')) });
-  assert.equal(expanded.review.perTask, 'high-risk-only');
+  assert.equal(expanded.review.perTask, 'never');
   assert.equal(expanded.verify.tier3, 'affected-only');
   assert.equal(expanded.models.bias, 'prefer-fast');
   assert.equal(expanded.brainstorm.depth, 'short');
@@ -91,12 +91,12 @@ test('per-group: review only at group boundary unless high-risk', () => {
   assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true, groupComplete: false }), true);
 });
 
-test('expandPace thorough stays always per-task', () => {
+test('expandPace thorough uses per-group cadence, deeper rounds', () => {
   const expanded = expandPace({
     pace: 'thorough',
     defaults: JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8')),
   });
-  assert.equal(expanded.review.perTask, 'always');
+  assert.equal(expanded.review.perTask, 'per-group');
   assert.equal(expanded.review.maxRounds, 3);
 });
 
@@ -144,12 +144,27 @@ test('session preferencesOverride wins without rewriting local', () => {
   assert.equal(fs.readFileSync(path.join(forgeDir, 'preferences.local.json'), 'utf8'), before);
 });
 
-test('hard floor: lite still reviews high-risk tasks', () => {
+test('hard floor: shouldRunPerTaskReview forces an immediate per-task review under lite on high risk', () => {
   const expanded = expandPace({ pace: 'lite' });
   assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true }), true);
   assert.equal(shouldRunPerTaskReview(expanded, { highRisk: false }), false);
-  assert.equal(shouldRunFinalReview(expanded, { signalText: 'stripe webhook' }), true);
-  assert.equal(shouldRunFinalReview(expanded, { signalText: 'readme typo' }), false);
+});
+
+// lite.review.final is now unconditionally "always" (D3), and after this
+// group no shipped preset sets `final` to anything but "always" — so the
+// hard floor inside shouldRunFinalReview is no longer observable through any
+// preset. It is still reachable: REVIEW_FINAL keeps `never` and
+// `high-risk-only` as values a user can pin or overlay. Exercise the floor
+// directly through those, not through a preset, so this guard would still
+// fail if the floor logic itself were deleted.
+test('hard floor: shouldRunFinalReview still forces a final review when final is pinned away from "always"', () => {
+  const finalNever = { review: { final: 'never' } };
+  assert.equal(shouldRunFinalReview(finalNever, { signalText: 'stripe webhook' }), true);
+  assert.equal(shouldRunFinalReview(finalNever, { signalText: 'readme typo' }), false);
+
+  const finalHighRiskOnly = { review: { final: 'high-risk-only' } };
+  assert.equal(shouldRunFinalReview(finalHighRiskOnly, { signalText: 'stripe webhook' }), true);
+  assert.equal(shouldRunFinalReview(finalHighRiskOnly, { signalText: 'readme typo' }), false);
 });
 
 test('isHighRiskText', () => {
@@ -203,6 +218,63 @@ test('parseAssignment', () => {
     key: 'review.maxRounds',
     value: 2,
   });
+});
+
+test('no shipped preset uses review.perTask "always" (frequency is capped at per-group)', () => {
+  const defaults = JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8'));
+  const presets = defaults.presets;
+  for (const [name, preset] of Object.entries(presets)) {
+    assert.notEqual(
+      preset.review.perTask,
+      'always',
+      `preset "${name}" uses review.perTask "always", but no shipped preset may — always stays valid only as a user pin`,
+    );
+  }
+});
+
+test('every preset ends with a final review and allows at least one fix round', () => {
+  const defaults = JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8'));
+  const presets = defaults.presets;
+  for (const [name, preset] of Object.entries(presets)) {
+    assert.equal(
+      preset.review.final,
+      'always',
+      `preset "${name}" must always run a final review of the whole change`,
+    );
+    assert.ok(
+      preset.review.maxRounds >= 1,
+      `preset "${name}" must allow at least one fix round (maxRounds >= 1), got ${preset.review.maxRounds}`,
+    );
+  }
+});
+
+test('standard and thorough: identical cadence, differing maxRounds', () => {
+  const defaults = JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8'));
+  const { standard, thorough } = defaults.presets;
+  // Cadence — the review-frequency knobs — must match.
+  assert.equal(standard.review.perTask, thorough.review.perTask);
+  assert.equal(standard.review.final, thorough.review.final);
+  // Depth/rounds is the axis presets are still allowed to differ on.
+  assert.notEqual(
+    standard.review.maxRounds,
+    thorough.review.maxRounds,
+    'standard and thorough must differ in maxRounds, or the presets carry no distinct meaning',
+  );
+});
+
+test('high-risk floor: a task touching payment logic gets an immediate per-task review under lite', () => {
+  const expanded = expandPace({ pace: 'lite' });
+  // Sanity: lite's ordinary cadence does not review every task.
+  assert.equal(expanded.review.perTask, 'never');
+  // The hard floor still fires immediately — not deferred to a group boundary —
+  // for a task whose own text reads as high-risk (money/auth/contracts/etc.).
+  assert.equal(
+    shouldRunPerTaskReview(expanded, {
+      signalText: 'wire the stripe payment refund flow',
+      groupComplete: false,
+    }),
+    true,
+  );
 });
 
 test('resolveSessionPaceFields auto from slug', () => {

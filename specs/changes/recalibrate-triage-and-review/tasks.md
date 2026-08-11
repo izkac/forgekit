@@ -47,15 +47,15 @@ decides substantiality, not the prompt filter*.
 
 ## 2. Re-cut the preset matrix
 
-- [ ] 2.1 Update `packages/cli/src/preferences.defaults.json`: `thorough.review.perTask`
+- [x] 2.1 Update `packages/cli/src/preferences.defaults.json`: `thorough.review.perTask`
       becomes `per-group`. Verify: `preferences.test.mjs` asserts no preset uses
       `always`.
-- [ ] 2.2 Set `brisk.review.final` and `lite.review.final` to `always`, and
+- [x] 2.2 Set `brisk.review.final` and `lite.review.final` to `always`, and
       `lite.review.maxRounds` to 1. Verify: test asserts every preset has a
       final review and at least one fix round.
-- [ ] 2.3 Assert the standard/thorough relationship in tests: identical cadence,
+- [x] 2.3 Assert the standard/thorough relationship in tests: identical cadence,
       differing `maxRounds`. Verify: `preferences.test.mjs` covers it.
-- [ ] 2.4 Confirm the high-risk hard floor is unaffected by the cadence change.
+- [x] 2.4 Confirm the high-risk hard floor is unaffected by the cadence change.
       Verify: test asserts a high-risk task requires an immediate per-task
       review under `lite`.
 
