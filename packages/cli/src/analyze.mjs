@@ -41,6 +41,16 @@ function num(value) {
 }
 
 /**
+ * The total side of a digest's `"<complete>/<total>"` tasks field.
+ *
+ * @param {unknown} tasks
+ */
+function taskTotal(tasks) {
+  const m = typeof tasks === 'string' ? /^\d+\/(\d+)$/.exec(tasks) : null;
+  return m ? Number(m[1]) : 0;
+}
+
+/**
  * A session's full metrics document, if its directory outlived it.
  *
  * @param {string} forgeDir
@@ -118,6 +128,8 @@ export function buildAnalysis(options = {}) {
   const byModel = Object.create(null);
   /** @type {Record<string, any>} */
   const byPhase = Object.create(null);
+  /** @type {Record<string, any>} */
+  const byPace = Object.create(null);
   /** @type {Record<string, number>} */
   const grades = Object.create(null);
   const dispatches = { total: 0, allowed: 0, rewritten: 0, denied: 0, skipped: 0, sessions: 0 };
@@ -147,6 +159,28 @@ export function buildAnalysis(options = {}) {
       totals.subagents += num(compact.subagents);
     }
     if (typeof grade === 'string' && grade) grades[grade] = (grades[grade] ?? 0) + 1;
+
+    // A session that never resolved a pace (the plan-time exit ramp) carries
+    // `pace: null` and `tasks: "0/0"` — it must not create a `null` bucket or
+    // fold in as a zero-yield session for a pace it never ran at.
+    if (typeof entry.pace === 'string' && entry.pace) {
+      const row = (byPace[entry.pace] ??= {
+        sessions: 0,
+        tasks: 0,
+        independentReviews: 0,
+        rejections: 0,
+      });
+      // Deliberately independent of `hasMetrics`: `reviews.*` is Forge's own
+      // recorded stamp, not harvested host telemetry. A session whose
+      // metrics collection failed can still have reviewed and rejected work,
+      // and `subagentsDispatched` — the harvested figure — must never stand
+      // in here: it is `null` or an indistinguishable harvested `0` for a
+      // meaningful slice of real ledgers (see baseline-yield.md).
+      row.sessions += 1;
+      row.tasks += taskTotal(entry.tasks);
+      row.independentReviews += num(entry.reviews?.independent);
+      row.rejections += num(entry.reviews?.rejections);
+    }
 
     // Prefer live metrics.json splits; else digest compact byModel/byPhase.
     // Name-only historical digests still contribute sessions/grades only.
@@ -261,6 +295,17 @@ export function buildAnalysis(options = {}) {
     row.grades.sort();
   }
 
+  /** @type {Record<string, any>} */
+  const reviewYield = Object.create(null);
+  for (const pace of Object.keys(byPace).sort()) {
+    const row = byPace[pace];
+    reviewYield[pace] = {
+      ...row,
+      reviewsPerTask: row.tasks > 0 ? row.independentReviews / row.tasks : 0,
+      rejectionsPer100Tasks: row.tasks > 0 ? (row.rejections / row.tasks) * 100 : 0,
+    };
+  }
+
   return {
     coverage: {
       sessionsTotal: digests.length,
@@ -278,6 +323,7 @@ export function buildAnalysis(options = {}) {
     sessions,
     byModel,
     byPhase,
+    reviewYield,
     dispatches: {
       ...dispatches,
       skipRate: dispatches.total > 0 ? dispatches.skipped / dispatches.total : 0,
@@ -413,6 +459,29 @@ export function formatAnalysis(analysis) {
             ]),
         ],
         ['left', 'right', 'right', 'right', 'right'],
+      ),
+    );
+  }
+
+  const yieldRows = Object.entries(a.reviewYield ?? {});
+  if (yieldRows.length) {
+    out.push('');
+    out.push('Review yield by pace  (from recorded review stamps, never harvested dispatch counts)');
+    out.push(
+      table(
+        [
+          ['pace', 'sessions', 'tasks', 'reviews', 'reviews/task', 'rejections', 'rej/100 tasks'],
+          ...yieldRows.map(([pace, row]) => [
+            pace,
+            String(row.sessions),
+            String(row.tasks),
+            String(row.independentReviews),
+            num(row.reviewsPerTask).toFixed(2),
+            String(row.rejections),
+            num(row.rejectionsPer100Tasks).toFixed(1),
+          ]),
+        ],
+        ['left', 'right', 'right', 'right', 'right', 'right', 'right'],
       ),
     );
   }

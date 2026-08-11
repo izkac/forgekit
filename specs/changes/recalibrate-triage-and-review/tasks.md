@@ -107,17 +107,17 @@ see design **D4**. What is missing is the record, so these tasks now cover that.
 
 ## 5. Review-yield reporting
 
-- [ ] 5.1 Add the per-pace yield table to `packages/cli/src/analyze.mjs`:
+- [x] 5.1 Add the per-pace yield table to `packages/cli/src/analyze.mjs`:
       sessions, tasks, independent reviews, reviews/task, rejections, rejections
       per 100 tasks. Verify: `analyze` tests over a fixture ledger produce one
       row per pace present.
-- [ ] 5.2 Derive the figures from recorded review stamps only, never from
+- [x] 5.2 Derive the figures from recorded review stamps only, never from
       harvested dispatch counts; report missing telemetry as missing. Verify:
       test with a session whose host metrics failed but which recorded reviews
       counts those reviews.
-- [ ] 5.3 Omit paces with no recorded sessions. Verify: test asserts no empty
+- [x] 5.3 Omit paces with no recorded sessions. Verify: test asserts no empty
       rows.
-- [ ] 5.4 Cover the table in `--json` output with a stable shape. Verify: test
+- [x] 5.4 Cover the table in `--json` output with a stable shape. Verify: test
       asserts the JSON keys.
 
 ## 6. Docs, distribution, and product loop
