@@ -1,10 +1,10 @@
 # Forge cost and speed — plan
 
 **Date:** 2026-08-10
-**Status:** phases A–C landed; combined close landed, recalibrated (cohort 3: gate never
-fired), then hardened into CLI rails (cohort 4: gate fired 3/8, adoption 0/3 — prose is
-advisory). Cohort 5 pending. Only fire-rate/adoption/request-counts are legible at n=2.
-D still blocked; item 7 not started
+**Status:** phases A–C landed; combined close landed, recalibrated (cohort 3), hardened
+into CLI rails (cohort 4), and measured working (cohort 5: fire rate 3/8, adoption 3/3,
+combined tails ~halved 60→33 req). Two residual gaps queued (ceremony fails open when
+implement is skipped; closer attribution line). D still blocked; item 7 not started
 **Owner:** Forgekit maintainers
 
 ## The problem, in numbers
@@ -304,6 +304,41 @@ combined-close instructions at the transition; `forge review-label final` defaul
 **Next measurement:** rerun the cohort; read (a) ceremony fire rate, (b) closer adoption
 (final-review.md headed `(closer)`, standard-tier stamp), (c) tail request counts for
 combined vs full trials. Token/outcome means stay illegible at n=2 — do not headline them.
+
+## Cohort 5 (rails) — first clean, adopted run of the combined close
+
+(A first attempt at this cohort died on account usage limits — 6 of 16 trials ended in
+`api_error 429`, some after one turn; harbor still reported "completed/verified", so
+check terminal_reason in `claude-code.txt` before trusting any cohort. Discarded and
+rerun clean: 0 × 429.)
+
+Read by the three legible metrics:
+
+1. **Fire rate:** `combined` 3/8 (both tenant trials + reservation-001, all via the
+   declared-task-count fallback). `full` 4/8 — refund and carrier/reservation trials on
+   high-risk signals (the floor erring safe), one fail-closed on `tasksTotal=0`. One
+   session never resolved ceremony at all (skipped `forge phase implement`) — residual
+   gap, see below.
+2. **Adoption (the thing cohort 4 measured at 0/3): 3/3.** Every combined session
+   produced `reviews/final-review.md` — the done-gate rail held where cohort 4 had two
+   empty `reviews/` dirs. The label rail visibly fired in tenant-001's transcript
+   ("combined ceremony: reviewer tier defaults to standard (closer)") and its final
+   stamp is `final:standard`. Zero capable-tier dispatches on combined sessions (cohort
+   4 had one at 90 tail requests). The one capable stamp in the cohort sits on a `full`
+   high-risk session, where it belongs.
+3. **Tail size: combined tails roughly halved.** Cohort 4 combined tails: 31/58/90
+   requests (mean ~60). Cohort 5: 22/27/49 (mean ~33). Full-ceremony tails unchanged
+   (19–54), as they should be.
+
+Headline (still n=2, still noise-band): forge 6/8 shippable — tie with baseline —
+$2.80/trial (vs $2.98 cohort 4), wall 875s. Direction right, size not claimable.
+
+**Residual gaps for the next pass:**
+- A session that never runs `forge phase implement` never resolves ceremony, and the
+  done-gate rail keys on `combined` — so `resolvedCeremony: MISSING` fails open
+  (observed once, on a refund trial that also skipped its final review).
+- Closers are not heading reports with the `Reviewer:` attribution line (all four final
+  reviews in the cohort lack it), so the census grades them from silence.
 
 ## How we will know it worked
 
