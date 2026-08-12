@@ -1,6 +1,6 @@
 {
   "name": "@izkac/forgekit",
-  "version": "0.3.38",
+  "version": "0.3.39",
   "description": "Forgekit CLIs \u2014 forgekit (install), forge (workflow), review (code review)",
   "type": "module",
   "bin": {

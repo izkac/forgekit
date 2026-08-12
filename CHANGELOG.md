@@ -1,5 +1,130 @@
 # Changelog
 
+## 0.3.39 — 2026-08-12
+
+### The agent decides whether work needs Forge; the filter only suppresses
+
+`forge triage --check` no longer decides substantiality. It decides one thing —
+whether to *ask* — and suppresses only prompts carrying no work content: empty,
+`/forge:skip`, a bare conversational reply, a read-only question, a stated
+trivial edit. Everything else reaches the agent as a question. The reminder asks
+("Decide: does this prompt need Forge?") where it used to assert ("Substantial
+work detected"), and `hasWorkContent` replaces `isSubstantialWork` so no name in
+the module claims a verdict the filter does not make.
+
+The hook used the classifier's exit code as a gate, so a regex was making the
+call ahead of the only component that can read the conversation, the repository
+and the session. `references/substantial-work.md` is now criteria for a judge
+rather than a specification the regex mirrors, and its skip conditions are
+**ANY**, not **ALL** — three conditions that could not all hold at once are why
+none of 87 recorded sessions was ever marked skipped.
+
+Four review rounds went into the suppression list, and the honest result is
+recorded as a finding rather than claimed as solved: a lexical filter cannot
+draw this line. Substrings silenced "Add a changelog generator"; a creation-verb
+gate silenced "Fix the double-charge bug ... this is a rename-only change to the
+Stripe adapter"; a mechanism-noun gate silenced "Add a changelog digest
+emailer". Each failure means no session, so the high-risk floor never engages.
+`changelog` is gone from the markers entirely — a plain noun, unlike every other
+marker, which assert something about an edit's nature — and `typo`,
+`formatting-only` and `whitespace-only` are unconditional again. What remains
+gated is a shorter list to delete from, not a longer one to refine.
+
+### Review cadence is capped at per-group, and every preset ends with a review
+
+Measured over 87 sessions in three projects: `thorough` spent 0.36 independent
+reviews per task against `standard`'s 0.13, and returned 4.7 rejections per 100
+tasks against 4.8. The cadence claim was unsupported.
+
+| Knob | thorough | standard | brisk | lite |
+| --- | --- | --- | --- | --- |
+| review.perTask | per-group | per-group | never | never |
+| review.final | always | always | always | always |
+| review.maxRounds | 3 | 2 | 1 | 1 |
+
+Two deliberate inversions: `lite` and `brisk` **gain** the final review, because
+one reviewer reading the whole change is the cheapest high-value dispatch in the
+system while N reviewers each reading a slice showed no measured return; and
+`lite.maxRounds` goes 0 → 1, because a review that cannot ask for a fix is
+advisory, which is the failure this project argues against everywhere else.
+
+The high-risk floor does not move. Money, auth, shared contracts, migrations and
+secrets still get an immediate per-task review at every pace.
+
+`thorough` now differs from `standard` in `maxRounds` alone — `depth` is `full`
+for both and always was. Whether a one-knob preset earns a name is filed for the
+yield table below to settle, not decided on judgement.
+
+### Pace movement is recorded, not just performed
+
+Plan-time de-escalation has shipped since 0.3.17; an earlier draft of this
+change asserted it did not exist and was corrected against the code. What was
+missing is the record. `paceDeescalated` marks a downward move, derived from
+comparing the pace before and after rather than from which function ran, since
+plan resolution moves either way. `paceSuppressed` records what a user pin
+overrode, and only when the signal would actually have differed — agreement is
+not suppression. Both now reach `sessions.jsonl` instead of dying with the
+session directory.
+
+`forge score` reads the marker instead of inferring from a threshold
+coincidence. That fixes a real misgrade: `forge status` heals `tasksTotal`
+straight from `tasks.md` without re-running the escalation invariant, so a
+session legitimately de-escalated at 3 tasks scored 0/5 "expected escalation to
+standard" once its plan grew.
+
+### A plan-time exit ramp, and skipped sessions that leave a record
+
+After brainstorm the work is shaped, so `forge exit-check --tasks N
+--capabilities N --spine-rows N [--high-risk]` decides whether to *offer*
+leaving Forge before a proposal, design, tasks, spine and brief are written for
+a two-file edit. Exit 0 offers, exit 1 proceeds. The agent supplies the counts —
+it has just done the shaping — and Forge owns the rule and the record. It fails
+closed on missing, non-numeric, negative, fractional, flag-shaped or repeated
+values; zero tasks is unshaped work and never qualifies; high-risk never
+qualifies however small.
+
+Either answer is recorded: `forge phase skipped --exit-reason "<reason>"` or
+`forge phase plan --exit-declined "<reason>"`. A skipped session now writes a
+`sessions.jsonl` row at all — before, it wrote none, left the unfinished-session
+view, and the next bare `forge cleanup` removed it with no durable record that it
+ever existed. Its row carries `score` and `grade` as `null`, never `0`, so it
+cannot drag an average.
+
+### forge analyze reports review yield per pace
+
+The measurement that justified this recalibration was done once, by hand, with a
+throwaway script. It is now one command, computed the same way, so the check
+after the next 20 sessions is an invocation rather than an archaeology project:
+sessions, tasks, independent reviews, reviews per task, rejections, rejections
+per 100 tasks. Figures come from recorded review stamps only —
+`subagentsDispatched` is null for 2 of 87 rows and 0 for 22 more, and a
+harvested zero cannot be told apart from a session that genuinely dispatched
+nothing. A session whose telemetry harvest failed still contributes its recorded
+reviews.
+
+The pre-change baseline is checked in at
+`specs/changes/recalibrate-triage-and-review/baseline-yield.md` so the effect is
+comparable against a fixed reference rather than a recollection.
+
+### Docs that cannot drift again
+
+`pace.md` and the skill's full reference both carried the pre-change matrix, and
+the full reference is the file `SKILL.md` tells agents to follow — an agent
+obeying it ran per-task review under `thorough` and skipped the final review
+under `lite`. Both are corrected, and `pace-doc-drift.test.mjs` now pins both
+against the shipped defaults; either drifting fails the suite.
+
+Also corrected: `auto` was described as resolving "once at session start, sticky
+for the session" in three places. It has three resolution points — session start
+from signals, plan-time re-resolution either direction, and task-count
+escalation. And the `/forge` command templates still told agents to skip only on
+an explicit `/forge:skip`, the exact rule this release removes.
+
+**Skill doc changes reach other machines only after
+`forgekit install --skills forge --force`.** `install.mjs` copies files rather
+than symlinking them, so every machine keeps reading the old copy until it is
+re-run.
+
 ## 0.3.38 — 2026-08-11
 
 ### Ceremony fails closed at the gate; closers carry attribution; task counts declared at implement
