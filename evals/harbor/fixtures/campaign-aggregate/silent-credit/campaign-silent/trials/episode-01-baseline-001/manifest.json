@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "runId": "campaign-silent",
+  "trialId": "episode-01-baseline-001",
+  "task": "forgekit-campaign-v1",
+  "category": "campaign",
+  "taskRevision": "campaign-rev-1",
+  "corpus": {
+    "id": "forgekit-campaign-v1",
+    "revision": "corpus-v1"
+  },
+  "harnessRevision": "harness-abc",
+  "arm": "baseline",
+  "repetition": 1,
+  "agent": "codex",
+  "model": "example/model",
+  "forgekitTreatment": {
+    "kind": "published-version",
+    "version": "1.2.3"
+  },
+  "images": {
+    "agent": "node@sha256:aaa",
+    "verifier": "node@sha256:bbb"
+  },
+  "settings": {
+    "repetitions": 1,
+    "concurrency": 1
+  },
+  "seed": "experiment-seed",
+  "scheduleIndex": 1,
+  "executionIndex": 1,
+  "armOrder": [
+    "baseline",
+    "forge"
+  ],
+  "armOrdinal": 1,
+  "harbor": {
+    "executable": "harbor",
+    "version": "0.20.0",
+    "versionSource": "harbor --version",
+    "argv": [
+      "run"
+    ]
+  },
+  "status": "verified",
+  "episodeId": "episode-01",
+  "episodeIndex": 1,
+  "normalizedResult": "trials/episode-01-baseline-001/normalized-result.json"
+}

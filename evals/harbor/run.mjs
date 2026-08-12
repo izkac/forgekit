@@ -14,7 +14,8 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertSafeTaskTree, defaultCorpusId, selectCorpus } from './corpus-selection.mjs';
+import { assertSafeTaskTree, defaultCorpusId, parseCampaign, selectCorpus } from './corpus-selection.mjs';
+import { CARRYOVER_MARKER } from './tasks/forgekit-campaign-v1/shared/carryover-precondition.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsRoot = path.resolve(here, '..');
@@ -30,7 +31,7 @@ const valueOptions = new Set([
 ]);
 
 function usage() {
-  return `Usage: node evals/harbor/run.mjs --task <id> --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> [--seed <safe-identifier>]\n  [--corpus <forgekit-held-out-v1|forgekit-hard-v2>]\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n  [--progress-interval-seconds <non-negative-int; default 30>]\n`;
+  return `Usage: node evals/harbor/run.mjs (--task <id> | --corpus forgekit-campaign-v1) --arm <baseline|forge|both>\n  --repetitions <positive-int> --concurrency <positive-int>\n  --agent <agent> --model <model-id> [--seed <safe-identifier>]\n  [--corpus <forgekit-held-out-v1|forgekit-hard-v2|forgekit-campaign-v1>]\n  (--forgekit-version <published-version> | --forgekit-tarball <path>) [--dry-run]\n  [--progress-interval-seconds <non-negative-int; default 30>]\n  Campaign corpora omit --task; --task remains required for non-campaign corpora.\n`;
 }
 
 function parseArgs(argv) {
@@ -54,13 +55,13 @@ function parseArgs(argv) {
     index += 1;
   }
 
-  const required = ['--task', '--agent', '--model'];
+  const required = ['--agent', '--model'];
   for (const option of required) {
     if (!Object.hasOwn(raw, option)) throw new Error(`${option} is required`);
   }
 
   const config = {
-    task: raw['--task'],
+    task: raw['--task'] ?? null,
     arm: raw['--arm'] ?? 'both',
     repetitions: parsePositiveInteger(raw['--repetitions'] ?? '1', 'repetitions'),
     concurrency: parsePositiveInteger(raw['--concurrency'] ?? '1', 'concurrency'),
@@ -100,7 +101,7 @@ function emitProgress(fields) {
 }
 
 function validate(config) {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(config.task)) {
+  if (config.task !== null && !/^[a-z0-9][a-z0-9-]*$/.test(config.task)) {
     throw new Error('task must be a safe task id containing lowercase letters, digits, and hyphens');
   }
   if (!['baseline', 'forge', 'both'].includes(config.arm)) {
@@ -157,6 +158,92 @@ async function loadCorpusTask(selection, task) {
       schemaVersion: parsed.schema_version,
       revision: createHash('sha256').update(bytes).digest('hex'),
     },
+  };
+}
+
+async function loadCorpusIdentity(selection) {
+  const manifestName = path.basename(selection.manifestPath);
+  let bytes;
+  let parsed;
+  try {
+    bytes = await readFile(selection.manifestPath);
+    parsed = JSON.parse(bytes);
+  } catch {
+    throw new Error(`${manifestName} must be readable valid JSON`);
+  }
+  if (!Number.isSafeInteger(parsed.schema_version) || parsed.corpus_id !== selection.id) {
+    throw new Error(`${manifestName} has invalid identity or task catalog`);
+  }
+  return {
+    id: parsed.corpus_id,
+    schemaVersion: parsed.schema_version,
+    revision: createHash('sha256').update(bytes).digest('hex'),
+  };
+}
+
+async function resolveRunUnits(config, selection) {
+  const campaign = await parseCampaign(selection);
+  if (campaign.episodes !== null) {
+    if (config.task !== null) throw new Error('--task is not valid for a campaign corpus');
+    const corpus = await loadCorpusIdentity(selection);
+    const units = [];
+    for (const episode of campaign.episodes) {
+      await assertCanonicalTask(episode.resolvedPath);
+      const taskVersion = await taskVersionFrom(episode.resolvedPath);
+      if (episode.version !== undefined && episode.version !== taskVersion) {
+        throw new Error(`corpus and task.toml versions disagree for episode: ${episode.id}`);
+      }
+      units.push({
+        id: episode.id,
+        canonicalPath: episode.resolvedPath,
+        taskVersion,
+        taskRevision: await hashDirectory(episode.resolvedPath),
+        canonicalLocator: path.posix.join(selection.taskRootLocator, episode.id),
+        stagedRelative: (arm, repetition) => `arms/${arm}/r${String(repetition).padStart(3, '0')}/${episode.id}`,
+        episodeId: episode.id,
+        episodeIndex: episode.index,
+      });
+    }
+    return {
+      campaign: {
+        id: campaign.id,
+        episodes: campaign.episodes.map((episode) => ({ id: episode.id, index: episode.index })),
+      },
+      category: 'campaign',
+      corpus,
+      units,
+      planTask: campaign.id,
+      planTaskVersion: units[0].taskVersion,
+      planTaskRevision: await hashDirectory(selection.taskRoot),
+    };
+  }
+
+  if (config.task === null) throw new Error('--task is required');
+  const { category, corpus, manifestTaskVersion } = await loadCorpusTask(selection, config.task);
+  const canonicalTask = await assertSafeTaskTree(selection.taskRoot, config.task);
+  await assertCanonicalTask(canonicalTask);
+  const taskVersion = await taskVersionFrom(canonicalTask);
+  if (manifestTaskVersion !== null && manifestTaskVersion !== taskVersion) {
+    throw new Error(`corpus and task.toml versions disagree for task: ${config.task}`);
+  }
+  const revision = await hashDirectory(canonicalTask);
+  return {
+    campaign: null,
+    category,
+    corpus,
+    units: [{
+      id: config.task,
+      canonicalPath: canonicalTask,
+      taskVersion,
+      taskRevision: revision,
+      canonicalLocator: path.posix.join(selection.taskRootLocator, config.task),
+      stagedRelative: (arm) => `arms/${arm}`,
+      episodeId: null,
+      episodeIndex: null,
+    }],
+    planTask: config.task,
+    planTaskVersion: taskVersion,
+    planTaskRevision: revision,
   };
 }
 
@@ -255,7 +342,7 @@ function selectedArms(arm) {
   return arm === 'both' ? ['baseline', 'forge'] : [arm];
 }
 
-function scheduleFor(config, taskRevision) {
+function scheduleFor(config, taskRevision, scheduleIdentity = config.task) {
   if (config.arm !== 'both') {
     return {
       strategy: 'single-arm',
@@ -272,7 +359,7 @@ function scheduleFor(config, taskRevision) {
   }
 
   const startHash = createHash('sha256')
-    .update(`${config.seed}\0${config.task}\0${taskRevision}`)
+    .update(`${config.seed}\0${scheduleIdentity}\0${taskRevision}`)
     .digest('hex');
   const startingArm = Number.parseInt(startHash.slice(0, 2), 16) % 2 === 0
     ? 'baseline'
@@ -313,6 +400,30 @@ function runIdFor(config, forgekitTreatment) {
   return `${timestamp}-${randomUUID().slice(0, 8)}`;
 }
 
+async function inheritCampaignApp(previousApp, stagedTask) {
+  const destApp = path.join(stagedTask, 'environment', 'app');
+  await rm(destApp, { recursive: true, force: true });
+  await cp(previousApp, destApp, { recursive: true });
+  await writeFile(path.join(destApp, CARRYOVER_MARKER), 'inherited\n');
+}
+
+async function findAppArtifact(trialOutput) {
+  const matches = await findEntries(
+    trialOutput,
+    (entry, file) => entry.isDirectory()
+      && entry.name === 'app'
+      && path.basename(path.dirname(file)) === 'artifacts',
+  );
+  return matches[0] ?? null;
+}
+
+async function carryCampaignOutput(trial, nextTrial) {
+  if (nextTrial === undefined || trial.status !== 'verified') return;
+  const appOutput = await findAppArtifact(trial.trialOutput);
+  if (appOutput === null) return;
+  await inheritCampaignApp(appOutput, path.join(trial.runDirectory, nextTrial.manifestData.stagedTask));
+}
+
 async function stageArm(canonicalTask, stagedTask, arm, treatment) {
   await cp(canonicalTask, stagedTask, { recursive: true, force: true });
   const instructionPath = path.join(stagedTask, 'instruction.md');
@@ -343,7 +454,7 @@ async function stageArm(canonicalTask, stagedTask, arm, treatment) {
   }
 }
 
-function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm }) {
+function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm, campaign }) {
   const argv = [
     'run', '--path', stagedTask,
     '--agent', agent,
@@ -353,7 +464,7 @@ function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm }) {
     '--n-concurrent', '1',
     '--yes',
   ];
-  if (arm === 'forge') argv.push('--artifact', '/app/.forge');
+  if (!campaign && arm === 'forge') argv.push('--artifact', '/app/.forge');
   return argv;
 }
 
@@ -511,6 +622,12 @@ async function writeManifest(trial) {
   await writeFile(trial.manifest, `${JSON.stringify(trial.manifestData, null, 2)}\n`);
 }
 
+async function recordNotAttempted(trial) {
+  trial.status = 'not-attempted';
+  trial.manifestData.status = 'not-attempted';
+  await writeManifest(trial);
+}
+
 function sanitizeTrialError(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/^Harbor exited (?:with signal [A-Za-z0-9]+|with code \d+)$/.test(message)) return message;
@@ -633,6 +750,9 @@ function trialPlanData(trial) {
     startedAt: trial.startedAt,
     finishedAt: trial.finishedAt,
     status: trial.status,
+    ...(trial.episodeId !== undefined && trial.episodeId !== null
+      ? { episodeId: trial.episodeId, episodeIndex: trial.episodeIndex }
+      : {}),
     ...(trial.error ? { error: trial.error } : {}),
   };
 }
@@ -663,17 +783,14 @@ async function main(argv) {
   }
 
   const selection = selectCorpus(config.corpusId);
-  const { category, corpus, manifestTaskVersion } = await loadCorpusTask(selection, config.task);
+  const resolved = await resolveRunUnits(config, selection);
+  const {
+    campaign, category, corpus, units, planTask, planTaskVersion, planTaskRevision,
+  } = resolved;
   const forgekitTreatment = await prepareForgekitTreatment(config);
-  const canonicalTask = await assertSafeTaskTree(selection.taskRoot, config.task);
-  await assertCanonicalTask(canonicalTask);
-  const taskVersion = await taskVersionFrom(canonicalTask);
-  if (manifestTaskVersion !== null && manifestTaskVersion !== taskVersion) {
-    throw new Error(`corpus and task.toml versions disagree for task: ${config.task}`);
-  }
-  const revision = await hashDirectory(canonicalTask);
   const harnessRevision = await hashHarness();
-  const schedule = scheduleFor(config, revision);
+  const scheduleIdentity = campaign ? campaign.id : config.task;
+  const schedule = scheduleFor(config, planTaskRevision, scheduleIdentity);
   const runId = runIdFor(config, forgekitTreatment.metadata);
   const runDirectory = path.join(runsRoot, runId);
   if (config.dryRun) await rm(runDirectory, { recursive: true, force: true });
@@ -681,15 +798,34 @@ async function main(argv) {
 
   const arms = selectedArms(config.arm);
   const stagedTasks = {};
-  for (const arm of arms) {
-    const stagedTask = path.join(runDirectory, 'arms', arm);
-    await stageArm(canonicalTask, stagedTask, arm, forgekitTreatment);
-    stagedTasks[arm] = stagedTask;
+  for (let repetition = 1; repetition <= config.repetitions; repetition += 1) {
+    for (const arm of arms) {
+      for (const unit of units) {
+        const stagedRelative = unit.stagedRelative(arm, repetition);
+        const stagedTask = path.join(runDirectory, stagedRelative);
+        await stageArm(unit.canonicalPath, stagedTask, arm, forgekitTreatment);
+        stagedTasks[`${arm}:${repetition}:${unit.id}`] = stagedTask;
+      }
+    }
+  }
+  if (campaign) {
+    for (let repetition = 1; repetition <= config.repetitions; repetition += 1) {
+      for (const arm of arms) {
+        for (let index = 1; index < units.length; index += 1) {
+          const previousApp = path.join(
+            stagedTasks[`${arm}:${repetition}:${units[index - 1].id}`],
+            'environment',
+            'app',
+          );
+          await inheritCampaignApp(previousApp, stagedTasks[`${arm}:${repetition}:${units[index].id}`]);
+        }
+      }
+    }
   }
 
   const images = {
-    agent: await baseImageFrom(path.join(canonicalTask, 'environment', 'Dockerfile')),
-    verifier: await baseImageFrom(path.join(canonicalTask, 'tests', 'Dockerfile')),
+    agent: await baseImageFrom(path.join(units[0].canonicalPath, 'environment', 'Dockerfile')),
+    verifier: await baseImageFrom(path.join(units[0].canonicalPath, 'tests', 'Dockerfile')),
   };
 
   const harborVersion = config.dryRun
@@ -704,76 +840,91 @@ async function main(argv) {
     const armOrder = schedule.armOrders[repetition - 1];
     for (let armIndex = 0; armIndex < armOrder.length; armIndex += 1) {
       const arm = armOrder[armIndex];
-      scheduleIndex += 1;
       const armOrdinal = armIndex + 1;
-      const trialId = `${config.task}-${arm}-${String(repetition).padStart(3, '0')}`;
-      const trialDirectory = path.join(runDirectory, 'trials', trialId);
-      const trialOutput = path.join(trialDirectory, 'harbor');
-      await mkdir(trialDirectory, { recursive: true });
-      const argvForHarbor = harborArgv({
-        stagedTask: stagedTasks[arm], agent: config.agent, model: config.model, trialOutput, trialId, arm,
-      });
-      const portableHarborArgv = [...argvForHarbor];
-      portableHarborArgv[portableHarborArgv.indexOf('--path') + 1] = `arms/${arm}`;
-      portableHarborArgv[portableHarborArgv.indexOf('--jobs-dir') + 1] = `trials/${trialId}/harbor`;
-      const manifest = path.join(trialDirectory, 'manifest.json');
-      const manifestData = {
-        schemaVersion: 1,
-        runId,
-        trialId,
-        task: config.task,
-        taskVersion,
-        category,
-        corpus,
-        taskRevision: revision,
-        harnessRevision,
-        seed: config.seed,
-        arm,
-        repetition,
-        scheduleIndex,
-        executionIndex: null,
-        armOrder,
-        armOrdinal,
-        agent: config.agent,
-        model: config.model,
-        forgekitVersion: config.forgekitVersion,
-        forgekitTreatment: forgekitTreatment.metadata,
-        resolvedAgent: null,
-        images,
-        settings: { repetitions: config.repetitions, concurrency: config.concurrency, seed: config.seed },
-        canonicalTask: path.posix.join(selection.taskRootLocator, config.task),
-        stagedTask: `arms/${arm}`,
-        startedAt: null,
-        finishedAt: null,
-        status: config.dryRun ? 'dry-run' : 'planned',
-        harbor: {
-          executable: 'harbor',
-          version: harborVersion,
-          versionSource: config.dryRun ? 'not-probed-dry-run' : 'harbor --version',
-          argv: portableHarborArgv,
-        },
-      };
-      const trial = {
-        trialId,
-        arm,
-        repetition,
-        scheduleIndex,
-        executionIndex: null,
-        armOrder,
-        armOrdinal,
-        runDirectory,
-        trialDirectory,
-        trialOutput,
-        manifest,
-        manifestRelative: path.relative(runDirectory, manifest),
-        harborArgv: portableHarborArgv,
-        startedAt: null,
-        finishedAt: null,
-        status: manifestData.status,
-        manifestData,
-      };
-      await writeManifest(trial);
-      trials.push(trial);
+      for (const unit of units) {
+        scheduleIndex += 1;
+        const trialId = `${unit.id}-${arm}-${String(repetition).padStart(3, '0')}`;
+        const trialDirectory = path.join(runDirectory, 'trials', trialId);
+        const trialOutput = path.join(trialDirectory, 'harbor');
+        await mkdir(trialDirectory, { recursive: true });
+        const stagedRelative = unit.stagedRelative(arm, repetition);
+        const argvForHarbor = harborArgv({
+          stagedTask: stagedTasks[`${arm}:${repetition}:${unit.id}`],
+          agent: config.agent,
+          model: config.model,
+          trialOutput,
+          trialId,
+          arm,
+          campaign: Boolean(campaign),
+        });
+        const portableHarborArgv = [...argvForHarbor];
+        portableHarborArgv[portableHarborArgv.indexOf('--path') + 1] = stagedRelative;
+        portableHarborArgv[portableHarborArgv.indexOf('--jobs-dir') + 1] = `trials/${trialId}/harbor`;
+        const manifest = path.join(trialDirectory, 'manifest.json');
+        const manifestData = {
+          schemaVersion: 1,
+          runId,
+          trialId,
+          task: planTask,
+          taskVersion: unit.taskVersion,
+          category,
+          corpus,
+          taskRevision: unit.taskRevision,
+          harnessRevision,
+          seed: config.seed,
+          arm,
+          repetition,
+          scheduleIndex,
+          executionIndex: null,
+          armOrder,
+          armOrdinal,
+          agent: config.agent,
+          model: config.model,
+          forgekitVersion: config.forgekitVersion,
+          forgekitTreatment: forgekitTreatment.metadata,
+          resolvedAgent: null,
+          images,
+          settings: { repetitions: config.repetitions, concurrency: config.concurrency, seed: config.seed },
+          canonicalTask: unit.canonicalLocator,
+          stagedTask: stagedRelative,
+          startedAt: null,
+          finishedAt: null,
+          status: config.dryRun ? 'dry-run' : 'planned',
+          harbor: {
+            executable: 'harbor',
+            version: harborVersion,
+            versionSource: config.dryRun ? 'not-probed-dry-run' : 'harbor --version',
+            argv: portableHarborArgv,
+          },
+        };
+        if (unit.episodeId !== null) {
+          manifestData.episodeId = unit.episodeId;
+          manifestData.episodeIndex = unit.episodeIndex;
+        }
+        const trial = {
+          trialId,
+          arm,
+          repetition,
+          scheduleIndex,
+          executionIndex: null,
+          armOrder,
+          armOrdinal,
+          episodeId: unit.episodeId,
+          episodeIndex: unit.episodeIndex,
+          runDirectory,
+          trialDirectory,
+          trialOutput,
+          manifest,
+          manifestRelative: path.relative(runDirectory, manifest),
+          harborArgv: portableHarborArgv,
+          startedAt: null,
+          finishedAt: null,
+          status: manifestData.status,
+          manifestData,
+        };
+        await writeManifest(trial);
+        trials.push(trial);
+      }
     }
   }
 
@@ -783,11 +934,11 @@ async function main(argv) {
     runDirectory,
     dryRun: config.dryRun,
     status: config.dryRun ? 'dry-run' : 'planned',
-    task: config.task,
-    taskVersion,
+    task: planTask,
+    taskVersion: planTaskVersion,
     category,
     corpus,
-    taskRevision: revision,
+    taskRevision: planTaskRevision,
     harnessRevision,
     seed: config.seed,
     schedule,
@@ -806,6 +957,7 @@ async function main(argv) {
     startedAt: null,
     finishedAt: null,
     trials: [],
+    ...(campaign ? { campaign } : {}),
   };
   await persistPlan(plan, trials);
 
@@ -816,7 +968,7 @@ async function main(argv) {
     plan.startedAt = new Date().toISOString();
     const progressStartedAt = performance.now();
     await persistPlan(plan, trials);
-    emitProgress({ run: runId, event: 'run-start', task: config.task, trials: trials.length });
+    emitProgress({ run: runId, event: 'run-start', task: planTask, trials: trials.length });
     const attempt = async (trial) => {
       executionIndex += 1;
       trial.executionIndex = executionIndex;
@@ -830,7 +982,33 @@ async function main(argv) {
       }
     };
 
-    if (config.arm === 'both') {
+    if (campaign) {
+      const repetitionBlocks = Array.from({ length: config.repetitions }, (_, index) => (
+        trials.filter((trial) => trial.repetition === index + 1)
+      ));
+      await runWithConcurrency(repetitionBlocks, config.concurrency, async (repTrials) => {
+        const armIds = [...new Set(repTrials.map((trial) => trial.arm))];
+        await Promise.all(armIds.map(async (arm) => {
+          const armTrials = repTrials
+            .filter((trial) => trial.arm === arm)
+            .sort((left, right) => left.episodeIndex - right.episodeIndex);
+          let stopArm = false;
+          for (const trial of armTrials) {
+            if (stopArm) {
+              await recordNotAttempted(trial);
+              continue;
+            }
+            await attempt(trial);
+            if (trial.status === 'failed') {
+              stopArm = true;
+              continue;
+            }
+            const nextTrial = armTrials.find((candidate) => candidate.episodeIndex === trial.episodeIndex + 1);
+            await carryCampaignOutput(trial, nextTrial);
+          }
+        }));
+      });
+    } else if (config.arm === 'both') {
       const pairBlocks = Array.from({ length: config.repetitions }, (_, index) => (
         trials.filter((trial) => trial.repetition === index + 1)
       ));

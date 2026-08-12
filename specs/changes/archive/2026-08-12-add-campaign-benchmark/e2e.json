@@ -1,0 +1,28 @@
+{
+  "change": "add-campaign-benchmark",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot-campaign-corpus",
+      "cmd": "node evals/harbor/smoke-campaign.mjs",
+      "expect": "episodes validated: 6"
+    },
+    {
+      "name": "produce-plan-both-arms",
+      "cmd": "node evals/harbor/run.mjs --corpus forgekit-campaign-v1 --arm both --repetitions 1 --concurrency 1 --seed campaign-e2e --agent claude-code --model claude-sonnet-5 --forgekit-tarball \"$FORGEKIT_TARBALL\" --dry-run",
+      "expect": "\"episodeIndex\": 6"
+    },
+    {
+      "name": "assert-episode-order-and-isolation",
+      "cmd": "node scripts/e2e/assert-campaign-plan.mjs --runs-root evals/.runs --seed campaign-e2e"
+    },
+    {
+      "name": "assert-carryover-staging",
+      "cmd": "node scripts/e2e/assert-campaign-carryover.mjs --runs-root evals/.runs --seed campaign-e2e"
+    },
+    {
+      "name": "assert-counted-aggregation",
+      "cmd": "node scripts/e2e/assert-campaign-aggregate.mjs --fixtures evals/harbor/fixtures/campaign-aggregate"
+    }
+  ]
+}

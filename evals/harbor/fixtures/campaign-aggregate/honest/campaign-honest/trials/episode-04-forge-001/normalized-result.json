@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "arm": "forge",
+  "task": "forgekit-campaign-v1",
+  "trial": 1,
+  "outcome": {
+    "functional": 0,
+    "regression": 0,
+    "tests_unchanged": 0,
+    "shippable": 0
+  },
+  "instrumentation": {
+    "available": true,
+    "reason": null,
+    "forge": null,
+    "harbor": {
+      "available": false,
+      "reason": "not reported",
+      "wall_clock_seconds": null,
+      "input_tokens": null,
+      "cache_tokens": null,
+      "output_tokens": null,
+      "cost_usd": null,
+      "retries": null
+    }
+  }
+}
