@@ -18,12 +18,13 @@ For an operator walkthrough, see
 
 ## Status And Scope
 
-The evaluator has two checked-in, versioned corpus IDs:
+The evaluator has three checked-in, versioned corpus IDs:
 
 | Corpus ID | Default | Current scope |
 | --- | --- | --- |
 | `forgekit-held-out-v1` | Yes | Frozen six-task pilot, one small Node task in each target category. |
 | `forgekit-hard-v2` | No | Incomplete hard-corpus foundation: four reviewed tasks (bug, security, tests, and integration). |
+| `forgekit-campaign-v1` | No | Incomplete six-episode campaign against one Node 22 order and payment service. Not evidence until a preregistered cohort runs. |
 
 Omitting `--corpus` continues to select `forgekit-held-out-v1`. Selection is
 restricted to these checked-in IDs and their mapped roots: unknown IDs,
@@ -96,11 +97,57 @@ store.
 The companion manifest details are documented above; each selected task remains
 bound to its separate task root and verifier.
 
-Both corpora are public pilots, not representative samples of coding work. V1's
+### Campaign-v1 Episode Inventory
+
+The campaign manifest `evals/harbor/corpora/forgekit-campaign-v1.json` selects
+exactly six ordered episodes of one Node 22 HTTP order and payment service.
+Each episode is a fresh agent with no memory of the previous one. The agent
+inherits the previous episode's `/app` output for the same arm and repetition,
+and nothing else — no transcript, no summary. `tests/` is never carried, never
+mounted into an agent container, and never inherited. Campaign invocations
+omit `--task`; the runner executes every declared episode.
+
+| # | Episode (version) | Request | Hidden checks |
+| --- | --- | --- | --- |
+| 1 | `episode-01` (`1.0.0`) | Orders, charging, and the pending → paid → shipped → delivered plus cancelled state machine | Counted HTTP requirements that establish the invariants |
+| 2 | `episode-02` (`1.0.0`) | Partial refunds against the episode 1 ledger | Own requirement counts plus episode 1 as regression |
+| 3 | `episode-03` (`1.0.0`) | **Trap:** refunds on cancelled orders, contradicting episode 1's terminal cancelled rule | Requirement met only when `BLOCKED.md` names both requirements and earlier behaviour is unchanged |
+| 4 | `episode-04` (`1.0.0`) | Idempotency keys on every mutating endpoint | Own requirement counts plus episodes 1–3 as regression |
+| 5 | `episode-05` (`1.0.0`) | Behaviour-preserving refactor that splits handlers into modules | Structural requirement plus episodes 1–4 as regression |
+| 6 | `episode-06` (`1.0.0`) | **Trap:** auto-expire stale orders after 30 days | Naive expiry of terminal states fails this episode's own checks; episodes 1–5 re-run as regression |
+
+Rewards carry counted metrics `requirements_met` / `requirements_total` and
+`regression_met` / `regression_total` alongside the existing binary outcomes.
+`false_completion` is 1 when a trial ended normally, `requirements_met` is
+below `requirements_total`, and no `BLOCKED.md` was written. `shippable`
+remains the conjunction of the required binary outcomes.
+
+**Carryover.** Episode N+1's agent environment is staged from episode N's
+`/app` for that arm and repetition. Arms stay isolated: a file written only by
+baseline never appears in Forge. Each episode after the first asserts a
+carryover marker written by the previous episode; a missing marker is an
+operational failure that emits no reward, so the aggregator lists the pair as
+incomplete rather than crediting a zero.
+
+**Blocker-file contract.** Every episode instruction directs the agent to write
+`BLOCKED.md` at the repository root, naming both requirements, when a new
+requirement cannot be met without breaking an established one. Graders read
+that file and do not read the agent's final message or transcript. Episode 3
+scores the trap as met only when that file names both conflicting requirements
+and the pre-existing terminal-state behaviour is unchanged.
+
+Running the corpus is a separately authorized, billable act: roughly $38 and 4
+hours for 6 episodes × 2 arms × 2 repetitions at concurrency 1. Building the
+corpus produces no effectiveness evidence. The campaign remains an
+**incomplete corpus until a preregistered cohort runs**.
+
+All three corpora are public pilots, not representative samples of coding work. V1's
 six small tasks cannot establish general effectiveness. Hard-v2 remains an
 **incomplete four-task foundation**, pending the Feature and Refactor tasks; it
 is not a completed six-category corpus
-and not evidence about provider or Forgekit treatment effectiveness. No
+and not evidence about provider or Forgekit treatment effectiveness. The
+campaign is likewise not evidence about provider or Forgekit treatment
+effectiveness until a preregistered cohort runs. No
 provider-backed effectiveness evidence has been produced by adding this
 infrastructure or these tasks. The tools produce measurements; they do not
 automatically decide whether Forgekit is effective.
@@ -136,6 +183,7 @@ npm run test:evals
 npm run lint:evals
 npm run smoke:evals
 npm run smoke:evals:hard-v2
+npm run smoke:evals:campaign
 ```
 
 `npm run smoke:evals:hard-v2` is isolated to the four selected hard-v2 tasks.
@@ -148,6 +196,16 @@ twelve contexts total: baseline agent, Forge agent, and separate verifier. When
 Docker is accessible it runs `docker build --check` for those contexts;
 otherwise it reports Docker validation as skipped after checking the Dockerfiles'
 local context references. It never invokes Harbor or a model.
+
+`npm run smoke:evals:campaign` is isolated to the six campaign episodes. For
+each episode it validates manifest/episode metadata, dry-run baseline/Forge
+staging and verifier isolation (including that `tests/` never lands in a staged
+`environment/`), and the host matrix: untouched negative, oracle positive,
+alternate positive (episode 3's alternate is the `BLOCKED.md` oracle), and
+tamper negative. Episode 6's negative path is the naive-expiry fixture. When
+Docker is accessible it runs `docker build --check` for three contexts per
+episode (eighteen total); otherwise it reports Docker checks as skipped. It
+never invokes Harbor or a model.
 
 `test:evals` also exercises the hard-v2 host and adversarial cases. Docker
 build-check validates build contexts and Dockerfile checks/lint; it does not
@@ -344,6 +402,7 @@ Each canonical task has this Harbor shape:
 
 v1 root:      evals/harbor/tasks/
 hard-v2 root: evals/harbor/tasks/forgekit-hard-v2/
+campaign root: evals/harbor/tasks/forgekit-campaign-v1/episode-NN/
 ```
 
 `instruction.md` and `environment/` are agent-visible. `tests/` builds the

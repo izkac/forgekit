@@ -126,14 +126,14 @@
 
 ## 8. Smoke, wiring, and docs
 
-- [ ] 8.1 Add `evals/harbor/smoke-campaign.mjs` validating, per episode,
+- [x] 8.1 Add `evals/harbor/smoke-campaign.mjs` validating, per episode,
       manifest metadata, baseline and Forge staging, verifier isolation, and the
       host matrix (untouched negative, oracle positive, alternate positive,
       tamper negative). Verify: `node evals/harbor/smoke-campaign.mjs` passes
       without Docker and reports Docker checks as skipped.
-- [ ] 8.2 Add the `smoke:evals:campaign` script to `package.json` and include
+- [x] 8.2 Add the `smoke:evals:campaign` script to `package.json` and include
       the campaign in `npm run lint:evals`. Verify: both scripts run clean.
-- [ ] 8.3 Document the corpus in `evals/README.md`: episode table, counted
+- [x] 8.3 Document the corpus in `evals/README.md`: episode table, counted
       metrics, carryover rules, blocker-file contract, cost and time estimate,
       and the statement that building it produces no effectiveness evidence.
       Verify: README states the corpus is incomplete until a preregistered
