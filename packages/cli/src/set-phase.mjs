@@ -28,7 +28,7 @@ import { COMBINED_TASKS, collectPlanFacts, suggestCeremonyFromPlan, suggestPaceF
 import { CONCRETE_PACES, isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
-import { runIntegrityChecks } from './integrity.mjs';
+import { resolveChangeDir, runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
 import { appendSessionDigest } from './ledger.mjs';
 import { bindHost } from './metrics/host.mjs';
@@ -54,7 +54,7 @@ export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--reopen-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -73,6 +73,7 @@ let tasksComplete = null;
 let subagentsDispatched = null;
 let allowIncomplete = null;
 let finalReviewWaived = null;
+let archiveWaived = null;
 let reopenWaived = null;
 let exitReason = null;
 let exitDeclined = null;
@@ -100,6 +101,9 @@ for (let i = 1; i < args.length; i += 1) {
     i += 1;
   } else if (flag === '--final-review-waived' && next) {
     finalReviewWaived = next;
+    i += 1;
+  } else if (flag === '--archive-waived' && next) {
+    archiveWaived = next;
     i += 1;
   } else if (flag === '--reopen-waived' && next) {
     reopenWaived = next;
@@ -458,6 +462,38 @@ function enforceDoneGate() {
     problems.push(
       'combined ceremony: missing reviews/final-review.md — dispatch the closer (phases/close.md) and save its report',
     );
+  }
+
+  // Archive gate: finish.md documents confirm tasks complete → archive the
+  // change → forge phase done, but only the first and last steps were
+  // enforced. Two changes shipped to main this month with the archive step
+  // skipped, leaving the live specs describing behavior already released.
+  // resolveChangeDir with forWrite:true has no archive fallback, so "the live
+  // dir still exists" is the same question as "was this change archived?".
+  // This must stay out of runIntegrityChecks: that function also runs from
+  // `forge integrity-check` and `forge score` at any phase, and finish.md
+  // tells operators to run integrity-check *before* archiving — a check
+  // there would demand an archive that hasn't happened yet on every mid-flight
+  // session.
+  const liveChangeDir = resolveChangeDir({ cwd: process.cwd(), session, forWrite: true });
+  if (liveChangeDir && fs.existsSync(liveChangeDir)) {
+    // --archive-waived names this specific problem, unlike --allow-incomplete
+    // below, which swallows every done-gate problem and marks the session
+    // incomplete. A change that is complete and merely unfiled is not
+    // incomplete, so this waiver must not touch incompleteReason — it only
+    // keeps the archive problem out of the list, the same way
+    // finalReviewWaived keeps the final-review floor from firing.
+    if (archiveWaived) {
+      session.archiveWaived = archiveWaived;
+    } else {
+      const remedy =
+        session.planType === 'openspec'
+          ? 'openspec archive'
+          : `forge change archive ${session.openspecChange}`;
+      problems.push(`change not archived: ${liveChangeDir} still exists on the live path — run \`${remedy}\``);
+    }
+  } else {
+    delete session.archiveWaived;
   }
 
   const integrity = runIntegrityChecks({ sessionDir: dir, session });

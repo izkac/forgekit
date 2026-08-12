@@ -290,6 +290,44 @@ test('runIntegrityChecks: passes after archive (spine resolves in archive dir)',
   }
 });
 
+test('runIntegrityChecks: mid-flight session with a live change dir reports no archive problem (gate is done-only)', () => {
+  // Mirror image of the "passes after archive" test above: the change stays
+  // live (never archived) and the session is not at done/finish. The archive
+  // gate lives only in set-phase.mjs's enforceDoneGate — runIntegrityChecks
+  // must stay quiet about the unarchived change so `forge integrity-check`
+  // and `forge score` don't demand an archive before finish.md's documented
+  // sequence has run it.
+  const cwd = tmp('forge-int-midflight-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    const session = {
+      phase: 'implement',
+      planType: 'openspec',
+      openspecChange: 'add-customer-registry',
+      slug: 'add-customer-registry',
+    };
+
+    const liveDir = path.join(cwd, 'openspec', 'changes', 'add-customer-registry');
+    fs.mkdirSync(liveDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(liveDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const result = runIntegrityChecks({ cwd, sessionDir, session });
+    assert.equal(fs.existsSync(liveDir), true, 'fixture keeps the change live, not archived');
+    assert.equal(result.ok, true);
+    assert.equal(
+      result.problems.some((p) => /archiv/i.test(p)),
+      false,
+      `runIntegrityChecks must not report an archive problem for a mid-flight session; got: ${JSON.stringify(result.problems)}`,
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('deferrals: add, list, resolve lifecycle', () => {
   const dir = tmp('forge-defer-');
   try {

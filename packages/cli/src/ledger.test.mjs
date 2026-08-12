@@ -427,6 +427,31 @@ test('a session with no waiver records null, not an empty claim', () => {
   assert.equal(digestOf(root).finalReviewWaived, null);
 });
 
+test('an archive waiver survives cleanup, as set-phase promises it does', () => {
+  // set-phase's --archive-waived records session.archiveWaived so a change
+  // that is complete but merely unfiled stays that way in the record — the
+  // same "session-only fields die at cleanup" argument as finalReviewWaived
+  // above. Assert against the actual .forge/sessions.jsonl row, not a
+  // function's return value: cleanup deletes sessionDir before anything else
+  // reads the ledger.
+  const root = tmp('forge-ledger-archive-waiver-');
+  const { sessionDir, session } = makeSession(root, 's1', {
+    archiveWaived: 'held live for the follow-up tranche',
+  });
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  fs.rmSync(sessionDir, { recursive: true, force: true });
+
+  assert.equal(digestOf(root).archiveWaived, 'held live for the follow-up tranche');
+});
+
+test('a session with no archive waiver records null, not an empty claim', () => {
+  const root = tmp('forge-ledger-noarchivewaiver-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  assert.equal(digestOf(root).archiveWaived, null);
+});
+
 /** A final review the prose rule reads as self-authored. */
 const SELF_PROSE = '# Final review\n\nReviewer: the coordinator — a self-check of the diff.\n';
 

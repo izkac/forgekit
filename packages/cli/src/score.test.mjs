@@ -136,6 +136,51 @@ function strongSessionFixture(root, sessionOverrides = {}) {
   return { sessionDir, session };
 }
 
+test('scoreSession: mid-flight session with a live change dir keeps its integrity points (gate is done-only)', () => {
+  // Mirror of the archive gate's own boundary: enforceDoneGate() in
+  // set-phase.mjs is the only place that treats a still-live change dir as a
+  // problem, and only at done/finish. runIntegrityChecks (what this check is
+  // built on) must stay quiet about it at any other phase, or `forge score`
+  // would zero out the integrity axis for every mid-flight session.
+  const root = tmp('forge-score-midflight-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'add-customer-registry',
+      phase: 'implement',
+      planType: 'openspec',
+      openspecChange: 'add-customer-registry',
+    });
+    const liveDir = path.join(root, 'openspec', 'changes', 'add-customer-registry');
+    fs.mkdirSync(liveDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(liveDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify\n\nExit 0\n', 'utf8');
+    const taskDir = path.join(sessionDir, 'tasks', '01-health');
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(taskDir, 'test-evidence.md'),
+      '# Test evidence\n\n- **Exit code:** 0\n- **Summary:** assert response.ok === true\n',
+      'utf8',
+    );
+
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    assert.equal(fs.existsSync(liveDir), true, 'fixture keeps the change live, not archived');
+
+    const integrity = check(card, 'integrity');
+    assert.equal(integrity.points, 20);
+    assert.equal(
+      integrity.notes.some((n) => /archiv/i.test(n)),
+      false,
+      `integrity notes must not mention archiving for a mid-flight session; got: ${JSON.stringify(integrity.notes)}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('scoreSession: surfaces recorded allowances (path/reason/phase) without moving the score', () => {
   const root = tmp('forge-score-allow-');
   try {
