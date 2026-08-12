@@ -41,8 +41,39 @@ export function isForgeInvocation(prompt) {
 // behaviour to build, remove, port or fix, not a passive piece of text — the
 // marker is describing what was done TO or WITH that mechanism, and the
 // prompt is substantial regardless of which verb introduced it.
-const TRIVIAL_MARKERS =
-  /\b(typo|formatting[\s-]only|whitespace[\s-]only|comment[\s-]only|no behaviou?r change|zero behaviou?r|changelog|docs[\s-]only|documentation[\s-]only|rename[\s-]only)\b/i;
+//
+// I1-R (round 4, final review round 3): putting every marker behind that
+// mechanism veto regressed the single most common trivial prompt there is.
+// `typo`, `formatting-only` and `whitespace-only` are unconditional before
+// this change on main; the round-3 reviewer measured 16 prompts (e.g.
+// "Correct a typo in the User class docstring") that suppress on main and
+// every round before round 3, but ASK at round 3's HEAD — a class or file
+// name sitting anywhere else in the sentence was enough to veto them. Unlike
+// `docs-only`/`rename-only`/etc., these three describe an edit whose nature
+// is fixed no matter what else the sentence names — a typo fix is a typo fix
+// whichever file, class or service it lands in — so they move back to
+// unconditional, out from behind NAMED_MECHANISM.
+//
+// Separately, `changelog` is dropped from the marker list entirely. Unlike
+// every other marker here, it is not an assertion about an edit's nature —
+// it is a plain noun naming a file. Agentive nouns built from any verb
+// (`changelog emailer`, `changelog importer`, `changelog generator`,
+// `changelog indexer`, …) describe the same "names a mechanism" shape as
+// NAMED_MECHANISM's list, but can never be fully enumerated there — the
+// round-3 reviewer measured this as the sole cause of 16 of 22 dangerous
+// suppressions. Dropping the marker removes the false-suppress class
+// outright instead of chasing it noun by noun; `update the changelog` now
+// asks, which is the fail-safe direction this filter is designed to prefer.
+//
+// `docs-only`, `documentation-only`, `rename-only`, `comment-only`, `no
+// behaviour change` and `zero behaviour` stay behind the NAMED_MECHANISM
+// veto — the same agentive-noun gap applies to them, but it is being
+// tracked, not fixed, in this round.
+const UNCONDITIONAL_TRIVIAL_MARKERS =
+  /\b(typo|formatting[\s-]only|whitespace[\s-]only)\b/i;
+
+const GATED_TRIVIAL_MARKERS =
+  /\b(comment[\s-]only|no behaviou?r change|zero behaviou?r|docs[\s-]only|documentation[\s-]only|rename[\s-]only)\b/i;
 
 // A named mechanism/artifact: something that has behaviour of its own,
 // rather than being passive text content (a changelog file, a doc page, a
@@ -57,7 +88,8 @@ export function isTrivialEdit(prompt) {
   const p = (prompt || '').trim();
   if (!p) return true;
   if (/^\s*fix(ed)?\s+(a|the)?\s*typo\b/i.test(p)) return true;
-  return TRIVIAL_MARKERS.test(p) && !NAMED_MECHANISM.test(p);
+  if (UNCONDITIONAL_TRIVIAL_MARKERS.test(p)) return true;
+  return GATED_TRIVIAL_MARKERS.test(p) && !NAMED_MECHANISM.test(p);
 }
 
 export function isReadOnlyQuestion(prompt) {

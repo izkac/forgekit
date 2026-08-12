@@ -56,9 +56,16 @@ test('trivial edits skip', () => {
 // match, so the assertion only passes if `isTrivialEdit` intercepts the
 // prompt before the patterns list is reached — not because the prompt
 // happened to match nothing.
-test('changelog edits are trivial even though "update" is an implement verb', () => {
-  assert.equal(hasWorkContent('Update the changelog for this release'), false);
-  assert.equal(shouldForgeTriage('Update the changelog for this release'), false);
+// FLIPPED in round 4: `changelog` is dropped from the trivial-marker list
+// entirely (see the I1-R comment below and in triage-prompt.mjs). This
+// assertion pinned `changelog` suppression, which the round-3 review found
+// was the sole cause of 16 of 22 dangerous false suppressions (agentive
+// nouns like `emailer`/`importer`/`generator` are formed from any verb and
+// can never be fully enumerated as NAMED_MECHANISM exceptions). Now asks,
+// deliberately, per the round-4 brief's acceptance table.
+test('a changelog edit now asks (changelog dropped from trivial markers in round 4)', () => {
+  assert.equal(hasWorkContent('Update the changelog for this release'), true);
+  assert.equal(shouldForgeTriage('Update the changelog for this release'), true);
 });
 
 test('formatting-only edits are trivial even though "fix" is an implement verb', () => {
@@ -200,11 +207,15 @@ test('deleting a rename-only compatibility shim from a module is substantial (ve
   assert.equal(shouldForgeTriage(prompt), true);
 });
 
-// Still suppressed: the marker IS the direct object of an edit verb, not a
-// modifier inside something new being built.
-test('"update the changelog" (the actual edit target) is still trivial', () => {
-  assert.equal(hasWorkContent('update the changelog'), false);
-  assert.equal(shouldForgeTriage('update the changelog'), false);
+// FLIPPED in round 4: `changelog` is dropped from the trivial-marker list
+// entirely, so this — the exact prompt named in the round-4 brief's
+// acceptance table ("newly asking, deliberate") — now asks even though the
+// marker is the direct object of the edit verb. Asking is the fail-safe
+// direction this filter is designed to prefer; the alternative is an
+// open-ended noun list that the round-3 review showed cannot draw this line.
+test('"update the changelog" now asks (changelog dropped from trivial markers in round 4)', () => {
+  assert.equal(hasWorkContent('update the changelog'), true);
+  assert.equal(shouldForgeTriage('update the changelog'), true);
 });
 
 // This prompt has no trivial marker, no read-only question shape, and no
@@ -234,6 +245,65 @@ test('bare conversational replies are not substantial', () => {
 test('"run the tests" is procedural, not substantial', () => {
   assert.equal(hasWorkContent('run the tests'), false);
   assert.equal(shouldForgeTriage('run the tests'), false);
+});
+
+// I1-R (round 4, final review round 3): round 3 put every trivial marker,
+// including `typo`/`formatting-only`/`whitespace-only`, behind the
+// NAMED_MECHANISM veto. That regressed the most common trivial prompt there
+// is — a bare typo/formatting/whitespace fix that happens to also name a
+// class, file or service suppresses on main and every round before round 3,
+// but round 3 asks. These four are the reviewer's exact regression measurements
+// and must SUPPRESS again.
+test('a typo fix naming a class is trivial (regressed to ASK in round 3)', () => {
+  const prompt = 'Correct a typo in the User class docstring';
+  assert.equal(hasWorkContent(prompt), false);
+  assert.equal(shouldForgeTriage(prompt), false);
+});
+
+test('a typo fix naming a file is trivial (regressed to ASK in round 3)', () => {
+  const prompt = "There's a typo in the migration file comment";
+  assert.equal(hasWorkContent(prompt), false);
+  assert.equal(shouldForgeTriage(prompt), false);
+});
+
+test('a whitespace-only reindent naming fixtures is trivial (regressed to ASK in round 3)', () => {
+  const prompt = 'whitespace-only reindent of the parser fixtures';
+  assert.equal(hasWorkContent(prompt), false);
+  assert.equal(shouldForgeTriage(prompt), false);
+});
+
+test('a formatting-only pass naming a package is trivial (regressed to ASK in round 3)', () => {
+  const prompt = 'formatting-only: run prettier on the adapter package';
+  assert.equal(hasWorkContent(prompt), false);
+  assert.equal(shouldForgeTriage(prompt), false);
+});
+
+// `typo` is unconditional even when a NAMED_MECHANISM noun ("service") sits
+// right next to it in the same sentence — proof the fix is "typo is always
+// trivial", not "typo is trivial unless a mechanism noun happens to be
+// nearby, except these three mechanism nouns".
+test('a typo fix naming a service is trivial (typo bypasses the mechanism veto entirely)', () => {
+  const prompt = 'typo: "recieve" -> "receive" in the payment service log line';
+  assert.equal(hasWorkContent(prompt), false);
+  assert.equal(shouldForgeTriage(prompt), false);
+});
+
+// `changelog` is dropped from the marker list entirely (round 4): it is a
+// plain noun naming a file, not an assertion about an edit's nature, and
+// agentive nouns built from any verb (`emailer`, `importer`, `generator`,
+// `indexer`, ...) can never be fully enumerated in NAMED_MECHANISM. Dropping
+// the marker removes the whole false-suppress class instead of chasing it
+// noun by noun.
+test('a changelog-digest emailer is substantial ("emailer" is not, and never was, in NAMED_MECHANISM)', () => {
+  const prompt = 'Add a changelog digest emailer';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('a changelog importer bug fix is substantial ("importer" is not, and never was, in NAMED_MECHANISM)', () => {
+  const prompt = 'Fix the changelog importer so it handles merge commits';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
 });
 
 // The reminder must ask the agent to decide, not hand it a conclusion the
