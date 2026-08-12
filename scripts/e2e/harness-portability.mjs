@@ -211,6 +211,11 @@ import { FINAL_REVIEW_REQUEST_FLOOR } from '../../packages/cli/src/review-census
 // retyped literal here would silently drift from it if it ever changed.
 import { NO_TDD_MARKER } from '../../packages/cli/src/record-evidence.mjs';
 
+// Same discipline again: `init-preserves-config` must assert absence of the
+// exact paths `scaffoldAdr` itself would have written, not a list of strings
+// retyped from having read that file once.
+import { DEFAULT_ADR_DIR, decisionsDocFor, resolveAdrTemplatesRoot } from '../../packages/cli/src/adr.mjs';
+
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FORGE_BIN = path.join(REPO, 'packages', 'cli', 'bin', 'forge.mjs');
 // Fixed path (phases are separate processes and must share state), but keyed to
@@ -915,6 +920,18 @@ function frozenVerdictOf(sessionDir) {
   }
 }
 
+/* ---------- init-preserves-config fixture ---------- */
+
+/** Apart from every fixture above: this loop runs `forge init` itself
+ *  against a project with no prior forge session, so it must not share a
+ *  directory any sibling phase's rmSync could reach mid-run. */
+const INIT_PRESERVES_CONFIG_PROJECT = `${SCRATCH}-init-preserves-config`;
+/** A `$HOME` distinct from the real operator's, so the shipped `forge init`
+ *  reads a fixture user default (openspec + ADRs on) instead of whatever
+ *  `~/.forgekit/config.json` happens to exist on the machine running this
+ *  harness. */
+const INIT_PRESERVES_CONFIG_HOME = `${SCRATCH}-init-preserves-config-home`;
+
 const phase = process.argv[2];
 
 // `all` is the harness's own probe: it must prove THIS rig, self-contained, with
@@ -932,6 +949,7 @@ const ALL_ROSTER = [
   'test-guard',
   'tdd-evidence',
   'archive-gate',
+  'init-preserves-config',
 ];
 
 if (phase === 'all') {
@@ -2879,12 +2897,91 @@ if (phase === 'boot') {
   process.stdout.write('ARCHIVING UNBLOCKS THE GATE, NO WAIVER NEEDED\n');
 
   process.stdout.write('ARCHIVE GATE GREEN\n');
+} else if (phase === 'init-preserves-config') {
+  // THE F125 FIX, AGAINST THE SHIPPED BINARY: a flagless, non-TTY re-init on
+  // a project that already recorded its own choices (specs engine, ADRs off)
+  // must leave those choices alone even when the *user*'s own default
+  // (`~/.forgekit/config.json`) disagrees (openspec, ADRs on). Before the
+  // fix, the user default won because the project's recorded config was
+  // never consulted — a run like this one would have flipped the project to
+  // openspec and scaffolded ADR files nobody here asked for.
+  const dir = INIT_PRESERVES_CONFIG_PROJECT;
+  const home = INIT_PRESERVES_CONFIG_HOME;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, '.forge'), { recursive: true });
+  // `dir` is deliberately NOT the built-in default ('specs'): a fixture whose
+  // recorded value coincides with what a broken read would fall back to
+  // can't tell "preserved" from "ignored and defaulted" apart — see
+  // `init.test.mjs`'s own "recorded custom plan.dir" test, which picks a
+  // non-default dir for the same reason.
+  const recordedConfig = { plan: { engine: 'specs', dir: 'docs/specs' }, adr: { enabled: false } };
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify(recordedConfig, null, 2)}\n`,
+  );
+  fs.mkdirSync(path.join(home, '.forgekit'), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, '.forgekit', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'openspec' }, adr: { enabled: true } }, null, 2)}\n`,
+  );
+
+  const init = forge(dir, ['init', '--claude'], { HOME: home });
+  if (init.code !== 0) fail(`forge init exited ${init.code} on a flagless re-init`, init.out);
+
+  const configPath = path.join(dir, '.forge', 'config.json');
+  const after = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  if (after.plan?.engine !== recordedConfig.plan.engine) {
+    fail(
+      `plan.engine changed from the recorded "${recordedConfig.plan.engine}" to "${after.plan?.engine}" — the user default overrode the project's own recorded choice`,
+      JSON.stringify(after),
+    );
+  }
+  if (after.plan?.dir !== recordedConfig.plan.dir) {
+    fail(
+      `plan.dir changed from the recorded "${recordedConfig.plan.dir}" to "${after.plan?.dir}"`,
+      JSON.stringify(after),
+    );
+  }
+  if (after.adr?.enabled !== recordedConfig.adr.enabled) {
+    fail(
+      `adr.enabled changed from the recorded ${recordedConfig.adr.enabled} to ${after.adr?.enabled} — the user default overrode the project's own recorded choice`,
+      JSON.stringify(after),
+    );
+  }
+
+  // No ADR scaffold: every path below is derived from what `scaffoldAdr`
+  // itself would have written for the default ADR dir, never a list of
+  // strings retyped from having read that module once.
+  const adrDirAbs = path.join(dir, DEFAULT_ADR_DIR);
+  if (fs.existsSync(adrDirAbs)) {
+    fail(
+      `ADR directory ${DEFAULT_ADR_DIR} was scaffolded even though the recorded adr.enabled was false`,
+      init.out,
+    );
+  }
+  const decisionsDocRel = decisionsDocFor(DEFAULT_ADR_DIR);
+  const decisionsDocAbs = path.join(dir, decisionsDocRel);
+  if (fs.existsSync(decisionsDocAbs)) {
+    fail(`ADR decisions doc ${decisionsDocRel} was scaffolded`, init.out);
+  }
+  const adrHooksSrc = path.join(resolveAdrTemplatesRoot(), 'hooks');
+  for (const name of fs.readdirSync(adrHooksSrc)) {
+    if (!fs.statSync(path.join(adrHooksSrc, name)).isFile()) continue;
+    const hookDest = path.join(dir, 'scripts', 'hooks', name);
+    if (fs.existsSync(hookDest)) {
+      fail(`ADR hook scripts/hooks/${name} was scaffolded even though ADRs are off`, init.out);
+    }
+  }
+
+  process.stdout.write('INIT PRESERVES CONFIG GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
-      'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate\n',
+      'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
+      'init-preserves-config\n',
   );
   process.exit(1);
 }

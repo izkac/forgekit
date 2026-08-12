@@ -10,10 +10,13 @@ import {
   initProject,
   mergeHooksIntoSettings,
   rememberedAgents,
+  resolveInitPlanEngine,
   resolveTemplatesRoot,
 } from './init.mjs';
 import { installSkillsToAgents } from './install.mjs';
-import { saveUserConfig } from './config.mjs';
+import { loadProjectConfig, saveUserConfig } from './config.mjs';
+import { DEFAULT_SPECS_DIR, writeProjectPlanConfig } from './plan-engine.mjs';
+import { DEFAULT_ADR_DIR, decisionsDocFor, disableProjectAdr, writeProjectAdrConfig } from './adr.mjs';
 
 test('init parseArgs accepts the expanded environment shorthands', () => {
   const opts = parseArgs(['--cursor', '--copilot', '--gemini', '--windsurf', '--opencode']);
@@ -558,5 +561,210 @@ test('end-to-end: a fresh `forge init` leaves `forge doctor` green', () => {
     assert.equal(doctor.status, 0, `forge doctor failed: ${doctor.stdout}\n${doctor.stderr}`);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// --- fix-init-preserves-config: resolveInitPlanEngine honors recorded plan.engine ---
+
+test('resolveInitPlanEngine: a flagless re-init keeps a recorded specs project (engine + dir)', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-specs-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-specs-home-'));
+  try {
+    // Project already recorded specs — this is the settled decision.
+    writeProjectPlanConfig(cwd, { engine: 'specs', dir: 'specs' });
+    // Machine default disagrees, so honoring it (the bug) would flip the engine.
+    saveUserConfig({ plan: { engine: 'openspec' } }, home);
+
+    const engine = await resolveInitPlanEngine({
+      cwd,
+      home,
+      openspec: null, // no --openspec / --no-openspec flag
+      isTTY: false, // reproduced in a non-TTY agent/CI run
+    });
+    assert.equal(engine, 'specs', 'recorded plan.engine wins over the user default');
+
+    // Drive it through the same write path `forge init` uses, to catch the
+    // reproduced bug: a wrong engine here made writeProjectPlanConfig replace
+    // the whole `plan` block, dropping `dir` entirely.
+    initProject(['codex'], { cwd, force: true, adr: false, planEngine: engine, planDir: null });
+    const config = loadProjectConfig(cwd);
+    assert.equal(config.plan.engine, 'specs');
+    assert.equal(config.plan.dir, 'specs', 'recorded plan.dir survives the re-init');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: explicit flags still outrank a recorded engine', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-flag-override-'));
+  try {
+    writeProjectPlanConfig(cwd, { engine: 'specs', dir: 'specs' });
+    const toOpenspec = await resolveInitPlanEngine({
+      cwd,
+      openspec: true,
+      isTTY: false,
+    });
+    assert.equal(toOpenspec, 'openspec', '--openspec still converts a recorded-specs project');
+
+    writeProjectPlanConfig(cwd, { engine: 'openspec' });
+    const toSpecs = await resolveInitPlanEngine({
+      cwd,
+      openspec: false,
+      isTTY: false,
+    });
+    assert.equal(toSpecs, 'specs', '--no-openspec still forces specs on a recorded-openspec project');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('resolveInitPlanEngine: a first-time init with no recorded config is unchanged', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-first-run-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-first-run-home-'));
+  try {
+    assert.equal(loadProjectConfig(cwd).plan, undefined, 'fixture has no recorded plan yet');
+    saveUserConfig({ plan: { engine: 'openspec' } }, home);
+
+    const engine = await resolveInitPlanEngine({
+      cwd,
+      home,
+      openspec: null,
+      isTTY: false,
+    });
+    assert.equal(engine, 'openspec', 'falls back to the user default exactly as today');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// --- fix-init-preserves-config task 1.5: a flagless re-init preserves a
+// recorded custom plan.dir. The fix lives inline in main() (init.mjs), not
+// in an exported function, so these drive it through the real `forge init`
+// subprocess — the same write path a user or agent actually hits.
+
+test('forge init: a flagless re-init preserves a recorded custom plan.dir', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-dir-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-dir-home-'));
+  try {
+    // Project already recorded specs with a non-default root.
+    writeProjectPlanConfig(cwd, { engine: 'specs', dir: 'docs/specs' });
+    // Machine default disagrees, so honoring it (the bug) would flip the engine
+    // too; group 1 already fixed that half — this test is about `dir`.
+    saveUserConfig({ plan: { engine: 'openspec' } }, home);
+
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home },
+    });
+    assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
+
+    const config = loadProjectConfig(cwd);
+    assert.equal(config.plan.engine, 'specs');
+    assert.equal(config.plan.dir, 'docs/specs', 'recorded custom plan.dir survives the re-init');
+    assert.ok(
+      fs.existsSync(path.join(cwd, 'docs', 'specs', 'README.md')),
+      'scaffold actually lands at the recorded dir, not the default',
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('forge init: a first-run project with no recorded plan.dir still gets the default (nothing invented)', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-first-run-dir-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-first-run-dir-home-'));
+  try {
+    assert.equal(loadProjectConfig(cwd).plan, undefined, 'fixture has no recorded plan yet');
+
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home },
+    });
+    assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
+
+    const config = loadProjectConfig(cwd);
+    assert.equal(config.plan.engine, 'specs');
+    assert.equal(
+      config.plan.dir,
+      DEFAULT_SPECS_DIR,
+      'absent recorded plan.dir falls through to the default, not invented',
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// --- fix-init-preserves-config task 2.1/2.2: a flagless re-init preserves a
+// recorded adr.enabled. The block lives inline in main() (init.mjs), so these
+// drive it through the real `forge init` subprocess, mirroring 1.5.
+
+test('forge init: a flagless re-init keeps a recorded adr.enabled:false project (no scaffold)', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-adr-off-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-adr-off-home-'));
+  try {
+    // Project already recorded ADRs off — the settled decision.
+    disableProjectAdr(cwd);
+    // Machine default disagrees: honoring it (the bug) would flip ADRs on.
+    saveUserConfig({ adr: { enabled: true } }, home);
+
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home },
+    });
+    assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
+
+    const config = loadProjectConfig(cwd);
+    assert.equal(config.adr.enabled, false, 'recorded adr.enabled:false survives the re-init');
+    assert.ok(
+      !fs.existsSync(path.join(cwd, ...DEFAULT_ADR_DIR.split('/'), 'README.md')),
+      'no ADR dir README scaffolded',
+    );
+    assert.ok(
+      !fs.existsSync(path.join(cwd, ...decisionsDocFor(DEFAULT_ADR_DIR).split('/'))),
+      'no decisions doc scaffolded',
+    );
+    assert.ok(
+      !fs.existsSync(path.join(cwd, 'scripts', 'hooks', 'check-pending-adrs.sh')),
+      'no ADR hook script scaffolded',
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('forge init: a flagless re-init keeps a recorded adr.enabled:true project even when the user default disables ADRs', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-adr-on-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recorded-adr-on-home-'));
+  try {
+    // Project already recorded ADRs on — the settled decision.
+    writeProjectAdrConfig(cwd, { adr: { enabled: true } });
+    // Machine default disagrees: honoring it (the bug) would flip ADRs off
+    // and would actively erase the recorded `true` in .forge/config.json.
+    saveUserConfig({ adr: { enabled: false } }, home);
+
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home },
+    });
+    assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
+
+    const config = loadProjectConfig(cwd);
+    assert.equal(config.adr.enabled, true, 'recorded adr.enabled:true survives the re-init');
+    assert.ok(
+      fs.existsSync(path.join(cwd, ...DEFAULT_ADR_DIR.split('/'), 'README.md')),
+      'ADR scaffold is (re)created since the recorded value is enabled',
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

@@ -1,0 +1,19 @@
+{
+  "change": "fix-init-preserves-config",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot-scratch-project",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "re-init-preserves-recorded-config",
+      "cmd": "node scripts/e2e/harness-portability.mjs init-preserves-config",
+      "expect": "INIT PRESERVES CONFIG GREEN"
+    },
+    {
+      "name": "shipped-cli-still-portable",
+      "cmd": "node scripts/e2e/harness-portability.mjs all"
+    }
+  ]
+}

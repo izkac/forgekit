@@ -22,12 +22,14 @@ import {
 } from './adr.mjs';
 import {
   DEFAULT_SPECS_DIR,
+  PLAN_ENGINES,
   hasOpenSpecConfig,
   loadUserPlanEngine,
   scaffoldSpecs,
   setupOpenSpec,
   writeProjectPlanConfig,
 } from './plan-engine.mjs';
+import { loadProjectConfig } from './config.mjs';
 import { resolveAsset } from './paths.mjs';
 import {
   AGENT_IDS,
@@ -733,6 +735,11 @@ async function promptOpenSpecSetup() {
  * `plan.engine: openspec`. Immediate `openspec init` is best-effort — failure
  * or declining setup must not fall back to the built-in specs engine.
  *
+ * Precedence, highest first: explicit flag; the project's own recorded
+ * `plan.engine` (`.forge/config.json`); an on-disk OpenSpec signal
+ * (`configured`); the user default; the prompt / non-TTY fallback. A project
+ * with no recorded `plan.engine` falls through unchanged.
+ *
  * @param {{
  *   cwd: string,
  *   openspec: boolean | null,
@@ -790,6 +797,18 @@ export async function resolveInitPlanEngine(opts) {
     // Flag means engine=openspec; attempt setup without a second prompt.
     await ensureOpenSpecSetup({ ask: false });
     return 'openspec';
+  }
+
+  // The project's own settled decision outranks the on-disk `configured`
+  // signal and the user default — but only when `plan.engine` is actually
+  // present. `loadProjectConfig` returns `{}` when absent, which must fall
+  // through, not be mistaken for a recorded value.
+  const recordedEngine = loadProjectConfig(opts.cwd).plan?.engine;
+  if (PLAN_ENGINES.includes(recordedEngine)) {
+    if (recordedEngine === 'openspec') {
+      await ensureOpenSpecSetup({ ask: false });
+    }
+    return recordedEngine;
   }
 
   if (configured) return 'openspec';
@@ -862,21 +881,40 @@ async function main(argv = process.argv.slice(2)) {
     agents: selected,
   });
 
+  // No --plan-dir on the command line: a recorded specs root is the
+  // project's settled decision and outranks the built-in default. Absent
+  // stays absent (first run still gets DEFAULT_SPECS_DIR downstream).
+  let planDir = opts.planDir;
+  if (planDir === null && planEngine === 'specs') {
+    const recordedDir = loadProjectConfig(opts.cwd).plan?.dir;
+    if (typeof recordedDir === 'string' && recordedDir) {
+      planDir = recordedDir;
+    }
+  }
+
   let adr = opts.adr;
   let adrDir = opts.adrDir;
   if (adr === null) {
-    const user = loadUserConfig();
-    const defaultDir = user.adr?.dir ?? DEFAULT_ADR_DIR;
-    if (process.stdin.isTTY) {
-      // Default Yes, unless the user globally opted out of ADRs.
-      const picked = await promptAdrForInit(defaultDir, user.adr?.enabled !== false);
-      adr = picked.enabled;
-      adrDir = picked.dir;
-    } else if (user.adr?.enabled === true) {
-      adr = true;
-      adrDir = user.adr.dir ?? DEFAULT_ADR_DIR;
+    // A recorded adr.enabled is the project's settled decision — it outranks
+    // the user default and the prompt. Absent falls through unchanged.
+    const recordedAdr = loadProjectConfig(opts.cwd).adr;
+    if (recordedAdr && typeof recordedAdr.enabled === 'boolean') {
+      adr = recordedAdr.enabled;
+      adrDir = recordedAdr.dir ?? DEFAULT_ADR_DIR;
     } else {
-      adr = false;
+      const user = loadUserConfig();
+      const defaultDir = user.adr?.dir ?? DEFAULT_ADR_DIR;
+      if (process.stdin.isTTY) {
+        // Default Yes, unless the user globally opted out of ADRs.
+        const picked = await promptAdrForInit(defaultDir, user.adr?.enabled !== false);
+        adr = picked.enabled;
+        adrDir = picked.dir;
+      } else if (user.adr?.enabled === true) {
+        adr = true;
+        adrDir = user.adr.dir ?? DEFAULT_ADR_DIR;
+      } else {
+        adr = false;
+      }
     }
   }
 
@@ -885,7 +923,7 @@ async function main(argv = process.argv.slice(2)) {
     adr,
     adrDir,
     planEngine,
-    planDir: opts.planDir,
+    planDir,
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (Array.isArray(report.skillOnly) && report.skillOnly.length) {
