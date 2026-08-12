@@ -60,10 +60,13 @@ export async function startAppServer(appDirectory, { nowMs = FIXED_NOW_MS } = {}
   return {
     port,
     nowMs,
-    async request(method, pathname, body) {
+    async request(method, pathname, body, headers = {}) {
       const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
         method,
-        headers: body === undefined ? {} : { "content-type": "application/json" },
+        headers: {
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+          ...headers,
+        },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       const text = await response.text();

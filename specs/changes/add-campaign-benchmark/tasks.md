@@ -109,17 +109,17 @@
 
 ## 7. Episodes 4–6
 
-- [ ] 7.1 Add episode 4 (idempotency keys on every mutating endpoint) with
+- [x] 7.1 Add episode 4 (idempotency keys on every mutating endpoint) with
       regression over episodes 1–3. Verify: oracle passes; a fixture that makes
       one endpoint non-idempotent lowers only the requirement count.
-- [ ] 7.2 Add episode 5, the behaviour-preserving refactor, whose checks are
+- [x] 7.2 Add episode 5, the behaviour-preserving refactor, whose checks are
       entirely regression over episodes 1–4 plus a structural requirement.
       Verify: a correct restructuring passes all regression checks; a
       restructuring that drops an edge case fails them.
-- [ ] 7.3 Add episode 6, the expiry trap, whose own checks catch expiry applied
+- [x] 7.3 Add episode 6, the expiry trap, whose own checks catch expiry applied
       to terminal states. Verify: the naive fixture fails the requirement check;
       the correct fixture passes.
-- [ ] 7.4 Add per-episode `false_completion` derivation to the shared verifier
+- [x] 7.4 Add per-episode `false_completion` derivation to the shared verifier
       helper and cover it across the six episodes. Verify: tests assert 1 for a
       silent shortfall and 0 both for a reported blocker and for a complete
       episode.
