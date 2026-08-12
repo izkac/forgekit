@@ -66,6 +66,31 @@ function requireSchemaVersion(value, expected, label) {
   if (value !== expected) throw new Error(`${label} schema version must be ${expected}`);
 }
 
+function requireNormalizedSchemaVersion(value, label) {
+  if (value !== 1 && value !== 2) throw new Error(`${label} schema version must be 1 or 2`);
+}
+
+const COUNT_FIELDS = ['requirements_met', 'requirements_total', 'regression_met', 'regression_total'];
+
+function validateCounts(counts, label) {
+  requireObject(counts, `${label}.counts`);
+  const result = {};
+  for (const name of COUNT_FIELDS) {
+    const value = counts[name];
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`${label}.counts.${name} must be a non-negative integer`);
+    }
+    result[name] = value;
+  }
+  if (result.requirements_met > result.requirements_total) {
+    throw new Error(`${label}.counts.requirements_met must not exceed requirements_total`);
+  }
+  if (result.regression_met > result.regression_total) {
+    throw new Error(`${label}.counts.regression_met must not exceed regression_total`);
+  }
+  return result;
+}
+
 function hasTraversal(candidate) {
   return candidate.split(/[\\/]/u).includes('..');
 }
@@ -214,12 +239,23 @@ function assertManifestMatchesPlan(manifest, plan, trialEntry, cohort, label) {
   if (!Array.isArray(manifest.harbor.argv)) throw new Error(`${label}.harbor.argv must be an array`);
   requirePositiveInteger(manifest.repetition, `${label}.repetition`);
   if (!ARMS.includes(manifest.arm)) throw new Error(`${label}.arm must be baseline or forge`);
-  if (!['verified', 'failed'].includes(manifest.status)) throw new Error(`${label}.status must be verified or failed`);
+  if (!['verified', 'failed', 'not-attempted'].includes(manifest.status)) {
+    throw new Error(`${label}.status must be verified, failed, or not-attempted`);
+  }
   if (manifest.status === 'failed') requireString(manifest.error, `${label}.error`);
+
+  const campaignTrial = Object.hasOwn(trialEntry, 'episodeIndex') || Object.hasOwn(manifest, 'episodeIndex');
+  if (campaignTrial) {
+    requireSafeId(manifest.episodeId, `${label}.episodeId`);
+    requirePositiveInteger(manifest.episodeIndex, `${label}.episodeIndex`);
+    if (manifest.episodeId !== trialEntry.episodeId) throw new Error(`${label}.episodeId does not match its plan`);
+    if (manifest.episodeIndex !== trialEntry.episodeIndex) throw new Error(`${label}.episodeIndex does not match its plan`);
+  }
 
   const matches = [
     ['runId', plan.runId], ['task', plan.task], ['category', plan.category],
-    ['taskRevision', plan.taskRevision], ['harnessRevision', plan.harnessRevision],
+    ...(campaignTrial ? [] : [['taskRevision', plan.taskRevision]]),
+    ['harnessRevision', plan.harnessRevision],
     ['trialId', trialEntry.trialId], ['arm', trialEntry.arm], ['repetition', trialEntry.repetition],
     ['status', trialEntry.status], ['scheduleIndex', trialEntry.scheduleIndex],
     ['executionIndex', trialEntry.executionIndex], ['armOrdinal', trialEntry.armOrdinal],
@@ -244,7 +280,7 @@ function assertManifestMatchesPlan(manifest, plan, trialEntry, cohort, label) {
 
 function validateNormalized(record, manifest, label) {
   requireObject(record, label);
-  requireSchemaVersion(record.schema_version, 1, label);
+  requireNormalizedSchemaVersion(record.schema_version, label);
   if (record.arm !== manifest.arm) throw new Error(`${label}.arm does not match its manifest`);
   if (record.task !== manifest.task) throw new Error(`${label}.task does not match its manifest`);
   if (record.trial !== manifest.repetition) throw new Error(`${label}.trial does not match its manifest`);
@@ -270,7 +306,21 @@ function validateNormalized(record, manifest, label) {
     }
     numeric[metric] = value;
   }
-  return { outcome, instrumentation: numeric };
+  const extra = {};
+  if (Object.hasOwn(record, 'counts')) extra.counts = validateCounts(record.counts, label);
+  if (Object.hasOwn(record, 'false_completion')) {
+    if (record.false_completion !== 0 && record.false_completion !== 1) {
+      throw new Error(`${label}.false_completion must be binary (0 or 1)`);
+    }
+    extra.false_completion = record.false_completion;
+  }
+  if (Object.hasOwn(record, 'reward_shape')) {
+    if (record.reward_shape !== 'binary' && record.reward_shape !== 'counted') {
+      throw new Error(`${label}.reward_shape must be binary or counted`);
+    }
+    extra.reward_shape = record.reward_shape;
+  }
+  return { outcome, instrumentation: numeric, ...extra };
 }
 
 async function readRun(candidate) {
@@ -289,6 +339,11 @@ async function readRun(candidate) {
     requirePositiveInteger(trialEntry.executionIndex, `plan ${runId}.trials[${index}].executionIndex`);
     requirePositiveInteger(trialEntry.armOrdinal, `plan ${runId}.trials[${index}].armOrdinal`);
     if (!Array.isArray(trialEntry.armOrder)) throw new Error(`plan ${runId}.trials[${index}].armOrder must be an array`);
+    const campaignTrial = Object.hasOwn(trialEntry, 'episodeIndex');
+    if (campaignTrial) {
+      requireSafeId(trialEntry.episodeId, `plan ${runId}.trials[${index}].episodeId`);
+      requirePositiveInteger(trialEntry.episodeIndex, `plan ${runId}.trials[${index}].episodeIndex`);
+    }
     const manifestFile = await requireRegularFile(runDirectory, trialEntry.manifest, `manifest for ${trialEntry.trialId}`);
     const manifest = await readJsonFile(manifestFile, `manifest for ${trialEntry.trialId}`);
     assertManifestMatchesPlan(manifest, plan, trialEntry, cohort, `manifest ${trialEntry.trialId}`);
@@ -305,8 +360,19 @@ async function readRun(candidate) {
       repetition: manifest.repetition,
       arm: manifest.arm,
       status: manifest.status,
+      ...(campaignTrial
+        ? { episode_id: manifest.episodeId, episode_index: manifest.episodeIndex }
+        : {}),
       provenance: stableValue({
         task_revision: manifest.taskRevision,
+        ...(campaignTrial
+          ? {
+            campaign_revision: plan.taskRevision,
+            episode_id: manifest.episodeId,
+            episode_index: manifest.episodeIndex,
+            episode_revision: manifest.taskRevision,
+          }
+          : {}),
         ...(Object.hasOwn(manifest, 'taskVersion') ? { task_version: manifest.taskVersion } : {}),
         corpus: manifest.corpus,
         images: manifest.images,
@@ -329,6 +395,15 @@ function operationSummary(observations) {
   };
 }
 
+function countedMetricsSummary(observations) {
+  const verified = observations.filter((observation) => observation.counts);
+  if (verified.length === 0) return undefined;
+  return Object.fromEntries(COUNT_FIELDS.map((field) => {
+    const values = verified.map((observation) => observation.counts[field]);
+    return [field, { observations: values.length, mean: mean(values) }];
+  }));
+}
+
 function armSummary(observations) {
   const verified = observations.filter((observation) => observation.outcome !== null);
   const outcomes = {};
@@ -349,41 +424,102 @@ function armSummary(observations) {
       mean: mean(values),
     };
   }
+  const counts = countedMetricsSummary(verified);
   return {
     observations: verified.length,
     operations: operationSummary(observations),
     outcomes,
     instrumentation,
+    ...(counts === undefined ? {} : { counts }),
   };
 }
 
 function pairKey(observation) {
-  return `${observation.task}\0${observation.repetition}`;
+  return observation.episode_index == null
+    ? `${observation.task}\0${observation.repetition}`
+    : `${observation.task}\0${observation.repetition}\0${observation.episode_index}`;
+}
+
+function taskLevelProvenance(observation) {
+  if (observation.episode_index == null) return observation.provenance;
+  return {
+    campaign_revision: observation.provenance.campaign_revision,
+    corpus: observation.provenance.corpus,
+    images: observation.provenance.images,
+  };
+}
+
+function episodeLevelProvenance(observation) {
+  return {
+    episode_id: observation.episode_id,
+    episode_revision: observation.provenance.episode_revision,
+    ...(Object.hasOwn(observation.provenance, 'task_version')
+      ? { task_version: observation.provenance.task_version }
+      : {}),
+  };
 }
 
 function sortedPairCells(observations) {
   const cells = new Map();
   const taskProvenance = new Map();
+  const episodeProvenance = new Map();
   for (const observation of observations) {
     const expected = taskProvenance.get(observation.task);
-    if (expected && !sameValue(expected, observation.provenance)) {
-      throw new Error(`task revision or provenance differs across repetitions of task ${observation.task}`);
+    const actual = taskLevelProvenance(observation);
+    if (expected && !sameValue(expected, actual)) {
+      throw new Error(
+        observation.episode_index == null
+          ? `task revision or provenance differs across repetitions of task ${observation.task}`
+          : `campaign revision or provenance differs for campaign ${observation.task}`,
+      );
     }
-    taskProvenance.set(observation.task, observation.provenance);
+    taskProvenance.set(observation.task, actual);
+    if (observation.episode_index != null) {
+      const episodeKey = `${observation.task}\0${observation.episode_index}`;
+      const expectedEpisode = episodeProvenance.get(episodeKey);
+      const episodeActual = episodeLevelProvenance(observation);
+      if (expectedEpisode && !sameValue(expectedEpisode, episodeActual)) {
+        throw new Error(
+          `episode revision or provenance differs for campaign ${observation.task} episode ${observation.episode_index}`,
+        );
+      }
+      episodeProvenance.set(episodeKey, episodeActual);
+    }
     const key = pairKey(observation);
-    if (!cells.has(key)) cells.set(key, { task: observation.task, category: observation.category, repetition: observation.repetition });
+    if (!cells.has(key)) {
+      cells.set(key, {
+        task: observation.task,
+        category: observation.category,
+        repetition: observation.repetition,
+        ...(observation.episode_index == null
+          ? {}
+          : { episode_index: observation.episode_index, episode_id: observation.episode_id }),
+      });
+    }
     const cell = cells.get(key);
     if (cell.category !== observation.category) throw new Error(`task ${observation.task} has inconsistent categories`);
     const mate = ARMS.map((arm) => cell[arm]).find(Boolean);
     if (mate && !sameValue(mate.provenance, observation.provenance)) {
-      throw new Error(`task revision or provenance differs for task ${observation.task} repetition ${observation.repetition}`);
+      throw new Error(
+        observation.episode_index == null
+          ? `task revision or provenance differs for task ${observation.task} repetition ${observation.repetition}`
+          : `episode revision or provenance differs for campaign ${observation.task} episode ${observation.episode_index} repetition ${observation.repetition}`,
+      );
     }
     if (Object.hasOwn(cell, observation.arm)) {
-      throw new Error(`duplicate cell for task ${observation.task} repetition ${observation.repetition} arm ${observation.arm}`);
+      throw new Error(
+        observation.episode_index == null
+          ? `duplicate cell for task ${observation.task} repetition ${observation.repetition} arm ${observation.arm}`
+          : `duplicate cell for task ${observation.task} repetition ${observation.repetition} arm ${observation.arm} episode ${observation.episode_index}`,
+      );
     }
     cell[observation.arm] = observation;
   }
-  return [...cells.values()].sort((left, right) => left.task.localeCompare(right.task) || left.repetition - right.repetition);
+  return [...cells.values()].sort(
+    (left, right) => left.task.localeCompare(right.task)
+      || left.repetition - right.repetition
+      || (left.episode_index ?? 0) - (right.episode_index ?? 0),
+  );
 }
 
 function pairSummary(observations) {
@@ -395,6 +531,7 @@ function pairSummary(observations) {
       task: cell.task,
       category: cell.category,
       repetition: cell.repetition,
+      ...(cell.episode_index == null ? {} : { episode_index: cell.episode_index }),
       present_arms: present,
       missing_arms: ARMS.filter((arm) => !cell[arm]?.outcome),
       arm_statuses: Object.fromEntries(ARMS.filter((arm) => cell[arm]).map((arm) => [arm, cell[arm].status])),
@@ -426,7 +563,21 @@ function pairSummary(observations) {
       mean_delta: mean(usable.map((cell) => cell.forge.instrumentation[metric] - cell.baseline.instrumentation[metric])),
     };
   }
-  return { complete: complete.length, incomplete: incomplete.length, incomplete_pairs: incomplete, outcomes, instrumentation };
+  const countedPairs = complete.filter((cell) => cell.baseline.counts && cell.forge.counts);
+  const counts = countedPairs.length === 0
+    ? undefined
+    : Object.fromEntries(COUNT_FIELDS.map((field) => {
+      const deltas = countedPairs.map((cell) => cell.forge.counts[field] - cell.baseline.counts[field]);
+      return [field, { pairs: countedPairs.length, mean_delta: mean(deltas) }];
+    }));
+  return {
+    complete: complete.length,
+    incomplete: incomplete.length,
+    incomplete_pairs: incomplete,
+    outcomes,
+    instrumentation,
+    ...(counts === undefined ? {} : { counts }),
+  };
 }
 
 function armsSummary(observations) {
@@ -443,6 +594,22 @@ function groupedSummaries(observations, property) {
   }));
 }
 
+function episodeSummaries(observations) {
+  const selected = observations.filter((observation) => observation.episode_index != null);
+  if (selected.length === 0) return undefined;
+  const indexes = [...new Set(selected.map((observation) => observation.episode_index))]
+    .sort((left, right) => left - right);
+  return Object.fromEntries(indexes.map((index) => {
+    const episode = selected.filter((observation) => observation.episode_index === index);
+    return [index, {
+      episode_index: index,
+      episode_id: episode[0].episode_id,
+      arms: armsSummary(episode),
+      pairs: pairSummary(episode),
+    }];
+  }));
+}
+
 async function aggregate(runDirectories) {
   const runs = [];
   for (const directory of runDirectories) runs.push(await readRun(directory));
@@ -452,6 +619,7 @@ async function aggregate(runDirectories) {
   // Validate duplicates across run-directory boundaries before producing any report.
   sortedPairCells(observations);
   const tasks = groupedSummaries(observations, 'task');
+  const episodes = episodeSummaries(observations);
   const taskDeltas = Object.values(tasks)
     .map((summary) => summary.pairs.outcomes.shippable.mean_delta)
     .filter((value) => value !== null);
@@ -464,6 +632,7 @@ async function aggregate(runDirectories) {
     arms: armsSummary(observations),
     categories: groupedSummaries(observations, 'category'),
     tasks,
+    ...(episodes === undefined ? {} : { episodes }),
     pairs: pairSummary(observations),
     primary: {
       endpoint: 'shippable',

@@ -7,18 +7,24 @@ import test from 'node:test';
 
 const aggregate = path.resolve('evals/harbor/aggregate-results.mjs');
 
-function normalized({ arm, task, trial, shippable, cost = null, seconds = null }) {
+function normalized({
+  arm, task, trial, shippable, cost = null, seconds = null,
+  schemaVersion = 1, counts, falseCompletion, rewardShape,
+}) {
   return {
-    schema_version: 1,
+    schema_version: schemaVersion,
     arm,
     task,
     trial,
+    ...(rewardShape === undefined ? {} : { reward_shape: rewardShape }),
     outcome: {
       functional: shippable,
       regression: shippable,
       tests_unchanged: shippable,
       shippable,
     },
+    ...(counts === undefined ? {} : { counts }),
+    ...(falseCompletion === undefined ? {} : { false_completion: falseCompletion }),
     instrumentation: {
       available: arm === 'forge',
       reason: arm === 'forge' ? null : 'not applicable',
@@ -48,20 +54,29 @@ function createRun(root, {
   treatment = { kind: 'published-version', version: '1.2.3' },
   selectedArm = 'both',
   taskRevision = `revision-${task}`,
+  campaignRevision,
+  campaign,
   taskVersion,
   manifestTaskVersion = taskVersion,
   corpus = { id: 'test-corpus', revision: 'corpus-v1' },
 } = {}) {
   const directory = path.join(root, runId);
   mkdirSync(path.join(directory, 'trials'), { recursive: true });
+  const planTaskRevision = campaignRevision ?? taskRevision;
   const trials = [];
-  for (const cell of cells) {
-    const trialId = `${task}-${cell.arm}-${cell.repetition}`;
+  for (const [cellIndex, cell] of cells.entries()) {
+    const hasEpisode = cell.episodeIndex !== undefined;
+    const trialId = hasEpisode
+      ? `${cell.episodeId}-${cell.arm}-${String(cell.repetition).padStart(3, '0')}`
+      : `${task}-${cell.arm}-${cell.repetition}`;
     const trialDirectory = path.join(directory, 'trials', trialId);
     mkdirSync(trialDirectory);
     const resultPath = path.join('trials', trialId, 'normalized-result.json');
     const status = cell.status ?? 'verified';
     const manifestPath = path.join('trials', trialId, 'manifest.json');
+    const scheduleIndex = hasEpisode
+      ? cellIndex + 1
+      : (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2);
     const manifest = {
       schemaVersion: 1,
       runId,
@@ -69,7 +84,7 @@ function createRun(root, {
       task,
       ...(manifestTaskVersion === undefined ? {} : { taskVersion: manifestTaskVersion }),
       category,
-      taskRevision,
+      taskRevision: cell.episodeRevision ?? planTaskRevision,
       corpus,
       harnessRevision,
       arm: cell.arm,
@@ -80,12 +95,13 @@ function createRun(root, {
       images: { agent: 'node@sha256:aaa', verifier: 'node@sha256:bbb' },
       settings: { repetitions: 2, concurrency: 1 },
       seed: 'experiment-seed',
-      scheduleIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
-      executionIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
+      scheduleIndex,
+      executionIndex: scheduleIndex,
       armOrder: ['baseline', 'forge'],
       armOrdinal: cell.arm === 'baseline' ? 1 : 2,
       harbor: { executable: 'harbor', version: '0.20.0', versionSource: 'harbor --version', argv: ['run'] },
       status,
+      ...(hasEpisode ? { episodeId: cell.episodeId, episodeIndex: cell.episodeIndex } : {}),
       ...(status === 'verified' ? { normalizedResult: resultPath } : { error: cell.error ?? 'Harbor failed' }),
     };
     writeFileSync(path.join(directory, manifestPath), `${JSON.stringify(manifest)}\n`);
@@ -97,16 +113,21 @@ function createRun(root, {
         shippable: cell.shippable,
         cost: cell.cost,
         seconds: cell.seconds,
+        schemaVersion: cell.schemaVersion,
+        counts: cell.counts,
+        falseCompletion: cell.falseCompletion,
+        rewardShape: cell.rewardShape,
       }))}\n`);
     }
     trials.push({
       trialId,
       arm: cell.arm,
       repetition: cell.repetition,
-      scheduleIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
-      executionIndex: (cell.repetition - 1) * 2 + (cell.arm === 'baseline' ? 1 : 2),
+      scheduleIndex,
+      executionIndex: scheduleIndex,
       armOrder: ['baseline', 'forge'],
       armOrdinal: cell.arm === 'baseline' ? 1 : 2,
+      ...(hasEpisode ? { episodeId: cell.episodeId, episodeIndex: cell.episodeIndex } : {}),
       manifest: manifestPath,
       status,
     });
@@ -116,11 +137,13 @@ function createRun(root, {
     runId,
     runDirectory: directory,
     dryRun: false,
-    status: cells.some((cell) => cell.status === 'failed') ? 'completed-with-failures' : 'completed',
+    status: cells.some((cell) => cell.status === 'failed' || cell.status === 'not-attempted')
+      ? 'completed-with-failures'
+      : 'completed',
     task,
     ...(taskVersion === undefined ? {} : { taskVersion }),
     category,
-    taskRevision,
+    taskRevision: planTaskRevision,
     corpus,
     harnessRevision,
     images: { agent: 'node@sha256:aaa', verifier: 'node@sha256:bbb' },
@@ -133,6 +156,7 @@ function createRun(root, {
       model,
       forgekitTreatment: treatment,
     },
+    ...(campaign === undefined ? {} : { campaign }),
     trials,
   };
   writeFileSync(path.join(directory, 'plan.json'), `${JSON.stringify(plan)}\n`);
@@ -408,4 +432,369 @@ test('refuses to pair equal task revisions carrying different semantic task vers
   assert.notEqual(result.status, 0);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /task revision|provenance|task version/i);
+});
+
+function campaignEpisodeSpecs() {
+  return [1, 2, 3, 4, 5, 6].map((index) => ({
+    index,
+    id: `episode-0${index}`,
+    baselineShippable: index % 2,
+    forgeShippable: index <= 4 ? 1 : 0,
+  }));
+}
+
+function campaignCellsFromSpecs(episodeSpecs, extras = {}) {
+  return episodeSpecs.flatMap((episode) => [
+    {
+      arm: 'baseline',
+      repetition: 1,
+      episodeIndex: episode.index,
+      episodeId: episode.id,
+      shippable: episode.baselineShippable,
+      ...extras,
+    },
+    {
+      arm: 'forge',
+      repetition: 1,
+      episodeIndex: episode.index,
+      episodeId: episode.id,
+      shippable: episode.forgeShippable,
+      ...extras,
+    },
+  ]);
+}
+
+test('campaign aggregation reports per-episode arm outcomes keyed by episode index', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-episodes-'));
+  const episodeSpecs = campaignEpisodeSpecs();
+  const directory = createRun(root, {
+    runId: 'campaign-episodes',
+    task: 'forgekit-campaign-v1',
+    category: 'campaign',
+    campaignRevision: 'campaign-rev-1',
+    campaign: {
+      id: 'forgekit-campaign-v1',
+      episodes: episodeSpecs.map((episode) => ({ id: episode.id, index: episode.index })),
+    },
+    cells: campaignCellsFromSpecs(episodeSpecs),
+  });
+
+  const result = invoke([directory]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  const expectedIndexes = episodeSpecs.map((episode) => String(episode.index));
+  assert.deepEqual(
+    Object.keys(report.episodes).sort((left, right) => Number(left) - Number(right)),
+    expectedIndexes,
+  );
+  for (const episode of episodeSpecs) {
+    const entry = report.episodes[episode.index];
+    assert.equal(entry.arms.baseline.outcomes.shippable.successes, episode.baselineShippable);
+    assert.equal(entry.arms.forge.outcomes.shippable.successes, episode.forgeShippable);
+    assert.equal(entry.arms.baseline.outcomes.shippable.observations, 1);
+    assert.equal(entry.arms.forge.outcomes.shippable.observations, 1);
+  }
+});
+
+test('accepts normalized schema version 2 with sibling counted fields and without requiring counts on binary records', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-schema-v2-'));
+  const binary = createRun(root, {
+    runId: 'schema-v2-binary',
+    task: 'binary-task',
+    category: 'bug',
+    cells: [{
+      arm: 'baseline',
+      repetition: 1,
+      shippable: 1,
+      schemaVersion: 2,
+      rewardShape: 'binary',
+    }],
+  });
+  let result = invoke([binary]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const counted = createRun(root, {
+    runId: 'schema-v2-counted',
+    task: 'counted-task',
+    category: 'campaign',
+    cells: [{
+      arm: 'forge',
+      repetition: 1,
+      shippable: 1,
+      schemaVersion: 2,
+      rewardShape: 'counted',
+      counts: {
+        requirements_met: 7,
+        requirements_total: 10,
+        regression_met: 12,
+        regression_total: 14,
+      },
+      falseCompletion: 1,
+    }],
+  });
+  result = invoke([counted]);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('rejects normalized schema versions other than 1 and 2', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-schema-v3-'));
+  const directory = createRun(root, {
+    runId: 'schema-v3',
+    task: 'versioned-task',
+    category: 'bug',
+    cells: [{ arm: 'baseline', repetition: 1, shippable: 1, schemaVersion: 3 }],
+  });
+  const result = invoke([directory]);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /schema version/i);
+});
+
+test('campaign aggregation reports per-episode paired deltas and incomplete pair counts', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-episode-deltas-'));
+  const incompleteIndex = 3;
+  const episodeSpecs = [1, 2, 3, 4, 5, 6].map((index) => ({
+    index,
+    id: `episode-0${index}`,
+    baselineShippable: index % 2,
+    forgeShippable: index <= 4 ? 1 : 0,
+    baselineCounts: {
+      requirements_met: index,
+      requirements_total: 10,
+      regression_met: index,
+      regression_total: 20,
+    },
+    forgeCounts: {
+      requirements_met: index + 2,
+      requirements_total: 10,
+      regression_met: index + 1,
+      regression_total: 20,
+    },
+  }));
+  const cells = episodeSpecs.flatMap((episode) => {
+    const counted = {
+      schemaVersion: 2,
+      rewardShape: 'counted',
+      falseCompletion: 0,
+    };
+    const baseline = {
+      arm: 'baseline',
+      repetition: 1,
+      episodeIndex: episode.index,
+      episodeId: episode.id,
+      shippable: episode.baselineShippable,
+      counts: episode.baselineCounts,
+      ...counted,
+    };
+    if (episode.index === incompleteIndex) {
+      return [
+        baseline,
+        {
+          arm: 'forge',
+          repetition: 1,
+          episodeIndex: episode.index,
+          episodeId: episode.id,
+          status: 'failed',
+          error: 'Harbor exited with code 1',
+        },
+      ];
+    }
+    return [
+      baseline,
+      {
+        arm: 'forge',
+        repetition: 1,
+        episodeIndex: episode.index,
+        episodeId: episode.id,
+        shippable: episode.forgeShippable,
+        counts: episode.forgeCounts,
+        ...counted,
+      },
+    ];
+  });
+  const directory = createRun(root, {
+    runId: 'campaign-deltas',
+    task: 'forgekit-campaign-v1',
+    category: 'campaign',
+    campaignRevision: 'campaign-rev-1',
+    campaign: {
+      id: 'forgekit-campaign-v1',
+      episodes: episodeSpecs.map((episode) => ({ id: episode.id, index: episode.index })),
+    },
+    cells,
+  });
+
+  const result = invoke([directory]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  const completeSpecs = episodeSpecs.filter((episode) => episode.index !== incompleteIndex);
+  const incompleteSpecs = episodeSpecs.filter((episode) => episode.index === incompleteIndex);
+
+  for (const episode of completeSpecs) {
+    const entry = report.episodes[episode.index];
+    const expectedDelta = episode.forgeShippable - episode.baselineShippable;
+    assert.equal(entry.pairs.complete, 1);
+    assert.equal(entry.pairs.incomplete, 0);
+    assert.equal(entry.pairs.outcomes.shippable.mean_delta, expectedDelta);
+    assert.equal(
+      entry.pairs.counts.requirements_met.mean_delta,
+      episode.forgeCounts.requirements_met - episode.baselineCounts.requirements_met,
+    );
+    assert.equal(
+      entry.arms.baseline.counts.requirements_met.mean,
+      episode.baselineCounts.requirements_met,
+    );
+    assert.equal(
+      entry.arms.forge.counts.requirements_met.mean,
+      episode.forgeCounts.requirements_met,
+    );
+  }
+  for (const episode of incompleteSpecs) {
+    const entry = report.episodes[episode.index];
+    assert.equal(entry.pairs.complete, 0);
+    assert.equal(entry.pairs.incomplete, 1);
+    assert.equal(entry.pairs.outcomes.shippable.mean_delta, null);
+    assert.deepEqual(entry.pairs.incomplete_pairs, [{
+      task: 'forgekit-campaign-v1',
+      category: 'campaign',
+      repetition: 1,
+      episode_index: episode.index,
+      present_arms: ['baseline'],
+      missing_arms: ['forge'],
+      arm_statuses: { baseline: 'verified', forge: 'failed' },
+    }]);
+    assert.equal(entry.arms.baseline.outcomes.shippable.successes, episode.baselineShippable);
+    assert.equal(entry.arms.forge.outcomes.shippable.observations, 0);
+  }
+});
+
+test('a not-attempted campaign episode is incomplete rather than a zero outcome', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-not-attempted-'));
+  const directory = createRun(root, {
+    runId: 'campaign-not-attempted',
+    task: 'forgekit-campaign-v1',
+    category: 'campaign',
+    campaignRevision: 'campaign-rev-1',
+    campaign: {
+      id: 'forgekit-campaign-v1',
+      episodes: [{ id: 'episode-01', index: 1 }],
+    },
+    cells: [
+      {
+        arm: 'baseline',
+        repetition: 1,
+        episodeIndex: 1,
+        episodeId: 'episode-01',
+        shippable: 1,
+      },
+      {
+        arm: 'forge',
+        repetition: 1,
+        episodeIndex: 1,
+        episodeId: 'episode-01',
+        status: 'not-attempted',
+      },
+    ],
+  });
+  const result = invoke([directory]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.episodes[1].pairs.complete, 0);
+  assert.equal(report.episodes[1].pairs.incomplete, 1);
+  assert.equal(report.episodes[1].arms.forge.outcomes.shippable.observations, 0);
+  assert.equal(report.episodes[1].arms.forge.outcomes.shippable.successes, 0);
+});
+
+function oneEpisodeCampaign(root, {
+  runId, selectedArm, campaignRevision, episodeRevision, arm, shippable,
+}) {
+  return createRun(root, {
+    runId,
+    task: 'forgekit-campaign-v1',
+    category: 'campaign',
+    selectedArm,
+    campaignRevision,
+    campaign: { id: 'forgekit-campaign-v1', episodes: [{ id: 'episode-01', index: 1 }] },
+    cells: [{
+      arm,
+      repetition: 1,
+      episodeIndex: 1,
+      episodeId: 'episode-01',
+      episodeRevision,
+      shippable,
+    }],
+  });
+}
+
+test('refuses mixed campaign revisions across run directories rather than pairing them', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-mixed-campaign-rev-'));
+  const baseline = oneEpisodeCampaign(root, {
+    runId: 'campaign-rev-a', selectedArm: 'baseline', campaignRevision: 'campaign-rev-a',
+    episodeRevision: 'episode-01-rev', arm: 'baseline', shippable: 0,
+  });
+  const forge = oneEpisodeCampaign(root, {
+    runId: 'campaign-rev-b', selectedArm: 'forge', campaignRevision: 'campaign-rev-b',
+    episodeRevision: 'episode-01-rev', arm: 'forge', shippable: 1,
+  });
+  const result = invoke([baseline, forge]);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /campaign revision|provenance/i);
+});
+
+test('refuses mixed episode revisions across run directories rather than pairing them', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-mixed-episode-rev-'));
+  const baseline = oneEpisodeCampaign(root, {
+    runId: 'episode-rev-a', selectedArm: 'baseline', campaignRevision: 'campaign-rev-same',
+    episodeRevision: 'episode-01-rev-a', arm: 'baseline', shippable: 0,
+  });
+  const forge = oneEpisodeCampaign(root, {
+    runId: 'episode-rev-b', selectedArm: 'forge', campaignRevision: 'campaign-rev-same',
+    episodeRevision: 'episode-01-rev-b', arm: 'forge', shippable: 1,
+  });
+  const result = invoke([baseline, forge]);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /episode revision|provenance/i);
+});
+
+test('pairs campaign arms whose episode revisions differ across episodes but match within each episode', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'forgekit-aggregate-consistent-episode-rev-'));
+  const episodeSpecs = [
+    { index: 1, id: 'episode-01', revision: 'episode-01-hash', baselineShippable: 0, forgeShippable: 1 },
+    { index: 2, id: 'episode-02', revision: 'episode-02-hash', baselineShippable: 1, forgeShippable: 1 },
+  ];
+  const cellsFor = (arm) => episodeSpecs.map((episode) => ({
+    arm,
+    repetition: 1,
+    episodeIndex: episode.index,
+    episodeId: episode.id,
+    episodeRevision: episode.revision,
+    shippable: arm === 'baseline' ? episode.baselineShippable : episode.forgeShippable,
+  }));
+  const baseline = createRun(root, {
+    runId: 'consistent-base',
+    task: 'forgekit-campaign-v1',
+    category: 'campaign',
+    selectedArm: 'baseline',
+    campaignRevision: 'campaign-rev-same',
+    campaign: { id: 'forgekit-campaign-v1', episodes: episodeSpecs.map((episode) => ({ id: episode.id, index: episode.index })) },
+    cells: cellsFor('baseline'),
+  });
+  const forge = createRun(root, {
+    runId: 'consistent-forge',
+    task: 'forgekit-campaign-v1',
+    category: 'campaign',
+    selectedArm: 'forge',
+    campaignRevision: 'campaign-rev-same',
+    campaign: { id: 'forgekit-campaign-v1', episodes: episodeSpecs.map((episode) => ({ id: episode.id, index: episode.index })) },
+    cells: cellsFor('forge'),
+  });
+  const result = invoke([baseline, forge]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.episodes[1].pairs.complete, 1);
+  assert.equal(report.episodes[2].pairs.complete, 1);
+  assert.equal(report.episodes[1].pairs.outcomes.shippable.mean_delta, 1);
+  assert.equal(report.episodes[2].pairs.outcomes.shippable.mean_delta, 0);
 });

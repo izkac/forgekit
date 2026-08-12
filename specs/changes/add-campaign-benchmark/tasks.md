@@ -73,17 +73,17 @@
 
 ## 5. Per-episode aggregation
 
-- [ ] 5.1 Extend `evals/harbor/aggregate-results.mjs` to group campaign results
+- [x] 5.1 Extend `evals/harbor/aggregate-results.mjs` to group campaign results
       by episode index and emit per-episode arm outcomes. Verify:
       `aggregate-results.test.mjs` on fixture runs produces six per-episode
       entries.
-- [ ] 5.2 Emit the paired delta per episode index with complete and incomplete
+- [x] 5.2 Emit the paired delta per episode index with complete and incomplete
       pair counts. Verify: test asserts deltas and counts for a fixture with one
       deliberately incomplete pair.
-- [ ] 5.3 Fail closed on mixed campaign or episode revisions across run
+- [x] 5.3 Fail closed on mixed campaign or episode revisions across run
       directories. Verify: test asserts an aggregation error rather than a
       pairing.
-- [ ] 5.4 Keep existing single-task aggregation output unchanged. Verify:
+- [x] 5.4 Keep existing single-task aggregation output unchanged. Verify:
       existing aggregator tests pass unmodified.
 
 ## 6. Campaign service and episodes 1–3
