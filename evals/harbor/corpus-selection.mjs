@@ -1,4 +1,4 @@
-import { lstat, readdir, realpath } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +17,11 @@ const registry = new Map([
     taskRoot: path.join(here, 'tasks', 'forgekit-hard-v2'),
     taskRootLocator: 'tasks/forgekit-hard-v2',
   }],
+  ['forgekit-campaign-v1', {
+    manifestPath: path.join(here, 'corpora', 'forgekit-campaign-v1.json'),
+    taskRoot: path.join(here, 'tasks', 'forgekit-campaign-v1'),
+    taskRootLocator: 'tasks/forgekit-campaign-v1',
+  }],
 ]);
 
 export function selectCorpus(corpusId = defaultCorpusId) {
@@ -26,6 +31,50 @@ export function selectCorpus(corpusId = defaultCorpusId) {
   const selected = registry.get(corpusId);
   if (selected === undefined) throw new Error(`unknown corpus: ${corpusId}`);
   return { id: corpusId, ...selected };
+}
+
+export async function parseCampaign(selection) {
+  const parsed = JSON.parse(await readFile(selection.manifestPath, 'utf8'));
+  if (!Array.isArray(parsed.episodes)) {
+    return { id: parsed.corpus_id, episodes: null };
+  }
+  const seenIds = new Set();
+  for (const entry of parsed.episodes) {
+    if (seenIds.has(entry.id)) throw new Error(`duplicate episode id: ${entry.id}`);
+    seenIds.add(entry.id);
+  }
+  for (let i = 0; i < parsed.episodes.length; i += 1) {
+    const entry = parsed.episodes[i];
+    if (entry.index === i + 1) continue;
+    if (i === 0) throw new Error(`episode index must start at 1: ${entry.id}`);
+    throw new Error(`non-contiguous episode index: ${entry.id}`);
+  }
+  for (const entry of parsed.episodes) {
+    const expectedTaskPath = path.posix.join(selection.taskRootLocator, entry.id);
+    if (entry.task_path !== undefined && entry.task_path !== expectedTaskPath) {
+      throw new Error(`corpus task_path does not match its allowlisted root for episode: ${entry.id}`);
+    }
+  }
+  const episodes = [];
+  for (const entry of parsed.episodes) {
+    let resolvedPath;
+    try {
+      resolvedPath = await assertSafeTaskTree(selection.taskRoot, entry.id);
+    } catch (error) {
+      if (error.message.startsWith('unknown task:')) {
+        throw new Error(`missing episode directory: ${entry.id}`);
+      }
+      throw error;
+    }
+    episodes.push({
+      id: entry.id,
+      index: entry.index,
+      taskPath: entry.task_path,
+      version: entry.version,
+      resolvedPath,
+    });
+  }
+  return { id: parsed.corpus_id, episodes };
 }
 
 function isInside(root, candidate) {

@@ -22,17 +22,17 @@
 
 ## 2. Campaign manifest and selection
 
-- [ ] 2.1 Extend `evals/harbor/corpus-selection.mjs` to parse an `episodes`
+- [x] 2.1 Extend `evals/harbor/corpus-selection.mjs` to parse an `episodes`
       array (episode id, index, task path) alongside the existing task list.
       Verify: `corpus-selection.test.mjs` accepts a well-formed six-episode
       manifest.
-- [ ] 2.2 Reject malformed campaigns: duplicate episode ids, non-contiguous or
+- [x] 2.2 Reject malformed campaigns: duplicate episode ids, non-contiguous or
       non-one-based indices, missing episode directories. Verify: one test case
       per rejection naming the offending episode; nothing is staged.
-- [ ] 2.3 Add `evals/harbor/corpora/forgekit-campaign-v1.json` declaring the
+- [x] 2.3 Add `evals/harbor/corpora/forgekit-campaign-v1.json` declaring the
       corpus id, schema version and six episode entries with versions. Verify:
       selection test loads the checked-in manifest and resolves all six paths.
-- [ ] 2.4 Confirm `corpus-v1.lock.json` still passes byte-for-byte and hard-v2
+- [x] 2.4 Confirm `corpus-v1.lock.json` still passes byte-for-byte and hard-v2
       selection is unchanged. Verify: `corpus-v1-lock.test.mjs` and
       `corpus-selection.test.mjs` pass unmodified.
 
