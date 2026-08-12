@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const CLI = fileURLToPath(new URL("./normalize-results.mjs", import.meta.url));
+const NORMALIZED_SCHEMA_VERSION = 2;
 
 function runNormalizer({ reward, forgeSummary, forgeSummaryRaw, harborResult, harborJobResult, arm = "baseline", task = "node-health-endpoint", trial = "1" }) {
   const directory = mkdtempSync(join(tmpdir(), "forge-normalizer-"));
@@ -40,10 +41,11 @@ test("preserves verifier outcomes when Forge telemetry is absent", () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    schema_version: 1,
+    schema_version: NORMALIZED_SCHEMA_VERSION,
     arm: "baseline",
     task: "node-health-endpoint",
     trial: 1,
+    reward_shape: "binary",
     outcome: {
       functional: 1,
       regression: 1,
@@ -201,4 +203,147 @@ test("normalizes available Harbor cost, token, retry, and timing instrumentation
     cost_usd: 0.25,
     retries: 2
   });
+});
+
+function countedReward(overrides = {}) {
+  return {
+    functional: 1,
+    regression: 1,
+    tests_unchanged: 1,
+    shippable: 1,
+    requirements_met: 3,
+    requirements_total: 5,
+    regression_met: 4,
+    regression_total: 6,
+    false_completion: 0,
+    ...overrides
+  };
+}
+
+test("records requirement and regression counts from a counted reward", () => {
+  const reward = countedReward();
+  const result = runNormalizer({ reward });
+
+  assert.equal(result.status, 0, result.stderr);
+  const normalized = JSON.parse(result.stdout);
+  assert.deepEqual(normalized.counts, {
+    requirements_met: reward.requirements_met,
+    requirements_total: reward.requirements_total,
+    regression_met: reward.regression_met,
+    regression_total: reward.regression_total
+  });
+  assert.deepEqual(normalized.outcome, {
+    functional: reward.functional,
+    regression: reward.regression,
+    tests_unchanged: reward.tests_unchanged,
+    shippable: 1
+  });
+  assert.equal(Object.hasOwn(normalized.outcome, "requirements_met"), false);
+});
+
+test("does not let a requirement shortfall change shippable", () => {
+  const reward = countedReward({
+    requirements_met: 2,
+    requirements_total: 5,
+    functional: 1,
+    regression: 1,
+    tests_unchanged: 1,
+    shippable: 1
+  });
+  const result = runNormalizer({ reward });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).outcome.shippable, 1);
+});
+
+test("rejects negative, non-integer, and met-exceeds-total counted metrics", () => {
+  const cases = [
+    { requirements_met: -1 },
+    { regression_total: -2 },
+    { requirements_met: 1.5 },
+    { regression_met: 2.25 },
+    { requirements_met: 6, requirements_total: 5 },
+    { regression_met: 7, regression_total: 6 }
+  ];
+  for (const overrides of cases) {
+    const result = runNormalizer({ reward: countedReward(overrides) });
+    assert.notEqual(result.status, 0, JSON.stringify(overrides));
+    assert.equal(result.stdout, "");
+  }
+});
+
+test("rejects a reward that carries only some counted metrics", () => {
+  const result = runNormalizer({
+    reward: countedReward({ regression_total: undefined })
+  });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "");
+});
+
+test("records absent counts as missing, never zero, for a hard-v2-shaped reward", () => {
+  const result = runNormalizer({
+    reward: { functional: 1, regression: 1, tests_unchanged: 1, shippable: 1 }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const normalized = JSON.parse(result.stdout);
+  assert.deepEqual(normalized.outcome, {
+    functional: 1,
+    regression: 1,
+    tests_unchanged: 1,
+    shippable: 1
+  });
+  assert.ok(normalized.counts === undefined || normalized.counts === null);
+  for (const name of ["requirements_met", "requirements_total", "regression_met", "regression_total"]) {
+    const recorded = normalized.counts?.[name] ?? normalized[name];
+    assert.ok(recorded === undefined || recorded === null, name);
+    assert.notEqual(recorded, 0, name);
+    assert.equal(Object.hasOwn(normalized.outcome, name), false, `outcome.${name}`);
+  }
+});
+
+test("records false_completion 0 and 1 from a campaign reward", () => {
+  for (const falseCompletion of [0, 1]) {
+    const reward = countedReward({ false_completion: falseCompletion });
+    const result = runNormalizer({ reward });
+    assert.equal(result.status, 0, result.stderr);
+    const normalized = JSON.parse(result.stdout);
+    assert.equal(normalized.false_completion, falseCompletion);
+    assert.equal(Object.hasOwn(normalized.outcome, "false_completion"), false);
+  }
+});
+
+test("rejects a campaign reward that omits false_completion", () => {
+  const result = runNormalizer({
+    reward: countedReward({ false_completion: undefined })
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /required numeric reward metric "false_completion"/);
+  assert.equal(result.stdout, "");
+});
+
+test("accepts a single-shot reward that omits false_completion", () => {
+  const result = runNormalizer({
+    reward: { functional: 1, regression: 1, tests_unchanged: 1, shippable: 1 }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const normalized = JSON.parse(result.stdout);
+  assert.equal(Object.hasOwn(normalized, "false_completion"), false);
+  assert.equal(Object.hasOwn(normalized.outcome, "false_completion"), false);
+});
+
+test("records schema version and reward shape for binary and counted rewards", () => {
+  const binary = runNormalizer({
+    reward: { functional: 1, regression: 1, tests_unchanged: 1, shippable: 1 }
+  });
+  assert.equal(binary.status, 0, binary.stderr);
+  const binaryRecord = JSON.parse(binary.stdout);
+  assert.equal(binaryRecord.schema_version, NORMALIZED_SCHEMA_VERSION);
+  assert.equal(binaryRecord.reward_shape, "binary");
+
+  const counted = runNormalizer({ reward: countedReward() });
+  assert.equal(counted.status, 0, counted.stderr);
+  const countedRecord = JSON.parse(counted.stdout);
+  assert.equal(countedRecord.schema_version, NORMALIZED_SCHEMA_VERSION);
+  assert.equal(countedRecord.reward_shape, "counted");
 });

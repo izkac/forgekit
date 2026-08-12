@@ -98,6 +98,59 @@ function requireMetric(reward, name) {
   return value;
 }
 
+const COUNT_FIELDS = [
+  "requirements_met",
+  "requirements_total",
+  "regression_met",
+  "regression_total"
+];
+const SCHEMA_VERSION = 2;
+
+function requireCount(reward, name) {
+  const value = reward[name];
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Harbor reward counted metric "${name}" must be a non-negative integer`);
+  }
+  return value;
+}
+
+function readCounts(reward) {
+  const present = COUNT_FIELDS.filter((name) => Object.hasOwn(reward, name));
+  if (present.length === 0) {
+    return null;
+  }
+  if (present.length !== COUNT_FIELDS.length) {
+    const missing = COUNT_FIELDS.filter((name) => !Object.hasOwn(reward, name));
+    throw new Error(
+      `Harbor reward must include all counted metrics or none; missing "${missing.join("\", \"")}"`
+    );
+  }
+
+  const counts = {
+    requirements_met: requireCount(reward, "requirements_met"),
+    requirements_total: requireCount(reward, "requirements_total"),
+    regression_met: requireCount(reward, "regression_met"),
+    regression_total: requireCount(reward, "regression_total")
+  };
+  if (counts.requirements_met > counts.requirements_total) {
+    throw new Error("Harbor reward \"requirements_met\" must not exceed \"requirements_total\"");
+  }
+  if (counts.regression_met > counts.regression_total) {
+    throw new Error("Harbor reward \"regression_met\" must not exceed \"regression_total\"");
+  }
+  return counts;
+}
+
+function readFalseCompletion(reward, counted) {
+  if (!Object.hasOwn(reward, "false_completion")) {
+    if (counted) {
+      throw new Error("Harbor reward must include required numeric reward metric \"false_completion\"");
+    }
+    return null;
+  }
+  return requireMetric(reward, "false_completion");
+}
+
 function normalizeOutcome(reward) {
   requireObject(reward, "Harbor reward");
   const functional = requireMetric(reward, "functional");
@@ -173,6 +226,8 @@ function normalizeHarbor(result, jobResult) {
 async function normalize(options) {
   const reward = await readJson(options.rewardPath, "Harbor reward");
   const outcome = normalizeOutcome(reward);
+  const counts = readCounts(reward);
+  const falseCompletion = readFalseCompletion(reward, counts !== null);
 
   let forge = null;
   let forgeReason = "Forge artifact summary was not provided";
@@ -208,11 +263,14 @@ async function normalize(options) {
   };
 
   return {
-    schema_version: 1,
+    schema_version: SCHEMA_VERSION,
     arm: options.arm,
     task: options.task,
     trial: options.trial,
+    reward_shape: counts === null ? "binary" : "counted",
     outcome,
+    ...(counts === null ? {} : { counts }),
+    ...(falseCompletion === null ? {} : { false_completion: falseCompletion }),
     instrumentation
   };
 }

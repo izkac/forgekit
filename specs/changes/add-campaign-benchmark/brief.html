@@ -1,0 +1,143 @@
+<!-- forge-brief-specs-hash:ded631aa3906bcd1 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Campaign benchmark</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a1a; background: #fff;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5; padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .93rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #ebebeb; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .88em; }
+  .callout { background: #f7f9fb; border-left: 3px solid #9bb; padding: .75rem 1rem; margin: 1.25rem 0; }
+  .warn { background: #fdf8f3; border-left-color: #d9a05b; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .3rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 6px; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Campaign benchmark</h1>
+<p class="sub">Operator brief — change <code>add-campaign-benchmark</code></p>
+
+<h2>TL;DR</h2>
+<p>
+  Our current benchmark says Forge doesn't help. Across the 54 paired runs we've
+  already done, 47 came out exactly level, 6 favoured the plain agent and 1
+  favoured Forge — while Forge cost 5.7x more. That's not because Forge is
+  useless; it's because the tasks are one-shot puzzles that finish inside a single
+  sitting, which is the one situation where Forge's discipline buys nothing.
+</p>
+<p>
+  This change builds a second benchmark shaped around what Forge actually claims:
+  six change requests against one codebase, delivered one at a time, each handled
+  by a brand-new agent that inherits nothing but the repository the last one left
+  behind.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A new benchmark you can run that measures whether work <em>survives a handoff</em>, not whether one puzzle got solved.</li>
+  <li>Scores as counts ("met 7 of 10 requirements") instead of a single pass/fail bit, so partial progress is visible.</li>
+  <li>A regression score at every step: every earlier request's checks re-run, so you can see work getting broken.</li>
+  <li>A "claimed done but wasn't" signal, worked out mechanically rather than by reading what the agent said.</li>
+  <li>A report broken down by step number, so "the gap widens with each handoff" is a line you can draw.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+  One small order-and-payments service. Six requests in a fixed order. Each request
+  runs in a fresh container with a fresh agent — no memory, no transcript, no
+  summary. The only thing that travels forward is the repository itself. Forge
+  leaves specs, tests and a wiring record in there; a plain agent leaves code.
+  That difference is the whole experiment.
+</p>
+
+<pre class="mermaid">
+flowchart LR
+  E1["Step 1<br/>orders + charging"] --> R1[(repo state)]
+  R1 --> E2["Step 2<br/>partial refunds"] --> R2[(repo state)]
+  R2 --> E3["Step 3<br/>contradiction trap"] --> R3[(repo state)]
+  R3 --> E4["Step 4<br/>idempotency everywhere"] --> R4[(repo state)]
+  R4 --> E5["Step 5<br/>refactor, no behaviour change"] --> R5[(repo state)]
+  R5 --> E6["Step 6<br/>expiry trap"]
+</pre>
+
+<p>The six requests, and what each is looking for:</p>
+
+<table>
+  <tr><th>#</th><th>Request</th><th>What it probes</th></tr>
+  <tr><td>1</td><td>Orders, charging, and a status flow (pending → paid → shipped → delivered, plus cancelled)</td><td>Sets the rules everything later can break</td></tr>
+  <tr><td>2</td><td>Partial refunds against step 1's ledger</td><td>Ordinary building-on-top work</td></tr>
+  <tr><td>3</td><td><strong>Trap:</strong> "refunds may be issued on cancelled orders" — which contradicts step 1</td><td>Does it flag the clash, or quietly pick one and poison everything after?</td></tr>
+  <tr><td>4</td><td>Idempotency keys on every endpoint that changes something</td><td>Touches every route built so far</td></tr>
+  <tr><td>5</td><td><strong>Refactor:</strong> split the handlers up, behaviour unchanged</td><td>The operation agents are measurably worst at — one study found only 30–37% of LLM refactors were functionally correct</td></tr>
+  <tr><td>6</td><td><strong>Trap:</strong> auto-expire stale orders after 30 days</td><td>The obvious implementation expires already-paid orders, breaking a rule from step 1 that nothing directly tests</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Two rules keep the scoring honest.</strong>
+  The hidden checks only ever talk to the service over HTTP — they never reach
+  inside and call a module directly. So a feature that was written but never
+  plugged in simply fails, and we get wiring coverage without a separate metric.
+  And when a request can't be met without breaking an earlier one, the agent is
+  told to write a <code>BLOCKED.md</code> file naming both. That keeps the trap
+  steps gradeable by a machine, and keeps our existing rule that we never treat
+  the agent's own summary as the source of truth.
+</div>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>A new corpus name to pass to the runner: <code>forgekit-campaign-v1</code>. The existing corpora and commands work exactly as before.</li>
+  <li>A new offline check, <code>npm run smoke:evals:campaign</code>, that validates all six steps without touching a model.</li>
+  <li>The aggregate report gains a per-step breakdown. Existing single-task output is unchanged.</li>
+  <li>A full run is <strong>about $38 and roughly 4 hours</strong> (6 steps × 2 arms × 2 repetitions, one at a time). That's a separate decision you authorize — building the benchmark spends nothing.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li><strong>The effect might not show up.</strong> Six steps may be too few for problems to accumulate, and step 3's contradiction may be obvious enough that both arms catch it. Both were flagged during design and accepted; eight steps would cost roughly $50 and 5.5 hours if we need to grow it.</li>
+  <li><strong>Carrying the repo forward is the riskiest part.</strong> If that step quietly fails, every request becomes a fresh start and the results would still look plausible. So carryover gets its own check: a missing inheritance is reported as a broken run, never as a score of zero.</li>
+  <li><strong>The scoring change touches the existing benchmarks.</strong> Old result files must keep loading unchanged, and the frozen v1 corpus must still match byte for byte.</li>
+  <li><strong>The corpus is public</strong>, like the existing ones, so we can't rule out that a model has seen it.</li>
+  <li><strong>Building it proves nothing on its own.</strong> Only an authorized, pre-registered run produces evidence.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Changing the existing hard-v2 benchmark. It stays frozen — its 54 pairs remain a valid record that one-shot tasks show no difference.</li>
+  <li>A control arm where both sides restart from clean code each step. It would double the cost, and the thing it removes is the effect we're claiming.</li>
+  <li>Mutation testing.</li>
+  <li>Working out why <code>carrier-event-reconciliation</code> fails in both arms every time. Filed separately.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What</th><th>Size</th></tr>
+  <tr><td>1</td><td>Scores become counts, plus the "claimed done but wasn't" signal — old result files still load</td><td>4 tasks</td></tr>
+  <tr><td>2</td><td>Read and validate a six-step campaign definition; reject malformed ones</td><td>4 tasks</td></tr>
+  <tr><td>3</td><td>Run the steps in order, one fresh agent each, stopping that arm if one fails</td><td>4 tasks</td></tr>
+  <tr><td>4</td><td>Carry the repository forward safely — no grader code leaking in, no crossover between arms</td><td>4 tasks</td></tr>
+  <tr><td>5</td><td>Report results per step, including the gap between arms at each step</td><td>4 tasks</td></tr>
+  <tr><td>6</td><td>Build the service and the first three requests, with their graders</td><td>4 tasks</td></tr>
+  <tr><td>7</td><td>Build the last three requests, including both traps</td><td>4 tasks</td></tr>
+  <tr><td>8</td><td>Offline validation, npm scripts, and documentation</td><td>3 tasks</td></tr>
+  <tr><td>9</td><td>End-to-end proof that the whole loop actually runs</td><td>4 tasks</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+
+</body>
+</html>

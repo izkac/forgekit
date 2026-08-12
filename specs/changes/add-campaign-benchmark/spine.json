@@ -1,0 +1,60 @@
+{
+  "change": "add-campaign-benchmark",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Counted reward contract (requirement/regression counts + false_completion)",
+      "library": "evals/harbor/normalize-results.mjs",
+      "runtimeOwner": "evals/harbor/run.mjs — normalizes each verified trial reward after Harbor returns",
+      "writes": "trials/<trial-id>/normalized-result.json",
+      "reads": "verifier-owned reward.json",
+      "uiConsumer": "evals/harbor/aggregate-results.mjs report",
+      "evidence": "evals/harbor/normalize-results.test.mjs"
+    },
+    {
+      "capability": "Campaign manifest parsing and rejection",
+      "library": "evals/harbor/corpus-selection.mjs",
+      "runtimeOwner": "evals/harbor/run.mjs — corpus selection at plan time",
+      "writes": "plan.json campaign/episode provenance",
+      "reads": "evals/harbor/corpora/forgekit-campaign-v1.json",
+      "uiConsumer": "runner stdout plan + trial manifests",
+      "evidence": "evals/harbor/corpus-selection.test.mjs"
+    },
+    {
+      "capability": "Episode sequencing (ordered trials, per-arm stop on failure, seeded pair order)",
+      "library": "evals/harbor/run.mjs",
+      "runtimeOwner": "evals/harbor/run.mjs CLI entrypoint",
+      "writes": "plan.json trials[] with episodeId/episodeIndex; trials/<id>/manifest.json",
+      "reads": "selected campaign manifest, seed, arm/repetition options",
+      "uiConsumer": "[eval-progress] stderr lifecycle messages + persisted plan",
+      "evidence": "evals/harbor/run.test.mjs"
+    },
+    {
+      "capability": "State carryover between episodes with verifier isolation and arm isolation",
+      "library": "evals/harbor/run.mjs (staging) + campaign verifier carryover precondition",
+      "runtimeOwner": "evals/harbor/run.mjs — stages episode N+1 from episode N output",
+      "writes": "arms/<arm>/episode-<nn> staged agent environment",
+      "reads": "previous episode's /app output for the same arm and repetition",
+      "uiConsumer": "episode verifier carryover assertion",
+      "evidence": "evals/harbor/run.test.mjs + evals/harbor/smoke-campaign.mjs"
+    },
+    {
+      "capability": "Per-episode aggregation and paired delta by episode index",
+      "library": "evals/harbor/aggregate-results.mjs",
+      "runtimeOwner": "aggregate-results.mjs CLI entrypoint",
+      "writes": "aggregate report stdout (per-episode entries, deltas, pair counts)",
+      "reads": "plan.json + trials/*/normalized-result.json across run directories",
+      "uiConsumer": "operator reading the aggregate JSON",
+      "evidence": "evals/harbor/aggregate-results.test.mjs"
+    },
+    {
+      "capability": "Campaign corpus content — six episodes, HTTP-only checks, blocker file, trap scoring",
+      "library": "evals/harbor/tasks/forgekit-campaign-v1/episode-01..06/",
+      "runtimeOwner": "each episode's separate tests/ verifier image, invoked by Harbor",
+      "writes": "verifier-owned reward.json per episode",
+      "reads": "agent /app over HTTP only; BLOCKED.md at repo root",
+      "uiConsumer": "normalize-results.mjs → aggregate-results.mjs",
+      "evidence": "evals/harbor/smoke-campaign.mjs host matrix + per-episode corpus tests"
+    }
+  ]
+}
