@@ -932,6 +932,12 @@ const INIT_PRESERVES_CONFIG_PROJECT = `${SCRATCH}-init-preserves-config`;
  *  harness. */
 const INIT_PRESERVES_CONFIG_HOME = `${SCRATCH}-init-preserves-config-home`;
 
+/* ---------- checkpoint-scope fixture ---------- */
+
+/** A real git repo (checkpoint refuses outside one), kept apart from every
+ *  sibling fixture's directory so no other phase's rmSync can reach it. */
+const CHECKPOINT_SCOPE_PROJECT = `${SCRATCH}-checkpoint-scope`;
+
 const phase = process.argv[2];
 
 // `all` is the harness's own probe: it must prove THIS rig, self-contained, with
@@ -950,6 +956,7 @@ const ALL_ROSTER = [
   'tdd-evidence',
   'archive-gate',
   'init-preserves-config',
+  'checkpoint-scope',
 ];
 
 if (phase === 'all') {
@@ -2975,13 +2982,118 @@ if (phase === 'boot') {
   }
 
   process.stdout.write('INIT PRESERVES CONFIG GREEN\n');
+} else if (phase === 'checkpoint-scope') {
+  // THE F111 FIX, AGAINST THE SHIPPED BINARY: with a second unfinished session
+  // present, `forge checkpoint` for session A must never sweep in a tracked
+  // edit that stands in for session B's own work — refuse first (naming the
+  // path, HEAD unchanged), then let `--path` scope staging to exactly the
+  // named paths plus session A's own change dir, leaving B's edit unstaged.
+  const dir = CHECKPOINT_SCOPE_PROJECT;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+
+  git(dir, 'init', '-q', '-b', 'work'); // non-default branch: checkpoint refuses on main/master
+  git(dir, 'config', 'user.email', 'e2e@example.com');
+  git(dir, 'config', 'user.name', 'E2E Harness');
+
+  fs.mkdirSync(path.join(dir, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' }, git: { checkpoint: 'per-group' } }, null, 2)}\n`,
+  );
+
+  // The shared source file — tracked and committed first so HEAD exists and
+  // the later edit reads as a *modification*, not an untracked file.
+  const sharedRel = path.join('src', 'shared.txt');
+  const sharedAbs = path.join(dir, sharedRel);
+  fs.mkdirSync(path.dirname(sharedAbs), { recursive: true });
+  fs.writeFileSync(sharedAbs, 'shared baseline\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'base');
+
+  // Two unfinished sessions sharing this project — A is the one this
+  // checkpoint runs as, B is the other open session whose scope must never
+  // be swept in.
+  const sessionAId = 'session-a';
+  const sessionBId = 'session-b';
+  const changeA = 'change-a';
+  const changeB = 'change-b';
+  for (const [id, change] of [
+    [sessionAId, changeA],
+    [sessionBId, changeB],
+  ]) {
+    const sDir = path.join(dir, '.forge', 'sessions', id);
+    fs.mkdirSync(sDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sDir, 'session.json'),
+      `${JSON.stringify({ id, slug: id, phase: 'implement', openspecChange: change })}\n`,
+    );
+  }
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'active.json'),
+    `${JSON.stringify({ sessionId: sessionAId })}\n`,
+  );
+  fs.mkdirSync(path.join(dir, 'specs', 'changes', changeA), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'specs', 'changes', changeB), { recursive: true });
+
+  // Session B's stand-in: a tracked edit to the shared file, nowhere near
+  // either change dir — exactly the shape a checkpoint must never sweep in
+  // once another session is open.
+  fs.writeFileSync(sharedAbs, 'shared baseline\nedited by session B\n');
+
+  // Session A's own edit, under A's own change dir.
+  const ownRel = path.join('specs', 'changes', changeA, 'notes.md').replace(/\\/g, '/');
+  const ownAbs = path.join(dir, ownRel);
+  fs.writeFileSync(ownAbs, 'session A notes\n');
+
+  const headBefore = git(dir, 'rev-parse', 'HEAD');
+
+  // --- assert the refusal ---
+  const refusal = forge(dir, ['checkpoint', '--group', 'g', '--session', sessionAId]);
+  if (refusal.code === 0) {
+    fail('forge checkpoint exited 0 with a foreign session\'s edit pending — it must refuse', refusal.out);
+  }
+  const sharedRelPosix = sharedRel.replace(/\\/g, '/');
+  if (!refusal.out.includes(sharedRelPosix)) {
+    fail(`the refusal did not name the shared file ${sharedRelPosix}`, refusal.out);
+  }
+  const headAfterRefusal = git(dir, 'rev-parse', 'HEAD');
+  if (headAfterRefusal !== headBefore) {
+    fail('HEAD moved on a refused checkpoint', `before=${headBefore} after=${headAfterRefusal}`);
+  }
+
+  // --- assert the scope: --path commits A's own file, leaves B's untouched ---
+  const scoped = forge(dir, ['checkpoint', '--group', 'g', '--session', sessionAId, '--path', ownRel]);
+  if (scoped.code !== 0) {
+    fail('forge checkpoint --path <A file> did not exit 0', scoped.out);
+  }
+  const headAfterScoped = git(dir, 'rev-parse', 'HEAD');
+  if (headAfterScoped === headBefore) {
+    fail('HEAD did not advance after the scoped checkpoint', scoped.out);
+  }
+  const committedFiles = git(dir, 'show', '--name-only', '--pretty=format:', 'HEAD')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!committedFiles.includes(ownRel)) {
+    fail(`the scoped commit's tree does not contain ${ownRel}`, committedFiles.join('\n'));
+  }
+  if (committedFiles.includes(sharedRelPosix)) {
+    fail(`the scoped commit's tree contains the shared file ${sharedRelPosix} — B's edit leaked in`, committedFiles.join('\n'));
+  }
+  const statusAfterScoped = git(dir, 'status', '--porcelain');
+  if (!statusAfterScoped.includes(sharedRelPosix)) {
+    fail(`the shared file ${sharedRelPosix} is no longer pending after the scoped checkpoint`, statusAfterScoped);
+  }
+
+  process.stdout.write('CHECKPOINT SCOPE GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'init-preserves-config\n',
+      'init-preserves-config|checkpoint-scope\n',
   );
   process.exit(1);
 }

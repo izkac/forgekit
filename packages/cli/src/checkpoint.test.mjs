@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { otherOpenChangeDirs, classifyPendingEntries } from './checkpoint.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const CHECKPOINT = path.join(SRC, 'checkpoint.mjs');
@@ -285,4 +286,363 @@ test('untracked sibling change dir refuses; same-change untracked still commits'
   assert.equal(ok.status, 0);
   assert.equal(ok.out.committed, true);
   assert.ok(ok.out.files.includes('specs/changes/phase-1/note.md'));
+});
+
+/**
+ * `.forge/sessions/` + a plan dir shaped for `otherOpenChangeDirs`: this
+ * session, two other open sessions (different phases, both with a change dir
+ * that exists on disk), a done session, a skipped session, an open session
+ * whose change dir was never created, and a malformed `session.json` — every
+ * reason an entry must be excluded, each represented once so the test can
+ * tell "excluded for the right reason" from "excluded by accident".
+ */
+function makeOtherSessionsFixture() {
+  const root = tmp('forge-ckpt-other-');
+  const sessionsDir = path.join(root, '.forge', 'sessions');
+  const planDir = path.join(root, 'specs');
+  const thisId = 'this-session';
+
+  const writeSession = (id, session) => {
+    const dir = path.join(sessionsDir, id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify(session), 'utf8');
+  };
+  const makeChangeDir = (slug) => {
+    const dir = path.join(planDir, 'changes', slug);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  };
+
+  writeSession(thisId, { id: thisId, phase: 'implement', openspecChange: 'this-change' });
+  makeChangeDir('this-change');
+
+  const openA = makeChangeDir('open-a');
+  writeSession('other-open-a', { id: 'other-open-a', phase: 'implement', openspecChange: 'open-a' });
+
+  const openB = makeChangeDir('open-b');
+  writeSession('other-open-b', { id: 'other-open-b', phase: 'review', openspecChange: 'open-b' });
+
+  makeChangeDir('done-change');
+  writeSession('done-session', { id: 'done-session', phase: 'done', openspecChange: 'done-change' });
+
+  makeChangeDir('skipped-change');
+  writeSession('skipped-session', {
+    id: 'skipped-session',
+    phase: 'skipped',
+    openspecChange: 'skipped-change',
+  });
+
+  // openspecChange resolves to a path, but nothing was ever created there.
+  writeSession('no-dir-session', {
+    id: 'no-dir-session',
+    phase: 'implement',
+    openspecChange: 'missing-change',
+  });
+
+  // Same directory shape Forge uses for a session — not readable JSON.
+  const malformedDir = path.join(sessionsDir, 'malformed-session');
+  fs.mkdirSync(malformedDir, { recursive: true });
+  fs.writeFileSync(path.join(malformedDir, 'session.json'), '{not json', 'utf8');
+
+  return { sessionsDir, planDir, thisId, expectedOpenDirs: [openA, openB].slice().sort() };
+}
+
+/**
+ * Two-session git project: this session's own change dir, another *open*
+ * session's change dir, and a shared file outside either — all with committed
+ * baseline content, so the pending edits below are *tracked* modifications,
+ * not new/untracked files. That distinction is the actual F111 gap: the
+ * pre-existing `foreignUntrackedChangePaths` backstop only ever looked at
+ * untracked paths, so a tracked edit under a foreign open session's change
+ * dir sailed straight through `git add -A`. Both `session.json`s are `phase:
+ * "implement"` (open) and their change dirs exist on disk, so
+ * `otherOpenChangeDirs` finds the overlap.
+ */
+function makeTwoSessionProject({ branch = 'feature-x' } = {}) {
+  const cwd = tmp('forge-ckpt-two-');
+  git(cwd, 'init', '-q', '-b', 'main');
+  git(cwd, 'config', 'user.email', 'test@example.com');
+  git(cwd, 'config', 'user.name', 'Test');
+
+  const mineFile = path.join(cwd, 'specs', 'changes', 'phase-1', 'existing.md');
+  const foreignFile = path.join(cwd, 'specs', 'changes', 'other-change', 'existing.md');
+  fs.mkdirSync(path.dirname(mineFile), { recursive: true });
+  fs.mkdirSync(path.dirname(foreignFile), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'README.md'), '# base\n', 'utf8');
+  fs.writeFileSync(mineFile, '# mine baseline\n', 'utf8');
+  fs.writeFileSync(foreignFile, '# foreign baseline\n', 'utf8');
+  git(cwd, 'add', '-A');
+  git(cwd, 'commit', '-q', '-m', 'base');
+  const baseSha = git(cwd, 'rev-parse', 'HEAD');
+  if (branch !== 'main') git(cwd, 'checkout', '-q', '-b', branch);
+
+  const now = new Date().toISOString();
+  const sessionsDir = path.join(cwd, '.forge', 'sessions');
+  const writeSession = (id, session) => {
+    const dir = path.join(sessionsDir, id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      JSON.stringify({ createdAt: now, updatedAt: now, ...session }),
+      'utf8',
+    );
+  };
+  writeSession('s1', {
+    id: 's1',
+    slug: 'phase-1',
+    phase: 'implement',
+    planType: 'specs',
+    openspecChange: 'phase-1',
+    baseCommit: baseSha,
+    branch,
+  });
+  writeSession('s2', {
+    id: 's2',
+    slug: 'other-change',
+    phase: 'implement',
+    planType: 'specs',
+    openspecChange: 'other-change',
+    baseCommit: baseSha,
+    branch,
+  });
+  fs.writeFileSync(path.join(cwd, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(cwd, '.forge', 'config.json'),
+    `${JSON.stringify({ git: { checkpoint: 'per-group' }, plan: { engine: 'specs', dir: 'specs' } })}\n`,
+    'utf8',
+  );
+
+  // Pending work: session 1's own edit (mine), a *tracked* edit under session
+  // 2's change dir (foreignPlan), and a shared source file neither session's
+  // change dir claims.
+  fs.appendFileSync(mineFile, 'mine edit\n');
+  fs.appendFileSync(foreignFile, 'foreign edit\n');
+  fs.appendFileSync(path.join(cwd, 'README.md'), 'shared edit\n');
+
+  return {
+    cwd,
+    sessionDir: path.join(sessionsDir, 's1'),
+    baseSha,
+    mineRelPath: 'specs/changes/phase-1/existing.md',
+    foreignRelPath: 'specs/changes/other-change/existing.md',
+    foreignChangeDir: 'specs/changes/other-change',
+    sharedRelPath: 'README.md',
+  };
+}
+
+test('checkpoint refuses when another open session is present and a foreignPlan/shared entry is pending', () => {
+  // F111 red: `foreignRelPath` is a *tracked* edit under session s2's open
+  // change dir — the old untracked-only backstop never saw it, so this used
+  // to sail through `git add -A` and commit under session s1's name.
+  const { cwd, foreignRelPath, sharedRelPath } = makeTwoSessionProject();
+  const headBefore = git(cwd, 'rev-parse', 'HEAD');
+
+  const { status, out, stderr } = run(cwd, ['--session', 's1', '--group', 'g1']);
+
+  assert.equal(status, 1, 'refuses instead of committing');
+  const text = `${stderr}${out ? JSON.stringify(out) : ''}`;
+  assert.ok(text.includes(foreignRelPath), 'names the foreignPlan path');
+  assert.ok(text.includes('s2'), "tags the foreignPlan path with its owning session");
+  assert.ok(text.includes(sharedRelPath), 'names the shared path');
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), headBefore, 'refusal makes no commit — HEAD unchanged');
+  assert.equal(
+    git(cwd, 'status', '--porcelain').includes(foreignRelPath) ||
+      git(cwd, 'status', '--porcelain', '--', foreignRelPath) !== '',
+    true,
+    'the foreign edit is left uncommitted',
+  );
+});
+
+test('--path scopes staging to mine + the named path, excluding a shared file; --path into a foreign change dir refuses', () => {
+  const { cwd, mineRelPath, foreignChangeDir, sharedRelPath, foreignRelPath } = makeTwoSessionProject();
+  // A second file under session s1's own change dir, not itself named on
+  // --path — it must still land, because the whole "mine" dir is staged once
+  // any --path is given, not just the literal argument.
+  const mineSecondRel = 'specs/changes/phase-1/second.md';
+  fs.writeFileSync(path.join(cwd, mineSecondRel), 'second mine file\n', 'utf8');
+
+  const { status, out } = run(cwd, ['--session', 's1', '--group', 'g1', '--path', mineRelPath]);
+  assert.equal(status, 0);
+  assert.equal(out.ok, true);
+  assert.equal(out.committed, true);
+  const committed = git(cwd, 'show', '--name-only', '--format=', 'HEAD')
+    .split('\n')
+    .filter(Boolean);
+  assert.ok(committed.includes(mineRelPath), 'the named mine file lands');
+  assert.ok(committed.includes(mineSecondRel), "the session's own change dir is staged wholesale");
+  assert.equal(committed.includes(sharedRelPath), false, 'a shared file outside the named path is never swept in');
+  assert.equal(committed.includes(foreignRelPath), false, 'the foreign session\'s file is never swept in');
+
+  const headAfterFirst = git(cwd, 'rev-parse', 'HEAD');
+  const refused = run(cwd, ['--session', 's1', '--group', 'g2', '--path', foreignChangeDir]);
+  assert.equal(refused.status, 1, '--path into a foreign open session\'s change dir refuses');
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), headAfterFirst, 'refusal makes no commit');
+});
+
+/**
+ * Same two-session shape as `makeTwoSessionProject`, except session s2 is
+ * open (its change dir exists on disk) but has *no* pending changes in it —
+ * only this session's own change dir does, and nothing shared is pending
+ * either. Spec scenario 4: "only this session's changes still checkpoints
+ * cleanly" — the *proceed* branch of the gate, which before this test was
+ * pinned only by the pure `classifyPendingEntries` unit test, never at the
+ * CLI level.
+ */
+function makeTwoSessionProjectMineOnly({ branch = 'feature-x' } = {}) {
+  const cwd = tmp('forge-ckpt-mineonly-');
+  git(cwd, 'init', '-q', '-b', 'main');
+  git(cwd, 'config', 'user.email', 'test@example.com');
+  git(cwd, 'config', 'user.name', 'Test');
+
+  const mineFile = path.join(cwd, 'specs', 'changes', 'phase-1', 'existing.md');
+  const foreignFile = path.join(cwd, 'specs', 'changes', 'other-change', 'existing.md');
+  fs.mkdirSync(path.dirname(mineFile), { recursive: true });
+  fs.mkdirSync(path.dirname(foreignFile), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'README.md'), '# base\n', 'utf8');
+  fs.writeFileSync(mineFile, '# mine baseline\n', 'utf8');
+  fs.writeFileSync(foreignFile, '# foreign baseline\n', 'utf8');
+  git(cwd, 'add', '-A');
+  git(cwd, 'commit', '-q', '-m', 'base');
+  const baseSha = git(cwd, 'rev-parse', 'HEAD');
+  if (branch !== 'main') git(cwd, 'checkout', '-q', '-b', branch);
+
+  const now = new Date().toISOString();
+  const sessionsDir = path.join(cwd, '.forge', 'sessions');
+  const writeSession = (id, session) => {
+    const dir = path.join(sessionsDir, id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      JSON.stringify({ createdAt: now, updatedAt: now, ...session }),
+      'utf8',
+    );
+  };
+  writeSession('s1', {
+    id: 's1',
+    slug: 'phase-1',
+    phase: 'implement',
+    planType: 'specs',
+    openspecChange: 'phase-1',
+    baseCommit: baseSha,
+    branch,
+  });
+  writeSession('s2', {
+    id: 's2',
+    slug: 'other-change',
+    phase: 'implement',
+    planType: 'specs',
+    openspecChange: 'other-change',
+    baseCommit: baseSha,
+    branch,
+  });
+  fs.writeFileSync(path.join(cwd, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(cwd, '.forge', 'config.json'),
+    `${JSON.stringify({ git: { checkpoint: 'per-group' }, plan: { engine: 'specs', dir: 'specs' } })}\n`,
+    'utf8',
+  );
+
+  // Only this session's own change dir has pending work: s2 is open (its
+  // change dir exists) but untouched, and nothing shared is pending.
+  fs.appendFileSync(mineFile, 'mine edit\n');
+
+  return {
+    cwd,
+    sessionDir: path.join(sessionsDir, 's1'),
+    baseSha,
+    mineRelPath: 'specs/changes/phase-1/existing.md',
+  };
+}
+
+test("only this session's own changes are pending while another session is open — checkpoint still proceeds and commits", () => {
+  const { cwd, sessionDir, mineRelPath } = makeTwoSessionProjectMineOnly();
+  const headBefore = git(cwd, 'rev-parse', 'HEAD');
+
+  const { status, out } = run(cwd, ['--session', 's1', '--group', 'g1']);
+
+  assert.equal(status, 0, 'proceeds — no refusal when only mine is pending');
+  assert.equal(out.ok, true);
+  assert.equal(out.committed, true);
+  const headAfter = git(cwd, 'rev-parse', 'HEAD');
+  assert.notEqual(headAfter, headBefore, 'HEAD advances');
+  assert.equal(headAfter, out.sha);
+  const committed = git(cwd, 'show', '--name-only', '--format=', 'HEAD')
+    .split('\n')
+    .filter(Boolean);
+  assert.ok(committed.includes(mineRelPath), 'the mine file lands in the commit');
+  assert.equal(readSession(sessionDir).checkpoints.length, 1);
+});
+
+test('a single open session still stages git add -A and commits, and the foreign-untracked backstop still refuses', () => {
+  // Regression guard for F111: with no other open session, the overlap gate
+  // must not engage at all — same `git add -A` + `foreignUntrackedChangePaths`
+  // path as before this change.
+  const { cwd, sessionDir } = makeProject();
+  const { status, out } = run(cwd, ['--group', 'group-01']);
+  assert.equal(status, 0);
+  assert.equal(out.committed, true);
+  assert.deepEqual(out.files.sort(), ['README.md', 'new-module.mjs']);
+  assert.equal(readSession(sessionDir).checkpoints.length, 1);
+
+  // The existing untracked-only backstop (F72) still refuses on its own.
+  const cwd2 = makeProject({
+    config: { git: { checkpoint: 'per-group' }, plan: { engine: 'specs', dir: 'specs' } },
+  }).cwd;
+  const foreign = path.join(cwd2, 'specs', 'changes', 'other-change', 'proposal.md');
+  fs.mkdirSync(path.dirname(foreign), { recursive: true });
+  fs.writeFileSync(foreign, '# other\n', 'utf8');
+  const headBefore = git(cwd2, 'rev-parse', 'HEAD');
+  const refused = run(cwd2, ['--group', 'group-01']);
+  assert.equal(refused.status, 1);
+  assert.equal(git(cwd2, 'rev-parse', 'HEAD'), headBefore);
+});
+
+test('otherOpenChangeDirs: skips done, skipped, this session, no-dir, and malformed sessions', () => {
+  const { sessionsDir, planDir, thisId, expectedOpenDirs } = makeOtherSessionsFixture();
+
+  const dirs = otherOpenChangeDirs(sessionsDir, thisId, planDir);
+
+  assert.deepEqual(dirs.slice().sort(), expectedOpenDirs);
+});
+
+test('classifyPendingEntries: partitions mine / foreignPlan / shared, segment-aware', () => {
+  const mineDir = '/plan/changes/mine';
+  const foreignA = '/plan/changes/foreign-a';
+  const foreignB = '/plan/changes/foreign-b';
+  const otherDirs = [foreignA, foreignB];
+
+  const mineNested = `${mineDir}/file.md`;
+  const mineExact = mineDir;
+  // Shares mine's characters but is a different path segment — `src/foo` must
+  // not match `src/foobar`. A plain `startsWith(mineDir)` (no `/` boundary)
+  // would wrongly land this in `mine`.
+  const mineSiblingPrefix = '/plan/changes/mineextra/file.md';
+  const foreignANested = `${foreignA}/file.md`;
+  const foreignAExact = foreignA;
+  const foreignASiblingPrefix = '/plan/changes/foreign-aextra/file.md';
+  const foreignBDeep = `${foreignB}/nested/deep.md`;
+  const unrelated = 'src/shared.mjs';
+
+  const pending = [
+    { path: mineNested },
+    { path: mineExact },
+    { path: mineSiblingPrefix },
+    { path: foreignANested },
+    { path: foreignAExact },
+    { path: foreignASiblingPrefix },
+    { path: foreignBDeep },
+    { path: unrelated },
+  ];
+
+  const result = classifyPendingEntries(pending, mineDir, otherDirs);
+
+  assert.deepEqual(result.mine.slice().sort(), [mineExact, mineNested].sort());
+  assert.deepEqual(
+    result.foreignPlan.slice().sort(),
+    [foreignAExact, foreignANested, foreignBDeep].sort(),
+  );
+  assert.deepEqual(
+    result.shared.slice().sort(),
+    [mineSiblingPrefix, foreignASiblingPrefix, unrelated].sort(),
+  );
 });
