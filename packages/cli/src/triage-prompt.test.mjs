@@ -128,6 +128,78 @@ test('a documentation-only site generator is substantial ("documentation-only" d
   assert.equal(shouldForgeTriage(prompt), true);
 });
 
+// I1-R (round 3, final review round 2): the round-2 fix gated the four
+// ambiguous markers on the ABSENCE of a creation verb (add/build/create/…).
+// That is a verb-FAMILY allowlist — it covers only how people describe
+// bringing something new into existence, not how they describe fixing,
+// removing, refactoring, porting or migrating an existing one. A payments
+// bug fix that happens to carry an incidental "rename-only" aside still
+// suppressed under that gate: no session, no high-risk floor. The fixed rule
+// does not look at the verb at all — it looks at whether the prompt names an
+// artifact/mechanism (bug, adapter, guard, parser, script, refactor, tool,
+// generator, pipeline, module, handler, job, …) alongside the marker. A
+// marker with no such artifact nearby is describing an edit to existing text
+// content (the changelog, the docs, a comment, a rename) and stays trivial;
+// a marker sitting next to a named mechanism is describing work done TO or
+// WITH that mechanism and must ask, regardless of which verb introduced it.
+test('a payments bug fix is substantial even though it carries an incidental "rename-only" aside (verb: fix, not implement)', () => {
+  const prompt =
+    'Fix the double-charge bug in the Stripe adapter; this is a rename-only change to the refund handler';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('removing a documentation-only guard from a deploy job is substantial (verb: remove)', () => {
+  const prompt = 'Remove the documentation-only guard from the deploy job';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('rewriting the changelog parser is substantial (verb: rewrite)', () => {
+  const prompt = 'Rewrite the changelog parser to handle conventional commits';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('implementing a "no behaviour change" refactor across files is substantial — the unconditional tier regressed here too', () => {
+  const prompt = 'Implement a no behaviour change refactor of the auth module into three files';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('a refactor whose purpose clause happens to mention "the changelog" is substantial (the object of Refactor is the script, not the changelog)', () => {
+  const prompt = 'Refactor the release script so it stops writing the changelog by hand';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('a comment-only stripping tool is substantial — "comment-only" was in the unconditional tier and should not have been', () => {
+  const prompt = 'Build a comment-only stripping tool for the vendored deps';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+// Two more, in verb families none of the acceptance list above uses (port,
+// migrate, delete) — proof the rule does not special-case any particular
+// verb, because it does not look at the verb at all.
+test('porting the changelog renderer to a new templating engine is substantial (verb: port)', () => {
+  const prompt = 'Port the changelog renderer to the new templating engine';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('migrating a comment-only stripping service to a new pipeline is substantial (verb: migrate)', () => {
+  const prompt = 'Migrate the comment-only stripping service to the new pipeline';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
+test('deleting a rename-only compatibility shim from a module is substantial (verb: delete)', () => {
+  const prompt = 'Delete the rename-only compatibility shim from the auth module';
+  assert.equal(hasWorkContent(prompt), true);
+  assert.equal(shouldForgeTriage(prompt), true);
+});
+
 // Still suppressed: the marker IS the direct object of an edit verb, not a
 // modifier inside something new being built.
 test('"update the changelog" (the actual edit target) is still trivial', () => {

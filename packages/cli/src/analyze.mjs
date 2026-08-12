@@ -160,19 +160,41 @@ export function buildAnalysis(options = {}) {
     }
     if (typeof grade === 'string' && grade) grades[grade] = (grades[grade] ?? 0) + 1;
 
-    // The plan-time exit ramp (D2) does NOT carry `pace: null`. `forge new`
-    // resolves a pace onto the session immediately, so a `phase: 'skipped'`
-    // digest line always carries a real, already-resolved pace alongside
-    // `tasks: "0/0"` (the live forgekit ledger has zero `pace: null` rows in
-    // 44). That session never reached review ceremony at the pace it
-    // resolved, so folding it in would inflate the `sessions` column for a
-    // pace it never ran at — the one column `baseline-yield.md` (which
-    // predates the exit ramp, and has no such rows) cannot be compared
-    // against. Exclude `phase: "skipped"` rows here. The `pace: null` check
-    // below is kept as defensive, null-safe handling — it guards a shape a
-    // hand-edited or pre-digest-schema ledger line could carry, not one the
-    // product actually emits.
-    if (entry.phase !== 'skipped' && typeof entry.pace === 'string' && entry.pace) {
+    // I3-R (final review round 2, `recalibrate-triage-and-review`): a prior
+    // pass here gated on `entry.phase !== 'skipped'`, reasoning that
+    // `'skipped'` meant the plan-time exit ramp (D2). It does not — `phase:
+    // 'skipped'` is written by every `forge phase skipped` transition, and
+    // `/forge:skip` on a session already mid-work goes through that exact
+    // command (`skills/forge/SKILL.md`, `templates/project/claude/commands/
+    // forge-skip.md`). That excluded real sessions with real tasks and real
+    // independent reviews from a table whose spec says it SHALL report them.
+    //
+    // The precise signal is `exitReason`: `set-phase.mjs`'s
+    // `recordExitReason` only ever sets it on the `skipped` transition when
+    // `--exit-reason` is passed, and the only documented producer of that
+    // flag is `forge exit-check`'s printed suggestion — fired at plan time,
+    // before any task ceremony has run, never by a mid-session
+    // `/forge:skip`. `forge new` resolves a pace onto the session
+    // immediately, so an exit-ramp row does NOT carry `pace: null` — it
+    // carries a real, already-resolved pace alongside `tasks: "0/0"` (the
+    // live forgekit ledger has zero `pace: null` rows in 44). That session
+    // never reached review ceremony at the pace it resolved, so folding it
+    // in would inflate the `sessions` column for a pace it never ran at —
+    // the one column `baseline-yield.md` (which predates the exit ramp, and
+    // has no such rows) cannot be compared against. Exclude rows that carry
+    // `exitReason` here, not rows that merely carry `phase: "skipped"`.
+    //
+    // Nothing enforces that an `exitReason` row's tasks stay at `0/0` —
+    // `--exit-reason` and `--tasks-total`/`--tasks-complete` are independent
+    // flags on the same command — but the one documented call site never
+    // pairs them, so in the flow the product drives this never happens. If a
+    // hand-built invocation ever did combine them, excluding by `exitReason`
+    // is still correct: the field means "this session never reached review
+    // ceremony at this pace", which holds regardless of what task counts got
+    // attached to the same transition. The `pace: null` check below is kept
+    // as defensive, null-safe handling — it guards a shape a hand-edited or
+    // pre-digest-schema ledger line could carry, not one the product emits.
+    if (entry.exitReason == null && typeof entry.pace === 'string' && entry.pace) {
       const row = (byPace[entry.pace] ??= {
         sessions: 0,
         tasks: 0,

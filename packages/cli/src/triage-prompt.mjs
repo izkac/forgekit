@@ -18,34 +18,46 @@ export function isForgeInvocation(prompt) {
   return /^\s*\/forge(?::|\s|$)/i.test((prompt || '').trim());
 }
 
-// Unconditional trivial markers: whenever these words appear, the prompt is
-// describing an edit to existing trivial content (typo, whitespace, a
-// comment, or an explicit "no behaviour change" claim) — there is no
-// plausible reading where they describe something new being built.
+// I1-R (round 3, final review round 2): the previous split gated
+// `changelog`/`docs-only`/`documentation-only`/`rename-only` on the ABSENCE
+// of a creation verb (add/build/create/implement/…), and left
+// `comment-only`/`no behaviour change`/`zero behaviour` unconditional on the
+// theory that "there is no plausible reading where they describe something
+// new being built". Both were falsified — not by the five prompts that
+// motivated them, but by the verb families neither list named: `fix`,
+// `remove`, `rewrite`, `refactor`, `port`, `migrate`, `delete` all describe
+// real work too, and a payments bug fix carrying an incidental
+// "rename-only" aside silenced with `Fix` exactly as it did with `Implement`.
+// A verb allowlist can only ever be as complete as the list of verbs someone
+// thought to write down.
+//
+// The fix does not look at the verb at all. Every one of these markers is an
+// assertion about the NATURE of an edit (a rename, a comment tweak, a
+// formatting pass, a doc-only change) — genuinely trivial when the prompt
+// has nothing else in it, but the same words are equally at home as
+// modifiers on a named mechanism ("a rename-only migration TOOL", "the
+// documentation-only GUARD", "a rename-only change to the refund HANDLER").
+// When the prompt also names a mechanism/artifact — something with its own
+// behaviour to build, remove, port or fix, not a passive piece of text — the
+// marker is describing what was done TO or WITH that mechanism, and the
+// prompt is substantial regardless of which verb introduced it.
 const TRIVIAL_MARKERS =
-  /\b(typo|formatting[\s-]only|whitespace[\s-]only|comment[\s-]only|no behaviou?r change|zero behaviou?r)\b/i;
+  /\b(typo|formatting[\s-]only|whitespace[\s-]only|comment[\s-]only|no behaviou?r change|zero behaviou?r|changelog|docs[\s-]only|documentation[\s-]only|rename[\s-]only)\b/i;
 
-// Conditional trivial markers: `changelog`, `docs-only`, `documentation-only`
-// and `rename-only` are ambiguous on their own. "Update the changelog" and
-// "Fix docs-only sections of the guide" use the marker as the direct object
-// of an edit — genuinely trivial. "Add a changelog generator" and "Build a
-// docs-only publishing pipeline" use the identical word as a modifier inside
-// a compound noun naming something new being BUILT — a feature request, not
-// an edit, and `changelog` in particular is a plain noun with no assertion
-// about the edit's nature at all. The two readings share no reliable lexical
-// boundary, but they do share a verb: an edit-only prompt never pairs the
-// marker with a creation verb (add/build/create/implement/…), because there
-// is nothing new to add/build/create — only something existing to fix.
-const NARROW_TRIVIAL_MARKERS = /\b(changelog|docs[\s-]only|documentation[\s-]only|rename[\s-]only)\b/i;
-const CREATION_VERB =
-  /\b(add(?:s|ed|ing)?|build(?:s|ing)?|built|creat(?:e|es|ed|ing)|implement(?:s|ed|ing)?|develop(?:s|ed|ing)?|writ(?:e|es|ing)|wrote|design(?:s|ed|ing)?|introduc(?:e|es|ed|ing)|generat(?:e|es|ed|ing)|mak(?:e|es|ing)|made)\b/i;
+// A named mechanism/artifact: something that has behaviour of its own,
+// rather than being passive text content (a changelog file, a doc page, a
+// comment, a rename by itself). Deliberately verb-independent — it does not
+// matter whether the prompt fixes, removes, builds, ports, migrates or
+// deletes one of these; naming it alongside a trivial marker means the
+// marker is a modifier on real work, not the whole of the request.
+const NAMED_MECHANISM =
+  /\b(tool|generator|pipeline|parser|guard|script|module|adapter|handler|refactor(?:ing)?|migration|endpoint|workflow|engine|plugin|service|function|class|component|job|site|stripp(?:er|ing)|bug|feature|microservice|widget|bot|webhook|middleware|library|package|extension|dashboard|console|worker|daemon|server|route|controller|schema|database|tables?)\b/i;
 
 export function isTrivialEdit(prompt) {
   const p = (prompt || '').trim();
   if (!p) return true;
-  if (TRIVIAL_MARKERS.test(p)) return true;
-  if (NARROW_TRIVIAL_MARKERS.test(p) && !CREATION_VERB.test(p)) return true;
-  return /^\s*fix(ed)?\s+(a|the)?\s*typo\b/i.test(p);
+  if (/^\s*fix(ed)?\s+(a|the)?\s*typo\b/i.test(p)) return true;
+  return TRIVIAL_MARKERS.test(p) && !NAMED_MECHANISM.test(p);
 }
 
 export function isReadOnlyQuestion(prompt) {

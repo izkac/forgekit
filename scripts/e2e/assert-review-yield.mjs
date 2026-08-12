@@ -17,11 +17,19 @@
  *
  * Also asserts:
  *   - a pace nothing was ever recorded at emits no row (no zero-row clutter);
- *   - a `phase: "skipped"` session (one that left through the plan-time exit
- *     ramp, D2) carries a real, already-resolved pace — `forge new` resolves
- *     one immediately, so this does NOT carry `pace: null` — and must not
- *     count toward that pace's `sessions`, since it never reached review
- *     ceremony at it.
+ *   - an exit-ramp row (`exitReason` set — the plan-time exit ramp, D2)
+ *     carries a real, already-resolved pace — `forge new` resolves one
+ *     immediately, so this does NOT carry `pace: null` — and must not count
+ *     toward that pace's `sessions`, since it never reached review ceremony
+ *     at it;
+ *   - a `phase: "skipped"` row with NO `exitReason` (a `/forge:skip` on a
+ *     session already mid-work — `skills/forge/SKILL.md` and
+ *     `templates/project/claude/commands/forge-skip.md` both route that
+ *     through the identical `forge phase skipped`) is a DIFFERENT shape and
+ *     DOES count: it can carry real tasks and real reviews that the table's
+ *     spec requires it to report. Both fixtures below share the same pace
+ *     (`thorough`) so the resulting row proves the split precisely — it
+ *     must equal the abandoned session alone, not the sum of both.
  *
  * Drives the SHIPPED binary (`forge analyze` and `forge analyze --json`)
  * against a scratch `.forge/sessions.jsonl` — never a real ledger in this
@@ -81,7 +89,7 @@ ensureBootedProject(SCRATCH);
  * One `.forge/sessions.jsonl` digest line, the shape `appendSessionDigest`
  * (packages/cli/src/ledger.mjs) writes.
  */
-function digestLine({ sessionId, phase = 'done', pace, tasksComplete, tasksTotal, independent, rejections, metricsAvailable, subagentsDispatched, endedAt }) {
+function digestLine({ sessionId, phase = 'done', pace, tasksComplete, tasksTotal, independent, rejections, metricsAvailable, subagentsDispatched, exitReason = null, endedAt }) {
   return JSON.stringify({
     sessionId,
     slug: sessionId,
@@ -97,6 +105,7 @@ function digestLine({ sessionId, phase = 'done', pace, tasksComplete, tasksTotal
     reviews: { total: independent, independent, selfChecks: 0, rejections, final: independent > 0 ? 'independent' : null },
     grade: null,
     health: null,
+    exitReason,
     startedAt: endedAt,
     endedAt,
   });
@@ -148,14 +157,13 @@ const ZERO_TASKS = digestLine({
   endedAt: at(30),
 });
 
-// A session that left through the plan-time exit ramp (D2). `forge new`
-// resolves a pace immediately, so this does NOT carry `pace: null` — it
-// carries the real, already-resolved pace and `phase: 'skipped'`, `tasks:
-// '0/0'`. It never reached review ceremony at that pace, so it must produce
-// no row (not a zero row) for it. Uses `thorough` deliberately — no other
-// fixture runs at `thorough`, so a stray row is unambiguous, and the "absent
-// paces" loop below (which already checks `thorough`) is what proves the
-// exclusion.
+// A session that left through the plan-time exit ramp (D2), `--exit-reason`
+// set. `forge new` resolves a pace immediately, so this does NOT carry
+// `pace: null` — it carries the real, already-resolved pace and `phase:
+// 'skipped'`, `tasks: '0/0'`. It never reached review ceremony at that pace,
+// so it must contribute nothing to it. Uses `thorough` deliberately — no
+// other fixture runs at `thorough`, so this and ABANDONED below are the only
+// contributors, which is what makes the split below unambiguous.
 const EXIT_RAMP = digestLine({
   sessionId: 'fixture-exit-ramp',
   phase: 'skipped',
@@ -166,12 +174,38 @@ const EXIT_RAMP = digestLine({
   rejections: 0,
   metricsAvailable: false,
   subagentsDispatched: 0,
+  exitReason: '2 task(s), single capability, no spine rows — small enough to leave Forge',
   endedAt: at(40),
+});
+
+// I3-R: `phase: 'skipped'` is not only the exit ramp — `/forge:skip` on a
+// session already mid-work writes the identical `phase: 'skipped'`, with no
+// `exitReason` (that flag's only documented producer, `forge exit-check`,
+// fires at plan time, before any tasks exist). This session has real tasks
+// and real recorded reviews and MUST count — dropping it silently discarded
+// exactly the shape `session-lifecycle` says must never be silent about.
+// Same pace as EXIT_RAMP (`thorough`) on purpose: if the exclusion regressed
+// back to gating on `phase` instead of `exitReason`, the `thorough` row
+// would vanish entirely; if it regressed the other way (stopped excluding
+// the exit ramp at all), the row would double-count. Only the correct gate
+// leaves `thorough` showing ABANDONED's numbers alone.
+const ABANDONED = digestLine({
+  sessionId: 'fixture-abandoned-mid-work',
+  phase: 'skipped',
+  pace: 'thorough',
+  tasksComplete: 8,
+  tasksTotal: 12,
+  independent: 3,
+  rejections: 1,
+  metricsAvailable: false,
+  subagentsDispatched: 0,
+  exitReason: null,
+  endedAt: at(35),
 });
 
 fs.writeFileSync(
   path.join(SCRATCH, '.forge', 'sessions.jsonl'),
-  `${[DISCRIMINATING, ORDINARY, ZERO_TASKS, EXIT_RAMP].join('\n')}\n`,
+  `${[DISCRIMINATING, ORDINARY, ZERO_TASKS, EXIT_RAMP, ABANDONED].join('\n')}\n`,
   'utf8',
 );
 // No surviving metrics.json / scorecards.jsonl for any of these fixture ids —
@@ -233,17 +267,33 @@ if (!Number.isFinite(standard.rejectionsPer100Tasks) || standard.rejectionsPer10
   );
 }
 
-// --- absent paces emit no row — "thorough" doubles as the exit-ramp proof: ---
-// EXIT_RAMP carries `pace: 'thorough'` and `phase: 'skipped'`, and no other
-// fixture runs at `thorough`, so a row appearing here means the exit-ramp
-// exclusion broke, not that a real session ran unrecorded.
-for (const absent of ['thorough']) {
+// --- "thorough" is the exit-ramp-vs-abandoned split proof ---
+// EXIT_RAMP (exitReason set, tasks 0/0) and ABANDONED (no exitReason, tasks
+// 8/12, 3 reviews, 1 rejection) both carry `pace: 'thorough'`, and no other
+// fixture runs there. The row must equal ABANDONED alone: `sessions` proves
+// EXIT_RAMP was excluded (1, not 2 — EXIT_RAMP's own tasks/reviews are all
+// zero, so only `sessions` would move if it leaked in); the other columns
+// prove ABANDONED was NOT also dropped by an over-broad `phase` gate.
+const thorough = yieldTable.thorough;
+if (!thorough) fail('reviewYield has no "thorough" row — the abandoned mid-work session was dropped', JSON.stringify(yieldTable, null, 2));
+if (thorough.sessions !== 1) {
+  fail(
+    `thorough.sessions expected 1 (ABANDONED only) got ${thorough.sessions} — the exit-ramp exclusion broke and let EXIT_RAMP count toward "sessions"`,
+    JSON.stringify(thorough, null, 2),
+  );
+}
+if (thorough.tasks !== 12 || thorough.independentReviews !== 3 || thorough.rejections !== 1) {
+  fail(
+    `thorough row does not match the abandoned-session fixture alone: ${JSON.stringify(thorough)} — a ` +
+      '`phase:"skipped"` gate (instead of `exitReason`) would drop this real work too',
+    JSON.stringify(yieldTable, null, 2),
+  );
+}
+
+// --- a pace nothing was ever recorded at emits no row (no zero-row clutter) ---
+for (const absent of ['auto']) {
   if (Object.prototype.hasOwnProperty.call(yieldTable, absent)) {
-    fail(
-      `reviewYield has a row for "${absent}" — either a fixture ran there unexpectedly, or the ` +
-        'phase:"skipped" (exit-ramp) exclusion broke and let EXIT_RAMP count toward it',
-      JSON.stringify(yieldTable, null, 2),
-    );
+    fail(`reviewYield has a row for "${absent}", which no fixture ever ran at`, JSON.stringify(yieldTable, null, 2));
   }
 }
 for (const [pace, row] of Object.entries(yieldTable)) {
@@ -266,5 +316,6 @@ process.stdout.write(
   `review-yield: lite=${lite.independentReviews}/${lite.tasks} (failed-telemetry session counted from stamps), ` +
     `brisk=${brisk.independentReviews}/${brisk.tasks} rej/100=${brisk.rejectionsPer100Tasks}, ` +
     `standard=${standard.independentReviews}/${standard.tasks} (guarded, no NaN), ` +
-    'absent paces: no row, exit-ramp (phase:skipped, real pace): no bucket\n',
+    `thorough=${thorough.independentReviews}/${thorough.tasks} (abandoned mid-work counted, exit-ramp sibling excluded), ` +
+    'unrecorded paces: no row\n',
 );

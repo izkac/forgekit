@@ -413,7 +413,7 @@ never overridden.
 | `auto` | Pick thorough / standard / brisk / lite from signals (default) |
 | `thorough` | Review once per **OpenSpec group**, same cadence as `standard`, with more fix→re-review rounds before escalating; full-workspace tier 3 |
 | `standard` | Review once per **OpenSpec group**; full-workspace tier 3 |
-| `brisk` | Review high-risk tasks only; affected-workspace tier 3 |
+| `brisk` | Review high-risk tasks only; affected-workspace tier 3 (final review still runs) |
 | `lite` | Skip per-task review for low-risk (final review still runs); audit tier-2 only at verify |
 
 ### Effort matrix (exact knobs)

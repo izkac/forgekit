@@ -661,21 +661,41 @@ test('the yield table has one row per pace present, summed from the fixture', ()
   assert.equal(cells[6], expectedByPace.brisk.rejectionsPer100Tasks.toFixed(1));
 });
 
-// I3 (final review of recalibrate-triage-and-review): the plan-time exit
-// ramp does NOT carry `pace: null` — `forge new` resolves a pace onto the
-// session immediately, so a `phase: 'skipped'` digest line always carries a
-// real pace and `tasks: '0/0'`. That session never reached review ceremony
-// at the pace it resolved, so counting it would inflate the `sessions`
-// column for a pace the session never ran at — the one column
-// `baseline-yield.md` (which predates the exit ramp and has no such rows)
-// cannot be compared against. Exclude `phase: 'skipped'` rows from the
-// by-pace aggregation; the `pace: null` guard above stays as defensive
-// handling for a shape the product does not actually emit.
-test('a phase:"skipped" row (the real exit-ramp shape) carries a real pace but must not count toward that pace\'s sessions', () => {
+// I3-R (round 3, final review round 2): `phase: 'skipped'` is not only the
+// plan-time exit ramp (D2) — it is every way a session leaves Forge,
+// including `/forge:skip` on a session already mid-work (`skills/forge/
+// SKILL.md` and `templates/project/claude/commands/forge-skip.md` both send
+// that through the identical `forge phase skipped`). Gating on `phase` alone
+// dropped a session with real tasks and real independent reviews from the
+// table whose spec says it SHALL report them — rejections too, and
+// rejections-per-100-tasks is D5's guardrail metric.
+//
+// The precise signal is `exitReason`: `set-phase.mjs`'s `recordExitReason`
+// only ever sets it on the `skipped` transition when `--exit-reason` is
+// passed, and the only documented call site for that flag is `forge
+// exit-check`'s printed suggestion at plan time — before any task ceremony
+// has run. A `/forge:skip` mid-session never passes `--exit-reason`, so its
+// digest row carries `phase: 'skipped'` with `exitReason: null`, exactly
+// like a normal in-progress session. Gate on `exitReason`, not `phase`.
+//
+// Can a row carry `exitReason` AND non-zero tasks? Nothing in `set-phase.mjs`
+// enforces mutual exclusivity between `--exit-reason` and `--tasks-total`/
+// `--tasks-complete` on the same invocation — but the one documented
+// producer of `--exit-reason` (`forge exit-check`) only ever fires at
+// plan-time, before any tasks exist to declare, and no template or skill
+// pairs it with a task-count flag. So in the flow the product actually
+// drives, an `exitReason` row's tasks are always `0/0`; a hand-built or
+// malformed invocation could in principle combine them, and if it did, this
+// gate would still exclude that row from the pace it names — correctly,
+// since `exitReason` being set means the session never reached review
+// ceremony at that pace regardless of what task counts got attached to the
+// same transition.
+test('an exit-ramp row (exitReason set, tasks 0/0) carries a real pace but must not count toward that pace\'s sessions', () => {
   const exited = digest('exit-ramp-1', {
     phase: 'skipped',
     pace: 'thorough',
     tasks: '0/0',
+    exitReason: '2 task(s), single capability, no spine rows — small enough to leave Forge',
     metrics: { available: false },
     reviews: { total: 0, independent: 0, selfChecks: 0, rejections: 0, final: null },
   });
@@ -684,9 +704,31 @@ test('a phase:"skipped" row (the real exit-ramp shape) carries a real pace but m
   assert.equal(
     Object.hasOwn(analysis.reviewYield, 'thorough'),
     false,
-    'a phase:"skipped" session must not create a row for the pace it exited at',
+    'an exit-ramp row (exitReason set) must not create a row for the pace it exited at',
   );
   assert.equal(analysis.coverage.sessionsTotal, 1, 'the skipped session still counts toward overall coverage');
+});
+
+test('an abandoned mid-work session (phase: skipped, no exitReason, real tasks and reviews) counts in the yield table', () => {
+  const abandoned = digest('abandoned-1', {
+    phase: 'skipped',
+    pace: 'thorough',
+    tasks: '8/12',
+    exitReason: null,
+    metrics: { available: false },
+    reviews: { total: 3, independent: 3, selfChecks: 0, rejections: 1, final: null },
+  });
+  const analysis = buildAnalysis({ cwd: project({ digests: [abandoned] }) });
+
+  assert.equal(
+    Object.hasOwn(analysis.reviewYield, 'thorough'),
+    true,
+    'a /forge:skip abandonment (no exitReason) must still count toward the pace it ran real work at',
+  );
+  assert.equal(analysis.reviewYield.thorough.sessions, 1);
+  assert.equal(analysis.reviewYield.thorough.tasks, 12);
+  assert.equal(analysis.reviewYield.thorough.independentReviews, 3);
+  assert.equal(analysis.reviewYield.thorough.rejections, 1);
 });
 
 test('a session that never resolved a pace does not create a null-pace row or count as a zero-yield session', () => {
