@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "runId": "campaign-honest",
+  "dryRun": false,
+  "status": "completed-with-failures",
+  "task": "forgekit-campaign-v1",
+  "category": "campaign",
+  "taskRevision": "campaign-rev-1",
+  "corpus": {
+    "id": "forgekit-campaign-v1",
+    "revision": "corpus-v1"
+  },
+  "harnessRevision": "harness-abc",
+  "images": {
+    "agent": "node@sha256:aaa",
+    "verifier": "node@sha256:bbb"
+  },
+  "settings": {
+    "arm": "both",
+    "repetitions": 1,
+    "concurrency": 1,
+    "seed": "experiment-seed",
+    "agent": "codex",
+    "model": "example/model",
+    "forgekitTreatment": {
+      "kind": "published-version",
+      "version": "1.2.3"
+    }
+  },
+  "campaign": {
+    "id": "forgekit-campaign-v1",
+    "episodes": [
+      {
+        "id": "episode-01",
+        "index": 1
+      },
+      {
+        "id": "episode-02",
+        "index": 2
+      },
+      {
+        "id": "episode-03",
+        "index": 3
+      },
+      {
+        "id": "episode-04",
+        "index": 4
+      },
+      {
+        "id": "episode-05",
+        "index": 5
+      },
+      {
+        "id": "episode-06",
+        "index": 6
+      }
+    ]
+  },
+  "trials": [
+    {
+      "trialId": "episode-01-baseline-001",
+      "arm": "baseline",
+      "repetition": 1,
+      "scheduleIndex": 1,
+      "executionIndex": 1,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 1,
+      "episodeId": "episode-01",
+      "episodeIndex": 1,
+      "manifest": "trials/episode-01-baseline-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-01-forge-001",
+      "arm": "forge",
+      "repetition": 1,
+      "scheduleIndex": 2,
+      "executionIndex": 2,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 2,
+      "episodeId": "episode-01",
+      "episodeIndex": 1,
+      "manifest": "trials/episode-01-forge-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-02-baseline-001",
+      "arm": "baseline",
+      "repetition": 1,
+      "scheduleIndex": 3,
+      "executionIndex": 3,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 1,
+      "episodeId": "episode-02",
+      "episodeIndex": 2,
+      "manifest": "trials/episode-02-baseline-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-02-forge-001",
+      "arm": "forge",
+      "repetition": 1,
+      "scheduleIndex": 4,
+      "executionIndex": 4,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 2,
+      "episodeId": "episode-02",
+      "episodeIndex": 2,
+      "manifest": "trials/episode-02-forge-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-03-baseline-001",
+      "arm": "baseline",
+      "repetition": 1,
+      "scheduleIndex": 5,
+      "executionIndex": 5,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 1,
+      "episodeId": "episode-03",
+      "episodeIndex": 3,
+      "manifest": "trials/episode-03-baseline-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-03-forge-001",
+      "arm": "forge",
+      "repetition": 1,
+      "scheduleIndex": 6,
+      "executionIndex": 6,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 2,
+      "episodeId": "episode-03",
+      "episodeIndex": 3,
+      "manifest": "trials/episode-03-forge-001/manifest.json",
+      "status": "failed"
+    },
+    {
+      "trialId": "episode-04-baseline-001",
+      "arm": "baseline",
+      "repetition": 1,
+      "scheduleIndex": 7,
+      "executionIndex": 7,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 1,
+      "episodeId": "episode-04",
+      "episodeIndex": 4,
+      "manifest": "trials/episode-04-baseline-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-04-forge-001",
+      "arm": "forge",
+      "repetition": 1,
+      "scheduleIndex": 8,
+      "executionIndex": 8,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 2,
+      "episodeId": "episode-04",
+      "episodeIndex": 4,
+      "manifest": "trials/episode-04-forge-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-05-baseline-001",
+      "arm": "baseline",
+      "repetition": 1,
+      "scheduleIndex": 9,
+      "executionIndex": 9,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 1,
+      "episodeId": "episode-05",
+      "episodeIndex": 5,
+      "manifest": "trials/episode-05-baseline-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-05-forge-001",
+      "arm": "forge",
+      "repetition": 1,
+      "scheduleIndex": 10,
+      "executionIndex": 10,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 2,
+      "episodeId": "episode-05",
+      "episodeIndex": 5,
+      "manifest": "trials/episode-05-forge-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-06-baseline-001",
+      "arm": "baseline",
+      "repetition": 1,
+      "scheduleIndex": 11,
+      "executionIndex": 11,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 1,
+      "episodeId": "episode-06",
+      "episodeIndex": 6,
+      "manifest": "trials/episode-06-baseline-001/manifest.json",
+      "status": "verified"
+    },
+    {
+      "trialId": "episode-06-forge-001",
+      "arm": "forge",
+      "repetition": 1,
+      "scheduleIndex": 12,
+      "executionIndex": 12,
+      "armOrder": [
+        "baseline",
+        "forge"
+      ],
+      "armOrdinal": 2,
+      "episodeId": "episode-06",
+      "episodeIndex": 6,
+      "manifest": "trials/episode-06-forge-001/manifest.json",
+      "status": "verified"
+    }
+  ]
+}

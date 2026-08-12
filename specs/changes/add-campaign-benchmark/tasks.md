@@ -140,19 +140,19 @@
       cohort runs.
 ## 9. Product loop
 
-- [ ] 9.1 Add `scripts/e2e/assert-campaign-plan.mjs`: reads the newest dry-run
+- [x] 9.1 Add `scripts/e2e/assert-campaign-plan.mjs`: reads the newest dry-run
       plan for the given seed and asserts twelve trials, contiguous episode
       indices per arm, recorded seeded first-arm order, and no verifier source
       in any staged agent environment. Verify: exits nonzero against a plan with
       a missing episode.
-- [ ] 9.2 Add `scripts/e2e/assert-campaign-carryover.mjs`: asserts every episode
+- [x] 9.2 Add `scripts/e2e/assert-campaign-carryover.mjs`: asserts every episode
       after the first was staged from the previous episode's output for the same
       arm, and that the two arms share no carried file. Verify: exits nonzero
       when carryover staging is bypassed.
-- [ ] 9.3 Add `scripts/e2e/assert-campaign-aggregate.mjs` plus fixtures under
+- [x] 9.3 Add `scripts/e2e/assert-campaign-aggregate.mjs` plus fixtures under
       `evals/harbor/fixtures/campaign-aggregate/`: asserts per-episode paired
       deltas, complete/incomplete pair counts, and that a carryover failure is
       reported incomplete rather than as a zero. Verify: exits nonzero when a
       fixture pair is silently credited.
-- [ ] 9.4 Product-loop acceptance: run the campaign steps end to end. Verify:
+- [x] 9.4 Product-loop acceptance: run the campaign steps end to end. Verify:
       green `forge e2e run`.
