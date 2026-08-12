@@ -454,7 +454,7 @@ async function stageArm(canonicalTask, stagedTask, arm, treatment) {
   }
 }
 
-function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm }) {
+function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm, campaign }) {
   const argv = [
     'run', '--path', stagedTask,
     '--agent', agent,
@@ -464,7 +464,7 @@ function harborArgv({ stagedTask, agent, model, trialOutput, trialId, arm }) {
     '--n-concurrent', '1',
     '--yes',
   ];
-  if (arm === 'forge') argv.push('--artifact', '/app/.forge');
+  if (!campaign && arm === 'forge') argv.push('--artifact', '/app/.forge');
   return argv;
 }
 
@@ -855,6 +855,7 @@ async function main(argv) {
           trialOutput,
           trialId,
           arm,
+          campaign: Boolean(campaign),
         });
         const portableHarborArgv = [...argvForHarbor];
         portableHarborArgv[portableHarborArgv.indexOf('--path') + 1] = stagedRelative;

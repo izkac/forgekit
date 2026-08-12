@@ -160,6 +160,14 @@ async function validateEpisodeMetadata(entry, taskRoot) {
   requireCondition(quotedValue(tomlSection(source, 'verifier.environment'), 'network_mode') === 'no-network', 'campaign verifier network must be disabled');
   requireCondition(quotedValue(tomlSection(source, 'environment'), 'network_mode') === 'public', 'campaign agent environment must permit setup egress');
 
+  const artifactsMatch = source.match(/^artifacts\s*=\s*\[([\s\S]*?)^\]\s*$/m);
+  requireCondition(artifactsMatch, 'campaign task.toml must declare artifact paths');
+  const artifacts = [...artifactsMatch[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  requireCondition(
+    artifacts.length === 1 && artifacts[0] === '/app/',
+    `${entry.id} must declare exactly /app/ so Harbor copies the full tree (nested /app paths overlap and drop the parent)`,
+  );
+
   const verifierDockerfile = await readFile(path.join(taskRoot, 'tests', 'Dockerfile'), 'utf8');
   requireCondition(/HARBOR_UNTRUSTED_UID=65534/.test(verifierDockerfile), 'campaign verifier must drop privileges for agent-controlled code');
   requireCondition(/chmod -R 700 \/tests/.test(verifierDockerfile), 'campaign verifier sources must remain root-only');

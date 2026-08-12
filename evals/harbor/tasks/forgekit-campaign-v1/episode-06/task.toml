@@ -1,8 +1,7 @@
 schema_version = "1.4"
 
 artifacts = [
-  "/app/package.json",
-  "/app/src/",
+  "/app/",
 ]
 
 [task]
