@@ -10,6 +10,12 @@ forge phase done         # runs integrity checks + writes scorecard.md/json
 # forge phase done --allow-incomplete "E2E blocked: no Compose in this environment"
 ```
 
+`forge phase done|finish` also refuses when the session's change directory
+still exists live under `<plan.dir>/changes/<name>/` — archive it first (step 2
+below in each path), or pass `--archive-waived "<reason>"` to proceed anyway.
+The reason is recorded as `session.archiveWaived`, not `incompleteReason`: the
+work is complete, just unfiled.
+
 `forge phase done|finish` always writes `.forge/sessions/<id>/scorecard.md` (and
 `.json`) — an L2 grade of session artifacts. Answer the **human ship-check**
 questions in that file for platform/async work (L3). See [usage.md](../../../docs/usage.md)
@@ -18,7 +24,9 @@ questions in that file for platform/async work (L3). See [usage.md](../../../doc
 ## OpenSpec path (`planType: openspec`)
 
 1. Confirm all tasks complete in `tasks.md`.
-2. User runs or approves `/opsx:archive` / `openspec archive`.
+2. User runs or approves `/opsx:archive` / `openspec archive`. Enforced: the
+   `forge phase done` below refuses while the change is still live, unless you
+   pass `--archive-waived "<reason>"`.
 3. **ADR follow-up (optional):** if `.forge/config.json` has `adr.enabled: true`
    (or the project uses ADRs), follow the **`archive-to-adr`** skill using
    `adr.dir` / `adr.decisionsDoc`. If ADRs are disabled, skip.
@@ -49,6 +57,12 @@ forge cleanup
    ```
 
    (plain `mv` if the dir is untracked).
+
+   Enforced: the `forge phase done` below refuses while
+   `<plan.dir>/changes/<name>/` still exists live, unless you pass
+   `--archive-waived "<reason>"`. The reason is recorded as
+   `session.archiveWaived` and kept in `.forge/sessions.jsonl`, so it outlives
+   session cleanup.
 3. **ADR follow-up (optional):** same rule as OpenSpec — if `adr.enabled`,
    follow **`archive-to-adr`** on the archived change; otherwise skip.
 4. End with **Suggested commit** block (display only — do not commit).

@@ -63,9 +63,17 @@ function isNonEmptyString(value) {
  */
 /**
  * The archived copy of a change, when the live dir is gone. Archiving moves
- * `changes/<change>/` to `changes/archive/<YYYY-MM-DD>-<change>/`, so the
- * done-gate integrity check (which runs *after* archive in the finish flow)
- * would otherwise never find spine.json/e2e.json. Returns null if no match.
+ * `changes/<change>/` to `changes/archive/<YYYY-MM-DD>-<change>/`.
+ *
+ * The done-gate in set-phase.mjs now enforces this ordering: it refuses
+ * `done`/`finish` while the change dir is still live, so by the time this
+ * integrity check runs at done, an archived change is the normal case rather
+ * than a possibility to tolerate. This fallback nevertheless stays
+ * deliberately permissive and must not grow an archive check of its own —
+ * `runIntegrityChecks` is also called by `forge integrity-check` and
+ * `forge score` at any phase, where an unarchived change is correct and
+ * expected. That is why the gate lives in the done-gate instead of here.
+ * Returns null if no match.
  *
  * @param {string} changesDir absolute path to `<root>/changes`
  * @param {string} change change name

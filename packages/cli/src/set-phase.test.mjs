@@ -189,6 +189,206 @@ test('ceremony missing at done fails closed to full and is recorded — skipping
   }
 });
 
+test('phase done refuses a specs-engine session whose change dir is still live', () => {
+  // Archive moves `<plan.dir>/changes/<name>/` to `<plan.dir>/changes/archive/<date>-<name>/`.
+  // A complete, otherwise-clean session must still be refused at `done` while
+  // the live dir exists, and the message must name the specs-engine remedy.
+  const dir = tmp('forge-done-archive-specs-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-archive-specs');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.openspecChange = 'demo-change';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+    const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'must refuse while the change dir is still live');
+    assert.match(r.stderr, /forge change archive demo-change/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done refuses an OpenSpec session whose change dir is still live, naming the OpenSpec remedy', () => {
+  // Same gate, other engine: the refusal must name `openspec archive`, not
+  // `forge change archive` — that command does not apply to OpenSpec projects.
+  const dir = tmp('forge-done-archive-openspec-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-archive-openspec');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'openspec';
+    s.openspecChange = 'demo-os-change';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    // spine.json belongs beside the (still-live) change, not the session dir —
+    // otherwise the unrelated stray-file check (integrity.mjs F50) adds its own
+    // "forge change archive" mention to stderr and this test's doesNotMatch
+    // below would fail for the wrong reason.
+    const changeDir = path.join(dir, 'openspec', 'changes', 'demo-os-change');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
+    fs.writeFileSync(
+      path.join(changeDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'must refuse while the change dir is still live');
+    assert.match(r.stderr, /openspec archive/);
+    assert.doesNotMatch(r.stderr, /forge change archive/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done reaches done when the change exists only under the archive path', () => {
+  // Pass-through case: once a change has been archived (no live dir, only
+  // `changes/archive/<date>-<name>/`), the archive gate must not stand in the
+  // way of an otherwise-clean session.
+  const dir = tmp('forge-done-archived-only-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-archived-only');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.openspecChange = 'shipped-change';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    const liveDir = path.join(dir, 'specs', 'changes', 'shipped-change');
+    assert.ok(!fs.existsSync(liveDir), 'fixture: the live path must not exist');
+    const archivedDir = path.join(dir, 'specs', 'changes', 'archive', '2026-01-01-shipped-change');
+    fs.mkdirSync(archivedDir, { recursive: true });
+    fs.writeFileSync(path.join(archivedDir, 'tasks.md'), '- [x] task\n');
+    fs.writeFileSync(
+      path.join(archivedDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /change not archived/, 'the archive gate must not fire once archived');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done raises no archive problem for a session with no tracked change', () => {
+  // Pass-through case: openspecChange unset means resolveChangeDir has
+  // nothing to resolve, so the archive gate has nothing to check.
+  const dir = tmp('forge-done-no-change-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-no-change');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(s.openspecChange, null, 'fixture: openspecChange starts unset');
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /change not archived/, 'no tracked change means no archive problem');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done accepts --archive-waived, records the reason, and does not mark the session incomplete', () => {
+  // A complete session whose change dir is still live is refused by the
+  // archive gate (see the tests above) — the only thing that can let this
+  // fixture reach `done` is the named waiver.
+  const dir = tmp('forge-done-archive-waived-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-archive-waived');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.openspecChange = 'demo-change';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+    const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
+
+    const reason = 'held live for the follow-up tranche';
+    const r = spawnSync(
+      process.execPath,
+      [SCRIPT, 'done', '--archive-waived', reason],
+      { cwd: dir, encoding: 'utf8' },
+    );
+    assert.equal(r.status, 0, r.stderr);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.archiveWaived, reason);
+    assert.equal(after.incompleteReason, undefined, 'a named waiver must not read as an unfinished session');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done --archive-waived with no reason still refuses', () => {
+  // Same fixture as the waiver test above — only the flag differs, and a
+  // bare flag with no reason must not satisfy it.
+  const dir = tmp('forge-done-archive-waived-bare-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-archive-waived-bare');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.openspecChange = 'demo-change';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+    const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'done', '--archive-waived'], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    assert.notEqual(r.status, 0, 'a bare flag with no reason must not waive the archive gate');
+    assert.match(r.stderr, /change not archived/);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.archiveWaived, undefined, 'no reason means no waiver recorded');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a phase transition appends {phase, at} to a session with no phaseHistory', () => {
   const dir = tmp('forge-phase-history-');
   try {
@@ -1817,7 +2017,15 @@ test('phase finish allows incomplete with --allow-incomplete', () => {
   }
 });
 
-/** High-risk change (specs engine) with a done-ready session. */
+/**
+ * High-risk change (specs engine) with a done-ready session. The change dir
+ * is built directly at its *archived* path — `changes/archive/<date>-<name>/`
+ * — not the live path: these tests are about the final-review floor and
+ * verdict ordering, and implicitly assume a session that finished properly,
+ * which an unarchived change is not. `resolveChangeDir`'s read path (no
+ * `forWrite`) falls back to the archive, so `spine.json` still resolves for
+ * `runIntegrityChecks` same as it did at the live path.
+ */
 function makeHighRiskFixture(dir, sessionId) {
   const sessionFile = makeForgeFixture(dir, sessionId);
   const sessionDir = path.dirname(sessionFile);
@@ -1828,7 +2036,7 @@ function makeHighRiskFixture(dir, sessionId) {
   raw.openspecChange = 'add-refunds';
   fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
   fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
-  const changeDir = path.join(dir, 'specs', 'changes', 'add-refunds');
+  const changeDir = path.join(dir, 'specs', 'changes', 'archive', '2026-01-01-add-refunds');
   fs.mkdirSync(changeDir, { recursive: true });
   fs.writeFileSync(
     path.join(changeDir, 'proposal.md'),

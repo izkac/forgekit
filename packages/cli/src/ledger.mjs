@@ -302,6 +302,11 @@ export function appendSessionDigest(opts) {
       // reviewer was declined evaporated at cleanup — while the cap it explains
       // survived in the score.
       finalReviewWaived: session.finalReviewWaived ?? null,
+      // set-phase's archive gate tells the operator --archive-waived is "kept
+      // on the session and in .forge/sessions.jsonl" — same session-only-dies-
+      // at-cleanup argument as finalReviewWaived above, so it is read back
+      // here rather than recomputed.
+      archiveWaived: session.archiveWaived ?? null,
       // I5 (final review): `paceSuppressed` and `exitDeclined` were written
       // by `set-phase.mjs` (`recordPaceSuppression`, `recordExitDeclined`)
       // and read by nothing in production — session-only, so both died with

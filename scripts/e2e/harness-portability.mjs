@@ -156,14 +156,31 @@
  *                 `forge score` counts the tdd-run-only task's evidence
  *                 toward tier-2 coverage
  *
+ * Archive-gate loop (specs/changes/enforce-archive-before-done/e2e.json), its
+ * own scratch project (no git needed — `enforceDoneGate`'s archive check
+ * never reads the worktree), built entirely through `forge new` / `forge
+ * change new` / `forge phase` / `forge change archive` against the shipped
+ * binary — the specs planning engine only:
+ *   archive-gate  a done-ready session naming a change still live under
+ *                 `specs/changes/<name>/` — `forge phase done` refuses,
+ *                 naming `forge change archive <name>` as the remedy, and
+ *                 session.json's phase stays untouched (a refused transition
+ *                 writes nothing); the SAME session then succeeds with
+ *                 `--archive-waived "<reason>"`, recording the reason as
+ *                 `session.archiveWaived` with no `incompleteReason` set; a
+ *                 second, fresh session/change proves the gate is
+ *                 satisfiable straight, not only waivable — `forge change
+ *                 archive` moves the change under `changes/archive/`, and
+ *                 `forge phase done` then succeeds with no waiver at all
+ *
  * `all` is this rig's own recorded probe (`.forge/config.json`'s
  * `e2e.harness.probe`) — every phase above that is layered onto a shared
  * fixture or built once and forgotten stays out of it, because re-running it
  * here would mean re-running the fixture it depends on out of order. Only
  * self-contained phases join the roster: the original five, and now
- * `doctor-wiring`, `test-guard`, and `tdd-evidence`, each of which builds and
- * tears down its own project and touches nothing `boot` or its siblings
- * leave behind.
+ * `doctor-wiring`, `test-guard`, `tdd-evidence`, and `archive-gate`, each of
+ * which builds and tears down its own project and touches nothing `boot` or
+ * its siblings leave behind.
  */
 
 import fs from 'node:fs';
@@ -445,6 +462,82 @@ function makeTddEvidenceProject(dir) {
     `${JSON.stringify({ notApplicable: 'tdd-evidence e2e fixture — no runtime spine' }, null, 2)}\n`,
   );
   return { dir, sessionDir };
+}
+
+/* ---------- archive-gate fixture ---------- */
+
+/** No git needed — `enforceDoneGate`'s archive check (`resolveChangeDir`
+ *  + `fs.existsSync`) never reads the worktree. Kept apart from every
+ *  sibling project so a run interleaved with other phases cannot `rmSync`
+ *  it out from under a later step. */
+const ARCHIVE_GATE_PROJECT = `${SCRATCH}-archive-gate`;
+
+/**
+ * A done-ready session against the built-in specs planning engine, built
+ * entirely through the shipped binary (`forge new`, `forge change new`,
+ * `forge phase plan`) plus the two files no CLI subcommand scaffolds for a
+ * scratch fixture: `spine.json` (`notApplicable`, same shape the `test-guard`
+ * and `tdd-evidence` fixtures use) and `verify-evidence.md`.
+ *
+ * `proposal.md`/`design.md` are overwritten after `forge change new`: the
+ * scaffold's own "Impact" boilerplate ("risks, migration notes") trips
+ * `THOROUGH_RE` in preferences.mjs on `migrat(?:e|ion|ions)` — measured
+ * directly against the shipped scaffold, not assumed — which drags in the
+ * unrelated money/auth final-review floor at `forge phase done` and would
+ * make this fixture fail for a reason that has nothing to do with archiving.
+ */
+function makeArchiveGateSession(dir, slug, changeName) {
+  const created = forge(dir, ['new', slug]);
+  if (created.code !== 0) fail(`forge new ${slug} exited ${created.code}`, created.out);
+  let createdOut;
+  try {
+    createdOut = JSON.parse(created.stdout);
+  } catch {
+    fail(`forge new ${slug} printed no parseable JSON on stdout`, created.out);
+  }
+  const sessionId = createdOut.sessionId;
+  const sessionDir = path.join(dir, '.forge', 'sessions', sessionId);
+
+  const scaffolded = forge(dir, ['change', 'new', changeName]);
+  if (scaffolded.code !== 0) fail(`forge change new ${changeName} exited ${scaffolded.code}`, scaffolded.out);
+  const changeDir = path.join(dir, 'specs', 'changes', changeName);
+
+  fs.writeFileSync(
+    path.join(changeDir, 'proposal.md'),
+    `# ${changeName}\n\n## Why\n\nArchive-gate e2e fixture — proves the gate, nothing else.\n\n` +
+      `## What Changes\n\n- Add a harmless probe.\n\n## Impact\n\nScratch fixture only.\n`,
+  );
+  fs.writeFileSync(
+    path.join(changeDir, 'design.md'),
+    '# Design\n\n## Context\n\nFixture only.\n\n## Decisions\n\n- Decision: keep it simple.\n',
+  );
+  fs.writeFileSync(
+    path.join(changeDir, 'spine.json'),
+    `${JSON.stringify({ notApplicable: 'archive-gate e2e fixture — no runtime spine', rows: [] }, null, 2)}\n`,
+  );
+
+  const planned = forge(dir, [
+    'phase',
+    'plan',
+    '--plan-type',
+    'specs',
+    '--openspec',
+    changeName,
+    '--tasks-total',
+    '2',
+    '--tasks-complete',
+    '2',
+    '--session',
+    sessionId,
+  ]);
+  if (planned.code !== 0) fail(`forge phase plan exited ${planned.code} for session ${sessionId}`, planned.out);
+
+  fs.writeFileSync(
+    path.join(sessionDir, 'verify-evidence.md'),
+    '# Verify evidence\n\narchive-gate e2e fixture — tasks complete, nothing blocked.\n',
+  );
+
+  return { sessionId, sessionDir, changeDir };
 }
 
 /* ---------- session telemetry fixture ---------- */
@@ -838,6 +931,7 @@ const ALL_ROSTER = [
   'doctor-wiring',
   'test-guard',
   'tdd-evidence',
+  'archive-gate',
 ];
 
 if (phase === 'all') {
@@ -2688,12 +2782,109 @@ if (phase === 'boot') {
   process.stdout.write('TDD PAIRING GATE CORRELATES BY COMMAND (I2 regression closed)\n');
 
   process.stdout.write('TDD EVIDENCE GREEN\n');
+} else if (phase === 'archive-gate') {
+  // THE CLAIM: `forge phase done` refuses while a session's tracked change is
+  // still live under `specs/changes/<name>/`, naming `forge change archive`
+  // as the remedy; `--archive-waived "<reason>"` bypasses that refusal and
+  // records the reason without marking the session incomplete; and archiving
+  // the change for real — no waiver at all — satisfies the same gate. Every
+  // step drives the SHIPPED binary against a throwaway specs-engine project;
+  // no module is imported and no gate is stubbed.
+  const dir = ARCHIVE_GATE_PROJECT;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' } }, null, 2)}\n`,
+  );
+
+  // 1. `forge phase done` refuses while the change dir is still live, naming
+  //    the specs-engine remedy, and leaves session.json's phase untouched —
+  //    a refused transition writes nothing (set-phase.mjs's own ordering:
+  //    every gate runs, and can exit, before the final saveSession).
+  const liveName = 'archive-gate-live';
+  const live = makeArchiveGateSession(dir, 'archive-gate-blocked', liveName);
+
+  const refused = forge(dir, ['phase', 'done', '--session', live.sessionId]);
+  if (refused.code === 0) {
+    fail('forge phase done exited 0 while specs/changes/<name>/ was still live', refused.out);
+  }
+  if (!refused.out.includes(`forge change archive ${liveName}`)) {
+    fail(`refusal did not name the specs-engine remedy "forge change archive ${liveName}"`, refused.out);
+  }
+  const afterRefusal = JSON.parse(fs.readFileSync(path.join(live.sessionDir, 'session.json'), 'utf8'));
+  if (afterRefusal.phase === 'done') {
+    fail('session.json phase moved to done despite the refused transition', JSON.stringify(afterRefusal));
+  }
+  process.stdout.write('DONE REFUSES WHILE THE CHANGE IS LIVE\n');
+
+  // 2. The SAME blocked session: `--archive-waived "<reason>"` succeeds,
+  //    records the reason, and does not also mark the session incomplete —
+  //    a complete-but-unfiled change is not an incomplete one.
+  const waivedReason = 'archive-gate e2e: held live intentionally';
+  const waived = forge(dir, ['phase', 'done', '--archive-waived', waivedReason, '--session', live.sessionId]);
+  if (waived.code !== 0) fail(`forge phase done --archive-waived exited ${waived.code}`, waived.out);
+  const afterWaiver = JSON.parse(fs.readFileSync(path.join(live.sessionDir, 'session.json'), 'utf8'));
+  if (afterWaiver.phase !== 'done') {
+    fail('session did not reach phase done after --archive-waived', JSON.stringify(afterWaiver));
+  }
+  if (afterWaiver.archiveWaived !== waivedReason) {
+    fail(
+      `session.archiveWaived was ${JSON.stringify(afterWaiver.archiveWaived)}, expected ${JSON.stringify(waivedReason)}`,
+      JSON.stringify(afterWaiver),
+    );
+  }
+  if (Object.hasOwn(afterWaiver, 'incompleteReason')) {
+    fail('a named archive waiver must not also mark the session incomplete', JSON.stringify(afterWaiver));
+  }
+  if (!fs.existsSync(live.changeDir)) {
+    fail('the waived change dir moved off the live path — this run no longer exercises a waiver', live.changeDir);
+  }
+  process.stdout.write('ARCHIVE-WAIVED SUCCEEDS AND RECORDS THE REASON\n');
+
+  // 3. A second, fresh session/change: `forge change archive` moves the
+  //    change under changes/archive/, and `forge phase done` then succeeds
+  //    with NO waiver at all — the gate is satisfiable by doing the right
+  //    thing, not only by waiving it.
+  const archivedName = 'archive-gate-archived';
+  const toArchive = makeArchiveGateSession(dir, 'archive-gate-unblocked', archivedName);
+
+  const archived = forge(dir, ['change', 'archive', archivedName]);
+  if (archived.code !== 0) fail(`forge change archive ${archivedName} exited ${archived.code}`, archived.out);
+  if (fs.existsSync(toArchive.changeDir)) {
+    fail('forge change archive did not move the change off the live path', toArchive.changeDir);
+  }
+  const archiveEntries = fs
+    .readdirSync(path.join(dir, 'specs', 'changes', 'archive'))
+    .filter((name) => name.endsWith(`-${archivedName}`));
+  if (archiveEntries.length !== 1) {
+    fail(`expected exactly one archived dir for ${archivedName}`, JSON.stringify(archiveEntries));
+  }
+
+  const doneAfterArchive = forge(dir, ['phase', 'done', '--session', toArchive.sessionId]);
+  if (doneAfterArchive.code !== 0) {
+    fail('forge phase done still refused once the change was archived (no waiver used)', doneAfterArchive.out);
+  }
+  const afterArchiveDone = JSON.parse(fs.readFileSync(path.join(toArchive.sessionDir, 'session.json'), 'utf8'));
+  if (afterArchiveDone.phase !== 'done') {
+    fail('session did not reach phase done after archiving', JSON.stringify(afterArchiveDone));
+  }
+  if (Object.hasOwn(afterArchiveDone, 'archiveWaived')) {
+    fail(
+      'done succeeded carrying an archiveWaived field — this run must prove the gate satisfied by archiving, not waiving',
+      JSON.stringify(afterArchiveDone),
+    );
+  }
+  process.stdout.write('ARCHIVING UNBLOCKS THE GATE, NO WAIVER NEEDED\n');
+
+  process.stdout.write('ARCHIVE GATE GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
-      'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence\n',
+      'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate\n',
   );
   process.exit(1);
 }

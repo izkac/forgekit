@@ -1,0 +1,33 @@
+{
+  "change": "enforce-archive-before-done",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "A finished change is filed before the session is done — done-gate refuses a live change dir, engine-correct remedy in the message",
+      "library": "packages/cli/src/integrity.mjs — resolveChangeDir({ forWrite: true }) supplies the live path with no archive fallback (read, not modified)",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs — the done-gate function that already holds the combined-ceremony check; runs on every `forge phase done|finish`",
+      "writes": "refusal on stderr + non-zero exit; on success the session.json phase transition to done/finish",
+      "reads": "session.openspecChange, session.planType, and whether <plan.dir>/changes/<name>/ exists on disk",
+      "uiConsumer": "the `forge phase done` refusal the agent and operator read at finish time",
+      "evidence": "packages/cli/src/set-phase.test.mjs"
+    },
+    {
+      "capability": "An unarchived finish is waived by name and recorded — --archive-waived sets session.archiveWaived without claiming the work was incomplete",
+      "library": "packages/cli/src/set-phase.mjs — flag parsing beside --final-review-waived",
+      "runtimeOwner": "packages/cli/src/ledger.mjs — writes the session row that carries the waiver past cleanup",
+      "writes": "session.archiveWaived in .forge/sessions/<id>/session.json + the archiveWaived field on the .forge/sessions.jsonl row",
+      "reads": "the --archive-waived reason string from argv",
+      "uiConsumer": "`forge analyze` / ledger readers accounting for why a change was left unfiled",
+      "evidence": "packages/cli/src/set-phase.test.mjs + packages/cli/src/ledger.test.mjs"
+    },
+    {
+      "capability": "The gate is done-only — integrity-check and score stay quiet mid-flight",
+      "library": "packages/cli/src/integrity.mjs — runIntegrityChecks, deliberately left without the archive check",
+      "runtimeOwner": "packages/cli/src/integrity-check.mjs and packages/cli/src/score.mjs — the two non-done callers whose behavior must not change",
+      "writes": "nothing new; the guarantee is the absence of an archive problem in their output and the retained 20 integrity points",
+      "reads": "session phase and the live change dir",
+      "uiConsumer": "`forge integrity-check` output during implement/verify and the session scorecard",
+      "evidence": "packages/cli/src/integrity.test.mjs + packages/cli/src/score.test.mjs"
+    }
+  ]
+}
