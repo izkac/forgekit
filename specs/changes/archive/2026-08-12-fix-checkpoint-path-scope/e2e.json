@@ -1,0 +1,19 @@
+{
+  "change": "fix-checkpoint-path-scope",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot-scratch-project",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "checkpoint-scopes-to-this-session",
+      "cmd": "node scripts/e2e/harness-portability.mjs checkpoint-scope",
+      "expect": "CHECKPOINT SCOPE GREEN"
+    },
+    {
+      "name": "shipped-cli-still-portable",
+      "cmd": "node scripts/e2e/harness-portability.mjs all"
+    }
+  ]
+}
