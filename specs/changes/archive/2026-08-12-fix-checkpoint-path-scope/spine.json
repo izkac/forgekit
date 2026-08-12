@@ -1,0 +1,24 @@
+{
+  "change": "fix-checkpoint-path-scope",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Checkpoint refuses to stage another open session's work when a second unfinished session shares the tree",
+      "library": "packages/cli/src/checkpoint.mjs — otherOpenChangeDirs + the pending classifier + the refusal gate",
+      "runtimeOwner": "packages/cli/src/checkpoint.mjs — the `forge checkpoint` CLI command (invoked by the coordinator at a task-group boundary)",
+      "writes": "a git commit staging only the session's own work, or a non-zero refusal with no commit; the checkpoint sha recorded on this session's session.json",
+      "reads": "the working tree (pendingEntries), .forge/sessions/*/session.json for other open sessions, the project plan dir",
+      "uiConsumer": "the coordinator reading the refusal/commit result; the group reviewer receiving groupRange",
+      "evidence": "packages/cli/src/checkpoint.test.mjs"
+    },
+    {
+      "capability": "--path scopes a checkpoint to an explicit subset plus the session's own change dir",
+      "library": "packages/cli/src/checkpoint.mjs — --path parsing + scoped pathspec staging",
+      "runtimeOwner": "packages/cli/src/checkpoint.mjs — `forge checkpoint --path <p>` CLI path",
+      "writes": "a git commit containing only the named paths and the session's change dir; a refusal when a named path is under another open session's change dir",
+      "reads": "the --path values, the working tree, other open sessions' change dirs",
+      "uiConsumer": "the coordinator committing its own group while a second session is open",
+      "evidence": "packages/cli/src/checkpoint.test.mjs"
+    }
+  ]
+}

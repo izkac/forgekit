@@ -1,0 +1,106 @@
+<!-- forge-brief-specs-hash:66fff8195c829e48 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Checkpoint scopes to this session</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         line-height: 1.6; color: #1c1e21; background: #fff; }
+  h1 { font-size: 1.75rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e3e5e8; padding-bottom: .35rem; }
+  .sub { color: #6a6f76; margin-top: 0; }
+  ul { padding-left: 1.25rem; } li { margin: .4rem 0; }
+  code { background: #f2f3f5; padding: .1rem .35rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .75rem 1rem; margin: 1.25rem 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e3e5e8; vertical-align: top; }
+  th { color: #6a6f76; font-weight: 600; }
+  .mermaid { margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Checkpoint scopes to this session's work</h1>
+<p class="sub">Operator brief · change <code>fix-checkpoint-path-scope</code> · finding F111</p>
+
+<h2>TL;DR</h2>
+<p>
+When two pieces of work are open in the same folder at once, the "save my
+progress" command grabs everything in the folder — including the other work's
+files — and records them under the wrong job. This change makes it save only the
+current job's files, and stop and ask when it can't tell them apart.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Saving progress no longer sweeps in a second open job's changes.</li>
+  <li>When two jobs are open and the tool can't tell whose change is whose, it stops and tells you, instead of guessing wrong.</li>
+  <li>A new way to say exactly which files to save (<code>--path</code>), so you can still save the current job's work while the other stays open.</li>
+  <li>It will never save another open job's planning files, even if you ask it to by name.</li>
+  <li>When only one job is open — the normal case — nothing changes at all.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+"Save my progress" (a checkpoint) currently stages every change in the folder
+except its own scratch notes. It has one narrow guard that catches another job's
+brand-new planning files, but it misses edits that job made to shared code. So
+with two jobs open, one job's checkpoint quietly commits the other's edits.
+</p>
+<p>
+The fix looks at whether a second job is open. If not, nothing changes. If one
+is, it only saves changes that clearly belong to the current job; anything it
+can't attribute makes it stop and point you at the fix — either name the files
+to save, or finish the other job first.
+</p>
+
+<pre class="mermaid">
+flowchart TD
+    A[forge checkpoint] --> B{Second job open in this folder?}
+    B -- No --> C[Save everything, as before]
+    B -- Yes --> D{Did you name the files with --path?}
+    D -- Yes --> E[Save just those + this job's plan]
+    D -- No --> F{Any change outside this job?}
+    F -- No --> G[Save this job's changes]
+    F -- Yes --> H[Stop, list them, suggest --path]
+</pre>
+
+<h2>What changes for you</h2>
+<table>
+  <tr><th>Situation</th><th>Before</th><th>After</th></tr>
+  <tr><td>Only one job open</td><td>Saves everything</td><td>Saves everything — unchanged</td></tr>
+  <tr><td>Two jobs open, unrelated changes present</td><td>Silently commits the other job's files under this one</td><td>Stops and asks you to scope with <code>--path</code></td></tr>
+  <tr><td>Two jobs open, want to save just yours</td><td>No way to</td><td><code>--path</code> saves exactly what you name</td></tr>
+</table>
+
+<h2>Risks and open questions</h2>
+<div class="callout">
+  <strong>The tool can't read minds about shared code.</strong> A job records which
+  plan it owns, but not which source files it edited — so when two jobs both touch
+  loose source files, it genuinely can't tell whose is whose. It refuses rather
+  than guess. The cost is an occasional "please name the files" when two jobs are
+  open; the answer is right there in the message. It can never commit <em>more</em>
+  than before — only the same or less.
+</div>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>No attempt to auto-detect which source files a job touched — that needs tracking the tool doesn't have.</li>
+  <li>No change to the push rules; checkpoints still never push and still refuse on the main branch.</li>
+  <li>The single-job case, which is almost every checkpoint, is deliberately left exactly as it is.</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li><strong>Tell which changes belong to which job</strong> — list other open jobs and sort each pending change (4 tasks)</li>
+  <li><strong>Stop-or-scope</strong> — refuse when it can't attribute, and a <code>--path</code> way to save an explicit subset (5 tasks)</li>
+  <li><strong>End-to-end proof</strong> — a throwaway project with two open jobs proving the sweep is gone (2 tasks)</li>
+</ul>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

@@ -25,8 +25,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { loadSession, resolveSessionOrExit, REPO_ROOT, saveSession } from './lib.mjs';
+import { loadSession, resolveSessionOrExit, REPO_ROOT, saveSession, unfinishedSessions } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { resolveProjectPlanEngine } from './plan-engine.mjs';
 
@@ -37,6 +38,9 @@ function usage() {
   process.stderr.write(
     `Usage:
   forge checkpoint --group <name> [--tasks <ids>] [--message <subject>]
+  forge checkpoint --path <p> [--path <p> ...]  scope staging to these paths
+                                             (only consulted while another
+                                             session's change dir is open)
   forge checkpoint --dry-run                 what would be committed
   forge checkpoint --range [--last]          diff range for a reviewer brief
 
@@ -164,6 +168,144 @@ export function pendingFiles(cwd) {
 }
 
 /**
+ * Change directories of every *other* open session sharing this project.
+ * "Open" mirrors `unfinishedSessions`: phase not `done`/`skipped`, and a
+ * malformed/unreadable `session.json` is skipped rather than fatal — it
+ * cannot prove an overlap, and a crash here would block an honest checkpoint.
+ * A session is kept only when it is not `thisSessionId` and its
+ * `openspecChange` resolves to a directory that exists on disk.
+ *
+ * Pure: takes `sessionsDir` and `planDir` as arguments rather than reading
+ * `SESSIONS_DIR` or `process.cwd()`, so a caller (or a test) can point it at
+ * a throwaway fixture.
+ *
+ * @param {string} sessionsDir
+ * @param {string} thisSessionId
+ * @param {string} planDir
+ * @returns {string[]}
+ */
+export function otherOpenChangeDirs(sessionsDir, thisSessionId, planDir) {
+  const sessions = unfinishedSessions(sessionsDir) || [];
+  const dirs = [];
+  for (const s of sessions) {
+    if (s.unreadable) continue; // couldn't parse it — not proof of overlap
+    if (s.id === thisSessionId) continue;
+    let openspecChange;
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(sessionsDir, s.id, 'session.json'), 'utf8'));
+      openspecChange = raw?.openspecChange;
+    } catch {
+      continue; // malformed/unreadable — skip, not fatal
+    }
+    if (!openspecChange) continue;
+    const dir = path.join(planDir, 'changes', openspecChange);
+    if (fs.existsSync(dir)) dirs.push(dir);
+  }
+  return dirs;
+}
+
+/**
+ * True when `entryPath` is `dirPath` itself or nested under it —
+ * segment-aware, so `src/foo` never matches `src/foobar`. Same discipline
+ * `foreignUntrackedChangePaths` uses for its prefix check (normalize
+ * separators, strip a trailing slash, require the boundary `/`), generalized
+ * to a whole directory rather than one path segment after a fixed prefix.
+ *
+ * @param {string} entryPath
+ * @param {string} dirPath
+ * @returns {boolean}
+ */
+function isUnderDir(entryPath, dirPath) {
+  const dir = String(dirPath || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+  if (!dir) return false;
+  const p = String(entryPath || '').replace(/\\/g, '/');
+  return p === dir || p.startsWith(`${dir}/`);
+}
+
+/**
+ * Partitions pending working-tree entries into `mine` (under this session's
+ * own change dir), `foreignPlan` (under one of `otherDirs`, i.e. an other-open
+ * session's change dir — see `otherOpenChangeDirs`), and `shared` (everything
+ * else: source files, docs, or a change dir with no open session behind it).
+ * Pure and order-preserving; matching is segment-aware via `isUnderDir`.
+ *
+ * @param {{ path: string }[]} pending
+ * @param {string} mineDir
+ * @param {string[]} otherDirs
+ * @returns {{ mine: string[], foreignPlan: string[], shared: string[] }}
+ */
+export function classifyPendingEntries(pending, mineDir, otherDirs) {
+  const mine = [];
+  const foreignPlan = [];
+  const shared = [];
+  for (const e of pending) {
+    if (isUnderDir(e.path, mineDir)) mine.push(e.path);
+    else if (otherDirs.some((dir) => isUnderDir(e.path, dir))) foreignPlan.push(e.path);
+    else shared.push(e.path);
+  }
+  return { mine, foreignPlan, shared };
+}
+
+/**
+ * Repo-relative, forward-slash path for a `--path` argument, resolved against
+ * `cwd` the same way a pathspec typed on the command line is.
+ *
+ * @param {string} cwd
+ * @param {string} raw
+ * @returns {string}
+ */
+function toRepoRelative(cwd, raw) {
+  return path.relative(cwd, path.resolve(cwd, raw)).replace(/\\/g, '/');
+}
+
+/**
+ * Same enumeration `otherOpenChangeDirs` does, kept as a separate function so
+ * that group-1's pure helper stays untouched — this one also remembers which
+ * session owns each dir, needed only to name a session in a refusal message.
+ *
+ * @param {string} sessionsDir
+ * @param {string} thisSessionId
+ * @param {string} planDir
+ * @returns {Map<string, string>} change dir -> owning session id
+ */
+function otherOpenChangeDirOwners(sessionsDir, thisSessionId, planDir) {
+  const sessions = unfinishedSessions(sessionsDir) || [];
+  const owners = new Map();
+  for (const s of sessions) {
+    if (s.unreadable) continue;
+    if (s.id === thisSessionId) continue;
+    let openspecChange;
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(sessionsDir, s.id, 'session.json'), 'utf8'));
+      openspecChange = raw?.openspecChange;
+    } catch {
+      continue;
+    }
+    if (!openspecChange) continue;
+    const dir = path.join(planDir, 'changes', openspecChange);
+    if (fs.existsSync(dir)) owners.set(dir, s.id);
+  }
+  return owners;
+}
+
+/**
+ * The session owning the change dir `entryPath` sits under (an entry of
+ * `otherOpenChangeDirOwners`'s keys), or `null` if none matches.
+ *
+ * @param {string} entryPath
+ * @param {Map<string, string>} owners
+ * @returns {string | null}
+ */
+function ownerForPath(entryPath, owners) {
+  for (const [dir, id] of owners) {
+    if (isUnderDir(entryPath, dir)) return id;
+  }
+  return null;
+}
+
+/**
  * What a reviewer should actually read.
  *
  * A group review runs *before* that group's checkpoint, so HEAD is still the
@@ -214,13 +356,24 @@ export function checkpointSubject(session, opts) {
   return `forge(${scope}): checkpoint${label ? ` — ${label}` : ''}`;
 }
 
+// Guards the executable body below so importing this module for its pure
+// exports (`otherOpenChangeDirs`, `classifyPendingEntries`, …) never runs the
+// CLI as a side effect of `import` — same pattern as doctor.mjs / exit-check.mjs.
+const isMain =
+  process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+
+if (isMain) {
+  runCli();
+}
+
+function runCli() {
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
   usage();
   process.exit(0);
 }
 
-/** @type {{ group?: string, tasks?: string, message?: string }} */
+/** @type {{ group?: string, tasks?: string, message?: string, paths?: string[] }} */
 const opts = {};
 let dryRun = false;
 let rangeOnly = false;
@@ -237,6 +390,7 @@ for (let i = 0; i < args.length; i += 1) {
   else if (a === '--range') rangeOnly = true;
   else if (a === '--last') sinceLast = true;
   else if (a === '--allow-default-branch') allowDefaultBranch = true;
+  else if (a === '--path' && args[i + 1]) (opts.paths ?? (opts.paths = [])).push(args[(i += 1)]);
   else {
     usage();
     fail(`Unknown argument: ${a}`);
@@ -356,29 +510,100 @@ if (dryRun) {
 }
 
 const planDir = resolveProjectPlanEngine(cwd).dir;
-const foreign = foreignUntrackedChangePaths(pending, planDir, session.openspecChange);
-if (foreign.length > 0) {
-  const changeLabel = session.openspecChange || '(none)';
-  fail(
-    `Refusing to checkpoint: untracked path(s) under a foreign change directory ` +
-      `(session change: ${changeLabel}):\n${foreign.map((p) => `  ${p}`).join('\n')}`,
-    {
-      ok: false,
-      reason: 'foreign untracked change paths',
-      foreign,
-      openspecChange: session.openspecChange ?? null,
-      planDir,
-    },
-  );
+const sessionsDir = path.dirname(sessionDir);
+const otherOpen = otherOpenChangeDirs(sessionsDir, sessionId, planDir);
+
+/** @type {string[]} */
+let stagedFiles;
+
+if (otherOpen.length === 0) {
+  // --- single-session path: unchanged (F72 backstop) ---
+  const foreign = foreignUntrackedChangePaths(pending, planDir, session.openspecChange);
+  if (foreign.length > 0) {
+    const changeLabel = session.openspecChange || '(none)';
+    fail(
+      `Refusing to checkpoint: untracked path(s) under a foreign change directory ` +
+        `(session change: ${changeLabel}):\n${foreign.map((p) => `  ${p}`).join('\n')}`,
+      {
+        ok: false,
+        reason: 'foreign untracked change paths',
+        foreign,
+        openspecChange: session.openspecChange ?? null,
+        planDir,
+      },
+    );
+  }
+  try {
+    gitOut(cwd, ['add', '-A', ...EXCLUDE_SCRATCH]);
+  } catch (err) {
+    fail(`git add failed: ${err instanceof Error ? err.message : err}`);
+  }
+  stagedFiles = files;
+} else {
+  // --- another session is open: refuse or scope, never sweep its work in
+  // (F111) — `git add -A` is never used once there is overlap.
+  const mineDir = session.openspecChange ? path.join(planDir, 'changes', session.openspecChange) : '';
+  const { mine, foreignPlan, shared } = classifyPendingEntries(pending, mineDir, otherOpen);
+  const owners = otherOpenChangeDirOwners(sessionsDir, sessionId, planDir);
+
+  if (opts.paths && opts.paths.length > 0) {
+    const resolvedPaths = opts.paths.map((p) => toRepoRelative(cwd, p));
+    for (const rel of resolvedPaths) {
+      const badDir = otherOpen.find((dir) => isUnderDir(rel, dir));
+      if (badDir) {
+        fail(
+          `Refusing to checkpoint: --path ${rel} resolves under another open session's change ` +
+            `directory (${badDir}, session ${owners.get(badDir) ?? 'unknown'}). ` +
+            `You cannot checkpoint another open session's plan, even explicitly.`,
+          {
+            ok: false,
+            reason: 'path under foreign change dir',
+            path: rel,
+            foreignDir: badDir,
+            session: owners.get(badDir) ?? null,
+          },
+        );
+      }
+    }
+    const scoped = pending.filter(
+      (e) => isUnderDir(e.path, mineDir) || resolvedPaths.some((rel) => isUnderDir(e.path, rel)),
+    );
+    stagedFiles = scoped.map((e) => e.path);
+    try {
+      if (stagedFiles.length > 0) gitOut(cwd, ['add', '--', ...stagedFiles]);
+    } catch (err) {
+      fail(`git add failed: ${err instanceof Error ? err.message : err}`);
+    }
+  } else {
+    if (foreignPlan.length > 0 || shared.length > 0) {
+      const lines = [
+        ...foreignPlan.map((p) => `  ${p}  (owned by session ${ownerForPath(p, owners) ?? 'unknown'})`),
+        ...shared.map((p) => `  ${p}`),
+      ];
+      fail(
+        `Refusing to checkpoint: another session is open and pending change(s) fall outside this ` +
+          `session's scope:\n${lines.join('\n')}\n` +
+          `Scope with --path, or finish/pause the other session(s).`,
+        {
+          ok: false,
+          reason: 'pending changes outside session scope',
+          foreignPlan,
+          shared,
+          otherOpen,
+        },
+      );
+    }
+    stagedFiles = mine;
+    try {
+      if (stagedFiles.length > 0) gitOut(cwd, ['add', '--', ...stagedFiles]);
+    } catch (err) {
+      fail(`git add failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 }
 
 // --- commit (never push) ---
 const prev = checkpoints.length ? checkpoints[checkpoints.length - 1].sha : null;
-try {
-  gitOut(cwd, ['add', '-A', ...EXCLUDE_SCRATCH]);
-} catch (err) {
-  fail(`git add failed: ${err instanceof Error ? err.message : err}`);
-}
 const commit = git(cwd, ['commit', '-m', subject, '--no-verify']);
 if (commit.status !== 0) {
   fail(`git commit failed: ${commit.stderr.trim() || commit.stdout.trim()}`);
@@ -401,7 +626,7 @@ checkpoints.push({
   subject,
   group: opts.group ?? null,
   tasks: opts.tasks ?? null,
-  files: files.length,
+  files: stagedFiles.length,
   at: new Date().toISOString(),
 });
 session.checkpoints = checkpoints;
@@ -413,9 +638,10 @@ emit({
   sha,
   subject,
   branch,
-  files,
+  files: stagedFiles,
   range: `${session.baseCommit}..HEAD`,
   groupRange: prev ? `${prev}..${sha}` : `${session.baseCommit}..${sha}`,
   pushed: false,
   note: 'Checkpoints never push. Pass groupRange as {DIFF_RANGE} to the group reviewer.',
 });
+}
