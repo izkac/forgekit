@@ -185,6 +185,65 @@ export function suggestCeremonyFromPlan(facts) {
   };
 }
 
+/**
+ * Decide the plan-time exit ramp: whether Forge offers to leave rather than
+ * write a proposal, design, tasks, spine and brief for this change (D2).
+ *
+ * Reuses `COMBINED_TASKS`, not a third "small" number. D2's own framing is
+ * that leaving Forge is "the same evidence plan-facts.mjs already uses to
+ * resolve resolvedCeremony: combined ... generalizes it one step further" —
+ * so the shape that already earns the cheap tail is exactly the shape that
+ * qualifies to skip the tail (and everything before it) entirely. Not
+ * `BRISK_TASKS`: that pace threshold excludes `tasks === 0`, which does not
+ * translate here — see the zero-tasks note below.
+ *
+ * `tasks === 0` does not qualify, and reads as its own case rather than
+ * falling into the `<= COMBINED_TASKS` branch (group review, fix round).
+ * The reasoning above ("a change readable as nothing to do is not evidence
+ * against leaving Forge") was written for `collectPlanFacts` reading a real
+ * `tasks.md` off disk, where zero is a *measured* fact about an unusually
+ * empty plan. `forge exit-check` (4.5) calls this with `tasks` *asserted* by
+ * the agent as a bare flag before anything is scaffolded — "0 tasks" there
+ * means nothing has been shaped yet, not that a shaped, small change
+ * happens to need none. The exit ramp's own precondition is *shaped* work
+ * ("After brainstorm... evaluate the shaped work against the plan-time exit
+ * conditions"), so a zero-task assertion is outside what this resolver
+ * should ever wave through, on either fact source.
+ *
+ * @param {ReturnType<typeof collectPlanFacts>} facts
+ * @returns {{ qualifies: boolean, reason: string }}
+ */
+export function suggestExitFromPlan(facts) {
+  if (!facts || !facts.readable) {
+    return { qualifies: false, reason: 'could not read the plan — failing closed, no exit offered' };
+  }
+  if (facts.highRisk) {
+    return { qualifies: false, reason: 'high-risk change — no exit offered, however small' };
+  }
+  if (facts.spineRows > 0) {
+    return {
+      qualifies: false,
+      reason: `${facts.spineRows} spine row(s) — a wired capability needs a tracked change`,
+    };
+  }
+  if (facts.tasks < 1) {
+    return {
+      qualifies: false,
+      reason: 'zero tasks — nothing shaped yet, not a small change, no exit offered',
+    };
+  }
+  if (facts.tasks <= COMBINED_TASKS && facts.capabilities <= 1) {
+    return {
+      qualifies: true,
+      reason: `${facts.tasks} task(s), single capability, no spine rows — small enough to leave Forge`,
+    };
+  }
+  return {
+    qualifies: false,
+    reason: `${facts.tasks} tasks, ${facts.capabilities} capability dir(s) — too large to leave Forge`,
+  };
+}
+
 /** Tasks at or above this count mean a multi-surface change. */
 const STANDARD_TASKS = 15;
 /** Below this, with nothing else going on, the ceremony is not worth it. */

@@ -2540,33 +2540,66 @@ if (phase === 'boot') {
   }
   process.stdout.write('TDD PAIRING GATE GREEN (discriminates paired vs unpaired)\n');
 
-  // 4. THE --no-tdd EXEMPTION, proved as a real red→green mutation on ONE
-  //    task rather than two fixtures that merely look different: first
-  //    record evidence WITHOUT the declaration (a task dir with
-  //    test-evidence.md but no tdd-runs.jsonl and no exemption marker) —
-  //    RED, gated same as any other undeclared task. Then re-record the
-  //    SAME task WITH --no-tdd --reason, overwriting the file in place —
-  //    GREEN, cleared by the marker alone, nothing else about the fixture
-  //    having moved.
+  // 4. THE --no-tdd EXEMPTION, proved at the point enforcement actually lives
+  //    now: THE WRITE ITSELF, not a later `integrity-check` scan.
+  //
+  //    Before commit f4bf653 ("fix(tdd): align subagent executed evidence",
+  //    2026-08-09), `forge evidence` (no --no-tdd) would happily record a
+  //    task's evidence with no red→green ledger at all, and only
+  //    `integrity-check` caught it later, on the next scan — a task dir left
+  //    holding `test-evidence.md` with no `tdd-runs.jsonl` and no exemption
+  //    marker. That is the shape this step used to build (record undeclared
+  //    evidence, watch the LATER gate refuse it, re-record with --no-tdd,
+  //    watch the gate clear).
+  //
+  //    `record-evidence.mjs` now refuses the write itself: in a
+  //    `features.tddEvidence` session, plain `forge evidence` on a task with
+  //    no `tdd-runs.jsonl` yet is rejected before anything touches disk (see
+  //    its own design note: "plain forge evidence without --no-tdd is
+  //    refused only while the task lacks a TDD ledger"). There is no
+  //    supported command left that reaches the state this step used to
+  //    build — a *completed* task carrying `test-evidence.md` with no ledger
+  //    and no declaration — because the one writer of `test-evidence.md`
+  //    refuses before that state can exist. This step now proves the
+  //    refusal at its new home instead: the write, not a later scan.
+  //
+  //    The gate's OTHER route to the same class of problem — a task that IS
+  //    complete (carries `tdd-runs.jsonl`) but whose stamps never pair a red
+  //    before a green, and carries no declaration — is not obsolete, and
+  //    step 3 above already proves it stays refused (GREEN_ONLY_TASK).
   const undeclared = forge(dir, [
     'evidence', '--task', DOCS_TASK, '--command', 'echo ok', '--exit', '0', '--summary', 'manual check',
   ]);
-  if (undeclared.code !== 0) fail(`forge evidence exited ${undeclared.code} recording undeclared evidence`, undeclared.out);
-
-  const beforeDeclare = forge(dir, ['integrity-check']);
-  if (beforeDeclare.code === 0) {
-    fail('forge integrity-check accepted a task with evidence but no red→green cycle and no exemption', beforeDeclare.out);
+  if (undeclared.code === 0) {
+    fail(
+      'forge evidence recorded undeclared evidence for a tddEvidence-session task with no ledger — ' +
+        "record-evidence.mjs's write-time refusal (f4bf653) is no longer enforced",
+      undeclared.out,
+    );
   }
-  const beforeDeclareReport = JSON.parse(beforeDeclare.stdout);
-  const namesDocsUndeclared = beforeDeclareReport.problems.some((p) => p.includes(DOCS_TASK));
-  if (!namesDocsUndeclared) {
-    fail(`integrity-check did not name the undeclared task ${DOCS_TASK}`, JSON.stringify(beforeDeclareReport.problems, null, 2));
+  if (!undeclared.out.includes(DOCS_TASK)) {
+    fail(
+      `the refusal did not name the task ${DOCS_TASK} — a future silent-success regression would be ` +
+        'invisible with only an exit code to go on',
+      undeclared.out,
+    );
   }
+  const evidenceFile = path.join(sessionDir, 'tasks', DOCS_TASK, 'test-evidence.md');
+  if (fs.existsSync(evidenceFile)) {
+    fail(
+      `forge evidence refused the write (exit ${undeclared.code}) but test-evidence.md exists for ${DOCS_TASK} ` +
+        'anyway — a refusal that writes the file regardless is a different bug, and worth catching here',
+      undeclared.out,
+    );
+  }
+  process.stdout.write('TDD PLAIN EVIDENCE REFUSED AT WRITE TIME (named, wrote nothing)\n');
 
+  // Now the exemption: --no-tdd --reason on the SAME task succeeds, writes
+  // the exemption marker and the reason, and integrity-check clears it. This
+  // half of the fixture is untouched by the enforcement-point move above.
   const reason = 'documentation only, no behavior change';
   const declare = forge(dir, ['evidence', '--task', DOCS_TASK, '--no-tdd', '--reason', reason]);
   if (declare.code !== 0) fail(`forge evidence --no-tdd exited ${declare.code}`, declare.out);
-  const evidenceFile = path.join(sessionDir, 'tasks', DOCS_TASK, 'test-evidence.md');
   const evidenceBody = fs.readFileSync(evidenceFile, 'utf8');
   if (!evidenceBody.includes(NO_TDD_MARKER)) {
     fail(`test-evidence.md for ${DOCS_TASK} does not carry the exemption marker`, evidenceBody);
@@ -2588,7 +2621,7 @@ if (phase === 'boot') {
   if (!stillNamesGreenOnly) {
     fail('the green-only task stopped being named — this run no longer isolates the exemption', JSON.stringify(afterDeclareReport.problems, null, 2));
   }
-  process.stdout.write('TDD NO-TDD EXEMPTION GREEN (undeclared refused, declared cleared)\n');
+  process.stdout.write('TDD NO-TDD EXEMPTION GREEN (write-time refusal, declared cleared)\n');
 
   // 5. Executed stamps count as tier-2 evidence for scoring: TASK's only
   //    evidence is a red→green tdd-runs.jsonl (no test-evidence.md at all),

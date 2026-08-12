@@ -8,7 +8,7 @@
   "presets": {
     "thorough": {
       "review": {
-        "perTask": "always",
+        "perTask": "per-group",
         "final": "always",
         "depth": "full",
         "maxRounds": 3
@@ -42,8 +42,8 @@
     },
     "brisk": {
       "review": {
-        "perTask": "high-risk-only",
-        "final": "high-risk-only",
+        "perTask": "never",
+        "final": "always",
         "depth": "spec-only",
         "maxRounds": 1
       },
@@ -60,9 +60,9 @@
     "lite": {
       "review": {
         "perTask": "never",
-        "final": "never",
+        "final": "always",
         "depth": "spec-only",
-        "maxRounds": 0
+        "maxRounds": 1
       },
       "verify": {
         "tier3": "audit-tier2-only"

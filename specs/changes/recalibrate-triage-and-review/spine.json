@@ -1,0 +1,60 @@
+{
+  "change": "recalibrate-triage-and-review",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Satisfiable skip gate (ANY conditions) + widened trivial classification",
+      "library": "packages/cli/src/triage-prompt.mjs",
+      "runtimeOwner": "templates/project/claude/hooks/forge-triage-hook.mjs — UserPromptSubmit hook on every agent turn",
+      "writes": "hook decision (fire or stay silent) + `forge triage --check` exit code",
+      "reads": "the user prompt",
+      "uiConsumer": "the triage banner the agent sees at prompt time",
+      "evidence": "packages/cli/src/triage-prompt.test.mjs"
+    },
+    {
+      "capability": "Preset review matrix — per-group cap, final review at every pace, lite gains a fix round",
+      "library": "packages/cli/src/preferences.defaults.json",
+      "runtimeOwner": "packages/cli/src/preferences.mjs — resolves the effective preset for `forge prefs` and every session",
+      "writes": "resolved knobs on the session; .forge/preferences.local.json when pinned",
+      "reads": "preferences.defaults.json + optional local overlay",
+      "uiConsumer": "`forge prefs` output and the session reminder the agent reads each phase",
+      "evidence": "packages/cli/src/preferences.test.mjs"
+    },
+    {
+      "capability": "Two-way pace resolution with pin precedence",
+      "library": "packages/cli/src/preferences.mjs",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs — `forge phase` recomputes pace from plan-time facts",
+      "writes": "session.resolvedPace + session.paceReason in .forge/sessions/<id>/session.json",
+      "reads": "task count, capability count, wired spine rows, high-risk surface, pin state",
+      "uiConsumer": "`forge status` pace line + session reminder",
+      "evidence": "packages/cli/src/set-phase.test.mjs + preferences.test.mjs"
+    },
+    {
+      "capability": "De-escalation is not scored as a missing escalation",
+      "library": "packages/cli/src/score.mjs",
+      "runtimeOwner": "packages/cli/src/set-phase.mjs — `forge phase done` writes the scorecard",
+      "writes": "session score + scorecard deductions in .forge/sessions/<id>/",
+      "reads": "session.resolvedPace, paceReason, tasksTotal",
+      "uiConsumer": "`forge analyze` per-session score/grade",
+      "evidence": "packages/cli/src/score.test.mjs"
+    },
+    {
+      "capability": "Plan-time exit ramp — offer, accept, decline, all recorded",
+      "library": "packages/cli/src/plan-facts.mjs",
+      "runtimeOwner": "packages/cli/src/exit-check.mjs — `forge exit-check`, run by the agent on the shaped facts as the session leaves brainstorm, before any change directory is scaffolded; recording is `forge phase skipped --exit-reason` / `forge phase plan --exit-declined` in packages/cli/src/set-phase.mjs",
+      "writes": "session phase `skipped` with the resolved shape as reason, or the declined-offer record",
+      "reads": "shaped task count, capability count, spine rows, high-risk surface — supplied as flags by the agent, not read off disk (no change directory exists yet at the moment the offer is made)",
+      "uiConsumer": "the brainstorm-phase offer the agent presents + .forge/sessions.jsonl rows",
+      "evidence": "packages/cli/src/plan-facts.test.mjs + set-phase.test.mjs + exit-check.test.mjs"
+    },
+    {
+      "capability": "Per-pace review-yield reporting from review stamps only",
+      "library": "packages/cli/src/analyze.mjs",
+      "runtimeOwner": "`forge analyze` CLI entrypoint",
+      "writes": "yield table on stdout (text and --json)",
+      "reads": ".forge/sessions.jsonl review stamps",
+      "uiConsumer": "operator comparing against specs/changes/recalibrate-triage-and-review/baseline-yield.md",
+      "evidence": "packages/cli/src/analyze.test.mjs"
+    }
+  ]
+}

@@ -5,7 +5,13 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
+import {
+  COMBINED_TASKS,
+  collectPlanFacts,
+  suggestCeremonyFromPlan,
+  suggestExitFromPlan,
+  suggestPaceFromPlan,
+} from './plan-facts.mjs';
 
 const SET_PHASE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 
@@ -82,6 +88,30 @@ test('task count alone escalates to standard', () => {
   assert.match(reason, /20 tasks/);
 });
 
+test('the >=15-tasks branch itself fires, not just the same-pace default fallback', () => {
+  // The test above only asserts pace==='standard' and reason matches /20
+  // tasks/ — both of which the *default* fallback branch (reached when no
+  // other rule matches) also satisfies for any tasks>=6, since it too is
+  // 'standard' and its reason also interpolates facts.tasks. Disabling the
+  // `facts.tasks >= STANDARD_TASKS` branch by hand left that test green,
+  // proving it discriminates nothing about this specific rule. Assert the
+  // exact reason template the task-count branch alone produces (it names
+  // "across N group(s)"; the default fallback names "spine row(s) —
+  // default") so a disabled branch is caught here even though the resolved
+  // pace does not change.
+  const root = tmp('forge-facts-many-exact-');
+  makeChange(root, {
+    tasks: tasksMd([['A', 5], ['B', 5], ['C', 5]]),
+    spine: { rows: [], notApplicable: 'sync only' },
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  const { pace, reason } = suggestPaceFromPlan(facts);
+  assert.equal(pace, 'standard');
+  assert.equal(reason, `${facts.tasks} tasks across ${facts.groups} group(s)`);
+  assert.doesNotMatch(reason, /default/);
+});
+
 test('a wired spine escalates to standard even when the task list is short', () => {
   const root = tmp('forge-facts-spine-');
   makeChange(root, {
@@ -92,6 +122,26 @@ test('a wired spine escalates to standard even when the task list is short', () 
   const { pace, reason } = suggestPaceFromPlan(collectPlanFacts({ cwd: root, session }));
   assert.equal(pace, 'standard');
   assert.match(reason, /3 spine row/);
+});
+
+test('the spineRows>=2 branch itself fires, not just the same-pace default fallback', () => {
+  // Same non-discriminating shape as the >=15-tasks case above: disabling
+  // `facts.spineRows >= 2` by hand leaves the test above green, because the
+  // default fallback also returns 'standard' and its reason also
+  // interpolates `${facts.spineRows} spine row(s)` — /3 spine row/ matches
+  // whichever branch produced it. Assert the exact reason template only the
+  // spineRows branch emits ("spine rows —", not "spine row(s) — default").
+  const root = tmp('forge-facts-spine-exact-');
+  makeChange(root, {
+    tasks: tasksMd([['Worker', 4]]),
+    spine: { rows: [{ capability: 'ingest' }, { capability: 'notify' }, { capability: 'report' }], notApplicable: null },
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  const { pace, reason } = suggestPaceFromPlan(facts);
+  assert.equal(pace, 'standard');
+  assert.equal(reason, `${facts.spineRows} spine rows — wired capabilities need per-group review`);
+  assert.doesNotMatch(reason, /default/);
 });
 
 test('money/auth anywhere in the plan holds standard, not thorough', () => {
@@ -362,4 +412,135 @@ test('headingless tasks.md with checkboxes reports groups: 0', () => {
   const facts = collectPlanFacts({ cwd: root, session });
   assert.equal(facts.tasks, 2);
   assert.equal(facts.groups, 0);
+});
+
+// --- 4.1: plan-time exit-condition resolution -----------------------------
+//
+// D2: the exit ramp offers to leave Forge entirely for a shape that already
+// earns the combined tail — few tasks, single capability, no wired spine
+// rows, no high-risk surface. `suggestExitFromPlan` reuses COMBINED_TASKS
+// (the ceremony resolver's "few tasks") rather than a third threshold; see
+// the function's own doc comment for why that one and not BRISK_TASKS.
+
+test('exit ramp: a small single-capability change with no spine rows qualifies', () => {
+  const root = tmp('forge-exit-small-');
+  makeChange(root, {
+    tasks: tasksMd([['Fix', 2]]),
+    spine: { rows: [], notApplicable: 'sync-only bugfix' },
+    capabilities: ['pagination'],
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  const { qualifies, reason } = suggestExitFromPlan(facts);
+  assert.equal(qualifies, true);
+  // Exact template, not a substring match — every branch in this resolver
+  // interpolates the same facts, so a loose match cannot tell them apart.
+  assert.equal(
+    reason,
+    `${facts.tasks} task(s), single capability, no spine rows — small enough to leave Forge`,
+  );
+});
+
+test('exit ramp: high-risk work never qualifies, however small', () => {
+  // Two tasks, one capability, no spine rows — the qualifying shape exactly.
+  // Risk has to outrank it, the same discipline the pace resolver's own
+  // "however small" test uses.
+  const root = tmp('forge-exit-risk-');
+  makeChange(root, {
+    tasks: tasksMd([['Rotate', 2]]),
+    proposal: '# Why\n\nRotate the signing secret used by the webhook.\n',
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['webhook'],
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.highRisk, true);
+  const { qualifies, reason } = suggestExitFromPlan(facts);
+  assert.equal(qualifies, false);
+  assert.equal(reason, 'high-risk change — no exit offered, however small');
+});
+
+test('exit ramp: a wired spine row never qualifies, however small the task list', () => {
+  const root = tmp('forge-exit-spine-');
+  makeChange(root, {
+    tasks: tasksMd([['Worker', 1]]),
+    spine: { rows: [{ capability: 'ingest' }], notApplicable: null },
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  const { qualifies, reason } = suggestExitFromPlan(facts);
+  assert.equal(qualifies, false);
+  assert.equal(reason, `${facts.spineRows} spine row(s) — a wired capability needs a tracked change`);
+});
+
+test('exit ramp: more tasks or more than one capability does not qualify', () => {
+  const root = tmp('forge-exit-big-');
+  makeChange(root, {
+    tasks: tasksMd([['Model', 3], ['API', 2]]),
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['billing', 'reporting'],
+  });
+
+  const facts = collectPlanFacts({ cwd: root, session });
+  const { qualifies, reason } = suggestExitFromPlan(facts);
+  assert.equal(qualifies, false);
+  assert.equal(
+    reason,
+    `${facts.tasks} tasks, ${facts.capabilities} capability dir(s) — too large to leave Forge`,
+  );
+});
+
+test('exit ramp: an unreadable plan fails closed — no exit offered', () => {
+  const root = tmp('forge-exit-none-');
+  const facts = collectPlanFacts({ cwd: root, session });
+  assert.equal(facts.readable, false);
+  const { qualifies, reason } = suggestExitFromPlan(facts);
+  assert.equal(qualifies, false);
+  assert.equal(reason, 'could not read the plan — failing closed, no exit offered');
+});
+
+test('exit ramp: reuses the ceremony resolver’s COMBINED_TASKS boundary, not a new number', () => {
+  // At the boundary: qualifies. One past it: does not — proving the
+  // resolver reads COMBINED_TASKS itself rather than a hand-typed literal
+  // that happens to agree with it today.
+  const atBoundary = tmp('forge-exit-boundary-at-');
+  makeChange(atBoundary, {
+    tasks: tasksMd([['Fix', COMBINED_TASKS]]),
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['pagination'],
+  });
+  const overBoundary = tmp('forge-exit-boundary-over-');
+  makeChange(overBoundary, {
+    tasks: tasksMd([['Fix', COMBINED_TASKS + 1]]),
+    spine: { rows: [], notApplicable: 'sync only' },
+    capabilities: ['pagination'],
+  });
+
+  assert.equal(suggestExitFromPlan(collectPlanFacts({ cwd: atBoundary, session })).qualifies, true);
+  assert.equal(suggestExitFromPlan(collectPlanFacts({ cwd: overBoundary, session })).qualifies, false);
+});
+
+test('exit ramp: zero tasks does not qualify — unshaped, not small', () => {
+  // Fix round, group review item 5. Reused COMBINED_TASKS's own doc comment
+  // argued from `collectPlanFacts` reading a real tasks.md, where tasks===0
+  // is a *measured* fact about an (unusually) empty plan. Under `forge
+  // exit-check` (4.5) tasks is instead *asserted* by the agent before
+  // anything is scaffolded — "0 tasks" there means nothing has been shaped
+  // yet, not that a shaped change happens to be trivially small. Zero is
+  // excluded explicitly rather than left to fall through to the qualifying
+  // branch's `<= COMBINED_TASKS` check.
+  const facts = { readable: true, tasks: 0, capabilities: 1, spineRows: 0, highRisk: false };
+  const { qualifies, reason } = suggestExitFromPlan(facts);
+  assert.equal(qualifies, false);
+  assert.equal(reason, 'zero tasks — nothing shaped yet, not a small change, no exit offered');
+});
+
+test('exit ramp: a high-risk shape with zero tasks reports the high-risk reason, not the zero-tasks one', () => {
+  // Branch order: risk and wired-spine facts are meaningful regardless of
+  // task count, so they must still win over the (new) zero-tasks guard —
+  // "high-risk, however small" outranks "nothing shaped yet".
+  const facts = { readable: true, tasks: 0, capabilities: 1, spineRows: 0, highRisk: true };
+  const { qualifies, reason } = suggestExitFromPlan(facts);
+  assert.equal(qualifies, false);
+  assert.equal(reason, 'high-risk change — no exit offered, however small');
 });

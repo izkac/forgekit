@@ -37,6 +37,12 @@ forge init --overlay                 # optional OpenSpec vendor patches
 Hooks call `forge` on PATH. Merge the generated `forge-hooks.snippet.json`
 into your agent settings if hooks are not picked up automatically.
 
+**Editing this file, `pace.md`, or anything else under `skills/forge/`?**
+Those edits change this repo checkout, not what's installed. Every machine
+running Forge — including this one, if it already installed — keeps reading
+its old copy under `~/.claude/skills/forge/…` (or the Cursor/Codex equivalent)
+until it re-runs `forgekit install --skills forge --force`.
+
 ---
 
 ## When Forge runs
@@ -405,10 +411,10 @@ never overridden.
 | Pace | Intent |
 |------|--------|
 | `auto` | Pick thorough / standard / brisk / lite from signals (default) |
-| `thorough` | Always review **each task**; full-workspace tier 3 |
+| `thorough` | Review once per **OpenSpec group**, same cadence as `standard`, with more fix→re-review rounds before escalating; full-workspace tier 3 |
 | `standard` | Review once per **OpenSpec group**; full-workspace tier 3 |
-| `brisk` | Review high-risk tasks only; affected-workspace tier 3 |
-| `lite` | Skip reviews for low-risk; audit tier-2 only at verify |
+| `brisk` | Review high-risk tasks only; affected-workspace tier 3 (final review still runs) |
+| `lite` | Skip per-task review for low-risk (final review still runs); audit tier-2 only at verify |
 
 ### Effort matrix (exact knobs)
 
@@ -416,19 +422,19 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 
 | Knob | `thorough` | `standard` | `brisk` | `lite` |
 |------|------------|------------|---------|--------|
-| **review.perTask** | always | per-group | high-risk-only | never\* |
-| **review.final** | always | always | high-risk-only | never\* |
+| **review.perTask** | per-group | per-group | never\* | never\* |
+| **review.final** | always | always | always | always |
 | **review.depth** | full | full | spec-only | spec-only |
-| **review.maxRounds** | 3 | 2 | 1 | 0 |
+| **review.maxRounds** | 3 | 2 | 1 | 1 |
 | **verify.tier3** | full-workspace | full-workspace | affected-only | audit-tier2-only |
 | **models.bias** | default | default | prefer-fast | prefer-fast |
 | **brainstorm.depth** | full | full | short (≤2–3 options) | minimal |
 
 \*Hard floor: money / auth / contracts / migrations / secrets still get per-task review (and final if the session touched high-risk), even under `brisk` / `lite` / mid-group `standard`.
 
-**`thorough` vs `standard`:** thorough reviews every task; standard reviews once per OpenSpec `tasks.md` group (`##` section), except high-risk tasks which still get an immediate per-task review.
+**`thorough` vs `standard`:** identical cadence — both review once per OpenSpec `tasks.md` group (`##` section), except high-risk tasks which still get an immediate per-task review — and identical review `depth` (`full`). They differ only in `maxRounds`: thorough allows 3 fix→re-review rounds before escalating remaining findings to the human, standard allows 2.
 
-**`auto`** is not a preset — it picks one of the four once at session start (sticky):
+**`auto`** is not a preset — it resolves from signals at session start, then may re-resolve at plan time and via task-count escalation (below); not a separate knob matrix:
 
 1. money / payment / auth / secret / migration / contract / gdpr → **standard** (never `brisk`/`lite`) — risk raises the floor; the **per-task** hard floor below reviews the risky tasks themselves
 2. ecosystem / API / multi-file / shared package / worker / job queue / pipeline / etl / platform / orchestration / openspec → **standard**

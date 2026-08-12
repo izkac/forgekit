@@ -2345,3 +2345,409 @@ test('a failed pointer write warns instead of being swallowed', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/**
+ * A specs-engine change dir under `dir`, readable by `collectPlanFacts`.
+ * `groupSizes` builds one numbered `## N. Group` heading per entry, with that
+ * many checkbox lines under it — mirrors plan-facts.test.mjs's `tasksMd`.
+ *
+ * @param {string} dir
+ * @param {string} slug
+ * @param {{ groupSizes?: number[], capabilities?: string[] }} [opts]
+ */
+function makePaceChangeFixture(dir, slug, opts = {}) {
+  const groupSizes = opts.groupSizes ?? [3];
+  const capabilities = opts.capabilities ?? [];
+  const changeDir = path.join(dir, 'specs', 'changes', slug);
+  fs.mkdirSync(changeDir, { recursive: true });
+  fs.writeFileSync(path.join(changeDir, 'proposal.md'), '# Why\nBecause.\n', 'utf8');
+  const tasks = groupSizes
+    .map(
+      (n, idx) =>
+        `## ${idx + 1}. Group ${idx + 1}\n${Array.from({ length: n }, (_, i) => `- [ ] ${idx + 1}.${i + 1} do it`).join('\n')}`,
+    )
+    .join('\n\n');
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), tasks, 'utf8');
+  fs.writeFileSync(
+    path.join(changeDir, 'spine.json'),
+    `${JSON.stringify({ rows: [], notApplicable: 'sync only' })}\n`,
+    'utf8',
+  );
+  for (const cap of capabilities) {
+    const capDir = path.join(changeDir, 'specs', cap);
+    fs.mkdirSync(capDir, { recursive: true });
+    fs.writeFileSync(path.join(capDir, 'spec.md'), '## ADDED Requirements\n', 'utf8');
+  }
+  return changeDir;
+}
+
+test('a plan-driven downward pace move is marked paceDeescalated', () => {
+  // maybeResolvePaceFromPlan can move the pace either way. paceEscalated
+  // (set by maybeEscalatePaceForTaskCount, asserted above) marks the
+  // task-count upward path; this is its counterpart for the plan-driven
+  // downward one — paceResolvedFrom: 'plan' alone says the plan decided, not
+  // which way it moved.
+  const dir = tmp('forge-pace-deescalate-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-deesc');
+    makePaceChangeFixture(dir, 'shrink-scope', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'shrink-scope';
+    raw.pace = 'auto';
+    raw.resolvedPace = 'standard';
+    raw.paceReason = 'unrecognized scope — failing closed';
+    raw.pacePinned = false;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '3', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'brisk');
+    assert.equal(session.paceResolvedFrom, 'plan');
+    assert.equal(session.paceDeescalated, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a plan-driven upward pace move is not marked paceDeescalated', () => {
+  const dir = tmp('forge-pace-escalate-plan-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-esc-plan');
+    makePaceChangeFixture(dir, 'wire-worker', { groupSizes: [8, 8, 4] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'wire-worker';
+    raw.pace = 'auto';
+    raw.resolvedPace = 'lite';
+    raw.paceReason = 'docs/mechanical signals without high-risk terms';
+    raw.pacePinned = false;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '20', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'standard');
+    assert.equal(session.paceResolvedFrom, 'plan');
+    assert.notEqual(session.paceDeescalated, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pin suppressing a plan-driven adjustment is recorded, naming what it overrode', () => {
+  // Both maybeResolvePaceFromPlan and maybeEscalatePaceForTaskCount return
+  // early on pacePinned having written nothing, so a suppressed adjustment
+  // reads identically to no signal ever firing. Pin thorough against a plan
+  // that would resolve brisk (3 tasks, single capability, no wired spine
+  // rows) and require the pin to survive AND the override to be on record.
+  const dir = tmp('forge-pace-pin-suppress-plan-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-plan');
+    makePaceChangeFixture(dir, 'shrink-scope-pinned', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'shrink-scope-pinned';
+    raw.pace = 'thorough';
+    raw.resolvedPace = 'thorough';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '3', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'thorough', 'the pinned pace must not change');
+    assert.equal(session.paceSuppressed?.plan?.wouldHaveBeen, 'brisk');
+    assert.match(session.paceSuppressed.plan.reason, /3 tasks/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pin suppressing a task-count escalation is recorded, naming what it overrode', () => {
+  const dir = tmp('forge-pace-pin-suppress-taskcount-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-taskcount');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.pace = 'lite';
+    raw.resolvedPace = 'lite';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '20']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'lite', 'the pinned pace must not change');
+    assert.equal(session.paceSuppressed?.taskCount?.wouldHaveBeen, 'standard');
+    assert.equal(session.paceSuppressed.taskCount.reason, '20 tasks');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pin that already agrees with the plan is not recorded as a suppression', () => {
+  // The easy thing to get wrong: a pinned session where the signal agreed
+  // with the pin is not a suppression, because nothing was overridden.
+  const dir = tmp('forge-pace-pin-agrees-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-agree');
+    makePaceChangeFixture(dir, 'shrink-scope-agree', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'shrink-scope-agree';
+    raw.pace = 'brisk';
+    raw.resolvedPace = 'brisk';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '3', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'brisk');
+    assert.equal(session.paceSuppressed, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('pin suppression from the plan and from task-count are recorded independently in the same pass', () => {
+  // facts.tasks (from tasks.md) and session.tasksTotal (declared via
+  // --tasks-total) can legitimately disagree — the plan here is small enough
+  // to resolve brisk, but the declared total is >=15, so both functions have
+  // something to suppress against the same `lite` pin, with genuinely
+  // different "would have been" answers (brisk vs standard). Neither may
+  // clobber the other's record.
+  const dir = tmp('forge-pace-pin-suppress-both-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pin-both');
+    makePaceChangeFixture(dir, 'small-plan-big-total', { groupSizes: [3], capabilities: ['toolbar'] });
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.planType = 'specs';
+    raw.openspecChange = 'small-plan-big-total';
+    raw.pace = 'lite';
+    raw.resolvedPace = 'lite';
+    raw.paceReason = 'explicit pace';
+    raw.pacePinned = true;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    runSetPhase(dir, ['implement', '--tasks-total', '20', '--allow-incomplete', 'fixture']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.resolvedPace, 'lite', 'the pinned pace must not change');
+    assert.equal(session.paceSuppressed?.plan?.wouldHaveBeen, 'brisk');
+    assert.match(session.paceSuppressed.plan.reason, /3 tasks/);
+    assert.equal(session.paceSuppressed?.taskCount?.wouldHaveBeen, 'standard');
+    assert.equal(session.paceSuppressed.taskCount.reason, '20 tasks');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 4.3 / 4.4 — the plan-time exit ramp. Acceptance is recorded as the
+// `skipped` phase carrying the resolved shape as its reason, and — the part
+// that changes shape — that record now actually reaches `.forge/sessions.jsonl`.
+// Decline is recorded on the session and the session genuinely reaches `plan`.
+// ---------------------------------------------------------------------------
+
+test('an accepted plan-time exit records the resolved shape as the reason and the session becomes skipped', () => {
+  const dir = tmp('forge-exit-accept-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-exit-accept');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.phase = 'brainstorm';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const reason = '2 task(s), single capability, no spine rows — small enough to leave Forge';
+    runSetPhase(dir, ['skipped', '--exit-reason', reason]);
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'skipped');
+    assert.equal(session.exitReason, reason);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an exited session appears in the session ledger, with the resolved shape as its reason — never as a scored session', () => {
+  // The load-bearing half of 4.3. Before this, `skipped` wrote no ledger row
+  // at all: the digest is appended by the scorecard, and the scorecard is
+  // gated on done|finish (see the GATE_PHASES comment on set-phase.mjs). A
+  // skipped session has no scorecard — nothing was implemented to grade —
+  // so this must not read like a finished session that happened to score
+  // zero: score and grade stay null, never 0.
+  const dir = tmp('forge-exit-ledger-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-exit-ledger');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.phase = 'brainstorm';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const reason = '3 task(s), single capability, no spine rows — small enough to leave Forge';
+    runSetPhase(dir, ['skipped', '--exit-reason', reason]);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.sessionId, 'sess-exit-ledger');
+    assert.equal(entry.phase, 'skipped');
+    assert.equal(entry.exitReason, reason);
+    assert.match(entry.exitReason, /task/);
+    assert.match(entry.exitReason, /capabilit/);
+    assert.match(entry.exitReason, /no spine rows/);
+    assert.equal(entry.score, null, 'an exit is never a graded outcome');
+    assert.equal(entry.grade, null, 'an exit is never a graded outcome');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a skipped session is recorded in the ledger even with no explicit exit reason — the general GATE_PHASES gap', () => {
+  // The defect this closes is wider than the ramp: any `skipped` transition
+  // — including /forge:skip's own bare `forge phase skipped` — wrote no
+  // digest line, so the session vanished at the next `forge cleanup` with no
+  // durable record it ever existed.
+  const dir = tmp('forge-exit-bare-');
+  try {
+    makeForgeFixture(dir, 'sess-exit-bare');
+    runSetPhase(dir, ['skipped']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.sessionId, 'sess-exit-bare');
+    assert.equal(entry.phase, 'skipped');
+    assert.equal(entry.exitReason, null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a declined plan-time exit is recorded on the session and the session reaches plan', () => {
+  const dir = tmp('forge-exit-decline-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-exit-decline');
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    raw.phase = 'brainstorm';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const reason = '2 task(s), single capability, no spine rows — small enough to leave Forge';
+    runSetPhase(dir, ['plan', '--exit-declined', reason]);
+
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.phase, 'plan', 'the session must genuinely reach plan, not merely carry the field');
+    assert.equal(session.exitDeclined, reason);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--exit-reason on a non-skipped transition is not recorded — the field is scoped to the phase it means', () => {
+  const dir = tmp('forge-exit-scope-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-exit-scope');
+    runSetPhase(dir, ['brainstorm', '--exit-reason', 'should not land here']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.exitReason, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--exit-declined on a non-plan transition is not recorded — the field is scoped to the phase it means', () => {
+  // Group review, fix round: the symmetric negative-path test for
+  // `recordExitDeclined`'s `if (phase !== 'plan') return;` guard —
+  // `recordExitReason`'s equivalent guard has one above; this one did not,
+  // which is a TDD-evidence gap, not a known defect (the reviewer confirmed
+  // the guard works at runtime by hand).
+  const dir = tmp('forge-exit-declined-scope-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-exit-declined-scope');
+    runSetPhase(dir, ['brainstorm', '--exit-declined', 'should not land here']);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(session.exitDeclined, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// I5 (final review of recalibrate-triage-and-review): `paceSuppressed` and
+// `exitDeclined` were written onto the session (by `recordPaceSuppression`
+// and `recordExitDeclined` above) but never read by `appendSessionDigest`
+// (ledger.mjs), so both died with the session directory at 14-day cleanup —
+// visible only by reading a live session's JSON. D4's argument for
+// `exitReason` (carried into the digest by this same change, with the
+// comment "session-only records evaporate at cleanup") applies unchanged to
+// these two. Follow that field's exact pattern: read back whatever the
+// session already carries, never recompute.
+// ---------------------------------------------------------------------------
+
+test('paceSuppressed reaches the session ledger — same "session-only records evaporate at cleanup" argument as exitReason', () => {
+  const dir = tmp('forge-pace-suppressed-ledger-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pace-suppressed');
+    const sessionDir = path.dirname(sessionFile);
+    const raw = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    // Written the way `recordPaceSuppression` (set-phase.mjs) actually shapes
+    // it — keyed by which signal it came from — rather than re-deriving the
+    // resolution logic in this test.
+    raw.paceSuppressed = { plan: { wouldHaveBeen: 'brisk', reason: '3 tasks, single capability, no wired spine rows' } };
+    fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.sessionId, 'sess-pace-suppressed');
+    assert.deepEqual(entry.paceSuppressed, {
+      plan: { wouldHaveBeen: 'brisk', reason: '3 tasks, single capability, no wired spine rows' },
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a session with no suppressed pace carries paceSuppressed: null in the ledger — never absent, never a stale value', () => {
+  const dir = tmp('forge-pace-suppressed-absent-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-pace-suppressed-absent');
+    const sessionDir = path.dirname(sessionFile);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+
+    runSetPhase(dir, ['done']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.paceSuppressed, null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('exitDeclined reaches the session ledger — a declined exit stays countable past the session that declined it', () => {
+  const dir = tmp('forge-exit-declined-ledger-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-exit-declined-ledger');
+    const sessionDir = path.dirname(sessionFile);
+    const reason = '2 task(s), single capability, no spine rows — small enough to leave Forge';
+    runSetPhase(dir, ['plan', '--exit-declined', reason]);
+
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    runSetPhase(dir, ['done']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.sessionId, 'sess-exit-declined-ledger');
+    assert.equal(entry.exitDeclined, reason);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -615,6 +615,272 @@ test('by-model caption marks requests as detailed-only and header is sess err', 
   assert.ok(!cols.includes('err'), `bare err must not be a column: ${JSON.stringify(cols)}`);
 });
 
+/* ---------- review yield by pace (5.1) ---------- */
+
+/** The total side of a digest's `"<complete>/<total>"` tasks field. */
+function taskTotalFromFixture(tasks) {
+  const m = /^\d+\/(\d+)$/.exec(String(tasks));
+  return m ? Number(m[1]) : 0;
+}
+
+test('the yield table has one row per pace present, summed from the fixture', () => {
+  const rows = [
+    digest('brisk-1', { pace: 'brisk', tasks: '3/4', metrics: compact(), reviews: { total: 2, independent: 1, selfChecks: 1, rejections: 0, final: 'independent' } }),
+    digest('brisk-2', { pace: 'brisk', tasks: '2/2', metrics: compact(), reviews: { total: 1, independent: 1, selfChecks: 0, rejections: 1, final: 'independent' } }),
+    digest('standard-1', { pace: 'standard', tasks: '6/6', metrics: compact(), reviews: { total: 3, independent: 2, selfChecks: 1, rejections: 1, final: 'independent' } }),
+  ];
+  const analysis = buildAnalysis({ cwd: project({ digests: rows }) });
+
+  const expectedByPace = {};
+  for (const r of rows) {
+    const bucket = (expectedByPace[r.pace] ??= { sessions: 0, tasks: 0, independentReviews: 0, rejections: 0 });
+    bucket.sessions += 1;
+    bucket.tasks += taskTotalFromFixture(r.tasks);
+    bucket.independentReviews += r.reviews.independent;
+    bucket.rejections += r.reviews.rejections;
+  }
+  for (const bucket of Object.values(expectedByPace)) {
+    bucket.reviewsPerTask = bucket.tasks > 0 ? bucket.independentReviews / bucket.tasks : 0;
+    bucket.rejectionsPer100Tasks = bucket.tasks > 0 ? (bucket.rejections / bucket.tasks) * 100 : 0;
+  }
+
+  assert.deepEqual(Object.keys(analysis.reviewYield).sort(), ['brisk', 'standard']);
+  assert.deepEqual(analysis.reviewYield.brisk, expectedByPace.brisk);
+  assert.deepEqual(analysis.reviewYield.standard, expectedByPace.standard);
+
+  const text = formatAnalysis(analysis);
+  const lines = text.split('\n').map((l) => l.trim());
+  const briskLine = lines.find((l) => l.startsWith('brisk'));
+  assert.ok(briskLine, `expected a rendered brisk row in:\n${text}`);
+  const cells = briskLine.split(/\s{2,}/);
+  assert.equal(cells[1], String(expectedByPace.brisk.sessions));
+  assert.equal(cells[2], String(expectedByPace.brisk.tasks));
+  assert.equal(cells[3], String(expectedByPace.brisk.independentReviews));
+  assert.equal(cells[4], expectedByPace.brisk.reviewsPerTask.toFixed(2));
+  assert.equal(cells[5], String(expectedByPace.brisk.rejections));
+  assert.equal(cells[6], expectedByPace.brisk.rejectionsPer100Tasks.toFixed(1));
+});
+
+// I3-R (round 3, final review round 2): `phase: 'skipped'` is not only the
+// plan-time exit ramp (D2) — it is every way a session leaves Forge,
+// including `/forge:skip` on a session already mid-work (`skills/forge/
+// SKILL.md` and `templates/project/claude/commands/forge-skip.md` both send
+// that through the identical `forge phase skipped`). Gating on `phase` alone
+// dropped a session with real tasks and real independent reviews from the
+// table whose spec says it SHALL report them — rejections too, and
+// rejections-per-100-tasks is D5's guardrail metric.
+//
+// The precise signal is `exitReason`: `set-phase.mjs`'s `recordExitReason`
+// only ever sets it on the `skipped` transition when `--exit-reason` is
+// passed, and the only documented call site for that flag is `forge
+// exit-check`'s printed suggestion at plan time — before any task ceremony
+// has run. A `/forge:skip` mid-session never passes `--exit-reason`, so its
+// digest row carries `phase: 'skipped'` with `exitReason: null`, exactly
+// like a normal in-progress session. Gate on `exitReason`, not `phase`.
+//
+// Can a row carry `exitReason` AND non-zero tasks? Nothing in `set-phase.mjs`
+// enforces mutual exclusivity between `--exit-reason` and `--tasks-total`/
+// `--tasks-complete` on the same invocation — but the one documented
+// producer of `--exit-reason` (`forge exit-check`) only ever fires at
+// plan-time, before any tasks exist to declare, and no template or skill
+// pairs it with a task-count flag. So in the flow the product actually
+// drives, an `exitReason` row's tasks are always `0/0`; a hand-built or
+// malformed invocation could in principle combine them, and if it did, this
+// gate would still exclude that row from the pace it names — correctly,
+// since `exitReason` being set means the session never reached review
+// ceremony at that pace regardless of what task counts got attached to the
+// same transition.
+test('an exit-ramp row (exitReason set, tasks 0/0) carries a real pace but must not count toward that pace\'s sessions', () => {
+  const exited = digest('exit-ramp-1', {
+    phase: 'skipped',
+    pace: 'thorough',
+    tasks: '0/0',
+    exitReason: '2 task(s), single capability, no spine rows — small enough to leave Forge',
+    metrics: { available: false },
+    reviews: { total: 0, independent: 0, selfChecks: 0, rejections: 0, final: null },
+  });
+  const analysis = buildAnalysis({ cwd: project({ digests: [exited] }) });
+
+  assert.equal(
+    Object.hasOwn(analysis.reviewYield, 'thorough'),
+    false,
+    'an exit-ramp row (exitReason set) must not create a row for the pace it exited at',
+  );
+  assert.equal(analysis.coverage.sessionsTotal, 1, 'the skipped session still counts toward overall coverage');
+});
+
+test('an abandoned mid-work session (phase: skipped, no exitReason, real tasks and reviews) counts in the yield table', () => {
+  const abandoned = digest('abandoned-1', {
+    phase: 'skipped',
+    pace: 'thorough',
+    tasks: '8/12',
+    exitReason: null,
+    metrics: { available: false },
+    reviews: { total: 3, independent: 3, selfChecks: 0, rejections: 1, final: null },
+  });
+  const analysis = buildAnalysis({ cwd: project({ digests: [abandoned] }) });
+
+  assert.equal(
+    Object.hasOwn(analysis.reviewYield, 'thorough'),
+    true,
+    'a /forge:skip abandonment (no exitReason) must still count toward the pace it ran real work at',
+  );
+  assert.equal(analysis.reviewYield.thorough.sessions, 1);
+  assert.equal(analysis.reviewYield.thorough.tasks, 12);
+  assert.equal(analysis.reviewYield.thorough.independentReviews, 3);
+  assert.equal(analysis.reviewYield.thorough.rejections, 1);
+});
+
+test('a session that never resolved a pace does not create a null-pace row or count as a zero-yield session', () => {
+  const skipped = digest('skipped-1', {
+    pace: null,
+    tasks: '0/0',
+    metrics: { available: false },
+    reviews: { total: 0, independent: 0, selfChecks: 0, rejections: 0, final: null },
+  });
+  const normal = digest('standard-1', {
+    pace: 'standard',
+    tasks: '5/5',
+    metrics: compact(),
+    reviews: { total: 2, independent: 2, selfChecks: 0, rejections: 0, final: 'independent' },
+  });
+  const analysis = buildAnalysis({ cwd: project({ digests: [skipped, normal] }) });
+
+  assert.equal(Object.hasOwn(analysis.reviewYield, 'null'), false);
+  assert.deepEqual(Object.keys(analysis.reviewYield), ['standard']);
+  assert.equal(analysis.reviewYield.standard.sessions, 1, 'the skipped row must not be folded in anywhere');
+  assert.equal(analysis.coverage.sessionsTotal, 2, 'the skipped session still counts toward overall coverage');
+});
+
+test('reviews per task and rejections per 100 tasks are 0, never NaN or Infinity, when a pace has zero tasks', () => {
+  const zeroTasks = digest('brisk-zero', {
+    pace: 'brisk',
+    tasks: '0/0',
+    metrics: compact(),
+    reviews: { total: 2, independent: 2, selfChecks: 0, rejections: 1, final: 'independent' },
+  });
+  const analysis = buildAnalysis({ cwd: project({ digests: [zeroTasks] }) });
+
+  assert.equal(analysis.reviewYield.brisk.tasks, 0);
+  assert.equal(analysis.reviewYield.brisk.reviewsPerTask, 0);
+  assert.equal(analysis.reviewYield.brisk.rejectionsPer100Tasks, 0);
+  assert.ok(Number.isFinite(analysis.reviewYield.brisk.reviewsPerTask));
+  assert.ok(Number.isFinite(analysis.reviewYield.brisk.rejectionsPer100Tasks));
+});
+
+/* ---------- review yield derives from stamps, not harvested telemetry (5.2) ---------- */
+
+test('a session whose host metrics failed but which recorded reviews still counts those reviews — never the harvested dispatch count', () => {
+  // The two sources are made to disagree on purpose: `subagentsDispatched: 0`
+  // is a harvested zero (indistinguishable from "genuinely dispatched
+  // nothing"), while `reviews.independent` is the real, recorded count. A
+  // fix that fell back to `subagentsDispatched`, or that skipped this session
+  // because `metrics.available === false`, would both land on numbers other
+  // than the ones asserted below.
+  const collectionFailed = digest('thorough-failed-telemetry', {
+    pace: 'thorough',
+    tasks: '6/6',
+    metrics: { available: false, reason: 'no transcript on disk' },
+    subagentsDispatched: 0,
+    reviews: { total: 5, independent: 4, selfChecks: 1, rejections: 2, final: 'independent' },
+  });
+  const analysis = buildAnalysis({ cwd: project({ digests: [collectionFailed] }) });
+
+  assert.equal(analysis.coverage.collectionFailed, 1, 'the fixture is exercising the failed-telemetry bucket');
+  assert.deepEqual(Object.keys(analysis.reviewYield), ['thorough']);
+  assert.equal(analysis.reviewYield.thorough.sessions, 1);
+  assert.equal(analysis.reviewYield.thorough.tasks, 6);
+  assert.equal(
+    analysis.reviewYield.thorough.independentReviews,
+    4,
+    'must come from reviews.independent, not the harvested subagentsDispatched (0)',
+  );
+  assert.notEqual(analysis.reviewYield.thorough.independentReviews, 0);
+  assert.equal(analysis.reviewYield.thorough.rejections, 2);
+  assert.equal(analysis.reviewYield.thorough.reviewsPerTask, 4 / 6);
+  assert.equal(analysis.reviewYield.thorough.rejectionsPer100Tasks, (2 / 6) * 100);
+});
+
+/* ---------- absent paces are omitted, not zero rows (5.3) ---------- */
+
+test('a pace with no recorded sessions produces no row — not a row of zeros', () => {
+  const rows = [
+    digest('brisk-only', { pace: 'brisk', tasks: '2/2', metrics: compact(), reviews: { total: 1, independent: 1, selfChecks: 0, rejections: 0, final: 'independent' } }),
+    digest('thorough-only', { pace: 'thorough', tasks: '3/3', metrics: compact(), reviews: { total: 2, independent: 2, selfChecks: 0, rejections: 1, final: 'independent' } }),
+  ];
+  const analysis = buildAnalysis({ cwd: project({ digests: rows }) });
+
+  assert.deepEqual(Object.keys(analysis.reviewYield).sort(), ['brisk', 'thorough']);
+  assert.equal(Object.hasOwn(analysis.reviewYield, 'standard'), false, 'no sessions ran at standard');
+  assert.equal(Object.hasOwn(analysis.reviewYield, 'lite'), false, 'no sessions ran at lite');
+
+  const text = formatAnalysis(analysis);
+  const lines = text.split('\n').map((l) => l.trim());
+  const heading = lines.findIndex((l) => l.startsWith('Review yield by pace'));
+  assert.ok(heading >= 0, `expected the yield section heading in:\n${text}`);
+  const sectionEnd = lines.indexOf('', heading);
+  const section = lines.slice(heading, sectionEnd === -1 ? undefined : sectionEnd);
+  assert.ok(!section.some((l) => l.startsWith('standard')), `standard must not be rendered:\n${section.join('\n')}`);
+  assert.ok(!section.some((l) => l.startsWith('lite')), `lite must not be rendered:\n${section.join('\n')}`);
+});
+
+/* ---------- the review-yield table has a stable, pinned JSON shape (5.4) ---------- */
+
+test('the review-yield table is a top-level `reviewYield` key, pace-keyed, with a pinned row shape', () => {
+  const rows = [
+    digest('brisk-1', { pace: 'brisk', tasks: '4/4', metrics: compact(), reviews: { total: 1, independent: 1, selfChecks: 0, rejections: 0, final: 'independent' } }),
+  ];
+  const analysis = buildAnalysis({ cwd: project({ digests: rows }) });
+  // `--json` serialises the analysis object verbatim (analyze-cli.mjs) — the
+  // round trip below is the actual shape a script parsing `forge analyze
+  // --json` would see, not just the in-memory object.
+  const parsed = JSON.parse(JSON.stringify(analysis));
+
+  assert.ok(Object.hasOwn(parsed, 'reviewYield'), 'reviewYield must be a top-level key');
+  assert.deepEqual(Object.keys(parsed), [
+    'coverage',
+    'filters',
+    'totals',
+    'sessions',
+    'byModel',
+    'byPhase',
+    'reviewYield',
+    'dispatches',
+    'grades',
+  ]);
+  assert.deepEqual(Object.keys(parsed.reviewYield), ['brisk']);
+  assert.deepEqual(Object.keys(parsed.reviewYield.brisk).sort(), [
+    'independentReviews',
+    'rejections',
+    'rejectionsPer100Tasks',
+    'reviewsPerTask',
+    'sessions',
+    'tasks',
+  ]);
+  assert.equal(typeof parsed.reviewYield.brisk.sessions, 'number');
+  assert.equal(typeof parsed.reviewYield.brisk.tasks, 'number');
+  assert.equal(typeof parsed.reviewYield.brisk.independentReviews, 'number');
+  assert.equal(typeof parsed.reviewYield.brisk.reviewsPerTask, 'number');
+  assert.equal(typeof parsed.reviewYield.brisk.rejections, 'number');
+  assert.equal(typeof parsed.reviewYield.brisk.rejectionsPer100Tasks, 'number');
+});
+
+test('forge analyze --json emits reviewYield through the real CLI binary', () => {
+  const bin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'forge.mjs');
+  const cwd = project({
+    digests: [
+      digest('brisk-1', { pace: 'brisk', tasks: '4/4', metrics: compact(), reviews: { total: 1, independent: 1, selfChecks: 0, rejections: 0, final: 'independent' } }),
+    ],
+  });
+  fs.writeFileSync(path.join(cwd, 'package.json'), '{"name":"scratch"}\n', 'utf8');
+
+  const json = spawnSync(process.execPath, [bin, 'analyze', '--json'], { cwd, encoding: 'utf8' });
+  assert.equal(json.status, 0, json.stderr);
+  const parsed = JSON.parse(json.stdout);
+  assert.deepEqual(Object.keys(parsed.reviewYield), ['brisk']);
+  assert.equal(parsed.reviewYield.brisk.independentReviews, 1);
+});
+
 /* ---------- the CLI ---------- */
 
 test('forge analyze is registered, prints a table, and --json emits the object', () => {

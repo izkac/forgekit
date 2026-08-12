@@ -290,11 +290,27 @@ export function appendSessionDigest(opts) {
       score: opts.card?.score ?? session.score ?? null,
       grade: opts.card?.grade ?? session.scoreGrade ?? null,
       incompleteReason: session.incompleteReason ?? null,
+      // The plan-time exit ramp's resolved shape (D2), for a session that
+      // left through it. `set-phase` records this on the session at the
+      // `skipped` transition and it is kept only there until now — read
+      // back here, never recomputed, since the change directory the shape
+      // was read from may no longer exist by the time anything reads this
+      // ledger line.
+      exitReason: session.exitReason ?? null,
       // set-phase tells the operator this is "kept on the session and in
       // .forge/sessions.jsonl". It was kept only on the session, so the reason a
       // reviewer was declined evaporated at cleanup — while the cap it explains
       // survived in the score.
       finalReviewWaived: session.finalReviewWaived ?? null,
+      // I5 (final review): `paceSuppressed` and `exitDeclined` were written
+      // by `set-phase.mjs` (`recordPaceSuppression`, `recordExitDeclined`)
+      // and read by nothing in production — session-only, so both died with
+      // the session directory at 14-day cleanup. Same argument as
+      // `exitReason` above: a suppressed adjustment (D4) or a declined exit
+      // offer must stay countable past the session that recorded it, never
+      // recomputed here.
+      paceSuppressed: session.paceSuppressed ?? null,
+      exitDeclined: session.exitDeclined ?? null,
       durationHours,
       startedAt: session.createdAt ?? null,
       endedAt: session.updatedAt ?? null,

@@ -41,6 +41,16 @@ function num(value) {
 }
 
 /**
+ * The total side of a digest's `"<complete>/<total>"` tasks field.
+ *
+ * @param {unknown} tasks
+ */
+function taskTotal(tasks) {
+  const m = typeof tasks === 'string' ? /^\d+\/(\d+)$/.exec(tasks) : null;
+  return m ? Number(m[1]) : 0;
+}
+
+/**
  * A session's full metrics document, if its directory outlived it.
  *
  * @param {string} forgeDir
@@ -118,6 +128,8 @@ export function buildAnalysis(options = {}) {
   const byModel = Object.create(null);
   /** @type {Record<string, any>} */
   const byPhase = Object.create(null);
+  /** @type {Record<string, any>} */
+  const byPace = Object.create(null);
   /** @type {Record<string, number>} */
   const grades = Object.create(null);
   const dispatches = { total: 0, allowed: 0, rewritten: 0, denied: 0, skipped: 0, sessions: 0 };
@@ -147,6 +159,59 @@ export function buildAnalysis(options = {}) {
       totals.subagents += num(compact.subagents);
     }
     if (typeof grade === 'string' && grade) grades[grade] = (grades[grade] ?? 0) + 1;
+
+    // I3-R (final review round 2, `recalibrate-triage-and-review`): a prior
+    // pass here gated on `entry.phase !== 'skipped'`, reasoning that
+    // `'skipped'` meant the plan-time exit ramp (D2). It does not — `phase:
+    // 'skipped'` is written by every `forge phase skipped` transition, and
+    // `/forge:skip` on a session already mid-work goes through that exact
+    // command (`skills/forge/SKILL.md`, `templates/project/claude/commands/
+    // forge-skip.md`). That excluded real sessions with real tasks and real
+    // independent reviews from a table whose spec says it SHALL report them.
+    //
+    // The precise signal is `exitReason`: `set-phase.mjs`'s
+    // `recordExitReason` only ever sets it on the `skipped` transition when
+    // `--exit-reason` is passed, and the only documented producer of that
+    // flag is `forge exit-check`'s printed suggestion — fired at plan time,
+    // before any task ceremony has run, never by a mid-session
+    // `/forge:skip`. `forge new` resolves a pace onto the session
+    // immediately, so an exit-ramp row does NOT carry `pace: null` — it
+    // carries a real, already-resolved pace alongside `tasks: "0/0"` (the
+    // live forgekit ledger has zero `pace: null` rows in 44). That session
+    // never reached review ceremony at the pace it resolved, so folding it
+    // in would inflate the `sessions` column for a pace it never ran at —
+    // the one column `baseline-yield.md` (which predates the exit ramp, and
+    // has no such rows) cannot be compared against. Exclude rows that carry
+    // `exitReason` here, not rows that merely carry `phase: "skipped"`.
+    //
+    // Nothing enforces that an `exitReason` row's tasks stay at `0/0` —
+    // `--exit-reason` and `--tasks-total`/`--tasks-complete` are independent
+    // flags on the same command — but the one documented call site never
+    // pairs them, so in the flow the product drives this never happens. If a
+    // hand-built invocation ever did combine them, excluding by `exitReason`
+    // is still correct: the field means "this session never reached review
+    // ceremony at this pace", which holds regardless of what task counts got
+    // attached to the same transition. The `pace: null` check below is kept
+    // as defensive, null-safe handling — it guards a shape a hand-edited or
+    // pre-digest-schema ledger line could carry, not one the product emits.
+    if (entry.exitReason == null && typeof entry.pace === 'string' && entry.pace) {
+      const row = (byPace[entry.pace] ??= {
+        sessions: 0,
+        tasks: 0,
+        independentReviews: 0,
+        rejections: 0,
+      });
+      // Deliberately independent of `hasMetrics`: `reviews.*` is Forge's own
+      // recorded stamp, not harvested host telemetry. A session whose
+      // metrics collection failed can still have reviewed and rejected work,
+      // and `subagentsDispatched` — the harvested figure — must never stand
+      // in here: it is `null` or an indistinguishable harvested `0` for a
+      // meaningful slice of real ledgers (see baseline-yield.md).
+      row.sessions += 1;
+      row.tasks += taskTotal(entry.tasks);
+      row.independentReviews += num(entry.reviews?.independent);
+      row.rejections += num(entry.reviews?.rejections);
+    }
 
     // Prefer live metrics.json splits; else digest compact byModel/byPhase.
     // Name-only historical digests still contribute sessions/grades only.
@@ -261,6 +326,17 @@ export function buildAnalysis(options = {}) {
     row.grades.sort();
   }
 
+  /** @type {Record<string, any>} */
+  const reviewYield = Object.create(null);
+  for (const pace of Object.keys(byPace).sort()) {
+    const row = byPace[pace];
+    reviewYield[pace] = {
+      ...row,
+      reviewsPerTask: row.tasks > 0 ? row.independentReviews / row.tasks : 0,
+      rejectionsPer100Tasks: row.tasks > 0 ? (row.rejections / row.tasks) * 100 : 0,
+    };
+  }
+
   return {
     coverage: {
       sessionsTotal: digests.length,
@@ -278,6 +354,7 @@ export function buildAnalysis(options = {}) {
     sessions,
     byModel,
     byPhase,
+    reviewYield,
     dispatches: {
       ...dispatches,
       skipRate: dispatches.total > 0 ? dispatches.skipped / dispatches.total : 0,
@@ -413,6 +490,29 @@ export function formatAnalysis(analysis) {
             ]),
         ],
         ['left', 'right', 'right', 'right', 'right'],
+      ),
+    );
+  }
+
+  const yieldRows = Object.entries(a.reviewYield ?? {});
+  if (yieldRows.length) {
+    out.push('');
+    out.push('Review yield by pace  (from recorded review stamps, never harvested dispatch counts)');
+    out.push(
+      table(
+        [
+          ['pace', 'sessions', 'tasks', 'reviews', 'reviews/task', 'rejections', 'rej/100 tasks'],
+          ...yieldRows.map(([pace, row]) => [
+            pace,
+            String(row.sessions),
+            String(row.tasks),
+            String(row.independentReviews),
+            num(row.reviewsPerTask).toFixed(2),
+            String(row.rejections),
+            num(row.rejectionsPer100Tasks).toFixed(1),
+          ]),
+        ],
+        ['left', 'right', 'right', 'right', 'right', 'right', 'right'],
       ),
     );
   }

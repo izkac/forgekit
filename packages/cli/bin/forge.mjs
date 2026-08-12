@@ -33,6 +33,7 @@ const COMMANDS = {
   install: { script: 'install.mjs', prependArgs: ['--skills', 'forge'] },
   init: { script: 'init.mjs' },
   triage: { script: 'triage-prompt.mjs' },
+  'exit-check': { script: 'exit-check.mjs' },
   change: { script: 'change.mjs' },
   spine: { script: 'spine.mjs' },
   e2e: { script: 'e2e.mjs' },
@@ -73,6 +74,7 @@ Commands:
   install                 Alias → forgekit install --skills forge
   init                    Wire Forge commands/hooks/rules into this project
   triage                  Classify whether a prompt needs Forge triage
+  exit-check --tasks N --capabilities N --spine-rows N [--high-risk] [--json]  Plan-time exit ramp rule (0=qualifies, 1=proceed to plan)
   change new|archive      Specs-engine change scaffold / archive
   spine init|check        Capability→runtime spine matrix (spine.json)
   e2e init|run|check      Executable product-loop acceptance (e2e.json)
