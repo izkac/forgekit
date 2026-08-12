@@ -15,6 +15,7 @@ import {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertSafeTaskTree, defaultCorpusId, parseCampaign, selectCorpus } from './corpus-selection.mjs';
+import { CARRYOVER_MARKER } from './tasks/forgekit-campaign-v1/shared/carryover-precondition.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsRoot = path.resolve(here, '..');
@@ -198,7 +199,7 @@ async function resolveRunUnits(config, selection) {
         taskVersion,
         taskRevision: await hashDirectory(episode.resolvedPath),
         canonicalLocator: path.posix.join(selection.taskRootLocator, episode.id),
-        stagedRelative: (arm) => `arms/${arm}/${episode.id}`,
+        stagedRelative: (arm, repetition) => `arms/${arm}/r${String(repetition).padStart(3, '0')}/${episode.id}`,
         episodeId: episode.id,
         episodeIndex: episode.index,
       });
@@ -397,6 +398,30 @@ function runIdFor(config, forgekitTreatment) {
   }
   const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
   return `${timestamp}-${randomUUID().slice(0, 8)}`;
+}
+
+async function inheritCampaignApp(previousApp, stagedTask) {
+  const destApp = path.join(stagedTask, 'environment', 'app');
+  await rm(destApp, { recursive: true, force: true });
+  await cp(previousApp, destApp, { recursive: true });
+  await writeFile(path.join(destApp, CARRYOVER_MARKER), 'inherited\n');
+}
+
+async function findAppArtifact(trialOutput) {
+  const matches = await findEntries(
+    trialOutput,
+    (entry, file) => entry.isDirectory()
+      && entry.name === 'app'
+      && path.basename(path.dirname(file)) === 'artifacts',
+  );
+  return matches[0] ?? null;
+}
+
+async function carryCampaignOutput(trial, nextTrial) {
+  if (nextTrial === undefined || trial.status !== 'verified') return;
+  const appOutput = await findAppArtifact(trial.trialOutput);
+  if (appOutput === null) return;
+  await inheritCampaignApp(appOutput, path.join(trial.runDirectory, nextTrial.manifestData.stagedTask));
 }
 
 async function stageArm(canonicalTask, stagedTask, arm, treatment) {
@@ -773,12 +798,28 @@ async function main(argv) {
 
   const arms = selectedArms(config.arm);
   const stagedTasks = {};
-  for (const arm of arms) {
-    for (const unit of units) {
-      const stagedRelative = unit.stagedRelative(arm);
-      const stagedTask = path.join(runDirectory, stagedRelative);
-      await stageArm(unit.canonicalPath, stagedTask, arm, forgekitTreatment);
-      stagedTasks[`${arm}:${unit.id}`] = stagedTask;
+  for (let repetition = 1; repetition <= config.repetitions; repetition += 1) {
+    for (const arm of arms) {
+      for (const unit of units) {
+        const stagedRelative = unit.stagedRelative(arm, repetition);
+        const stagedTask = path.join(runDirectory, stagedRelative);
+        await stageArm(unit.canonicalPath, stagedTask, arm, forgekitTreatment);
+        stagedTasks[`${arm}:${repetition}:${unit.id}`] = stagedTask;
+      }
+    }
+  }
+  if (campaign) {
+    for (let repetition = 1; repetition <= config.repetitions; repetition += 1) {
+      for (const arm of arms) {
+        for (let index = 1; index < units.length; index += 1) {
+          const previousApp = path.join(
+            stagedTasks[`${arm}:${repetition}:${units[index - 1].id}`],
+            'environment',
+            'app',
+          );
+          await inheritCampaignApp(previousApp, stagedTasks[`${arm}:${repetition}:${units[index].id}`]);
+        }
+      }
     }
   }
 
@@ -806,9 +847,9 @@ async function main(argv) {
         const trialDirectory = path.join(runDirectory, 'trials', trialId);
         const trialOutput = path.join(trialDirectory, 'harbor');
         await mkdir(trialDirectory, { recursive: true });
-        const stagedRelative = unit.stagedRelative(arm);
+        const stagedRelative = unit.stagedRelative(arm, repetition);
         const argvForHarbor = harborArgv({
-          stagedTask: stagedTasks[`${arm}:${unit.id}`],
+          stagedTask: stagedTasks[`${arm}:${repetition}:${unit.id}`],
           agent: config.agent,
           model: config.model,
           trialOutput,
@@ -957,7 +998,12 @@ async function main(argv) {
               continue;
             }
             await attempt(trial);
-            if (trial.status === 'failed') stopArm = true;
+            if (trial.status === 'failed') {
+              stopArm = true;
+              continue;
+            }
+            const nextTrial = armTrials.find((candidate) => candidate.episodeIndex === trial.episodeIndex + 1);
+            await carryCampaignOutput(trial, nextTrial);
           }
         }));
       });

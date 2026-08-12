@@ -56,17 +56,17 @@
 
 ## 4. State carryover
 
-- [ ] 4.1 Stage episode N+1's agent environment from episode N's `/app` output
+- [x] 4.1 Stage episode N+1's agent environment from episode N's `/app` output
       for the same arm and repetition. Verify: `run.test.mjs` dry-run asserts
       episode 2's staged environment contains a file written into episode 1's
       output.
-- [ ] 4.2 Exclude verifier directories from carryover and assert no verifier
+- [x] 4.2 Exclude verifier directories from carryover and assert no verifier
       source reaches any agent environment at any episode. Verify: staging test
       asserts absence across all six episodes.
-- [ ] 4.3 Keep arms isolated: each arm's episode N+1 derives only from its own
+- [x] 4.3 Keep arms isolated: each arm's episode N+1 derives only from its own
       episode N. Verify: test asserts a file written only by the baseline arm
       never appears in the Forge arm's staged environment.
-- [ ] 4.4 Add a carryover precondition to the shared verifier helper: a missing
+- [x] 4.4 Add a carryover precondition to the shared verifier helper: a missing
       inherited marker reports an operational failure and emits no reward.
       Verify: test asserts no `reward.json` is written and the aggregator lists
       the pair as incomplete rather than crediting a zero.

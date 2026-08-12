@@ -62,8 +62,28 @@ function manifestFile(plan, trial) {
   return path.join(plan.runDirectory, trial.manifest);
 }
 
+function trialStagedPath(trial) {
+  return trial.harborArgv[trial.harborArgv.indexOf('--path') + 1];
+}
+
 async function cleanupPlan(plan) {
   if (plan?.runDirectory) await rm(plan.runDirectory, { recursive: true, force: true });
+}
+
+async function listRelativeFiles(root) {
+  const found = [];
+  async function visit(current, relative = '') {
+    const entries = await readdir(current, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const childRelative = relative ? `${relative}/${entry.name}` : entry.name;
+      const child = path.join(current, entry.name);
+      if (entry.isDirectory()) await visit(child, childRelative);
+      else found.push(childRelative);
+    }
+  }
+  await visit(root);
+  return found;
 }
 
 test('dry run stages canonical baseline and Forge arms and writes trial manifests', async (t) => {
@@ -1002,4 +1022,133 @@ test('campaign seeded schedules hash campaign identity and alternate across repe
       })))
     )),
   );
+});
+
+test('campaign dry-run stages episode 2 app from episode 1 of the same arm', async (t) => {
+  const campaignRoot = path.join(here, 'tasks/forgekit-campaign-v1');
+  const episode1App = path.join(campaignRoot, 'episode-01/environment/app');
+  const episode2App = path.join(campaignRoot, 'episode-02/environment/app');
+  const episode2Canonical = new Set(await listRelativeFiles(episode2App));
+  const inherited = (await listRelativeFiles(episode1App)).filter((file) => !episode2Canonical.has(file));
+  assert.ok(inherited.length > 0);
+
+  const result = await run([...campaignArgs, '--dry-run']);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  for (const arm of ['baseline', 'forge']) {
+    const trial = plan.trials.find((candidate) => candidate.arm === arm && candidate.episodeId === 'episode-02');
+    const stagedApp = path.join(plan.runDirectory, trialStagedPath(trial), 'environment', 'app');
+    for (const relative of inherited) {
+      const expected = await readFile(path.join(episode1App, relative), 'utf8');
+      const actual = await readFile(path.join(stagedApp, relative), 'utf8');
+      assert.equal(actual, expected);
+    }
+  }
+});
+
+test('campaign staging never places verifier sources in any agent environment', async (t) => {
+  const campaignRoot = path.join(here, 'tasks/forgekit-campaign-v1');
+  const declared = JSON.parse(await readFile(path.join(here, 'corpora/forgekit-campaign-v1.json'), 'utf8'));
+  const verifierContents = [];
+  for (const episode of declared.episodes) {
+    const testsDir = path.join(campaignRoot, episode.id, 'tests');
+    for (const relative of await listRelativeFiles(testsDir)) {
+      verifierContents.push(await readFile(path.join(testsDir, relative)));
+    }
+  }
+  assert.ok(verifierContents.length > 0);
+  assert.equal(declared.episodes.length, 6);
+
+  const result = await run([...campaignArgs, '--dry-run']);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  for (const trial of plan.trials) {
+    const environment = path.join(plan.runDirectory, trialStagedPath(trial), 'environment');
+    for (const relative of await listRelativeFiles(environment)) {
+      const staged = await readFile(path.join(environment, relative));
+      for (const verifier of verifierContents) {
+        assert.notEqual(
+          Buffer.compare(staged, verifier),
+          0,
+          `${trial.arm} ${trial.episodeId} environment/${relative} matches a verifier file`,
+        );
+      }
+    }
+  }
+});
+
+test('campaign arms do not share carried repository state', async (t) => {
+  const baselineOnly = 'baseline-arm-only.txt';
+  const forgeOnly = 'forge-arm-only.txt';
+  const baselineBytes = 'written-by-baseline-episode-01\n';
+  const forgeBytes = 'written-by-forge-episode-01\n';
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-arm-isolation-'));
+  const fakeHarbor = path.join(bin, 'harbor');
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('harbor 0.20.0'); process.exit(0); }
+const jobName = args[args.indexOf('--job-name') + 1];
+const staged = args[args.indexOf('--path') + 1];
+const job = path.join(args[args.indexOf('--jobs-dir') + 1], 'job');
+const appOut = path.join(job, 'trial', 'artifacts', 'app');
+cpSync(path.join(staged, 'environment', 'app'), appOut, { recursive: true });
+if (jobName.includes('episode-01-baseline-')) {
+  writeFileSync(path.join(appOut, ${JSON.stringify(baselineOnly)}), ${JSON.stringify(baselineBytes)});
+}
+if (jobName.includes('episode-01-forge-')) {
+  writeFileSync(path.join(appOut, ${JSON.stringify(forgeOnly)}), ${JSON.stringify(forgeBytes)});
+}
+mkdirSync(path.join(job, 'trial', 'verifier'), { recursive: true });
+writeFileSync(path.join(job, 'trial', 'verifier', 'reward.json'), '{"functional":1,"regression":1,"tests_unchanged":1,"shippable":1}');
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const result = await run([...campaignArgs, '--seed', 'arm-isolation-seed'], {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  const baselineEpisode2 = plan.trials.find((trial) => trial.arm === 'baseline' && trial.episodeId === 'episode-02');
+  const forgeEpisode2 = plan.trials.find((trial) => trial.arm === 'forge' && trial.episodeId === 'episode-02');
+  const baselineApp = path.join(plan.runDirectory, trialStagedPath(baselineEpisode2), 'environment', 'app');
+  const forgeApp = path.join(plan.runDirectory, trialStagedPath(forgeEpisode2), 'environment', 'app');
+  assert.equal(await readFile(path.join(baselineApp, baselineOnly), 'utf8'), baselineBytes);
+  assert.equal(await readFile(path.join(forgeApp, forgeOnly), 'utf8'), forgeBytes);
+  await assert.rejects(() => readFile(path.join(forgeApp, baselineOnly)));
+  await assert.rejects(() => readFile(path.join(baselineApp, forgeOnly)));
+});
+
+test('campaign dry-run stages distinct directories per repetition', async (t) => {
+  const repetitions = 2;
+  const args = [...campaignArgs, '--dry-run'];
+  args[args.indexOf('--repetitions') + 1] = String(repetitions);
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  const stagedPaths = plan.trials.map(trialStagedPath);
+  assert.equal(new Set(stagedPaths).size, stagedPaths.length);
+
+  const episode2 = plan.trials.filter((trial) => trial.arm === 'baseline' && trial.episodeId === 'episode-02');
+  assert.equal(episode2.length, repetitions);
+  const directories = [];
+  for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+    const trial = episode2.find((candidate) => candidate.repetition === repetition);
+    const relative = trialStagedPath(trial);
+    assert.equal(relative, `arms/baseline/r${String(repetition).padStart(3, '0')}/episode-02`);
+    const directory = path.join(plan.runDirectory, relative);
+    assert.equal((await stat(directory)).isDirectory(), true);
+    directories.push(path.resolve(directory));
+  }
+  assert.notEqual(directories[0], directories[1]);
 });
