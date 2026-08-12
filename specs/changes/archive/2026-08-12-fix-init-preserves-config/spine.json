@@ -1,0 +1,24 @@
+{
+  "change": "fix-init-preserves-config",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Init preserves a project's recorded plan engine (and plan.dir) when no engine flag is given",
+      "library": "packages/cli/src/init.mjs — resolveInitPlanEngine, reading loadProjectConfig",
+      "runtimeOwner": "packages/cli/src/init.mjs — `forge init` CLI command, run per project (and by every install/upgrade that re-inits)",
+      "writes": "plan.engine / plan.dir in the project's .forge/config.json (or leaves them unchanged when recorded)",
+      "reads": "the project's existing .forge/config.json, the engine flags, and the user default",
+      "uiConsumer": "every later forge phase, which routes plan commands by the recorded engine; the init report JSON",
+      "evidence": "packages/cli/src/init.test.mjs"
+    },
+    {
+      "capability": "Init preserves a project's recorded adr.enabled when no ADR flag is given",
+      "library": "packages/cli/src/init.mjs — the ADR resolution block (opts.adr === null path)",
+      "runtimeOwner": "packages/cli/src/init.mjs — `forge init` CLI command",
+      "writes": "adr.enabled / adr.dir / adr.decisionsDoc in .forge/config.json, and ADR scaffold files on disk (or none when the recorded value disables ADRs)",
+      "reads": "the project's existing .forge/config.json adr block, the ADR flags, and the user default",
+      "uiConsumer": "the archive-to-adr flow and the pending-ADR hooks, which only fire when adr.enabled",
+      "evidence": "packages/cli/src/init.test.mjs"
+    }
+  ]
+}
