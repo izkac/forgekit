@@ -1,0 +1,19 @@
+{
+  "change": "enforce-archive-before-done",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "boot-scratch-project",
+      "cmd": "node scripts/e2e/harness-portability.mjs boot"
+    },
+    {
+      "name": "done-refuses-while-change-is-live",
+      "cmd": "node scripts/e2e/harness-portability.mjs archive-gate",
+      "expect": "ARCHIVE GATE GREEN"
+    },
+    {
+      "name": "shipped-cli-still-portable",
+      "cmd": "node scripts/e2e/harness-portability.mjs all"
+    }
+  ]
+}
