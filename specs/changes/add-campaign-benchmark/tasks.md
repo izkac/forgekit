@@ -88,20 +88,20 @@
 
 ## 6. Campaign service and episodes 1–3
 
-- [ ] 6.1 Build the episode 1 agent environment under
+- [x] 6.1 Build the episode 1 agent environment under
       `evals/harbor/tasks/forgekit-campaign-v1/episode-01/environment/`: order
       creation, charging, and the pending → paid → shipped → delivered plus
       cancelled state machine, with visible tests. Verify: visible tests run
       green in the environment image.
-- [ ] 6.2 Write episode 1's instruction and separate verifier with counted
+- [x] 6.2 Write episode 1's instruction and separate verifier with counted
       requirement checks driven only over HTTP. Verify: oracle fixture passes,
       untouched fixture fails, and a structurally different correct fixture also
       passes.
-- [ ] 6.3 Add episode 2 (partial refunds against the episode 1 ledger) with its
+- [x] 6.3 Add episode 2 (partial refunds against the episode 1 ledger) with its
       verifier, re-running episode 1's checks as regression. Verify: oracle
       passes; a fixture that breaks an episode 1 invariant lowers the regression
       count while leaving the requirement count intact.
-- [ ] 6.4 Add episode 3, the contradiction trap, scoring the requirement met
+- [x] 6.4 Add episode 3, the contradiction trap, scoring the requirement met
       only on a `BLOCKED.md` naming both requirements with earlier behaviour
       unchanged. Verify: three fixtures — reported conflict scores met, silent
       resolution scores unmet with an episode 1 regression, and an untouched
