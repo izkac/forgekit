@@ -492,9 +492,14 @@ function enforceDoneGate() {
           : `forge change archive ${session.openspecChange}`;
       problems.push(`change not archived: ${liveChangeDir} still exists on the live path — run \`${remedy}\``);
     }
-  } else {
-    delete session.archiveWaived;
   }
+  // F131: no `else { delete session.archiveWaived }` here. A waiver on the
+  // session was necessarily *used* — it is only ever recorded on a transition
+  // where the live dir existed and the gate would otherwise have fired — so
+  // it is audit history, not a live switch. Deleting it once the change is
+  // archived made session.json disagree with the sessions.jsonl ledger row
+  // written by the waiving transition, and `forge status` / the reminder
+  // hooks read session.json.
 
   const integrity = runIntegrityChecks({ sessionDir: dir, session });
   problems.push(...integrity.problems);
@@ -540,7 +545,8 @@ function enforceFinalReviewFloor() {
     return; // cannot judge risk — do not invent a refusal
   }
   if (!facts.highRisk) {
-    delete session.finalReviewWaived;
+    // F131: do not delete a recorded session.finalReviewWaived here — it was
+    // used when recorded and is audit history (see the archive-gate waiver).
     return;
   }
   // The frozen verdict, measured moments ago by `freezeReviewVerdict` below —
@@ -573,7 +579,8 @@ function enforceFinalReviewFloor() {
     return;
   }
   if (verdict.final === 'independent') {
-    delete session.finalReviewWaived;
+    // F131: keep a recorded waiver — a real review supersedes it going
+    // forward, but the waiver still documents how the session reached done.
     return;
   }
 

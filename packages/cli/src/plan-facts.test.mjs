@@ -12,6 +12,8 @@ import {
   suggestExitFromPlan,
   suggestPaceFromPlan,
 } from './plan-facts.mjs';
+import { createSpecsChange } from './change.mjs';
+import { writeProjectPlanConfig } from './plan-engine.mjs';
 
 const SET_PHASE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
 
@@ -244,6 +246,41 @@ test('risk read ignores negated mentions: "no money/auth impact" is not a money 
   const facts = collectPlanFacts({ cwd: root, session });
   assert.equal(facts.highRisk, false);
   assert.equal(suggestCeremonyFromPlan(facts).ceremony, 'combined');
+});
+
+test('an untouched `forge change new` scaffold is not high-risk (F129)', () => {
+  // The proposal template's Impact placeholder says "risks, migration notes"
+  // and a `--capability auth` bullet names auth verbatim — the risk read took
+  // the CLI's own boilerplate as a money/auth/migration signal and forced the
+  // full tail on every freshly scaffolded change.
+  for (const capabilities of [[], ['toolbar'], ['auth']]) {
+    const root = tmp('forge-facts-scaffold-');
+    writeProjectPlanConfig(root, { engine: 'specs' });
+    createSpecsChange(root, 'my-change', { capabilities });
+
+    const facts = collectPlanFacts({ cwd: root, session });
+    assert.equal(
+      facts.highRisk,
+      false,
+      `scaffold with capabilities ${JSON.stringify(capabilities)} must not classify high-risk`,
+    );
+  }
+});
+
+test('scaffold stripping still hears a real risk the user wrote (F129)', () => {
+  // Line-level, not file-level: a proposal the user edited keeps only their
+  // lines in the risk read, and an affirmative migration mention in them must
+  // still classify — the strip protects placeholders, not risk words.
+  const root = tmp('forge-facts-scaffold-real-');
+  writeProjectPlanConfig(root, { engine: 'specs' });
+  createSpecsChange(root, 'my-change');
+  fs.appendFileSync(
+    path.join(root, 'specs', 'changes', 'my-change', 'proposal.md'),
+    '\nWe must migrate the sessions table to the new schema.\n',
+    'utf8',
+  );
+
+  assert.equal(collectPlanFacts({ cwd: root, session }).highRisk, true);
 });
 
 test('ceremony: high-risk always gets the full tail', () => {

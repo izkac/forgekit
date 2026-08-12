@@ -479,6 +479,74 @@ test('--path scopes staging to mine + the named path, excluding a shared file; -
   assert.equal(git(cwd, 'rev-parse', 'HEAD'), headAfterFirst, 'refusal makes no commit');
 });
 
+test('--path matching nothing pending is a clean no-op, not a git commit failure (F134)', () => {
+  // The session has no change of its own (mineDir empty) and the named --path
+  // matches nothing pending, so the scoped staging set is empty. The old code
+  // skipped `git add` and ran `git commit` against an empty index, surfacing
+  // git's generic "nothing to commit" as a checkpoint failure.
+  const cwd = tmp('forge-ckpt-empty-scope-');
+  git(cwd, 'init', '-q', '-b', 'main');
+  git(cwd, 'config', 'user.email', 'test@example.com');
+  git(cwd, 'config', 'user.name', 'Test');
+  const foreignFile = path.join(cwd, 'specs', 'changes', 'other-change', 'existing.md');
+  fs.mkdirSync(path.dirname(foreignFile), { recursive: true });
+  fs.writeFileSync(foreignFile, '# foreign baseline\n', 'utf8');
+  git(cwd, 'add', '-A');
+  git(cwd, 'commit', '-q', '-m', 'base');
+  const baseSha = git(cwd, 'rev-parse', 'HEAD');
+  git(cwd, 'checkout', '-q', '-b', 'feature-x');
+
+  const now = new Date().toISOString();
+  const sessionsDir = path.join(cwd, '.forge', 'sessions');
+  const writeSession = (id, session) => {
+    const dir = path.join(sessionsDir, id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      JSON.stringify({ createdAt: now, updatedAt: now, ...session }),
+      'utf8',
+    );
+  };
+  writeSession('s1', {
+    id: 's1',
+    slug: 'direct-work',
+    phase: 'implement',
+    planType: 'direct',
+    baseCommit: baseSha,
+    branch: 'feature-x',
+  });
+  writeSession('s2', {
+    id: 's2',
+    slug: 'other-change',
+    phase: 'implement',
+    planType: 'specs',
+    openspecChange: 'other-change',
+    baseCommit: baseSha,
+    branch: 'feature-x',
+  });
+  fs.writeFileSync(path.join(cwd, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(cwd, '.forge', 'config.json'),
+    `${JSON.stringify({ git: { checkpoint: 'per-group' }, plan: { engine: 'specs', dir: 'specs' } })}\n`,
+    'utf8',
+  );
+
+  // The only pending change belongs to the other open session; the --path
+  // scope names a path with nothing pending under it.
+  fs.appendFileSync(foreignFile, 'foreign edit\n');
+
+  const { status, out, stderr } = run(cwd, ['--session', 's1', '--group', 'g1', '--path', 'src']);
+  assert.equal(status, 0, `empty scope must not fail: ${stderr}`);
+  assert.equal(out.ok, true);
+  assert.equal(out.committed, false);
+  assert.match(out.reason, /nothing to checkpoint/);
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), baseSha, 'no empty commit is created');
+  assert.ok(
+    git(cwd, 'status', '--porcelain').includes('other-change'),
+    'the foreign edit is left untouched',
+  );
+});
+
 /**
  * Same two-session shape as `makeTwoSessionProject`, except session s2 is
  * open (its change dir exists on disk) but has *no* pending changes in it —

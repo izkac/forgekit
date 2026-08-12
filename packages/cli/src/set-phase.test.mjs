@@ -389,6 +389,54 @@ test('phase done --archive-waived with no reason still refuses', () => {
   }
 });
 
+test('phase done: archiving after a waiver must not erase the recorded waiver (F131)', () => {
+  // The bug: waive at done with the change live, archive it, re-run done —
+  // the no-live-dir branch ran `delete session.archiveWaived`, so session.json
+  // (what `forge status` and the reminder hooks read) stopped agreeing with
+  // the sessions.jsonl row the waiving transition wrote. A recorded waiver
+  // was necessarily used; it is audit history, not a live switch.
+  const dir = tmp('forge-done-archive-waived-kept-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-archive-waived-kept');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.openspecChange = 'demo-change';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+    const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
+    fs.mkdirSync(changeDir, { recursive: true });
+    fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
+
+    const reason = 'held live for the follow-up tranche';
+    const first = spawnSync(
+      process.execPath,
+      [SCRIPT, 'done', '--archive-waived', reason],
+      { cwd: dir, encoding: 'utf8' },
+    );
+    assert.equal(first.status, 0, first.stderr);
+
+    // Archive, then re-run done — the waiver must survive the transition that
+    // no longer needs it.
+    const archived = path.join(dir, 'specs', 'changes', 'archive', '2026-08-12-demo-change');
+    fs.mkdirSync(path.dirname(archived), { recursive: true });
+    fs.renameSync(changeDir, archived);
+    const second = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(second.status, 0, second.stderr);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.archiveWaived, reason, 'a used waiver is audit history — archiving must not erase it');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a phase transition appends {phase, at} to a session with no phaseHistory', () => {
   const dir = tmp('forge-phase-history-');
   try {
@@ -710,7 +758,11 @@ test('a stale self verdict never survives to refuse a session that was then revi
       // unavailable, so nothing could have been on record.
       unitOnRecord: false,
     });
-    assert.equal(session.finalReviewWaived, undefined, 'a real review retires the waiver');
+    assert.equal(
+      session.finalReviewWaived,
+      'reviewer declined — cost',
+      'F131: a used waiver is audit history — a later real review supersedes it but must not erase it',
+    );
     const { reviews } = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
     assert.equal(reviews.final, 'independent');
     assert.equal(reviews.evidence, 'inferred', 'and the durable record does not claim it was measured');

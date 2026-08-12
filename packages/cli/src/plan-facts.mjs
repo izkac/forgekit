@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveChangeDir } from './integrity.mjs';
 import { isHighRiskText } from './preferences.mjs';
+import { dropScaffoldLines } from './change.mjs';
 
 /** A tasks.md checkbox line. */
 const TASK_LINE_RE = /^\s*-\s*\[[ xX]\]\s+/;
@@ -101,12 +102,15 @@ export function collectPlanFacts(opts) {
   }
 
   // Risk read across everything the plan says, including the spine — the same
-  // fail-closed rule the scorer uses. Negation lines are dropped first (see
-  // dropNegatedRiskLines): "no money/auth impact" is a disclaimer, not a risk.
+  // fail-closed rule the scorer uses. Two line classes are dropped first:
+  // negation lines (see dropNegatedRiskLines): "no money/auth impact" is a
+  // disclaimer, not a risk; and verbatim scaffold lines (see
+  // dropScaffoldLines): the placeholder "migration notes" the CLI itself
+  // wrote into proposal.md is template, not signal (F129).
   facts.highRisk = isHighRiskText(
     [proposalBody, designBody, tasksBody, spineBody, opts.session?.paceSignal, opts.session?.slug]
       .filter(Boolean)
-      .map((body) => dropNegatedRiskLines(String(body)))
+      .map((body) => dropScaffoldLines(dropNegatedRiskLines(String(body))))
       .join(' '),
   );
   return facts;

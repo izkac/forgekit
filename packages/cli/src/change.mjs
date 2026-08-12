@@ -154,6 +154,38 @@ const TASKS_TMPL = `# Tasks
 `;
 
 /**
+ * Scaffold boilerplate, as verbatim lines. The risk read in plan-facts.mjs
+ * drops these before classifying: an unfilled template is the CLI talking to
+ * itself, not a signal — "migration notes" in the Impact placeholder
+ * classified every freshly scaffolded change as high-risk (F129). Derived
+ * from the templates themselves, so a template edit cannot drift the set.
+ * Capability bullets embed the capability id, so they match by pattern.
+ */
+const SCAFFOLD_LINES = new Set(
+  [PROPOSAL_TMPL('<title>', []), DESIGN_TMPL, TASKS_TMPL]
+    .flatMap((body) => body.split('\n'))
+    .filter((line) => line.trim() !== ''),
+);
+
+const SCAFFOLD_CAP_BULLET_RE = /^- `[a-z0-9-]+`: … \(delta: `specs\/[a-z0-9-]+\/spec\.md`\)$/;
+
+/**
+ * Drop the lines this module's own scaffold writes (F129). Lines the user
+ * added or rewrote survive untouched, so a real "migrate the sessions table"
+ * in an edited proposal still classifies as high-risk — only verbatim
+ * placeholder lines are stripped.
+ *
+ * @param {string} body
+ * @returns {string}
+ */
+export function dropScaffoldLines(body) {
+  return String(body)
+    .split('\n')
+    .filter((line) => !SCAFFOLD_LINES.has(line) && !SCAFFOLD_CAP_BULLET_RE.test(line))
+    .join('\n');
+}
+
+/**
  * @param {string} cwd
  * @param {string} name
  * @param {{ force?: boolean, capabilities?: string[] }} [opts]

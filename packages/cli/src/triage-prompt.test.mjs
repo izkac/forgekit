@@ -8,6 +8,7 @@ import {
   shouldForgeTriage,
   buildForgeTriageMessage,
   buildTriageHelpText,
+  parseTriageArgs,
 } from './triage-prompt.mjs';
 
 test('isForgeSkip matches /forge:skip', () => {
@@ -339,4 +340,20 @@ test('triage help text states the suppression semantics of --check exit codes', 
   assert.match(help, /forge triage --check/);
   assert.match(help, /0.*ask the agent/i);
   assert.match(help, /1.*suppress/i);
+});
+
+test('a prompt that is literally a forge flag survives after `--` (F105)', () => {
+  // The hooks pass the user prompt positionally; without a delimiter a prompt
+  // of exactly `--help` was parsed as forge's own flag and injected usage
+  // text into the triage flow instead of being treated as content.
+  for (const flagPrompt of ['--help', '-h', '--check', '--message', '--has-session']) {
+    const opts = parseTriageArgs(['--check', '--', flagPrompt]);
+    assert.equal(opts.help, false, `"${flagPrompt}" must not parse as the help flag`);
+    assert.equal(opts.prompt, flagPrompt);
+  }
+  // Flags before `--` still parse; `--` only protects what follows it.
+  const mixed = parseTriageArgs(['--message', '--has-session', '--', '--help']);
+  assert.equal(mixed.message, true);
+  assert.equal(mixed.hasSession, true);
+  assert.equal(mixed.prompt, '--help');
 });

@@ -780,6 +780,45 @@ function changedGuardCandidatePaths({ cwd, baseCommit }) {
 }
 
 /**
+ * Archive-move exemption (F130). `forge change archive` / `openspec archive`
+ * rename the whole change dir to `changes/archive/<YYYY-MM-DD>-<change>/`.
+ * For a change that predates the session's `baseCommit`, git reports every
+ * tracked file in it as deleted — and change-dir artifacts (`spine.json`,
+ * `verify-evidence.md`, …) are guarded regardless of age, so a routine
+ * archive presented at done as "guarded file deleted without allowance".
+ *
+ * A deletion whose content survives byte-identical at the archived location
+ * is a move, not a tamper, and is exempt. The content comparison against
+ * `baseCommit` is load-bearing: a `spine.json` edited and *then* archived is
+ * a modify laundered through the move, and must still refuse.
+ *
+ * Returns a lookup over repo-relative posix deleted paths.
+ *
+ * @param {{ repoRoot: string, session: Record<string, unknown>, baseCommit: string }} params
+ * @returns {(relPath: string) => boolean}
+ */
+function makeArchiveMoveLookup({ repoRoot, session, baseCommit }) {
+  const noop = () => false;
+  const liveDir = resolveChangeDir({ cwd: repoRoot, session, forWrite: true });
+  // No named change, or the change is still live — nothing was archived, so
+  // every deletion under it (if it existed) is an ordinary finding.
+  if (!liveDir || fs.existsSync(liveDir)) return noop;
+  const archivedDir = resolveChangeDir({ cwd: repoRoot, session });
+  if (!archivedDir || archivedDir === liveDir || !fs.existsSync(archivedDir)) return noop;
+  const liveRel = path.relative(repoRoot, liveDir).split(path.sep).join('/');
+  if (liveRel === '' || liveRel.startsWith('..')) return noop;
+  const prefix = `${liveRel}/`;
+  return function isArchiveMove(relPath) {
+    if (!relPath.startsWith(prefix)) return false;
+    const archivedFile = path.join(archivedDir, relPath.slice(prefix.length));
+    if (!fs.existsSync(archivedFile)) return false;
+    const base = spawnSync('git', ['show', `${baseCommit}:${relPath}`], { cwd: repoRoot });
+    if (base.error || base.status !== 0) return false;
+    return Buffer.compare(base.stdout, fs.readFileSync(archivedFile)) === 0;
+  };
+}
+
+/**
  * Guarded-files integrity backstop (design D1/D3): refuses `forge phase
  * done|finish` when a guarded file (a baseline test tracked at the session's
  * `baseCommit`, or a forge integrity artifact regardless of age) was modified
@@ -868,6 +907,7 @@ export function checkGuardedFiles({ cwd, sessionDir, session }) {
 
   const config = loadProjectConfig(repoRoot);
   const gitLsTree = makeGitLsTree({ cwd: repoRoot, baseCommit });
+  const isArchiveMove = makeArchiveMoveLookup({ repoRoot, session, baseCommit });
 
   /** @type {string[]} */
   const problems = [];
@@ -875,6 +915,9 @@ export function checkGuardedFiles({ cwd, sessionDir, session }) {
     for (const { status, path: relPath } of changes) {
       const classification = classifyGuarded({ relPath, session, config, gitLsTree });
       if (!classification.guarded) continue;
+      // F130: archiving the session's change moves its artifacts wholesale; a
+      // byte-identical copy at the archived path makes the deletion a move.
+      if (status === 'D' && isArchiveMove(relPath)) continue;
       if (findAllowance(allowances, relPath)) continue;
       const verb = status === 'D' ? 'deleted' : 'modified';
       problems.push(

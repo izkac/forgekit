@@ -602,6 +602,22 @@ if (otherOpen.length === 0) {
   }
 }
 
+// F134: a --path scope that matches nothing pending (e.g. the session has no
+// change dir of its own and the named paths are all clean) must not fall into
+// `git commit` against an empty index — git's generic "nothing committed"
+// failure read as a checkpoint bug. Give the same answer the clean-tree
+// guard above gives.
+if (stagedFiles.length === 0) {
+  emit({
+    ok: true,
+    committed: false,
+    reason: 'nothing to checkpoint — no pending changes match the --path scope',
+    branch,
+    range: session.baseCommit ? `${session.baseCommit}..HEAD` : null,
+  });
+  process.exit(0);
+}
+
 // --- commit (never push) ---
 const prev = checkpoints.length ? checkpoints[checkpoints.length - 1].sha : null;
 const commit = git(cwd, ['commit', '-m', subject, '--no-verify']);

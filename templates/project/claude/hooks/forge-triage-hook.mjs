@@ -64,13 +64,15 @@ const prompt = extractPrompt(raw);
 if (!prompt) process.exit(0);
 const promptArg = useShell ? `"${prompt.replaceAll('"', '""')}"` : prompt;
 
-const check = runForge(['triage', '--check', promptArg]);
+// `--` before the prompt: a prompt that is literally a forge flag (e.g.
+// "--help") must reach triage as prompt text, not as an option (F105).
+const check = runForge(['triage', '--check', '--', promptArg]);
 if (check.status !== 0) process.exit(0);
 
 const hasSession = fs.existsSync(ACTIVE_FILE);
 const args = ['triage', '--message'];
 if (hasSession) args.push('--has-session');
-args.push(promptArg);
+args.push('--', promptArg);
 
 const msg = runForge(args);
 if (msg.status === 0 && msg.stdout.trim()) {

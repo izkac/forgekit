@@ -899,6 +899,89 @@ test('runIntegrityChecks: guardedFiles — integrity artifact (spine.json) modif
   }
 });
 
+test('runIntegrityChecks: guardedFiles — archiving a pre-baseCommit change is a move, not a tamper (F130)', () => {
+  // The change dir was committed before the session started, so archiving it
+  // reports `D openspec/changes/<change>/spine.json` against baseCommit — and
+  // spine.json is a guarded integrity artifact regardless of age. The 0.3.40
+  // archive gate made archive-before-done the normal path, so this refusal
+  // fired on every compliant run. A byte-identical copy at the archived path
+  // makes the deletion a move.
+  const cwd = gitRepo('forge-guard-archive-');
+  try {
+    const liveDir = path.join(cwd, 'openspec', 'changes', 'add-customer-registry');
+    fs.mkdirSync(liveDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(liveDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(liveDir, 'proposal.md'), '# Why\n\nBecause.\n', 'utf8');
+    gitCommitAll(cwd, 'base'); // the change predates the session
+    const baseCommit = gitHead(cwd);
+
+    const sessionDir = makeSessionDir(cwd);
+    const session = {
+      slug: 'x',
+      planType: 'openspec',
+      openspecChange: 'add-customer-registry',
+      baseCommit,
+    };
+
+    // `forge change archive` / `openspec archive`: a plain rename of the dir.
+    const archived = path.join(cwd, 'openspec', 'changes', 'archive', '2026-08-12-add-customer-registry');
+    fs.mkdirSync(path.dirname(archived), { recursive: true });
+    fs.renameSync(liveDir, archived);
+
+    const result = runIntegrityChecks({ cwd, sessionDir, session });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.problems, []);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: guardedFiles — editing spine.json and THEN archiving is still a tamper (F130)', () => {
+  // The exemption compares the archived copy against baseCommit, so a modify
+  // laundered through the archive move must still refuse.
+  const cwd = gitRepo('forge-guard-archive-tamper-');
+  try {
+    const liveDir = path.join(cwd, 'openspec', 'changes', 'add-customer-registry');
+    fs.mkdirSync(liveDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(liveDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    gitCommitAll(cwd, 'base');
+    const baseCommit = gitHead(cwd);
+
+    const sessionDir = makeSessionDir(cwd);
+    const session = {
+      slug: 'x',
+      planType: 'openspec',
+      openspecChange: 'add-customer-registry',
+      baseCommit,
+    };
+
+    // Tamper first, archive second.
+    fs.writeFileSync(
+      path.join(liveDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only — weakened' }, null, 2)}\n`,
+      'utf8',
+    );
+    const archived = path.join(cwd, 'openspec', 'changes', 'archive', '2026-08-12-add-customer-registry');
+    fs.mkdirSync(path.dirname(archived), { recursive: true });
+    fs.renameSync(liveDir, archived);
+
+    const result = runIntegrityChecks({ cwd, sessionDir, session });
+    assert.equal(result.ok, false);
+    assert.match(result.problems.join('\n'), /guarded file deleted without allowance/);
+    assert.match(result.problems.join('\n'), /spine\.json/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('runIntegrityChecks: guardedFiles — C1: a tracked .forge/config.json rewritten to guard.testGlobs: [] is itself caught by the backstop', () => {
   const cwd = gitRepo('forge-guard-config-');
   try {

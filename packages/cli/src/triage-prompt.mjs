@@ -192,8 +192,12 @@ export function buildForgeTriageMessage(options = {}) {
  *                                        content) — the agent is never asked
  *   forge triage --message "<prompt>"   print triage reminder (always)
  *   forge triage --message --has-session "<prompt>"
+ *
+ * `--` ends flag parsing: everything after it is prompt text, so a prompt
+ * that is literally `--help` (or `--check`, …) is treated as content, not as
+ * forge's own option (F105). The triage hook always passes `--`.
  */
-function parseTriageArgs(argv) {
+export function parseTriageArgs(argv) {
   const opts = {
     check: false,
     message: false,
@@ -204,6 +208,10 @@ function parseTriageArgs(argv) {
   const rest = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg === '--') {
+      rest.push(...argv.slice(i + 1));
+      break;
+    }
     if (arg === '--check') opts.check = true;
     else if (arg === '--message') opts.message = true;
     else if (arg === '--has-session') opts.hasSession = true;
@@ -218,6 +226,9 @@ export function buildTriageHelpText() {
   return `Usage:
   forge triage --check "<prompt>"
   forge triage --message [--has-session] "<prompt>"
+
+Everything after \`--\` is prompt text, even if it looks like a flag:
+  forge triage --check -- "--help"
 
 --check exit codes:
   0   ask the agent to decide whether this prompt needs Forge
