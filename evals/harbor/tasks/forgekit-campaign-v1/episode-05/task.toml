@@ -1,0 +1,8 @@
+schema_version = "1.4"
+
+[task]
+name = "forgekit/episode-05"
+version = "1.0.0"
+description = "Campaign episode stub for runner sequencing."
+authors = []
+keywords = ["campaign"]

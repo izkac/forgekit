@@ -38,7 +38,17 @@ const validArgs = [
   '--agent', 'claude-code',
   '--model', 'anthropic/claude-sonnet-4',
   '--forgekit-version', '0.3.37',
- ];
+];
+
+const campaignArgs = [
+  '--corpus', 'forgekit-campaign-v1',
+  '--arm', 'both',
+  '--repetitions', '1',
+  '--concurrency', '1',
+  '--agent', 'claude-code',
+  '--model', 'anthropic/claude-sonnet-4',
+  '--forgekit-version', '0.3.37',
+];
 
 function parsePlan(stdout) {
   const plan = JSON.parse(stdout);
@@ -770,4 +780,226 @@ test('explicit hard-v2 selection stages only its allowlisted root and records co
     assert.equal(manifest.taskVersion, plan.taskVersion);
     assert.equal(manifest.canonicalTask, 'tasks/forgekit-hard-v2/reservation-confirmation-race');
   }
+});
+
+test('campaign dry-run plans one trial per episode per arm in declared order', async (t) => {
+  const declared = JSON.parse(await readFile(path.join(here, 'corpora/forgekit-campaign-v1.json'), 'utf8'));
+  const result = await run([...campaignArgs, '--dry-run']);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  const expectedTrialCount = declared.episodes.length * plan.schedule.armOrders[0].length;
+  assert.equal(plan.trials.length, expectedTrialCount);
+  assert.equal(plan.campaign.id, declared.corpus_id);
+  assert.deepEqual(
+    plan.campaign.episodes.map((episode) => ({ id: episode.id, index: episode.index })),
+    declared.episodes.map((episode) => ({ id: episode.id, index: episode.index })),
+  );
+
+  const expected = plan.schedule.armOrders[0].flatMap((arm) => (
+    declared.episodes.map((episode) => ({
+      arm,
+      episodeId: episode.id,
+      episodeIndex: episode.index,
+      repetition: 1,
+    }))
+  ));
+  assert.deepEqual(
+    plan.trials.map((trial) => ({
+      arm: trial.arm,
+      episodeId: trial.episodeId,
+      episodeIndex: trial.episodeIndex,
+      repetition: trial.repetition,
+    })),
+    expected,
+  );
+
+  const trialIds = new Set(plan.trials.map((trial) => trial.trialId));
+  assert.equal(trialIds.size, plan.trials.length);
+
+  for (const trial of plan.trials) {
+    const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
+    assert.equal(manifest.episodeId, trial.episodeId);
+    assert.equal(manifest.episodeIndex, trial.episodeIndex);
+    assert.equal(manifest.trialId, trial.trialId);
+    assert.match(trial.trialId, new RegExp(`-${trial.arm}-`));
+    assert.equal(trial.harborArgv[trial.harborArgv.indexOf('--job-name') + 1], trial.trialId);
+    assert.equal(manifest.harbor.argv[manifest.harbor.argv.indexOf('--job-name') + 1], trial.trialId);
+  }
+});
+
+test('rejects --task when the selected corpus is a campaign', async () => {
+  const result = await run([...campaignArgs, '--task', 'episode-01', '--dry-run']);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /--task is not valid for a campaign corpus/);
+});
+
+test('non-campaign corpora still require --task', async () => {
+  const withoutTask = validArgs.filter((value, index) => (
+    value !== '--task' && validArgs[index - 1] !== '--task'
+  ));
+  const result = await run([...withoutTask, '--dry-run']);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /--task is required/);
+});
+
+test('campaign episodes execute in declared order and never overlap within an arm', async (t) => {
+  const declared = JSON.parse(await readFile(path.join(here, 'corpora/forgekit-campaign-v1.json'), 'utf8'));
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-campaign-order-'));
+  const capture = path.join(bin, 'events.jsonl');
+  const fakeHarbor = path.join(bin, 'harbor');
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('harbor 0.20.0'); process.exit(0); }
+const jobName = args[args.indexOf('--job-name') + 1];
+const event = (name) => appendFileSync(process.env.HARBOR_CAPTURE_FILE, JSON.stringify({ name, jobName, at: Date.now() }) + '\\n');
+event('start');
+await new Promise((resolve) => setTimeout(resolve, 40));
+const job = path.join(args[args.indexOf('--jobs-dir') + 1], 'job');
+mkdirSync(path.join(job, 'trial', 'verifier'), { recursive: true });
+writeFileSync(path.join(job, 'trial', 'verifier', 'reward.json'), '{"functional":1,"regression":1,"tests_unchanged":1,"shippable":1}');
+event('end');
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const args = [...campaignArgs, '--seed', 'episode-order-seed'];
+  args[args.indexOf('--arm') + 1] = 'baseline';
+  args[args.indexOf('--concurrency') + 1] = '2';
+  const result = await run(args, {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture },
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  assert.equal(plan.trials.length, declared.episodes.length);
+  assert.deepEqual(
+    plan.trials.map((trial) => trial.episodeIndex),
+    declared.episodes.map((episode) => episode.index),
+  );
+  assert.deepEqual(
+    [...plan.trials].sort((left, right) => left.executionIndex - right.executionIndex)
+      .map((trial) => trial.episodeIndex),
+    declared.episodes.map((episode) => episode.index),
+  );
+  assert.ok(plan.trials.every((trial) => trial.status === 'verified'));
+
+  const events = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
+  for (let index = 1; index < plan.trials.length; index += 1) {
+    const previous = plan.trials[index - 1];
+    const current = plan.trials[index];
+    const previousEnd = events.findIndex((event) => event.name === 'end' && event.jobName === previous.trialId);
+    const currentStart = events.findIndex((event) => event.name === 'start' && event.jobName === current.trialId);
+    assert.ok(
+      previousEnd >= 0 && currentStart > previousEnd,
+      `episode ${current.episodeIndex} must not start before episode ${previous.episodeIndex} ends`,
+    );
+  }
+});
+
+test('campaign operational failure stops that arm and continues the other', async (t) => {
+  const declared = JSON.parse(await readFile(path.join(here, 'corpora/forgekit-campaign-v1.json'), 'utf8'));
+  const failedEpisode = declared.episodes.find((episode) => episode.index === 3);
+  const remainingEpisodes = declared.episodes.filter((episode) => episode.index > failedEpisode.index);
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'forgekit-harbor-campaign-stop-'));
+  const capture = path.join(bin, 'events.jsonl');
+  const fakeHarbor = path.join(bin, 'harbor');
+  await writeFile(fakeHarbor, `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('harbor 0.20.0'); process.exit(0); }
+const jobName = args[args.indexOf('--job-name') + 1];
+const event = (name) => appendFileSync(process.env.HARBOR_CAPTURE_FILE, JSON.stringify({ name, jobName, at: Date.now() }) + '\\n');
+event('start');
+if (jobName.includes('${failedEpisode.id}-baseline-')) { event('end'); process.exit(9); }
+const job = path.join(args[args.indexOf('--jobs-dir') + 1], 'job');
+mkdirSync(path.join(job, 'trial', 'verifier'), { recursive: true });
+writeFileSync(path.join(job, 'trial', 'verifier', 'reward.json'), '{"functional":1,"regression":1,"tests_unchanged":1,"shippable":1}');
+event('end');
+`);
+  await chmod(fakeHarbor, 0o755);
+  t.after(() => rm(bin, { recursive: true, force: true }));
+
+  const result = await run([...campaignArgs, '--seed', 'episode-stop-seed'], {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HARBOR_CAPTURE_FILE: capture },
+  });
+  assert.notEqual(result.code, 0);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+  assert.equal(plan.status, 'completed-with-failures');
+
+  const baseline = plan.trials.filter((trial) => trial.arm === 'baseline');
+  const forge = plan.trials.filter((trial) => trial.arm === 'forge');
+  assert.equal(baseline.length, declared.episodes.length);
+  assert.equal(forge.length, declared.episodes.length);
+
+  const failedTrial = baseline.find((trial) => trial.episodeIndex === failedEpisode.index);
+  assert.equal(failedTrial.status, 'failed');
+  for (const episode of remainingEpisodes) {
+    const trial = baseline.find((candidate) => candidate.episodeIndex === episode.index);
+    assert.equal(trial.status, 'not-attempted');
+    const manifest = JSON.parse(await readFile(manifestFile(plan, trial), 'utf8'));
+    assert.equal(manifest.status, 'not-attempted');
+  }
+  assert.ok(forge.every((trial) => trial.status === 'verified'));
+  assert.deepEqual(
+    forge.map((trial) => trial.episodeIndex),
+    declared.episodes.map((episode) => episode.index),
+  );
+
+  const persisted = JSON.parse(await readFile(path.join(plan.runDirectory, 'plan.json'), 'utf8'));
+  assert.deepEqual(
+    persisted.trials.filter((trial) => trial.arm === 'baseline' && trial.episodeIndex > failedEpisode.index)
+      .map((trial) => trial.status),
+    remainingEpisodes.map(() => 'not-attempted'),
+  );
+
+  const events = (await readFile(capture, 'utf8')).trim().split('\n').map(JSON.parse);
+  const startedJobs = new Set(events.filter((event) => event.name === 'start').map((event) => event.jobName));
+  for (const episode of remainingEpisodes) {
+    const trial = baseline.find((candidate) => candidate.episodeIndex === episode.index);
+    assert.equal(startedJobs.has(trial.trialId), false, `${trial.trialId} must not invoke Harbor`);
+  }
+});
+
+test('campaign seeded schedules hash campaign identity and alternate across repetitions', async (t) => {
+  const declared = JSON.parse(await readFile(path.join(here, 'corpora/forgekit-campaign-v1.json'), 'utf8'));
+  const seed = 'campaign-schedule-seed';
+  const args = [...campaignArgs, '--seed', seed, '--dry-run'];
+  args[args.indexOf('--repetitions') + 1] = '2';
+  const result = await run(args);
+  assert.equal(result.code, 0, result.stderr);
+  const plan = parsePlan(result.stdout);
+  t.after(() => cleanupPlan(plan));
+
+  const startHash = createHash('sha256')
+    .update(`${seed}\0${declared.corpus_id}\0${plan.taskRevision}`)
+    .digest('hex');
+  const startingArm = Number.parseInt(startHash.slice(0, 2), 16) % 2 === 0 ? 'baseline' : 'forge';
+  const otherArm = startingArm === 'baseline' ? 'forge' : 'baseline';
+
+  assert.equal(plan.schedule.strategy, 'seeded-counterbalanced-pairs');
+  assert.equal(plan.schedule.seed, seed);
+  assert.equal(plan.schedule.startHash, startHash);
+  assert.equal(plan.schedule.startingArm, startingArm);
+  assert.deepEqual(plan.schedule.armOrders, [
+    [startingArm, otherArm],
+    [otherArm, startingArm],
+  ]);
+  assert.deepEqual(plan.schedule.firstArmCounts, { baseline: 1, forge: 1 });
+  assert.deepEqual(
+    plan.trials.map((trial) => ({ arm: trial.arm, episodeIndex: trial.episodeIndex, repetition: trial.repetition })),
+    plan.schedule.armOrders.flatMap((armOrder, repetitionIndex) => (
+      armOrder.flatMap((arm) => declared.episodes.map((episode) => ({
+        arm,
+        episodeIndex: episode.index,
+        repetition: repetitionIndex + 1,
+      })))
+    )),
+  );
 });

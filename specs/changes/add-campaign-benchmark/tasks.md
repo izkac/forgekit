@@ -38,19 +38,19 @@
 
 ## 3. Episode sequencing in the runner
 
-- [ ] 3.1 Add campaign planning to `evals/harbor/run.mjs`: one trial per
+- [x] 3.1 Add campaign planning to `evals/harbor/run.mjs`: one trial per
       episode per arm per repetition, recording episode id and index in
       `plan.json` and each trial manifest. Verify: `run.test.mjs` dry-run of a
       six-episode campaign with `--arm both --repetitions 1` plans twelve
       trials in the right order.
-- [ ] 3.2 Execute episodes in declared order per arm, never starting episode
+- [x] 3.2 Execute episodes in declared order per arm, never starting episode
       N+1 before episode N reaches a terminal state. Verify: test asserts
       recorded execution order and that within-arm episodes never overlap.
-- [ ] 3.3 On an episode's operational failure, record the remaining episodes of
+- [x] 3.3 On an episode's operational failure, record the remaining episodes of
       that arm as not attempted, continue the other arm, and exit nonzero.
       Verify: test with an injected episode-3 failure asserts episodes 4–6 are
       `not-attempted` and the other arm completed.
-- [ ] 3.4 Apply the existing seeded first-arm schedule at campaign level and
+- [x] 3.4 Apply the existing seeded first-arm schedule at campaign level and
       record it. Verify: test asserts the same hash-derived ordering rule and
       alternation across repetitions as the single-task path.
 
