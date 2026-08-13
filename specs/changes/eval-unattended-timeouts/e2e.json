@@ -9,7 +9,7 @@
     },
     {
       "name": "produce-unattended-dry-run",
-      "cmd": "node evals/harbor/run.mjs --corpus forgekit-campaign-v1 --arm both --repetitions 1 --concurrency 1 --seed unattended-e2e --agent claude-code --model claude-sonnet-5 --forgekit-tarball \"$FORGEKIT_TARBALL\" --dry-run",
+      "cmd": "mkdir -p evals/.runs && printf 'forgekit unattended e2e; never installed\\n' > evals/.runs/unattended-e2e.tgz && node evals/harbor/run.mjs --corpus forgekit-campaign-v1 --arm both --repetitions 1 --concurrency 1 --seed unattended-e2e --agent claude-code --model claude-sonnet-5 --forgekit-tarball evals/.runs/unattended-e2e.tgz --dry-run",
       "expect": "\"dryRun\": true"
     },
     {

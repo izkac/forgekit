@@ -13,15 +13,15 @@
       other smokes if run) pass.
 
 ## 2. Campaign timeout and version
-- [ ] 2.1 RED: tighten `evals/harbor/smoke-campaign.mjs` so every episode
+- [x] 2.1 RED: tighten `evals/harbor/smoke-campaign.mjs` so every episode
       agent `timeout_sec` is 3600 and every episode version is `1.1.0`.
       Verify: smoke fails on current 1200 / 1.0.0 files.
-- [ ] 2.2 GREEN: set agent `timeout_sec = 3600.0` and `version = "1.1.0"` in
+- [x] 2.2 GREEN: set agent `timeout_sec = 3600.0` and `version = "1.1.0"` in
       all six `evals/harbor/tasks/forgekit-campaign-v1/episode-*/task.toml`
       files and matching versions in
       `evals/harbor/corpora/forgekit-campaign-v1.json`. Verify:
       `npm run smoke:evals:campaign` passes.
-- [ ] 2.3 `--no-tdd` Update the campaign episode version column in
+- [x] 2.3 `--no-tdd` Update the campaign episode version column in
       `evals/README.md` to `1.1.0` and note the 3600s agent cap.
 
 ## 3. Product loop

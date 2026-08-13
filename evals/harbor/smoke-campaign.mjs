@@ -125,7 +125,7 @@ async function loadAndValidateManifest() {
     requireCondition(!ids.has(entry.id), `campaign episode is duplicated: ${entry.id}`);
     ids.add(entry.id);
     requireCondition(entry.index === offset + 1, `campaign episode index must be contiguous and one-based: ${entry.id}`);
-    requireCondition(/^\d+\.\d+\.\d+$/.test(entry.version), `campaign episode version must be semantic: ${entry.id}`);
+    requireCondition(entry.version === '1.1.0', `campaign episode version must be 1.1.0: ${entry.id}`);
     requireCondition(entry.task_path === `tasks/${corpusId}/${entry.id}`, `campaign task_path is not bound to its episode: ${entry.id}`);
   }
   return { manifest, campaign };
@@ -148,12 +148,13 @@ async function validateEpisodeMetadata(entry, taskRoot) {
   ]);
   const task = tomlSection(source, 'task');
   requireCondition(quotedValue(task, 'name') === `forgekit/${entry.id}`, 'campaign task.toml name does not match episode');
+  requireCondition(quotedValue(task, 'version') === '1.1.0', 'campaign episode task.toml version must be 1.1.0');
   requireCondition(quotedValue(task, 'version') === entry.version, 'campaign manifest and task.toml versions differ');
   requireCondition(quotedValue(task, 'description').length > 0, 'campaign episode description must not be empty');
   const metadata = tomlSection(source, 'metadata');
   requireCondition(quotedValue(metadata, 'difficulty').length > 0, 'campaign episode difficulty must not be empty');
   requireCondition(quotedValue(metadata, 'benchmark_category').length > 0, 'campaign episode benchmark_category must not be empty');
-  requireCondition(numericValue(tomlSection(source, 'agent'), 'timeout_sec') > 0, 'campaign agent timeout must be positive');
+  requireCondition(numericValue(tomlSection(source, 'agent'), 'timeout_sec') === 3600, 'campaign agent timeout must be 3600');
   const verifier = tomlSection(source, 'verifier');
   requireCondition(numericValue(verifier, 'timeout_sec') > 0, 'campaign verifier timeout must be positive');
   requireCondition(quotedValue(verifier, 'environment_mode') === 'separate', 'campaign verifier must use a separate environment');
