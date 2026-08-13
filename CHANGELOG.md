@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.44 — 2026-08-13
+
+Harbor evals: the Forge arm is told the trial is unattended (no operator, pick a
+default, do not stop on a clarifying question). Campaign episodes are 1.1.0 with
+a 3600s agent cap on both arms so a full Forge loop can finish. hard-v2 stays at
+1200s. Next live campaign run is a new cohort.
+
 ## 0.3.39 — 2026-08-12
 
 ### The agent decides whether work needs Forge; the filter only suppresses
