@@ -429,7 +429,7 @@ async function stageArm(canonicalTask, stagedTask, arm, treatment) {
   const instructionPath = path.join(stagedTask, 'instruction.md');
   const canonicalInstruction = (await readFile(instructionPath, 'utf8')).trimEnd();
   const treatmentInstructions = arm === 'forge'
-    ? `## Evaluation arm: forge\n\nUse the installed Forge CLI and Forge workflow for this task. Announce that you are using Forge, triage the request, and for substantial work start a session with \`forge new <slug>\`. Follow a tracked plan, use test-driven red/green evidence, then verify and review before completion. Preserve Forge process artifacts in the working repository.`
+    ? `## Evaluation arm: forge\n\nUse the installed Forge CLI and Forge workflow for this task. Announce that you are using Forge, triage the request, and for substantial work start a session with \`forge new <slug>\`. Follow a tracked plan, use test-driven red/green evidence, then verify and review before completion. Preserve Forge process artifacts in the working repository.\n\nThis trial is unattended. There is no human operator. Never end your turn with a clarifying question or wait for confirmation. Pick a reasonable default and continue. If a requirement cannot be met without breaking an established one, write BLOCKED.md as the task instruction already allows — that is the only allowed stop.`
     : `## Evaluation arm: baseline\n\nComplete this task using the agent's normal workflow.`;
   await writeFile(instructionPath, `${canonicalInstruction}\n\n---\n\n${treatmentInstructions}\n`);
 

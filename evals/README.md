@@ -107,14 +107,17 @@ and nothing else — no transcript, no summary. `tests/` is never carried, never
 mounted into an agent container, and never inherited. Campaign invocations
 omit `--task`; the runner executes every declared episode.
 
+Each episode `[agent] timeout_sec` is 3600 on both arms. The next live run
+is a new cohort.
+
 | # | Episode (version) | Request | Hidden checks |
 | --- | --- | --- | --- |
-| 1 | `episode-01` (`1.0.0`) | Orders, charging, and the pending → paid → shipped → delivered plus cancelled state machine | Counted HTTP requirements that establish the invariants |
-| 2 | `episode-02` (`1.0.0`) | Partial refunds against the episode 1 ledger | Own requirement counts plus episode 1 as regression |
-| 3 | `episode-03` (`1.0.0`) | **Trap:** refunds on cancelled orders, contradicting episode 1's terminal cancelled rule | Requirement met only when `BLOCKED.md` names both requirements and earlier behaviour is unchanged |
-| 4 | `episode-04` (`1.0.0`) | Idempotency keys on every mutating endpoint | Own requirement counts plus episodes 1–3 as regression |
-| 5 | `episode-05` (`1.0.0`) | Behaviour-preserving refactor that splits handlers into modules | Structural requirement plus episodes 1–4 as regression |
-| 6 | `episode-06` (`1.0.0`) | **Trap:** auto-expire stale orders after 30 days | Naive expiry of terminal states fails this episode's own checks; episodes 1–5 re-run as regression |
+| 1 | `episode-01` (`1.1.0`) | Orders, charging, and the pending → paid → shipped → delivered plus cancelled state machine | Counted HTTP requirements that establish the invariants |
+| 2 | `episode-02` (`1.1.0`) | Partial refunds against the episode 1 ledger | Own requirement counts plus episode 1 as regression |
+| 3 | `episode-03` (`1.1.0`) | **Trap:** refunds on cancelled orders, contradicting episode 1's terminal cancelled rule | Requirement met only when `BLOCKED.md` names both requirements and earlier behaviour is unchanged |
+| 4 | `episode-04` (`1.1.0`) | Idempotency keys on every mutating endpoint | Own requirement counts plus episodes 1–3 as regression |
+| 5 | `episode-05` (`1.1.0`) | Behaviour-preserving refactor that splits handlers into modules | Structural requirement plus episodes 1–4 as regression |
+| 6 | `episode-06` (`1.1.0`) | **Trap:** auto-expire stale orders after 30 days | Naive expiry of terminal states fails this episode's own checks; episodes 1–5 re-run as regression |
 
 Rewards carry counted metrics `requirements_met` / `requirements_total` and
 `regression_met` / `regression_total` alongside the existing binary outcomes.

@@ -261,7 +261,13 @@ async function stageAndValidate(workDirectory, entry, taskRoot, fakeTarball) {
     requireCondition(forgeDockerfile.includes(`COPY ${stagedFilename} /tmp/forgekit-treatment.tgz`), 'hard-v2 Forge arm is missing its staged local treatment');
     requireCondition(!forgeDockerfile.includes('@izkac/forgekit@'), 'hard-v2 Forge smoke would install a registry package');
     requireCondition(/Evaluation arm: baseline/.test(baselineInstruction) && !/Forge workflow/i.test(baselineInstruction), 'hard-v2 baseline instruction contains Forge treatment');
+    requireCondition(!/unattended/i.test(baselineInstruction), 'hard-v2 baseline instruction contains unattended rule');
+    requireCondition(!/no human operator/i.test(baselineInstruction), 'hard-v2 baseline instruction contains unattended operator rule');
+    requireCondition(!/never end (?:a |your )turn with a clarifying question/i.test(baselineInstruction), 'hard-v2 baseline instruction contains unattended clarifying-question rule');
     requireCondition(/Evaluation arm: forge/.test(forgeInstruction) && /Forge workflow/.test(forgeInstruction), 'hard-v2 Forge instruction is missing its treatment');
+    requireCondition(/unattended/i.test(forgeInstruction), 'hard-v2 Forge instruction is missing unattended rule');
+    requireCondition(/no human operator/i.test(forgeInstruction), 'hard-v2 Forge instruction is missing no-human-operator rule');
+    requireCondition(/never end (?:a |your )turn with a clarifying question/i.test(forgeInstruction), 'hard-v2 Forge instruction is missing clarifying-question rule');
 
     const canonicalTests = await directoryMap(path.join(taskRoot, 'tests'));
     for (const arm of ['baseline', 'forge']) {

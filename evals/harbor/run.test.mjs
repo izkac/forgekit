@@ -120,8 +120,14 @@ test('dry run stages canonical baseline and Forge arms and writes trial manifest
   const forgeInstruction = await readFile(path.join(forge, 'instruction.md'), 'utf8');
   assert.match(baselineInstruction, /Evaluation arm: baseline/);
   assert.doesNotMatch(baselineInstruction, /Forge workflow/i);
+  assert.doesNotMatch(baselineInstruction, /unattended/i);
+  assert.doesNotMatch(baselineInstruction, /no human operator/i);
+  assert.doesNotMatch(baselineInstruction, /never end (?:a |your )turn with a clarifying question/i);
   assert.match(forgeInstruction, /Evaluation arm: forge/);
   assert.match(forgeInstruction, /Forge workflow/);
+  assert.match(forgeInstruction, /unattended/i);
+  assert.match(forgeInstruction, /no human operator/i);
+  assert.match(forgeInstruction, /never end (?:a |your )turn with a clarifying question/i);
 
   for (const trial of plan.trials) {
     assert.deepEqual(trial.harborArgv.slice(0, 2), ['run', '--path']);

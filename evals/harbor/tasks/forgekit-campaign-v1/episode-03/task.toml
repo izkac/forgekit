@@ -6,7 +6,7 @@ artifacts = [
 
 [task]
 name = "forgekit/episode-03"
-version = "1.0.0"
+version = "1.1.0"
 description = "Allow refunds on cancelled orders, or report the conflict with the terminal cancelled invariant."
 authors = []
 keywords = ["campaign"]
@@ -18,7 +18,7 @@ benchmark_category = "tests"
 tags = ["node", "orders", "refunds", "http", "campaign"]
 
 [agent]
-timeout_sec = 1200.0
+timeout_sec = 3600.0
 
 [verifier]
 timeout_sec = 180.0

@@ -6,37 +6,37 @@
     {
       "id": "episode-01",
       "index": 1,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "task_path": "tasks/forgekit-campaign-v1/episode-01"
     },
     {
       "id": "episode-02",
       "index": 2,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "task_path": "tasks/forgekit-campaign-v1/episode-02"
     },
     {
       "id": "episode-03",
       "index": 3,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "task_path": "tasks/forgekit-campaign-v1/episode-03"
     },
     {
       "id": "episode-04",
       "index": 4,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "task_path": "tasks/forgekit-campaign-v1/episode-04"
     },
     {
       "id": "episode-05",
       "index": 5,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "task_path": "tasks/forgekit-campaign-v1/episode-05"
     },
     {
       "id": "episode-06",
       "index": 6,
-      "version": "1.0.0",
+      "version": "1.1.0",
       "task_path": "tasks/forgekit-campaign-v1/episode-06"
     }
   ]
