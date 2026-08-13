@@ -1,0 +1,92 @@
+<!-- forge-brief-specs-hash:63a3553f38fa4ae6 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Fair campaign evals</title>
+<style>
+  body { max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         line-height: 1.6; color: #1c1e21; background: #fff; }
+  h1 { font-size: 1.75rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e3e5e8; padding-bottom: .35rem; }
+  .sub { color: #6a6f76; margin-top: 0; }
+  ul { padding-left: 1.25rem; } li { margin: .4rem 0; }
+  code { background: #f2f3f5; padding: .1rem .35rem; border-radius: 3px; font-size: .9em; }
+  .callout { background: #fff8e6; border-left: 3px solid #e0a800; padding: .75rem 1rem; margin: 1.25rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Let Forge finish the trial</h1>
+<p class="sub">Operator brief · change <code>eval-unattended-timeouts</code></p>
+
+<h2>TL;DR</h2>
+<p>
+The first campaign run made Forge look worse at coding because three of its
+twelve trials never finished: one asked a person who isn't there, two ran out
+of a 20-minute clock while still reviewing. This change tells Forge there is
+no one to ask, and gives every campaign trial an hour — same cap for the
+plain agent, who will just finish early.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Forge's eval instructions say: this is unattended, don't wait, pick a default and keep going.</li>
+  <li>Campaign trials may run up to 60 minutes instead of 20, on both arms.</li>
+  <li>That timeout bump is a new episode version (1.1.0), so we don't mix it with the first run.</li>
+  <li>Reviews and tests stay. We are not thinning Forge to make it look cheaper.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>
+Every eval already stamps a short "you are the Forge arm" note onto the task.
+That note will now also say there is no operator. The six campaign tasks will
+advertise a one-hour agent limit to Harbor. The next live campaign run is a
+new cohort; don't average it with the 1.0.0 numbers.
+</p>
+
+<pre class="mermaid">
+flowchart LR
+  A[Harbor starts a Forge trial] --> B{Agent wants to ask a human?}
+  B -- Yes, today --> C[Trial ends unfinished]
+  B -- After this change --> D[Pick a default and continue]
+  D --> E{Still working at 20 min?}
+  E -- Today --> F[Killed]
+  E -- After this change --> G[Keep going until done or 60 min]
+</pre>
+
+<h2>What changes for you</h2>
+<p>
+The next authorized campaign run will cost more wall-clock if Forge uses the
+extra time — up to about an hour per Forge trial in the worst case, instead of
+twenty minutes. Baseline should still finish in a few minutes. Use a new seed
+and treat results as a 1.1.0 cohort.
+</p>
+
+<h2>Risks and open questions</h2>
+<div class="callout">
+  The Forge workflow skill still tells agents to confirm fuzzy design choices.
+  If that voice wins over the eval note, we may still see a question-and-stop.
+  We will look at that on the next run rather than rewriting the skill now.
+</div>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>No change to the Forge skill that humans use in the editor.</li>
+  <li>No change to hard-v2's 20-minute cap.</li>
+  <li>No rerun of the live cohort as part of this change — that stays a separate spend decision.</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>Unattended instruction on the Forge arm — 3 tasks</li>
+  <li>Campaign timeout 3600s and version 1.1.0 — 3 tasks</li>
+  <li>Product-loop check on a dry-run — 1 task</li>
+</ul>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

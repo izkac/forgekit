@@ -1,0 +1,24 @@
+{
+  "change": "eval-unattended-timeouts",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "The Forge arm is unattended",
+      "library": "evals/harbor/run.mjs — stageArm Forge instruction",
+      "runtimeOwner": "node evals/harbor/run.mjs (Harbor evaluation runner CLI)",
+      "writes": "staged arms/forge/instruction.md",
+      "reads": "canonical task instruction.md",
+      "uiConsumer": "Harbor agent reading /instruction.md in the trial container",
+      "evidence": "evals/harbor/run.test.mjs + scripts/e2e/assert-unattended-forge-instruction.mjs"
+    },
+    {
+      "capability": "Campaign episodes allow a full Forge loop",
+      "library": "evals/harbor/tasks/forgekit-campaign-v1/episode-*/task.toml + corpora/forgekit-campaign-v1.json",
+      "runtimeOwner": "Harbor agent timeout from task.toml when `harbor run` executes a campaign trial",
+      "writes": "N/A — metadata consumed by Harbor",
+      "reads": "episode task.toml [agent] timeout_sec and [task] version",
+      "uiConsumer": "Harbor trial scheduler",
+      "evidence": "evals/harbor/smoke-campaign.mjs"
+    }
+  ]
+}

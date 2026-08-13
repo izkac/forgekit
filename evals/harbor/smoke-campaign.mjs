@@ -261,11 +261,17 @@ async function validateArmTreatment(entry, stagedRoot, arm, stagedFilename) {
   if (arm === 'baseline') {
     requireCondition(!dockerfile.includes('forgekit-treatment'), `${entry.id} baseline arm installs Forgekit`);
     requireCondition(/Evaluation arm: baseline/.test(instruction) && !/Forge workflow/i.test(instruction), `${entry.id} baseline instruction contains Forge treatment`);
+    requireCondition(!/unattended/i.test(instruction), `${entry.id} baseline instruction contains unattended rule`);
+    requireCondition(!/no human operator/i.test(instruction), `${entry.id} baseline instruction contains unattended operator rule`);
+    requireCondition(!/never end (?:a |your )turn with a clarifying question/i.test(instruction), `${entry.id} baseline instruction contains unattended clarifying-question rule`);
     return;
   }
   requireCondition(dockerfile.includes(`COPY ${stagedFilename} /tmp/forgekit-treatment.tgz`), `${entry.id} Forge arm is missing its staged local treatment`);
   requireCondition(!dockerfile.includes('@izkac/forgekit@'), `${entry.id} Forge smoke would install a registry package`);
   requireCondition(/Evaluation arm: forge/.test(instruction) && /Forge workflow/.test(instruction), `${entry.id} Forge instruction is missing its treatment`);
+  requireCondition(/unattended/i.test(instruction), `${entry.id} Forge instruction is missing unattended rule`);
+  requireCondition(/no human operator/i.test(instruction), `${entry.id} Forge instruction is missing no-human-operator rule`);
+  requireCondition(/never end (?:a |your )turn with a clarifying question/i.test(instruction), `${entry.id} Forge instruction is missing clarifying-question rule`);
   requireCondition(
     (await readFile(path.join(stagedRoot, 'environment', stagedFilename))).equals(fakeTarballBytes),
     `${entry.id} Forge staging changed the harmless local tarball`,

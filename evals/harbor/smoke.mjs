@@ -201,7 +201,13 @@ async function stageAndValidate(workDirectory, taskId, taskRoot) {
   requireCondition(!forgeDockerfile.includes('FORGEKIT_INSTALL_MARKER'), 'Forge arm retained its install marker');
   requireCondition(/Evaluation arm: baseline/.test(baselineInstruction), 'baseline instruction is not arm-specific');
   requireCondition(!/Forge workflow/i.test(baselineInstruction), 'baseline instruction contains Forge treatment');
+  requireCondition(!/unattended/i.test(baselineInstruction), 'baseline instruction contains unattended rule');
+  requireCondition(!/no human operator/i.test(baselineInstruction), 'baseline instruction contains unattended operator rule');
+  requireCondition(!/never end (?:a |your )turn with a clarifying question/i.test(baselineInstruction), 'baseline instruction contains unattended clarifying-question rule');
   requireCondition(/Evaluation arm: forge/.test(forgeInstruction) && /Forge workflow/.test(forgeInstruction), 'Forge instruction is missing its treatment');
+  requireCondition(/unattended/i.test(forgeInstruction), 'Forge instruction is missing unattended rule');
+  requireCondition(/no human operator/i.test(forgeInstruction), 'Forge instruction is missing no-human-operator rule');
+  requireCondition(/never end (?:a |your )turn with a clarifying question/i.test(forgeInstruction), 'Forge instruction is missing clarifying-question rule');
 
   for (const arm of ['baseline', 'forge']) {
     const environmentMap = await directoryMap(path.join(stagedByArm[arm], 'environment'));
