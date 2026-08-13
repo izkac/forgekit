@@ -25,6 +25,6 @@
       `evals/README.md` to `1.1.0` and note the 3600s agent cap.
 
 ## 3. Product loop
-- [ ] 3.1 Add `scripts/e2e/assert-unattended-forge-instruction.mjs`: read the
+- [x] 3.1 Add `scripts/e2e/assert-unattended-forge-instruction.mjs`: read the
       `unattended-e2e` dry-run Forge `instruction.md` and require the
       unattended phrases. Verify: `forge e2e run` is green.
