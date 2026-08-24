@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.45 — 2026-08-24
+
+Docs: new `docs/day-to-day.md` — the operator's guide to Forge. Scenario-driven:
+which commands are yours vs the agent's, the three ways to start work, a feature
+walked start to finish, pace in "reach for it when" terms, gate refusals in
+plain words, fleet, and the few options an operator actually touches. Linked
+from the README and `docs/usage.md`; no code changes.
+
 ## 0.3.44 — 2026-08-13
 
 Harbor evals: the Forge arm is told the trial is unattended (no operator, pick a
