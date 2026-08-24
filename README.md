@@ -8,7 +8,9 @@ Portable agent-skills monorepo. One package (`@izkac/forgekit`), three bins:
 | **`forge`** | Forge workflow sessions |
 | **`review`** | Thorough code review pipeline |
 
-**New here?** Read **[How to use Forgekit](docs/usage.md)** — install, project wiring,
+**New here?** Read **[Forge day to day](docs/day-to-day.md)** — the operator's
+guide: what you type, what the agent does, pace, gates, fleet. Full reference:
+**[How to use Forgekit](docs/usage.md)** — install, project wiring,
 slash commands, simple vs jobs/workers examples, integrity (spine / defer /
 executed e2e product loop), and a cheat sheet.
 

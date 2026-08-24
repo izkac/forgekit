@@ -1,6 +1,8 @@
 # How to use Forgekit
 
-Step-by-step guide for humans. Reference details live in
+Step-by-step guide for humans. For a shorter scenario-driven operator guide —
+what you type on a normal day — see [day-to-day.md](day-to-day.md).
+Reference details live in
 [`skills/forge/docs/forge.md`](../skills/forge/docs/forge.md) (workflow internals; also at `docs/forge.md`) and
 [`docs/thorough-code-review.md`](thorough-code-review.md) (standalone review).
 
@@ -968,6 +970,7 @@ In the agent:
 
 | Doc | Contents |
 |-----|----------|
+| [day-to-day.md](day-to-day.md) | Operator's guide — what you type on a normal day |
 | [usage.md](usage.md) | Tutorial + session success (L1/L2/L3) |
 | [forge.md](forge.md) | Full reference: phases, pace matrix, integrity rules, agent surfaces |
 | [runtime-integrity.md](../skills/forge/references/runtime-integrity.md) | Hard rules agents must follow |
