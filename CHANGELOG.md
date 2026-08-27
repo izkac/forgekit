@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.46 — 2026-08-27
 
 Forge starts only when you type `/forge` or ask to **use Forge**. It no longer
 auto-triages every chat request. After you invoke it, triage is still the first
