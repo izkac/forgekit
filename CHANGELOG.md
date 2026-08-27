@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.50 — 2026-08-27
+
+OpenSpec leftover sweep before final review. When `openspec-verify-change` /
+`/opsx:verify` is in the project and the session is `planType: openspec`,
+Forge verify runs that sweep, fixes every finding (CRITICAL, WARNING,
+SUGGESTION — including files `tasks.md` never listed), and records
+`openspec-verify.md` with `Remaining: none`. `forge phase review` and
+`forge phase done` refuse without it. The vendor "ready for archive (with
+noted improvements)" line is not enough. Specs-engine sessions skip the
+gate. Combined close still runs the sweep before the closer.
+
 ## 0.3.49 — 2026-08-27
 
 `forgekit install` no longer offers a selectable `agents` environment or a
