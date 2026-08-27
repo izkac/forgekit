@@ -1,9 +1,10 @@
 # Substantial work triage
 
 Run this check **as Step 0 after the user invoked Forge** — `/forge` /
-`/forge:*` (except `/forge:skip`), or natural language “use Forge” /
-“using Forge” / “use the Forge …”. Do **not** enter Forge on a plain
-request, even if the work looks substantial.
+`/forge:*` (except `/forge:skip`), or any natural-language ask for Forge by
+name: “use Forge”, “with Forge”, “do forge work”, “run the forge workflow”,
+“start a forge session”. Do **not** enter Forge on a plain request, even if
+the work looks substantial.
 
 **You decide** whether invoked work is substantial enough to continue the
 pipeline. You can see the conversation, the repository and the session.
@@ -15,7 +16,7 @@ engine). Smaller work executes directly after this step.
 ## Enter / continue Forge when invoked AND ANY apply
 
 - User invoked `/forge` or any `/forge:*` command (except `/forge:skip`)
-- User asked to **use Forge** (or “using Forge” / “use the Forge …”)
+- User asked for **Forge by name** in any phrasing (“use Forge”, “with Forge”, “do forge work”, “forge workflow”…)
 - An active session already exists for this work (follow-ups may continue without a second invoke)
 
 Then continue the pipeline when the work is a feature, logic-changing bug,
@@ -23,6 +24,13 @@ multi-file edit, public API/schema change, or would produce a tracked
 capability. Honor `/forge` on small work by still running this step — you
 may execute directly if it is truly trivial, and the plan-time exit ramp
 still applies once the work is shaped.
+
+**Existing tracked change:** if the invoked work targets a change that is
+already proposed (OpenSpec `openspec/changes/<name>/` or specs
+`specs/changes/<name>/`), it is substantial by definition — route to the
+`/forge:apply` flow (session + `forge phase implement`, subagent-driven
+implement, verify, review). Never implement an existing change inline
+without the pipeline.
 
 ## Skip the rest of the pipeline (execute directly) when ANY apply
 

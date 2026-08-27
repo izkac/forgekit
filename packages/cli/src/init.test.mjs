@@ -100,6 +100,24 @@ test('Forge skill is opt-in and still triages after invoke', () => {
   assert.ok(!/Use when building features, fixing non-trivial bugs/.test(skill));
 });
 
+// /forge over an already-proposed change fell through to inline implementation
+// (no session, no subagents) because the command never routed it. The command
+// itself must route to the apply flow — not rely on the skill body alone.
+test('/forge command routes existing changes to the apply flow', () => {
+  const root = resolveTemplatesRoot();
+  for (const rel of ['claude/commands/forge.md', 'cursor/commands/forge.md']) {
+    const body = fs.readFileSync(path.join(root, ...rel.split('/')), 'utf8');
+    assert.match(body, /already-proposed\s+change/, `${rel} missing existing-change routing`);
+    assert.match(body, /\/forge:apply/, `${rel} does not route to the apply flow`);
+    assert.match(body, /forge phase implement/, `${rel} missing implement phase command`);
+    assert.match(
+      body,
+      /Never implement an already-proposed change inline/,
+      `${rel} missing inline-implementation ban`,
+    );
+  }
+});
+
 test('claude init ships the model-policy hook and registers it in the snippet', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-model-hook-'));
   try {

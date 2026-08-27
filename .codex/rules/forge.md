@@ -2,9 +2,11 @@
 
 Full workflow: `~/.codex/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.codex/skills/forge/SKILL.md` after `forge install`).
 
-**Default:** execute the request directly. Start Forge only when the user invokes `/forge` or asks to **use Forge**. Codex has no slash commands — the phrase is the invoke.
+**Default:** execute the request directly. Start Forge only when the user asks for **Forge by name** in any phrasing ("use Forge", "with Forge", "do forge work", "forge workflow"). Codex has no slash commands — the phrase is the invoke.
 
 When Forge is invoked, **triage is always Step 0**. Skip with `/forge:skip` or when work is trivial.
+
+**Existing tracked change** + invoke → apply flow (session, `forge phase implement`, subagent-driven implement, verify, review). Never implement an already-proposed change inline.
 
 If an active session exists, continue it for follow-ups on that work.
 

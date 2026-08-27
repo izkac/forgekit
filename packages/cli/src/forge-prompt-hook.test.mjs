@@ -189,7 +189,7 @@ test('retired forge-triage-hook.mjs is not shipped in templates', () => {
 test('prompt hook matcher stays in sync with isForgeInvocation', () => {
   const hookSrc = fs.readFileSync(TEMPLATE_HOOKS['forge-prompt-hook.mjs'], 'utf8');
   const cliSrc = fs.readFileSync(path.join(SRC, 'triage-prompt.mjs'), 'utf8');
-  const needle = String.raw`/\b(?:use(?:\s+the)?|using)\s+forge\b/i`;
+  const needle = String.raw`/\b(?:use|using|with|via|start|run|do)\s+(?:the\s+)?forge\b|\bforge\s+(?:work(?:flow)?|pipeline|session)\b/i`;
   assert.ok(hookSrc.includes(needle), 'prompt hook missing the use-Forge matcher');
   assert.ok(cliSrc.includes(needle), 'triage-prompt.mjs missing the use-Forge matcher');
 });

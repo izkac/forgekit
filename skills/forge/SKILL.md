@@ -3,8 +3,9 @@ name: forge
 description: >-
   Forge — self-contained disciplined development workflow. Brainstorm, tracked
   plan, subagent-driven TDD, verify, review, and finish.
-  Use when the user invokes /forge or asks to use Forge. Triage is always the
-  first step after invoke. Do not start Forge on uninvoked requests.
+  Use when the user invokes /forge or asks for Forge by name ("use Forge",
+  "do forge work", "with the forge workflow"). Triage is always the first step
+  after invoke. Do not start Forge on uninvoked requests.
 disable-model-invocation: true
 ---
 
@@ -58,13 +59,19 @@ Local overlays: [docs/forge.md](./docs/forge.md) § Checkout-local overrides.
 ## Step 0 — Triage (after invoke)
 
 Forge starts only when the user invoked `/forge` / `/forge:*` (except `/forge:skip`)
-or asked to **use Forge**. Do not self-start on substantial-looking work.
+or asked for **Forge by name** — any phrasing counts: "use Forge", "with Forge",
+"do forge work", "run the forge workflow", "start a forge session". Do not
+self-start on substantial-looking work.
 
 Once invoked, triage per
 [references/substantial-work.md](./references/substantial-work.md) **before**
 brainstorm or plan — invocation does not skip this step.
 
 - **Substantial (tracked-change-worthy)** → continue Forge (bootstrap session if needed)
+- **Existing tracked change** (already proposed via OpenSpec or specs) → follow
+  the `/forge:apply` flow: bootstrap/resume the session, `forge phase implement
+  --plan-type <engine> --openspec "<change>"`, then subagent-driven implement,
+  verify, and review. Do **not** re-brainstorm, and never implement inline
 - **Too small for a tracked change** → execute directly, no session
 - **`/forge:skip`** → mark session `phase: skipped` if one exists; execute directly
 

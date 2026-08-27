@@ -28,6 +28,14 @@ test('isForgeInvocation matches natural-language use Forge', () => {
   assert.equal(isForgeInvocation('Use the Forge workflow for this change'), true);
 });
 
+test('isForgeInvocation matches other ask-for-Forge-by-name phrasings', () => {
+  assert.equal(isForgeInvocation('Do forge work over the add-auth openspec change'), true);
+  assert.equal(isForgeInvocation('Implement the add-auth change with Forge'), true);
+  assert.equal(isForgeInvocation('run the forge workflow on this'), true);
+  assert.equal(isForgeInvocation('apply it via forge'), true);
+  assert.equal(isForgeInvocation('start a forge session for this change'), true);
+});
+
 test('isForgeInvocation does not match a plain work request', () => {
   assert.equal(isForgeInvocation('Add rate limiting to the public API.'), false);
   assert.equal(isForgeInvocation('What is forge?'), false);

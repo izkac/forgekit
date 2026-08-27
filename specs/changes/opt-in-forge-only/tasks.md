@@ -15,3 +15,9 @@
 
 - [x] 3.1 Forge skill: `disable-model-invocation: true`; Step 0 runs only after invoke; triage remains first pipeline step. `references/substantial-work.md` enter-conditions are invoke-only. Thin-rule templates + this repo’s copies invert the default. `skills/forge/docs/forge.md` agent-surfaces table. Verify: thin-rule test plus a pin that skill/rules do not say “triage before implementation” as the default.
 - [x] 3.2 Operator docs: `docs/day-to-day.md` starting-work section; slash-command templates keep triage as step 1; CHANGELOG. Verify by reading the files.
+
+## 4. Follow-up: invoke phrasing + existing-change routing
+
+- [x] 4.1 Broaden `isForgeInvocation` (CLI + prompt hook, kept in sync) to any ask-for-Forge-by-name phrasing: “with Forge”, “do forge work”, “run the forge workflow”, “start a forge session”. Tests in `triage-prompt.test.mjs`.
+- [x] 4.2 Skill Step 0, `substantial-work.md`, and thin rules: invoked work over an already-proposed change routes to the `/forge:apply` flow (session + implement phase + subagents), never inline implementation.
+- [x] 4.3 `/forge` command templates (cursor + claude) route existing changes themselves — step 2 switches to the apply flow with `forge phase implement`; pinned in `init.test.mjs`. This was the actual reported failure: `/forge` over an existing OpenSpec change implemented inline with no session.

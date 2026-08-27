@@ -18,8 +18,11 @@ export function isForgeInvocation(prompt) {
   const p = (prompt || '').trim();
   if (!p) return false;
   if (/^\s*\/forge(?::|\s|$)/i.test(p)) return true;
-  // Keep in sync with templates/project/claude/hooks/forge-prompt-hook.mjs
-  return /\b(?:use(?:\s+the)?|using)\s+forge\b/i.test(p);
+  // Any ask-for-Forge-by-name phrasing: "use Forge", "with Forge",
+  // "do forge work", "run the forge workflow". `\bforge\b` does not match
+  // "forgekit". Keep in sync with
+  // templates/project/claude/hooks/forge-prompt-hook.mjs
+  return /\b(?:use|using|with|via|start|run|do)\s+(?:the\s+)?forge\b|\bforge\s+(?:work(?:flow)?|pipeline|session)\b/i.test(p);
 }
 
 // I1-R (round 3, final review round 2): the previous split gated

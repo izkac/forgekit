@@ -45,7 +45,7 @@ function isForgeInvocation(prompt) {
   if (!p) return false;
   if (/^\s*\/forge(?::|\s|$)/i.test(p)) return true;
   // Keep in sync with packages/cli/src/triage-prompt.mjs
-  return /\b(?:use(?:\s+the)?|using)\s+forge\b/i.test(p);
+  return /\b(?:use|using|with|via|start|run|do)\s+(?:the\s+)?forge\b|\bforge\s+(?:work(?:flow)?|pipeline|session)\b/i.test(p);
 }
 
 function emit(message) {

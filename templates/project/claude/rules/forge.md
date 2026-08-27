@@ -2,9 +2,11 @@
 
 Full workflow: `~/.claude/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.claude/skills/forge/SKILL.md` after `forge install`).
 
-**Default:** execute the request directly. Start Forge only when the user invokes `/forge` / `/forge:*` (except `/forge:skip`) or asks to **use Forge**.
+**Default:** execute the request directly. Start Forge only when the user invokes `/forge` / `/forge:*` (except `/forge:skip`) or asks for **Forge by name** in any phrasing ("use Forge", "with Forge", "do forge work", "forge workflow").
 
 When Forge is invoked, **triage is always Step 0** (substantial → pipeline; trivial/read-only → execute directly).
+
+**Existing tracked change** + invoke → the `/forge:apply` flow (session, `forge phase implement`, subagent-driven implement, verify, review). Never implement an already-proposed change inline.
 
 If an active session exists, continue it for follow-ups on that work. An unrelated request without an invoke does not start a new session.
 
