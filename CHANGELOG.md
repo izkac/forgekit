@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.49 — 2026-08-27
+
+`forgekit install` no longer offers a selectable `agents` environment or a
+`--shared` flag. Cursor, Codex, Copilot, Gemini, and OpenCode write skills
+once to `~/.agents/skills/<skill>/`. Claude and Windsurf keep their vendor
+paths. The first-run picker pre-checks the `.agents`-capable harnesses.
+`--shared` errors with guidance to `--cursor` / `--codex`. `--agents agents`
+is an unknown agent. Uninstall records which harnesses own a dest: uninstalling
+Cursor keeps `~/.agents/skills/<skill>/` while Codex is still recorded, and
+removes it when Cursor was the only owner.
+`forge init --agents` still errors and points at `forgekit install`. A stamped
+project copy at `.agents/skills/forge/` (from 0.3.48) is a `forge doctor`
+warning (never a failure) naming `forge init`, and is deleted by the next
+`forge init`; unstamped / other `.agents/` content is left alone. Stamped
+leftovers at old vendor skill paths are retired on the next `.agents` install.
+
 ## 0.3.48 — 2026-08-27
 
 Vendor-neutral `.agents` target, mirroring OpenSpec's `openspec init --tools
