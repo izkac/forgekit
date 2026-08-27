@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.48 — 2026-08-27
+
+Vendor-neutral `.agents` target, mirroring OpenSpec's `openspec init --tools
+agents`: `forgekit install` gains an `agents` environment that installs skills
+to `~/.agents/skills/<skill>/`, and `forge init --agents` copies the packaged
+Forge skill into the project at `.agents/skills/forge/` (committed, so the repo
+carries Forge for the team). The target is skills-only — no command files and no
+hooks, which stay with the per-tool targets — and combines with the
+cursor/claude/codex targets in the same run; in agnostic tools, invoke Forge by
+name. `forge doctor` warns (not fails) when the project copy is outdated,
+naming `forge init --agents` as the refresh.
+
 ## 0.3.47 — 2026-08-27
 
 Fix: `/forge` over an already-proposed change (OpenSpec or specs) implemented
