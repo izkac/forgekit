@@ -179,67 +179,126 @@ no recorded value SHALL be resolved exactly as a first-time init is today.
 - **AND** `forge-triage-hook.mjs` is not listed as unwired
 
 ### Requirement: Vendor-neutral `.agents` install target
-`forgekit install` SHALL offer an `agents` environment that installs selected
-skills to `~/.agents/skills/<skill>/` with the standard forgekit stamp, and
-`forge init` SHALL offer an `agents` target (`--agents` flag and picker entry)
-that copies the packaged Forge skill to `<project>/.agents/skills/forge/`
-with a stamp, refreshing it on re-run. The target SHALL be skills-only: init
-SHALL NOT write command files or hooks for it and SHALL report both as
-intentionally skipped. The target SHALL be combinable with any other agent
-target in the same run. Forgekit SHALL only manage its own skill directories
-under `.agents/skills/` and SHALL NOT read, list, or remove anything else
-under `.agents/`.
+`forgekit install` SHALL NOT offer a selectable `agents` environment or a
+`--shared` flag. Harnesses that natively discover `~/.agents/skills/`
+(Cursor, Codex CLI, GitHub Copilot, Gemini CLI, OpenCode) SHALL install
+selected skills to `~/.agents/skills/<skill>/` with the standard forgekit
+stamp. Selecting more than one of those harnesses SHALL write each skill to
+that destination **once**. Claude Code SHALL keep `~/.claude/skills/<skill>/`.
+Windsurf SHALL keep its vendor skill path. `--shared` SHALL fail with an
+error that names `--cursor` / `--codex` (or other harness flags). The
+interactive picker SHALL pre-check the `.agents`-capable harnesses when
+nothing is installed yet. Forgekit SHALL only manage its own skill
+directories under `.agents/skills/` and SHALL NOT read, list, or remove
+anything else under `.agents/`.
 
 #### Scenario: Install to the shared user-level root
 
 - **GIVEN** a home directory without `~/.agents`
-- **WHEN** `forgekit install --skills forge --agents agents` runs
+- **WHEN** `forgekit install --skills forge --cursor` runs
 - **THEN** `~/.agents/skills/forge/SKILL.md` exists
 - **AND** the directory carries a `.forgekit.json` stamp
-- **AND** `forgekit list` shows the `forge × agents` pair as present
+- **AND** `~/.cursor/skills/forge` is not created
 
-#### Scenario: Project init writes the skill tree and skips commands and hooks
+#### Scenario: Two `.agents`-capable harnesses share one dest
 
-- **GIVEN** a project with no `.agents/` directory
+- **GIVEN** a home directory without `~/.agents`
+- **WHEN** `forgekit install --skills forge --cursor --codex` runs
+- **THEN** exactly one copy exists at `~/.agents/skills/forge/`
+- **AND** `~/.codex/skills/forge` is not created
+
+#### Scenario: `--shared` fails with guidance
+
+- **WHEN** `forgekit install --shared` is parsed
+- **THEN** it fails
+- **AND** the error names `--cursor` or `--codex`
+
+#### Scenario: First-run picker pre-checks `.agents`-capable harnesses
+
+- **GIVEN** a home directory with no managed skill installs
+- **WHEN** the interactive environment picker is computed
+- **THEN** cursor, codex, copilot, gemini, and opencode are pre-checked
+- **AND** claude is not pre-checked
+
+#### Scenario: `forge init --agents` fails with guidance
+
 - **WHEN** `forge init --agents` runs
-- **THEN** `.agents/skills/forge/SKILL.md` exists with a stamp
-- **AND** no `.agents/commands/` and no hook wiring is created
-- **AND** the report marks commands and hooks as skipped for this target
-
-#### Scenario: The agents target is not exclusive
-
-- **GIVEN** a project with no wiring
-- **WHEN** `forge init --agents --cursor` runs
-- **THEN** both `.agents/skills/forge/` and `.cursor/commands/forge.md` exist
-
-#### Scenario: Re-init refreshes a stale project copy
-
-- **GIVEN** `.agents/skills/forge/` containing an older skill tree
-- **WHEN** `forge init --agents` runs again
-- **THEN** the tree matches the packaged skill and the stamp is current
-
-#### Scenario: Foreign content under .agents is untouched
-
-- **GIVEN** `.agents/skills/other-skill/` and `.agents/agents.md` exist
-- **WHEN** `forge init --agents` runs
-- **THEN** both are left exactly as they were
+- **THEN** the exit code is non-zero
+- **AND** the error names `forgekit install` as where skills are managed
 
 ### Requirement: Doctor reports the project `.agents` skill copy
-When `<project>/.agents/skills/forge/` exists, `forge doctor` SHALL report it —
-ok when current against the packaged skill, a warning (not a failure) when
-outdated or unversioned, naming `forge init --agents` as the refresh. When the
-directory is absent the check SHALL be skipped without affecting the exit
-code.
+When `<project>/.agents/skills/forge/` exists **with a forgekit stamp**,
+`forge doctor` SHALL warn (not fail) that it is a legacy project copy, naming
+`forge init` (which retires it) or manual deletion. When the directory exists
+without a forgekit stamp it SHALL be ignored as foreign content: no check
+output, no warning. When the directory is absent the check SHALL be skipped
+without affecting the exit code.
 
-#### Scenario: Outdated project copy warns but does not fail
+#### Scenario: Stamped legacy copy warns but does not fail
 
-- **GIVEN** `.agents/skills/forge/` with a stamp from an older version
+- **GIVEN** `.agents/skills/forge/` carrying a `.forgekit.json` stamp
 - **WHEN** `forge doctor` runs
 - **THEN** the exit code is unaffected by this check
-- **AND** the output names the stale copy and `forge init --agents`
+- **AND** the output calls the copy legacy and names `forge init` as the cleanup
+
+#### Scenario: Unstamped directory is ignored
+
+- **GIVEN** `.agents/skills/forge/` without a `.forgekit.json` stamp
+- **WHEN** `forge doctor --json` runs
+- **THEN** the report contains no `agentsSkill` check
 
 #### Scenario: Absent directory is skipped
 
 - **GIVEN** a project with no `.agents/` directory
 - **WHEN** `forge doctor` runs
 - **THEN** no `.agents` check appears as failed or warned
+
+### Requirement: Init retires the stamped project `.agents` skill copy
+`forge init` SHALL delete `<project>/.agents/skills/forge/` when that
+directory carries a `.forgekit.json` stamp, and SHALL report the retirement in
+its JSON report and human-readable output. A directory at that path without a
+forgekit stamp SHALL be left byte-identical, as SHALL all other content under
+`.agents/`.
+
+#### Scenario: Stamped copy is retired on the next init
+
+- **GIVEN** a project with a stamped `.agents/skills/forge/` from 0.3.48
+- **WHEN** `forge init --cursor` runs
+- **THEN** `.agents/skills/forge/` no longer exists
+- **AND** the report marks the copy as retired
+
+#### Scenario: Unstamped and foreign content survive
+
+- **GIVEN** `.agents/skills/forge/` without a stamp and `.agents/agents.md`
+- **WHEN** `forge init --cursor` runs
+- **THEN** both are left exactly as they were
+
+### Requirement: Shared dest is not deleted while another harness still maps there
+Uninstalling or pruning one `.agents`-capable harness SHALL NOT remove
+`~/.agents/skills/<skill>/` while another selected or remaining harness
+still maps to that destination.
+
+#### Scenario: Uninstall Cursor keeps the dest if Codex remains
+
+- **GIVEN** `~/.agents/skills/forge/` installed via `--cursor --codex`
+- **WHEN** `forgekit uninstall --skills forge --agents cursor` runs
+- **THEN** `~/.agents/skills/forge/` still exists
+
+### Requirement: Stamped vendor leftovers are retired on `.agents` install
+When `forgekit install` writes a skill to `~/.agents/skills/<skill>/`, it
+SHALL delete a **stamped** leftover at that skill’s previous vendor path for
+each `.agents`-capable harness. An unstamped directory at a vendor path
+SHALL be left byte-identical.
+
+#### Scenario: Stamped Cursor vendor copy is retired
+
+- **GIVEN** a stamped `~/.cursor/skills/forge/`
+- **WHEN** `forgekit install --skills forge --cursor --force` runs
+- **THEN** `~/.cursor/skills/forge/` no longer exists
+- **AND** `~/.agents/skills/forge/` exists with a stamp
+
+#### Scenario: Unstamped vendor directory survives
+
+- **GIVEN** `~/.cursor/skills/forge/` without a `.forgekit.json` stamp
+- **WHEN** `forgekit install --skills forge --cursor --force` runs
+- **THEN** the unstamped vendor directory is left exactly as it was

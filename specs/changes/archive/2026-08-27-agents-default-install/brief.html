@@ -1,0 +1,81 @@
+<!-- forge-brief-specs-hash:dab57230bc13f86e -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Operator brief — shared .agents becomes the default install</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f4f4f4; padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #ddd; padding: .5rem .7rem; text-align: left; vertical-align: top; }
+  th { background: #f8f8f8; }
+  .why { background: #f0f7ff; border-left: 4px solid #4a90d9; padding: .8rem 1rem; }
+  .warn { background: #fff8ec; border-left: 4px solid #e2a33d; padding: .8rem 1rem; }
+</style>
+</head>
+<body>
+<h1>Shared <code>.agents</code> becomes the default install; the project copy is retired</h1>
+
+<div class="why">
+<strong>Why now.</strong> We checked the current host documentation: Cursor reads
+skills natively from <code>~/.agents/skills/</code> and <code>.agents/skills/</code>,
+and for Codex CLI the shared <code>.agents</code> root is the <em>canonical</em>
+skills location (its old vendor path is deprecated). Only Claude Code still
+requires its own <code>~/.claude/skills/</code>. So the shared root should be the
+default install, and the per-project copy added in 0.3.48 is redundant.
+</div>
+
+<h2>What changes for you</h2>
+<table>
+  <tr><th>Command</th><th>Before (0.3.48)</th><th>After</th></tr>
+  <tr>
+    <td><code>forgekit install</code></td>
+    <td>Shared <code>.agents</code> was the last picker entry, never pre-checked.</td>
+    <td>Shared <code>.agents</code> is the first picker entry and pre-checked by
+        default (you can still unselect it). Cursor/Codex stay selectable —
+        their labels note they also read the shared root. New
+        <code>--shared</code> shorthand.</td>
+  </tr>
+  <tr>
+    <td><code>forge init</code></td>
+    <td><code>--agents</code> copied the Forge skill into
+        <code>&lt;project&gt;/.agents/skills/forge/</code>.</td>
+    <td><code>--agents</code> is gone — it errors with a pointer to
+        <code>forgekit install</code>. Init also deletes a leftover
+        forgekit-stamped project copy and reports the cleanup. Foreign files
+        under <code>.agents/</code> are never touched.</td>
+  </tr>
+  <tr>
+    <td><code>forge doctor</code></td>
+    <td>Warned when the project copy was stale, suggesting
+        <code>forge init --agents</code>.</td>
+    <td>Warns that a stamped project copy is a legacy leftover and names the
+        cleanup. Unstamped directories are ignored (not ours to judge).</td>
+  </tr>
+</table>
+
+<h2>Where skills live after this change</h2>
+<table>
+  <tr><th>Host</th><th>Reads</th></tr>
+  <tr><td>Cursor</td><td><code>~/.agents/skills/</code> (shared, default) — also <code>~/.cursor/skills/</code> if you keep the per-tool install</td></tr>
+  <tr><td>Codex CLI</td><td><code>~/.agents/skills/</code> (its canonical location)</td></tr>
+  <tr><td>Claude Code</td><td><code>~/.claude/skills/</code> only — keep the Claude target selected</td></tr>
+</table>
+
+<div class="warn">
+<strong>One-time effect.</strong> If a project has a stamped
+<code>.agents/skills/forge/</code> from 0.3.48 (possibly committed to git), the
+next <code>forge init</code> deletes it. The git diff makes that reviewable;
+nothing is lost — the same skill is served from <code>~/.agents/skills/</code>.
+</div>
+
+<h2>Not changing</h2>
+<ul>
+  <li>Claude Code wiring (commands, hooks, rules, skills) — untouched.</li>
+  <li>Per-project wiring (<code>forge init --cursor/--claude/--codex</code>) — commands, thin rules, and hooks land per target exactly as before.</li>
+  <li><code>forgekit update</code> ownership rules — only stamped copies are ever rewritten.</li>
+</ul>
+</body>
+</html>

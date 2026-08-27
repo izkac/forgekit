@@ -1,0 +1,11 @@
+{
+  "change": "agents-dest-map",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "agents-target",
+      "cmd": "node scripts/e2e/harness-portability.mjs agents-target",
+      "expect": "AGENTS TARGET GREEN"
+    }
+  ]
+}

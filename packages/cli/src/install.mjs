@@ -84,19 +84,19 @@ export const AGENTS = {
   },
   cursor: {
     label: 'Cursor',
-    skillDir: (home, skillId) => path.join(home, '.cursor', 'skills', skillId),
+    skillDir: (home, skillId) => path.join(home, '.agents', 'skills', skillId),
   },
   codex: {
     label: 'Codex CLI',
-    skillDir: (home, skillId) => path.join(home, '.codex', 'skills', skillId),
+    skillDir: (home, skillId) => path.join(home, '.agents', 'skills', skillId),
   },
   copilot: {
     label: 'GitHub Copilot',
-    skillDir: (home, skillId) => path.join(home, '.copilot', 'skills', skillId),
+    skillDir: (home, skillId) => path.join(home, '.agents', 'skills', skillId),
   },
   gemini: {
     label: 'Gemini CLI',
-    skillDir: (home, skillId) => path.join(home, '.gemini', 'skills', skillId),
+    skillDir: (home, skillId) => path.join(home, '.agents', 'skills', skillId),
   },
   windsurf: {
     label: 'Windsurf',
@@ -105,16 +105,20 @@ export const AGENTS = {
   },
   opencode: {
     label: 'opencode',
-    skillDir: (home, skillId) =>
-      path.join(home, '.config', 'opencode', 'skills', skillId),
-  },
-  agents: {
-    label: 'Shared .agents (vendor-neutral)',
     skillDir: (home, skillId) => path.join(home, '.agents', 'skills', skillId),
   },
 };
 
 export const AGENT_IDS = Object.freeze(Object.keys(AGENTS));
+
+/** Harnesses whose skillDir is `~/.agents/skills/<skill>`. */
+export const AGENTS_SHARING_AGENTS_ROOT = Object.freeze([
+  'cursor',
+  'codex',
+  'copilot',
+  'gemini',
+  'opencode',
+]);
 
 /**
  * @param {string} value
@@ -170,6 +174,11 @@ export function parseArgs(argv) {
     else if (arg === '--force' || arg === '-f') opts.force = true;
     else if (arg === '--prune') opts.prune = true;
     else if (arg === '--help' || arg === '-h') opts.help = true;
+    else if (arg === '--shared') {
+      throw new Error(
+        '--shared is not a flag; install with a harness that maps to ~/.agents/skills (e.g. --cursor or --codex)',
+      );
+    }
     else if (arg === '--cursor') opts.agents.push('cursor');
     else if (arg === '--claude' || arg === '--claude-code') opts.agents.push('claude');
     else if (arg === '--codex') opts.agents.push('codex');
@@ -222,9 +231,9 @@ Options:
   --adr-project     Also scaffold ADR docs into --cwd when it is a git repo
   --no-adr-project  Never scaffold into cwd
   --cwd <path>      Project root for optional ADR scaffold (default: cwd)
-  --list            Show installed vs missing (and outdated) for all skill×agent pairs
+  --list            Show installed vs missing (and outdated) for each unique dest
   --update          Reinstall outdated installed skills (same agents as present)
-  --uninstall       Remove installed skill dirs for selected skills×agents
+  --uninstall       Remove dests whose recorded harnesses are all selected
   --force, -f       Overwrite existing skill directories
   --help
 
@@ -265,13 +274,20 @@ export function resolveSkillSource(skillId) {
  * @param {string} dest
  * @param {string} skillId
  * @param {string} skillSource
+ * @param {string[]} [agentIds] harnesses that own this dest after the write
  */
-export function writeInstallStamp(dest, skillId, skillSource) {
+export function writeInstallStamp(dest, skillId, skillSource, agentIds = []) {
+  const prev = readInstallStamp(dest);
+  const prevAgents = Array.isArray(prev?.agents) ? prev.agents : [];
+  const agents = [...new Set([...prevAgents, ...agentIds])].filter((id) =>
+    AGENT_IDS.includes(id),
+  );
   const stamp = {
     skill: skillId,
     version: packageVersion(),
     contentHash: hashDirectory(skillSource),
     installedAt: new Date().toISOString(),
+    ...(agents.length ? { agents } : {}),
   };
   fs.writeFileSync(
     path.join(dest, FORGEKIT_STAMP),
@@ -283,7 +299,7 @@ export function writeInstallStamp(dest, skillId, skillSource) {
 
 /**
  * @param {string} dest
- * @returns {{ skill?: string, version?: string, contentHash?: string } | null}
+ * @returns {{ skill?: string, version?: string, contentHash?: string, agents?: string[] } | null}
  */
 export function readInstallStamp(dest) {
   const p = path.join(dest, FORGEKIT_STAMP);
@@ -337,6 +353,74 @@ function removeDirRecursive(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+/** Previous vendor layouts for harnesses that now share `~/.agents/skills`. */
+const PREVIOUS_VENDOR_SKILL_DIRS = Object.freeze([
+  (home, skillId) => path.join(home, '.cursor', 'skills', skillId),
+  (home, skillId) => path.join(home, '.codex', 'skills', skillId),
+  (home, skillId) => path.join(home, '.copilot', 'skills', skillId),
+  (home, skillId) => path.join(home, '.gemini', 'skills', skillId),
+  (home, skillId) => path.join(home, '.config', 'opencode', 'skills', skillId),
+]);
+
+/**
+ * @param {string} home
+ * @param {string} skillId
+ * @param {string} dest
+ */
+function retireStampedVendorLeftovers(home, skillId, dest) {
+  if (dest !== path.join(home, '.agents', 'skills', skillId)) return;
+  for (const skillDir of PREVIOUS_VENDOR_SKILL_DIRS) {
+    const vendorDest = skillDir(home, skillId);
+    if (vendorDest === dest) continue;
+    if (readInstallStamp(vendorDest)) removeDirRecursive(vendorDest);
+  }
+}
+
+/**
+ * @param {string} home
+ * @param {string} skillId
+ * @param {string} dest
+ * @returns {string[]}
+ */
+function agentsMappingToDest(home, skillId, dest) {
+  return AGENT_IDS.filter((id) => AGENTS[id].skillDir(home, skillId) === dest);
+}
+
+/**
+ * Harnesses recorded as owning this dest. Legacy stamps without `agents`
+ * fall back to every AGENTS entry that maps here.
+ * @param {string} home
+ * @param {string} skillId
+ * @param {string} dest
+ * @returns {string[]}
+ */
+function destOwners(home, skillId, dest) {
+  const stamp = readInstallStamp(dest);
+  const recorded = Array.isArray(stamp?.agents)
+    ? stamp.agents.filter((id) => typeof id === 'string')
+    : [];
+  const known = recorded.filter(
+    (id) => AGENT_IDS.includes(id) && AGENTS[id].skillDir(home, skillId) === dest,
+  );
+  if (known.length) return known;
+  return agentsMappingToDest(home, skillId, dest);
+}
+
+/**
+ * @param {string} dest
+ * @param {string[]} agentIds
+ */
+function persistStampAgents(dest, agentIds) {
+  const stamp = readInstallStamp(dest);
+  if (!stamp) return;
+  stamp.agents = [...new Set(agentIds)].filter((id) => AGENT_IDS.includes(id));
+  fs.writeFileSync(
+    path.join(dest, FORGEKIT_STAMP),
+    `${JSON.stringify(stamp, null, 2)}\n`,
+    'utf8',
+  );
+}
+
 /**
  * @param {string[]} skillIds
  * @param {string[]} agentIds
@@ -349,12 +433,22 @@ export function installSkillsToAgents(skillIds, agentIds, opts = {}) {
 
   for (const skillId of skillIds) {
     const skillSource = resolveSkillSource(skillId);
+    /** @type {Map<string, string[]>} */
+    const destAliases = new Map();
     for (const agentId of agentIds) {
       const agent = AGENTS[agentId];
       if (!agent) throw new Error(`Unknown agent: ${agentId}`);
       const dest = agent.skillDir(home, skillId);
+      const aliases = destAliases.get(dest);
+      if (aliases) aliases.push(agentId);
+      else destAliases.set(dest, [agentId]);
+    }
+    for (const [dest, aliases] of destAliases) {
+      const agentId = aliases[0];
       const exists = fs.existsSync(dest);
       if (exists && !opts.force) {
+        const stamp = readInstallStamp(dest);
+        if (stamp) persistStampAgents(dest, [...(stamp.agents ?? []), ...aliases]);
         results.push({
           skill: skillId,
           agent: agentId,
@@ -367,7 +461,8 @@ export function installSkillsToAgents(skillIds, agentIds, opts = {}) {
       }
       if (exists) removeDirRecursive(dest);
       copyDirRecursive(skillSource, dest);
-      writeInstallStamp(dest, skillId, skillSource);
+      writeInstallStamp(dest, skillId, skillSource, aliases);
+      retireStampedVendorLeftovers(home, skillId, dest);
       results.push({
         skill: skillId,
         agent: agentId,
@@ -390,13 +485,28 @@ export function uninstallSkillsFromAgents(skillIds, agentIds, opts = {}) {
   const home = opts.home ?? os.homedir();
   /** @type {{ skill: string, agent: string, dest: string, status: string }[]} */
   const results = [];
+  const requested = new Set(agentIds);
+  /** @type {Set<string>} */
+  const seen = new Set();
   for (const skillId of skillIds) {
     for (const agentId of agentIds) {
       const agent = AGENTS[agentId];
       if (!agent) throw new Error(`Unknown agent: ${agentId}`);
       const dest = agent.skillDir(home, skillId);
+      const key = `${skillId}\0${dest}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       if (!fs.existsSync(dest)) {
         results.push({ skill: skillId, agent: agentId, dest, status: 'missing' });
+        continue;
+      }
+      const owners = destOwners(home, skillId, dest);
+      if (!owners.every((id) => requested.has(id))) {
+        persistStampAgents(
+          dest,
+          owners.filter((id) => !requested.has(id)),
+        );
+        results.push({ skill: skillId, agent: agentId, dest, status: 'kept' });
         continue;
       }
       removeDirRecursive(dest);
@@ -415,11 +525,18 @@ export function uninstallSkillsFromAgents(skillIds, agentIds, opts = {}) {
 export function installedManagedPairs(home = os.homedir()) {
   /** @type {{ skill: string, agent: string, dest: string }[]} */
   const pairs = [];
+  /** @type {Set<string>} */
+  const seen = new Set();
   for (const skill of SKILL_IDS) {
     for (const agent of AGENT_IDS) {
       const dest = AGENTS[agent].skillDir(home, skill);
+      const key = `${skill}\0${dest}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       if (fs.existsSync(dest) && readInstallStamp(dest)) {
-        pairs.push({ skill, agent, dest });
+        for (const owner of destOwners(home, skill, dest)) {
+          pairs.push({ skill, agent: owner, dest });
+        }
       }
     }
   }
@@ -440,11 +557,19 @@ export function reconcileInstall(skillIds, agentIds, opts = {}) {
   /** @type {{ skill: string, agent: string, dest: string, status: string }[]} */
   const removed = [];
   if (opts.prune) {
+    /** @type {Set<string>} */
+    const prunedDests = new Set();
     for (const p of installedManagedPairs(home)) {
-      if (!desired.has(`${p.skill}::${p.agent}`)) {
-        removeDirRecursive(p.dest);
-        removed.push({ ...p, status: 'removed' });
-      }
+      if (desired.has(`${p.skill}::${p.agent}`)) continue;
+      const destStillWanted = AGENT_IDS.some(
+        (a) =>
+          desired.has(`${p.skill}::${a}`) &&
+          AGENTS[a].skillDir(home, p.skill) === p.dest,
+      );
+      if (destStillWanted || prunedDests.has(p.dest)) continue;
+      removeDirRecursive(p.dest);
+      prunedDests.add(p.dest);
+      removed.push({ ...p, status: 'removed' });
     }
   }
   const results = installSkillsToAgents(skillIds, agentIds, {
@@ -480,8 +605,10 @@ export function updateOutdatedSkills(opts = {}) {
       // The shared .agents root holds other tools' skills too: an unstamped
       // dir at a managed path there is foreign, not forgekit's to reinstall.
       // The .forgekit.json stamp is the ownership marker — only stamped
-      // (outdated) copies are updated for the agents environment.
-      const owned = status === 'outdated' || (status === 'unversioned' && agentId !== 'agents');
+      // (outdated) copies are updated under ~/.agents/skills/.
+      const inAgentsSkills = dest.includes(path.join('.agents', 'skills'));
+      const owned =
+        status === 'outdated' || (status === 'unversioned' && !inAgentsSkills);
       if (owned) {
         skillSet.add(skillId);
         agentSet.add(agentId);
@@ -500,16 +627,20 @@ export function updateOutdatedSkills(opts = {}) {
  */
 export function listInstallStatus(opts = {}) {
   const home = opts.home ?? os.homedir();
-  /** @type {{ skill: string, agent: string, dest: string, status: string }[]} */
+  /** @type {{ skill: string, dest: string, status: string, agents: string[] }[]} */
   const rows = [];
   for (const skillId of SKILL_IDS) {
+    /** @type {Set<string>} */
+    const seen = new Set();
     for (const agentId of AGENT_IDS) {
       const dest = AGENTS[agentId].skillDir(home, skillId);
+      if (seen.has(dest)) continue;
+      seen.add(dest);
       rows.push({
         skill: skillId,
-        agent: agentId,
         dest,
         status: skillInstallStatus(skillId, dest),
+        agents: agentsMappingToDest(home, skillId, dest),
       });
     }
   }
@@ -546,6 +677,18 @@ async function promptSkills(checkedIds) {
 /** @param {string[]} [checkedIds] */
 async function promptAgents(checkedIds) {
   return promptMulti('Install for which environments?', AGENT_IDS, checkedIds ?? []);
+}
+
+/**
+ * Environments to pre-check in the interactive picker: every harness that
+ * maps to `~/.agents/skills`, even on a first run with nothing installed,
+ * then any already-installed/remembered environment, deduped. Claude is
+ * included only when already installed or remembered.
+ * @param {string[]} installedAgents
+ * @returns {string[]}
+ */
+export function defaultAgentSelection(installedAgents) {
+  return [...new Set([...AGENTS_SHARING_AGENTS_ROOT, ...installedAgents])];
 }
 
 /**
@@ -689,7 +832,7 @@ async function resolveSkillsAndAgents(skillsIn, agentsIn) {
       );
       return 1;
     }
-    agents = await promptAgents([...new Set(installed.map((p) => p.agent))]);
+    agents = await promptAgents(defaultAgentSelection(installed.map((p) => p.agent)));
     agentsPrompted = true;
   }
 
@@ -717,7 +860,7 @@ export async function runInstall(argv = process.argv.slice(2)) {
   if (opts.list) {
     for (const row of listInstallStatus()) {
       process.stdout.write(
-        `${row.skill.padEnd(28)} ${row.agent.padEnd(8)} ${row.status.padEnd(12)} ${row.dest}\n`,
+        `${row.skill.padEnd(28)} ${row.agents.join(',').padEnd(40)} ${row.status.padEnd(12)} ${row.dest}\n`,
       );
     }
     return 0;

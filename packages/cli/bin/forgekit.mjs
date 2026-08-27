@@ -30,8 +30,8 @@ Usage:
   forgekit <command> [args...]
 
 Commands:
-  install                 Install skills into ~/.cursor|claude|codex/skills/
-  list                    Show installed / missing / outdated (skill × agent)
+  install                 Install skills into ~/.agents/skills/ (Claude/Windsurf: vendor paths)
+  list                    Show installed / missing / outdated (unique dest + harness aliases)
   update                  Reinstall outdated skills
   uninstall               Remove installed skill directories
 

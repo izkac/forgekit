@@ -76,12 +76,14 @@ things — Forge for a one-line change is waste, and the tooling agrees: even
 mid-Forge, a small plan (≤5 tasks, one capability, low-risk) triggers an
 **exit ramp** where the agent offers to leave Forge before scaffolding specs.
 
-**Using an agent without a dedicated Forge target?** There's a vendor-neutral
-option: `forgekit install` can put the skill in `~/.agents/skills/forge/`, and
-`forge init --agents` copies it into the repo at `.agents/skills/forge/` — one
-shared skill copy, and the repo can carry Forge for the whole team. What you
-don't get: no slash commands and no hooks — start work by asking for Forge by
-name ("use Forge …").
+**Using Cursor, Codex, Copilot, Gemini, or OpenCode?** Pick that harness at
+`forgekit install` — the skill lands once at `~/.agents/skills/forge/`. There
+is no `--shared` flag and no separate shared target. Claude still needs
+`--claude`. `forge init --agents` is gone: it errors and points at install. A
+leftover stamped project copy is a `forge doctor` warning and is retired by
+`forge init`. What you don't get from the skill alone: no slash commands and
+no hooks — start work by asking for Forge by name ("use Forge …"). Cursor
+still gets commands/rules/hooks via `forge init --cursor`.
 
 ---
 

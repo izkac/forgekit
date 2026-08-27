@@ -789,10 +789,10 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 
 | Agent | Skill (after install) | Project wiring (`forge init`) | Session hooks |
 | ----- | --------------------- | ----------------------------- | ------------- |
-| **Cursor** | `~/.cursor/skills/forge/` | commands, `forge.mdc`, SessionStart hook | SessionStart → active session reminder |
+| **Cursor** | `~/.agents/skills/forge/` (pick that harness) | commands, `forge.mdc`, SessionStart hook (`forge init --cursor`) | SessionStart → active session reminder |
 | **Claude Code** | `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks | SessionStart + `/forge` or “use Forge” UserPromptSubmit |
-| **Codex CLI** | `~/.codex/skills/forge/` | thin rule | *(none — start only when the user asks to use Forge)* |
-| **Shared `.agents`** | `~/.agents/skills/forge/` (via `forgekit install`) | `forge init --agents` → `.agents/skills/forge/` (skills-only; no commands or hooks) | *(none — hooks stay per-tool)* |
+| **Codex CLI** | `~/.agents/skills/forge/` (pick that harness) | thin rule | *(none — start only when the user asks to use Forge)* |
+| **Copilot / Gemini / OpenCode** | `~/.agents/skills/forge/` (pick that harness; one dest) | *(none — global skill only)* | *(none — start only when the user asks to use Forge)* |
 
 ### Slash commands (Cursor + Claude Code)
 
@@ -818,16 +818,14 @@ User can say “skip forge” or `/forge:skip` to opt out.
 
 ### Vendor-neutral `.agents` target
 
-For agents without a dedicated target: `forgekit install` (environment `agents`)
-puts the skill in `~/.agents/skills/forge/`; `forge init --agents` copies it into
-the project at `.agents/skills/forge/` (committed — the repo carries Forge for the
-team). **Skills-only by design** — no command files (no universal command adapter
-exists) and no hooks (hook wiring is host-specific; Cursor/Claude keep theirs via
-their own targets). Combinable with the `cursor`/`claude`/`codex` targets in the
-same run. In agnostic tools, invoke Forge **by name** (“use Forge”, “do forge
-work”). `forge doctor` warns (does not fail) when the project copy is outdated —
-refresh with `forge init --agents`. Forgekit manages only `.agents/skills/forge/`
-and never touches other `.agents` content.
+`.agents` is not a picker item. Selecting Cursor, Codex, Copilot, Gemini, or
+OpenCode writes the skill once to `~/.agents/skills/forge/` — those harnesses
+discover that root natively. There is no `--shared` flag. Claude Code still
+needs `--claude` (`~/.claude/skills/forge/`). `forge init --agents` errors and
+points at `forgekit install`. Leftover stamped project copies at
+`.agents/skills/forge/` (from 0.3.48) are warned by `forge doctor` and retired
+by the next `forge init`; unstamped / other `.agents/` content is left alone.
+In agnostic tools, invoke Forge **by name** (“use Forge”, “do forge work”).
 
 ---
 

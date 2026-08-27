@@ -1,0 +1,33 @@
+{
+  "change": "agents-default-install",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "project-wiring / shared .agents default install",
+      "library": "packages/cli/src/install.mjs",
+      "runtimeOwner": "forgekit install CLI (runInstall / promptAgents)",
+      "writes": "~/.agents/skills/<skill>/ + .forgekit.json stamp; ~/.forgekit/config.json agents memory",
+      "reads": "packaged skills/ assets; existing managed installs",
+      "uiConsumer": "install picker output + forgekit list",
+      "evidence": "specs/changes/agents-default-install/e2e.json → harness agents-target phase"
+    },
+    {
+      "capability": "project-wiring / init retires project .agents copy",
+      "library": "packages/cli/src/init.mjs",
+      "runtimeOwner": "forge init CLI (parseArgs / initProject / main)",
+      "writes": "deletion of stamped <project>/.agents/skills/forge/; agentsSkillRetired report field",
+      "reads": ".forgekit.json ownership stamp",
+      "uiConsumer": "forge init human-readable report",
+      "evidence": "specs/changes/agents-default-install/e2e.json → harness agents-target phase"
+    },
+    {
+      "capability": "project-wiring / doctor legacy-copy warning",
+      "library": "packages/cli/src/doctor.mjs",
+      "runtimeOwner": "forge doctor CLI (checkAgentsSkill via runDoctorChecks)",
+      "writes": "checks.agentsSkill warning in doctor report (never exit-code)",
+      "reads": "<project>/.agents/skills/forge/.forgekit.json",
+      "uiConsumer": "forge doctor stdout / --json consumers",
+      "evidence": "specs/changes/agents-default-install/e2e.json → harness agents-target phase"
+    }
+  ]
+}

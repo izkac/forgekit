@@ -173,16 +173,16 @@
  *                 archive` moves the change under `changes/archive/`, and
  *                 `forge phase done` then succeeds with no waiver at all
  *
- * Agents-target loop (specs/changes/agents-install-target/e2e.json), its own
+ * Agents-target loop (specs/changes/agents-dest-map/e2e.json), its own
  * scratch project AND scratch HOME/USERPROFILE (never the machine's real one):
- *   agents-target  `forge init --agents` writes .agents/skills/forge (skill +
- *                  stamp, no commands/) and prints the skipped commands/hooks
- *                  note; a re-run clears a file the packaged skill no longer
- *                  ships while a foreign .agents/agents.md survives
- *                  byte-identical; `forgekit install --skills forge --agents
- *                  agents` lands the same skill under <home>/.agents/skills/;
- *                  deleting the project stamp turns the doctor check into a
- *                  warning naming `forge init --agents` without failing
+ *   agents-target  `forgekit install --skills forge --cursor` lands the skill
+ *                  under <home>/.agents/skills/ and does not create
+ *                  <home>/.cursor/skills/forge; `forge init --agents` exits
+ *                  non-zero naming `forgekit install`; a planted stamped
+ *                  project copy is a doctor warning naming `forge init` (not
+ *                  `forge init --agents`) without failing; `forge init --cursor`
+ *                  then retires that copy while a foreign .agents/agents.md
+ *                  survives byte-identical
  *
  * `all` is this rig's own recorded probe (`.forge/config.json`'s
  * `e2e.harness.probe`) — every phase above that is layered onto a shared
@@ -3148,43 +3148,12 @@ if (phase === 'boot') {
   fs.mkdirSync(home, { recursive: true });
   const homeEnv = { HOME: home, USERPROFILE: home };
 
-  // --- 1. project-level init writes the skill, no commands, and says so ---
-  const init = forge(dir, ['init', '--agents', '--no-openspec', '--no-adr'], homeEnv);
-  if (init.code !== 0) fail(`forge init --agents exited ${init.code}`, init.out);
-  const skillDir = path.join(dir, '.agents', 'skills', 'forge');
-  if (!fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
-    fail('.agents/skills/forge/SKILL.md missing after init', init.out);
-  }
-  if (!fs.existsSync(path.join(skillDir, '.forgekit.json'))) {
-    fail('.agents/skills/forge/.forgekit.json stamp missing after init', init.out);
-  }
-  if (fs.existsSync(path.join(dir, '.agents', 'commands'))) {
-    fail('.agents/commands/ was created — the agents target is skills-only', init.out);
-  }
-  if (!init.out.includes('commands/hooks skipped')) {
-    fail('init output does not print the skipped commands/hooks note', tail(init.out, 30));
-  }
-
-  // --- 2. re-run refreshes: deleted-upstream files go, foreign files stay ---
-  fs.writeFileSync(path.join(skillDir, 'stale-extra.md'), '# removed upstream\n');
-  const foreignPath = path.join(dir, '.agents', 'agents.md');
-  const foreignBody = '# user notes — not forgekit\'s\n';
-  fs.writeFileSync(foreignPath, foreignBody);
-  const reinit = forge(dir, ['init', '--agents', '--no-openspec', '--no-adr'], homeEnv);
-  if (reinit.code !== 0) fail(`re-run forge init --agents exited ${reinit.code}`, reinit.out);
-  if (fs.existsSync(path.join(skillDir, 'stale-extra.md'))) {
-    fail('stale-extra.md survived the refresh — merge-copy instead of clear+copy', reinit.out);
-  }
-  if (fs.readFileSync(foreignPath, 'utf8') !== foreignBody) {
-    fail('.agents/agents.md did not survive the re-init byte-identical', reinit.out);
-  }
-
-  // --- 3. user-level install lands under <home>/.agents/skills/forge ---
+  // --- 1. --cursor install lands under <home>/.agents/skills/forge, not .cursor ---
   const installEnv = { ...process.env, ...homeEnv, FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet') };
   delete installEnv.CLAUDE_CODE_SESSION_ID;
   const install = spawnSync(
     process.execPath,
-    [FORGEKIT_BIN, 'install', '--skills', 'forge', '--agents', 'agents', '--no-adr', '--no-openspec'],
+    [FORGEKIT_BIN, 'install', '--skills', 'forge', '--cursor', '--no-adr', '--no-openspec'],
     { cwd: dir, encoding: 'utf8', env: installEnv },
   );
   const installOut = `${install.stdout ?? ''}${install.stderr ?? ''}`;
@@ -3196,9 +3165,33 @@ if (phase === 'boot') {
   if (!fs.existsSync(path.join(homeSkillDir, '.forgekit.json'))) {
     fail('<home>/.agents/skills/forge/.forgekit.json stamp missing after forgekit install', installOut);
   }
+  const cursorVendorDir = path.join(home, '.cursor', 'skills', 'forge');
+  if (fs.existsSync(cursorVendorDir)) {
+    fail('<home>/.cursor/skills/forge must not exist after --cursor install', installOut);
+  }
 
-  // --- 4. a stampless project copy is a doctor warning, never a failure ---
-  fs.rmSync(path.join(skillDir, '.forgekit.json'));
+  // --- 2. forge init --agents is gone: non-zero, points at forgekit install ---
+  const initAgents = forge(dir, ['init', '--agents'], homeEnv);
+  if (initAgents.code === 0) {
+    fail('forge init --agents exited 0 — the project target must be removed', initAgents.out);
+  }
+  if (!initAgents.out.includes('forgekit install')) {
+    fail('forge init --agents output does not name `forgekit install`', tail(initAgents.out, 30));
+  }
+
+  // --- 3. a planted stamped project copy is a doctor warning, never a failure ---
+  // Specs-engine layout so doctor is otherwise green — the leftover-copy
+  // warning must not flip report.ok / exit. (The old phase got this from
+  // `forge init --agents --no-openspec`, which no longer writes a project.)
+  fs.mkdirSync(path.join(dir, 'specs', 'changes'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'specs', 'specs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' } }, null, 2)}\n`,
+  );
+  const skillDir = path.join(dir, '.agents', 'skills', 'forge');
+  fs.cpSync(homeSkillDir, skillDir, { recursive: true });
   const doctor = forge(dir, ['doctor', '--json'], homeEnv);
   let report;
   try {
@@ -3207,20 +3200,36 @@ if (phase === 'boot') {
     fail('forge doctor --json did not print parseable JSON', tail(doctor.out, 30));
   }
   const agentsCheck = report.checks?.agentsSkill;
-  if (!agentsCheck) fail('doctor report has no checks.agentsSkill for a present copy', doctor.stdout);
+  if (!agentsCheck) fail('doctor report has no checks.agentsSkill for a stamped copy', doctor.stdout);
   // This scratch project passes every other check, so the run's own verdict
-  // and exit code are exactly what the stale-copy warning must not move.
+  // and exit code are exactly what the leftover-copy warning must not move.
   if (report.ok !== true || doctor.code !== 0) {
     fail(
-      `the stale-copy warning flipped the doctor verdict (ok=${report.ok}, exit=${doctor.code}) — it must stay a warning`,
+      `the leftover-copy warning flipped the doctor verdict (ok=${report.ok}, exit=${doctor.code}) — it must stay a warning`,
       doctor.out,
     );
   }
-  if (agentsCheck.warning !== true || agentsCheck.status !== 'unversioned') {
-    fail('a stampless copy did not surface as an unversioned warning', doctor.stdout);
+  if (agentsCheck.warning !== true) {
+    fail('a stamped copy did not surface as a warning', doctor.stdout);
   }
-  if (!agentsCheck.message.includes('forge init --agents')) {
-    fail('the warning does not name `forge init --agents` as the refresh', doctor.stdout);
+  if (!agentsCheck.message.includes('forge init')) {
+    fail('the warning does not name `forge init` as the retirement path', doctor.stdout);
+  }
+  if (agentsCheck.message.includes('forge init --agents')) {
+    fail('the warning still names `forge init --agents`', doctor.stdout);
+  }
+
+  // --- 4. forge init --cursor retires the stamped copy; foreign files stay ---
+  const foreignPath = path.join(dir, '.agents', 'agents.md');
+  const foreignBody = '# user notes — not forgekit\'s\n';
+  fs.writeFileSync(foreignPath, foreignBody);
+  const init = forge(dir, ['init', '--cursor', '--no-openspec', '--no-adr'], homeEnv);
+  if (init.code !== 0) fail(`forge init --cursor exited ${init.code}`, init.out);
+  if (fs.existsSync(skillDir)) {
+    fail('stamped .agents/skills/forge/ survived forge init --cursor', init.out);
+  }
+  if (fs.readFileSync(foreignPath, 'utf8') !== foreignBody) {
+    fail('.agents/agents.md did not survive the init byte-identical', init.out);
   }
 
   process.stdout.write('AGENTS TARGET GREEN\n');

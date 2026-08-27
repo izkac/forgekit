@@ -34,11 +34,9 @@ import { resolveAsset } from './paths.mjs';
 import {
   AGENT_IDS,
   AGENTS,
-  copyDirRecursive,
   installedManagedPairs,
   promptOpenSpec,
-  resolveSkillSource,
-  writeInstallStamp,
+  readInstallStamp,
 } from './install.mjs';
 import {
   collectHookCommands,
@@ -50,7 +48,17 @@ import {
 
 // Environments with project-local command/rule/hook templates. Others are
 // driven by the globally-installed skill alone (no per-project wiring).
-const WIRED_AGENTS = Object.freeze(['cursor', 'claude', 'codex', 'agents']);
+const WIRED_AGENTS = Object.freeze(['cursor', 'claude', 'codex']);
+
+/**
+ * Environments `forge init` offers (picker, `--all`, known-list).
+ * Same set as install now that the `agents` target is gone. Leftover
+ * `'agents'` in user config is still dropped by `rememberedAgents`.
+ * @returns {string[]}
+ */
+export function initAgentIds() {
+  return [...AGENT_IDS];
+}
 
 /**
  * Lazy: `@inquirer/prompts` is a real amount of code that most importers of
@@ -98,7 +106,11 @@ export function parseArgs(argv) {
     else if (arg === '--gemini') opts.agents.push('gemini');
     else if (arg === '--windsurf') opts.agents.push('windsurf');
     else if (arg === '--opencode') opts.agents.push('opencode');
-    else if (arg === '--agents') opts.agents.push('agents');
+    else if (arg === '--agents') {
+      throw new Error(
+        '--agents is no longer a project init target; skills are user-global now. Run `forgekit install` (pick Cursor, Codex, …).',
+      );
+    }
     else if (arg === '--adr') opts.adr = true;
     else if (arg === '--no-adr') opts.adr = false;
     else if (arg === '--adr-dir') opts.adrDir = argv[++i];
@@ -120,8 +132,6 @@ Options:
   --cursor          Cursor (.cursor/commands, rules, hooks)
   --claude          Claude Code (.claude/commands, rules, hooks)
   --codex           Codex CLI (.codex/rules)
-  --agents          Shared .agents (vendor-neutral): copies the Forge skill to
-                    .agents/skills/forge — skills only, no commands or hooks
   --copilot/--gemini/--windsurf/--opencode
                     Offered in the picker for parity with \`forgekit install\`;
                     driven by the global skill (no per-project wiring yet)
@@ -142,9 +152,10 @@ Options:
 Requires the Forge skill already installed (\`forge install\`) for agents
 to load skill content. Init only adds project-local wiring.
 
-Interactive (TTY): the environment picker matches \`forgekit install\` and is
-pre-checked with what you installed there (saved in ~/.forgekit/config.json),
-so you don't pick twice. When --openspec/--no-openspec omitted: uses the user
+Interactive (TTY): the environment picker is pre-checked with what you
+installed via \`forgekit install\` (saved in ~/.forgekit/config.json).
+Skills stay user-global; init does not copy them.
+When --openspec/--no-openspec omitted: uses the user
 default from install when set; otherwise asks Planning engine?. Choosing
 OpenSpec always writes plan.engine=openspec (setup failure or declining
 immediate \`openspec init\` does not fall back to the built-in specs engine).
@@ -591,6 +602,15 @@ export function initProject(selected, opts) {
 
   const copyOpts = { force: opts.force, cwd };
 
+  const agentsSkillDest = path.join(cwd, '.agents', 'skills', 'forge');
+  if (fs.existsSync(agentsSkillDest) && readInstallStamp(agentsSkillDest)) {
+    fs.rmSync(agentsSkillDest, { recursive: true, force: true });
+    report.agentsSkillRetired = {
+      dest: '.agents/skills/forge',
+      status: 'retired',
+    };
+  }
+
   if (selected.includes('cursor')) {
     report.files.push(
       ...copyDirFiles(
@@ -642,26 +662,6 @@ export function initProject(selected, opts) {
         copyOpts,
       ),
     );
-  }
-
-  if (selected.includes('agents')) {
-    const skillSource = resolveSkillSource('forge');
-    const dest = path.join(cwd, '.agents', 'skills', 'forge');
-    const existed = fs.existsSync(dest);
-    // Clear only the forge subtree (never anything broader under .agents/):
-    // a merge-copy would keep files the packaged skill no longer ships while
-    // the fresh stamp claims the copy is current.
-    if (existed) fs.rmSync(dest, { recursive: true, force: true });
-    copyDirRecursive(skillSource, dest);
-    writeInstallStamp(dest, 'forge', skillSource);
-    report.agentsSkill = {
-      dest: '.agents/skills/forge',
-      status: existed ? 'updated' : 'written',
-    };
-    report.agentsSkipped = {
-      commands: 'no universal command adapter',
-      hooks: 'hook wiring is host-specific',
-    };
   }
 
   // Selected environments without project-wiring templates: the globally
@@ -732,7 +732,6 @@ function wiredAgents(cwd) {
     cursor: path.join(cwd, '.cursor', 'commands'),
     claude: path.join(cwd, '.claude', 'commands'),
     codex: path.join(cwd, '.codex', 'rules'),
-    agents: path.join(cwd, '.agents', 'skills', 'forge'),
   };
   return new Set(
     Object.entries(markers)
@@ -749,12 +748,15 @@ function wiredAgents(cwd) {
  * @returns {Set<string>}
  */
 export function rememberedAgents(cwd, home) {
+  const allowed = new Set(initAgentIds());
   const user = loadUserConfig(home);
-  return new Set([
-    ...(Array.isArray(user.agents) ? user.agents : []),
-    ...installedManagedPairs(home).map((p) => p.agent),
-    ...wiredAgents(cwd),
-  ]);
+  return new Set(
+    [
+      ...(Array.isArray(user.agents) ? user.agents : []),
+      ...installedManagedPairs(home).map((p) => p.agent),
+      ...wiredAgents(cwd),
+    ].filter((id) => allowed.has(id)),
+  );
 }
 
 /** @param {string} cwd */
@@ -763,7 +765,7 @@ async function promptAgents(cwd) {
   const remembered = rememberedAgents(cwd);
   return checkbox({
     message: 'Init Forge project wiring for which environments?',
-    choices: AGENT_IDS.map((id) => ({
+    choices: initAgentIds().map((id) => ({
       value: id,
       name: AGENTS[id].label,
       checked: remembered.has(id),
@@ -913,11 +915,11 @@ async function main(argv = process.argv.slice(2)) {
     return 0;
   }
 
-  let selected = opts.all ? [...AGENT_IDS] : [...new Set(opts.agents)];
+  let selected = opts.all ? initAgentIds() : [...new Set(opts.agents)];
   if (selected.length === 0) {
     if (!process.stdin.isTTY) {
       process.stderr.write(
-        'No agents specified. Pass --cursor/--claude/--codex/--agents/--copilot/--gemini/--windsurf/--opencode/--all, or run in a TTY.\n',
+        'No agents specified. Pass --cursor/--claude/--codex/--copilot/--gemini/--windsurf/--opencode/--all, or run in a TTY.\n',
       );
       return 1;
     }
@@ -926,7 +928,7 @@ async function main(argv = process.argv.slice(2)) {
 
   for (const id of selected) {
     if (!AGENTS[id]) {
-      process.stderr.write(`Unknown environment: ${id}. Known: ${AGENT_IDS.join(', ')}\n`);
+      process.stderr.write(`Unknown environment: ${id}. Known: ${initAgentIds().join(', ')}\n`);
       return 1;
     }
   }
@@ -982,9 +984,9 @@ async function main(argv = process.argv.slice(2)) {
     planDir,
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  if (report.agentsSkill) {
+  if (report.agentsSkillRetired) {
     process.stdout.write(
-      `\nagents: skill → ${report.agentsSkill.dest} (commands/hooks skipped — no universal command adapter / hook wiring is host-specific)\n`,
+      `\nRetired leftover project copy: ${report.agentsSkillRetired.dest}\n`,
     );
   }
   if (Array.isArray(report.skillOnly) && report.skillOnly.length) {

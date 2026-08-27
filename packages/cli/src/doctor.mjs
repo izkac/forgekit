@@ -19,7 +19,7 @@ import {
   resolveProjectPlanEngine,
 } from './plan-engine.mjs';
 import { ensureClaudeHookHints, ensureCursorHookHints } from './init.mjs';
-import { skillInstallStatus } from './install.mjs';
+import { readInstallStamp, skillInstallStatus } from './install.mjs';
 import { collectHookCommands, isCommandReferenced, RETIRED_CLAUDE_HOOK_BASENAMES } from './hooks.mjs';
 
 export { OPENSPEC_PACKAGE, OPENSPEC_INSTALL_CMD };
@@ -166,27 +166,26 @@ export function checkSpecsProject(opts) {
 }
 
 /**
- * Project-level `.agents/skills/forge` copy (written by `forge init --agents`).
- * A stale copy is a warning, never a failure — `ok` stays true so the doctor
- * exit code is unaffected. Returns null when the directory is absent: the
- * check is skipped entirely.
+ * Project-level `.agents/skills/forge` copy (legacy leftover from older
+ * `forge init --agents`). A stamped copy is a warning, never a failure —
+ * `ok` stays true so the doctor exit code is unaffected. Returns null when
+ * the directory is absent or unstamped (foreign): the check is skipped.
  * @param {{ cwd: string, existsSync?: typeof fs.existsSync }} opts
  */
 export function checkAgentsSkill(opts) {
   const existsSync = opts.existsSync ?? fs.existsSync;
   const dest = path.join(opts.cwd, '.agents', 'skills', 'forge');
   if (!existsSync(dest)) return null;
+  if (!readInstallStamp(dest)) return null;
   const status = skillInstallStatus('forge', dest);
-  const current = status === 'present';
   return {
     id: 'agents-skill',
     ok: true,
-    warning: !current,
+    warning: true,
     status,
     dest,
-    message: current
-      ? '.agents/skills/forge is current'
-      : `.agents/skills/forge is a stale copy (${status}) — refresh with \`forge init --agents\``,
+    message:
+      '.agents/skills/forge is a legacy project copy — run `forge init` to retire it, or delete the directory',
   };
 }
 

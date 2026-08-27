@@ -7,13 +7,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   parseArgs,
+  initAgentIds,
   initProject,
   mergeHooksIntoSettings,
   rememberedAgents,
   resolveInitPlanEngine,
   resolveTemplatesRoot,
 } from './init.mjs';
-import { FORGEKIT_STAMP, installSkillsToAgents, resolveSkillSource } from './install.mjs';
+import { AGENT_IDS, FORGEKIT_STAMP, installSkillsToAgents } from './install.mjs';
 import { loadProjectConfig, saveUserConfig } from './config.mjs';
 import { DEFAULT_SPECS_DIR, writeProjectPlanConfig } from './plan-engine.mjs';
 import { DEFAULT_ADR_DIR, decisionsDocFor, disableProjectAdr, writeProjectAdrConfig } from './adr.mjs';
@@ -29,15 +30,15 @@ test('rememberedAgents unions install config, installed skills, and project wiri
   try {
     // Chosen during `forgekit install` (saved to user config).
     saveUserConfig({ agents: ['claude', 'gemini'] }, home);
-    // Actually installed skill for another env.
-    installSkillsToAgents(['forge'], ['copilot'], { home, force: true });
+    // Independent dest so sharing .agents aliases are not pulled in.
+    installSkillsToAgents(['forge'], ['windsurf'], { home, force: true });
     // Project already wired for cursor.
     fs.mkdirSync(path.join(cwd, '.cursor', 'commands'), { recursive: true });
 
     const remembered = rememberedAgents(cwd, home);
     assert.ok(remembered.has('claude'), 'from install config');
     assert.ok(remembered.has('gemini'), 'from install config');
-    assert.ok(remembered.has('copilot'), 'from installed skill dir');
+    assert.ok(remembered.has('windsurf'), 'from installed skill dir');
     assert.ok(remembered.has('cursor'), 'from project wiring marker');
     assert.ok(!remembered.has('codex'));
   } finally {
@@ -818,116 +819,213 @@ test('forge init: a flagless re-init keeps a recorded adr.enabled:true project e
   }
 });
 
-// --- agents-install-target: project-level `agents` target (.agents/skills/forge) ---
+// --- agents-default-install 2.1: retire the project-level `agents` target ---
 
-test('init parseArgs accepts --agents as a target shorthand', () => {
-  assert.deepEqual(parseArgs(['--agents']).agents, ['agents']);
+test('init parseArgs throws for --agents and names forgekit install', () => {
+  assert.throws(
+    () => parseArgs(['--agents']),
+    (err) => {
+      assert.match(String(err.message), /forgekit install/);
+      assert.doesNotMatch(String(err.message), /^Unknown argument: --agents$/);
+      return true;
+    },
+  );
 });
 
-test('initProject with agents writes .agents/skills/forge and nothing else under .agents', () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-init-'));
+test('initAgentIds is AGENT_IDS (picker / --all / known-list)', () => {
+  const ids = initAgentIds();
+  assert.ok(!AGENT_IDS.includes('agents'), 'fixture sanity: install no longer offers agents');
+  assert.ok(!ids.includes('agents'), 'init picker must not offer agents');
+  assert.deepEqual(ids, [...AGENT_IDS]);
+  assert.ok(ids.length > 0, 'fixture sanity: init still offers other environments');
+});
+
+test('initProject with the --all selection does not create .agents/', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-all-no-agents-'));
   try {
-    const report = initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
-    const dest = path.join(cwd, '.agents', 'skills', 'forge');
-    assert.ok(fs.existsSync(path.join(dest, 'SKILL.md')), 'skill copied');
-    assert.ok(fs.existsSync(path.join(dest, FORGEKIT_STAMP)), 'stamp written');
-    assert.ok(!fs.existsSync(path.join(cwd, '.agents', 'commands')), 'no command files');
-    assert.deepEqual(report.agentsSkill, {
-      dest: '.agents/skills/forge',
-      status: 'written',
-    });
-    assert.deepEqual(report.agentsSkipped, {
-      commands: 'no universal command adapter',
-      hooks: 'hook wiring is host-specific',
-    });
-    assert.ok(!report.skillOnly.includes('agents'), 'agents is wired, not skill-only');
+    initProject(initAgentIds(), { cwd, force: true, adr: false, planEngine: null });
+    assert.equal(fs.existsSync(path.join(cwd, '.agents')), false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test('initProject agents target combines with other targets', () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-combo-'));
+test('forge init --all does not create a project .agents/ tree', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-all-spawn-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-all-spawn-home-'));
   try {
-    initProject(['agents', 'cursor'], { cwd, force: true, adr: false, planEngine: null });
-    assert.ok(fs.existsSync(path.join(cwd, '.agents', 'skills', 'forge', 'SKILL.md')));
-    assert.ok(fs.existsSync(path.join(cwd, '.cursor', 'commands', 'forge.md')));
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('re-running init refreshes a stale .agents/skills/forge copy in place', () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-refresh-'));
-  try {
-    initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
-    const dest = path.join(cwd, '.agents', 'skills', 'forge');
-    const skillFile = path.join(dest, 'SKILL.md');
-    fs.writeFileSync(skillFile, '# stale forge skill\n', 'utf8');
-    // A file the packaged skill no longer ships: a merge-copy would leave it
-    // behind while the stamp claims the copy is current.
-    fs.writeFileSync(path.join(dest, 'stale-extra.md'), '# removed upstream\n', 'utf8');
-
-    const report = initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
-    const sourceBody = fs.readFileSync(
-      path.join(resolveSkillSource('forge'), 'SKILL.md'),
-      'utf8',
-    );
-    assert.equal(fs.readFileSync(skillFile, 'utf8'), sourceBody, 'stale copy refreshed');
-    assert.equal(
-      fs.existsSync(path.join(dest, 'stale-extra.md')),
-      false,
-      'files deleted upstream are removed, not merge-copied over',
-    );
-    assert.equal(report.agentsSkill.status, 'updated');
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('forge init --agents prints the skipped commands/hooks note in human output', () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-stdout-'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-stdout-home-'));
-  try {
-    // os.homedir() reads USERPROFILE on Windows, HOME elsewhere — set both so
-    // the machine's real ~/.forgekit/config.json cannot leak into the fixture.
-    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--agents', '--force'], {
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--all', '--force', '--no-openspec'], {
       cwd,
       encoding: 'utf8',
       env: { ...process.env, HOME: home, USERPROFILE: home },
     });
-    assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
-    assert.match(result.stdout, /agents: skill → \.agents\/skills\/forge/);
-    assert.match(result.stdout, /commands\/hooks skipped/);
+    assert.equal(result.status, 0, `forge init --all failed: ${result.stderr}`);
+    assert.equal(fs.existsSync(path.join(cwd, '.agents')), false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('agents init never touches foreign content under .agents/', () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-foreign-'));
+test('rememberedAgents drops leftover agents from user config and the old project marker', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-home-agents-filter-'));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-proj-agents-filter-'));
   try {
-    fs.mkdirSync(path.join(cwd, '.agents', 'skills', 'other-skill'), { recursive: true });
-    fs.writeFileSync(path.join(cwd, '.agents', 'agents.md'), '# user notes\n', 'utf8');
+    saveUserConfig({ agents: ['agents', 'claude'] }, home);
+    fs.mkdirSync(path.join(cwd, '.agents', 'skills', 'forge'), { recursive: true });
+
+    const remembered = rememberedAgents(cwd, home);
+    assert.ok(remembered.has('claude'), 'real install-config choice still remembered');
+    assert.ok(!remembered.has('agents'), 'retired agents target is not a remembered init choice');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('forge init --agents exits non-zero and names forgekit install', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-agents-gone-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-agents-gone-home-'));
+  try {
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--agents'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stderr}${result.stdout}`, /forgekit install/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('forge init --help does not describe a project --agents skill copy', () => {
+  const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--help'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, `forge init --help failed: ${result.stderr}`);
+  assert.doesNotMatch(result.stdout, /copies the Forge skill/);
+  assert.doesNotMatch(result.stdout, /\.agents\/skills\/forge/);
+  assert.doesNotMatch(result.stdout, /minus the shared/);
+});
+
+test('non-TTY forge init with no agents does not list --agents', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-no-agents-flag-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-no-agents-flag-home-'));
+  try {
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /No agents specified/);
+    assert.doesNotMatch(result.stderr, /--agents/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// --- agents-default-install 2.2: retire a stamped project `.agents/skills/forge` copy ---
+
+function plantAgentsForgeCopy(cwd, { stamped, extraFiles = {} }) {
+  const dest = path.join(cwd, '.agents', 'skills', 'forge');
+  fs.mkdirSync(dest, { recursive: true });
+  const skillBody = '# leftover project forge skill\n';
+  fs.writeFileSync(path.join(dest, 'SKILL.md'), skillBody, 'utf8');
+  if (stamped) {
     fs.writeFileSync(
-      path.join(cwd, '.agents', 'skills', 'other-skill', 'SKILL.md'),
-      '# other skill\n',
+      path.join(dest, FORGEKIT_STAMP),
+      `${JSON.stringify({ skill: 'forge', version: '0.3.48' }, null, 2)}\n`,
       'utf8',
     );
+  }
+  for (const [rel, body] of Object.entries(extraFiles)) {
+    const file = path.join(cwd, '.agents', ...rel.split('/'));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body, 'utf8');
+  }
+  return dest;
+}
 
-    initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
+test('initProject retires a stamped .agents/skills/forge copy and reports it', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-retire-stamped-'));
+  try {
+    const dest = plantAgentsForgeCopy(cwd, { stamped: true });
+    assert.ok(fs.existsSync(path.join(dest, FORGEKIT_STAMP)), 'fixture sanity: stamp present');
 
-    assert.equal(
-      fs.readFileSync(path.join(cwd, '.agents', 'agents.md'), 'utf8'),
-      '# user notes\n',
+    const report = initProject(['cursor'], { cwd, force: true, adr: false, planEngine: null });
+
+    assert.equal(fs.existsSync(dest), false, 'stamped copy must be removed');
+    assert.equal(report.agentsSkillRetired.status, 'retired');
+    assert.equal(report.agentsSkillRetired.dest, '.agents/skills/forge');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('initProject leaves an unstamped .agents/skills/forge copy and .agents/agents.md byte-identical', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-retire-unstamped-'));
+  try {
+    const dest = plantAgentsForgeCopy(cwd, {
+      stamped: false,
+      extraFiles: { 'agents.md': '# user notes\n' },
+    });
+    const skillBefore = fs.readFileSync(path.join(dest, 'SKILL.md'));
+    const notesBefore = fs.readFileSync(path.join(cwd, '.agents', 'agents.md'));
+    assert.equal(fs.existsSync(path.join(dest, FORGEKIT_STAMP)), false, 'fixture sanity: no stamp');
+
+    const report = initProject(['cursor'], { cwd, force: true, adr: false, planEngine: null });
+
+    assert.equal(report.agentsSkillRetired, undefined);
+    assert.ok(fs.existsSync(dest), 'unstamped copy must remain');
+    assert.ok(fs.readFileSync(path.join(dest, 'SKILL.md')).equals(skillBefore));
+    assert.ok(fs.readFileSync(path.join(cwd, '.agents', 'agents.md')).equals(notesBefore));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('initProject does not touch a foreign skill when retiring a stamped forge copy', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-retire-foreign-'));
+  try {
+    const dest = plantAgentsForgeCopy(cwd, {
+      stamped: true,
+      extraFiles: { 'skills/other-skill/SKILL.md': '# other skill\n' },
+    });
+    const foreignBefore = fs.readFileSync(
+      path.join(cwd, '.agents', 'skills', 'other-skill', 'SKILL.md'),
     );
-    assert.equal(
-      fs.readFileSync(path.join(cwd, '.agents', 'skills', 'other-skill', 'SKILL.md'), 'utf8'),
-      '# other skill\n',
+
+    const report = initProject(['cursor'], { cwd, force: true, adr: false, planEngine: null });
+
+    assert.equal(fs.existsSync(dest), false, 'stamped forge copy retired');
+    assert.equal(report.agentsSkillRetired.status, 'retired');
+    assert.ok(
+      fs.readFileSync(path.join(cwd, '.agents', 'skills', 'other-skill', 'SKILL.md')).equals(foreignBefore),
+      'foreign skill left byte-identical',
     );
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('forge init --cursor prints a retirement line for a stamped project copy', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-retire-stdout-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-retire-stdout-home-'));
+  try {
+    plantAgentsForgeCopy(cwd, { stamped: true });
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--cursor', '--force', '--no-openspec'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
+    assert.equal(fs.existsSync(path.join(cwd, '.agents', 'skills', 'forge')), false);
+    assert.match(result.stdout, /Retired leftover project copy: \.agents\/skills\/forge/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

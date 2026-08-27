@@ -1,0 +1,45 @@
+<!-- forge-brief-specs-hash:f0091fd1a1143d8d -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Operator brief — harness picker writes .agents</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 1.8rem; }
+  code { background: #f4f4f4; padding: .1em .35em; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #ddd; padding: .5rem .7rem; text-align: left; vertical-align: top; }
+  th { background: #f8f8f8; }
+  .why { background: #f0f7ff; border-left: 4px solid #4a90d9; padding: .8rem 1rem; }
+</style>
+</head>
+<body>
+<h1>Pick the harness. Forgekit writes where it actually looks.</h1>
+
+<div class="why">
+<strong>Why.</strong> “Shared <code>.agents</code>” was a location pretending to be
+a product. You pick Cursor or Codex; those tools already read
+<code>~/.agents/skills/</code>. Claude still does not — it keeps its own folder.
+</div>
+
+<h2>What you pick vs where it lands</h2>
+<table>
+  <tr><th>Picker</th><th>Skill directory</th></tr>
+  <tr><td>Cursor, Codex, Copilot, Gemini, OpenCode</td><td><code>~/.agents/skills/&lt;skill&gt;/</code> — one copy even if you pick several</td></tr>
+  <tr><td>Claude Code</td><td><code>~/.claude/skills/&lt;skill&gt;/</code></td></tr>
+  <tr><td>Windsurf</td><td>vendor path (unchanged)</td></tr>
+</table>
+
+<p><code>forgekit install --cursor --codex</code> writes once. There is no
+<code>--shared</code> flag and no “Shared .agents” row. Init still wires
+commands/hooks per harness; skills stay user-global.</p>
+
+<h2>Leftovers</h2>
+<p>A stamped <code>~/.cursor/skills/forge</code> (or the old Codex/Copilot/Gemini/OpenCode
+vendor path) is deleted the next time that harness installs into
+<code>.agents</code>, so Cursor does not list the skill twice. Unstamped folders
+are left alone. A 0.3.48 project copy at
+<code>.agents/skills/forge</code> is still retired by <code>forge init</code>.</p>
+</body>
+</html>

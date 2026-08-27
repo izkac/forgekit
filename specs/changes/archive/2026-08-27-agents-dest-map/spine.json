@@ -1,0 +1,33 @@
+{
+  "change": "agents-dest-map",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "project-wiring / dest map + dest-deduped install",
+      "library": "packages/cli/src/install.mjs",
+      "runtimeOwner": "forgekit install CLI (installSkillsToAgents / parseArgs)",
+      "writes": "~/.agents/skills/<skill>/ for .agents-capable harnesses; vendor path for claude/windsurf",
+      "reads": "packaged skills/; existing stamps",
+      "uiConsumer": "forgekit install / list output",
+      "evidence": "specs/changes/agents-dest-map/e2e.json → harness agents-target"
+    },
+    {
+      "capability": "project-wiring / uninstall keeps shared dest while another harness maps there",
+      "library": "packages/cli/src/install.mjs",
+      "runtimeOwner": "forgekit uninstall / reconcileInstall",
+      "writes": "dest removed only when no remaining harness maps to it",
+      "reads": "AGENTS skillDir map; desired selection",
+      "uiConsumer": "forgekit uninstall stdout",
+      "evidence": "packages/cli/src/install.test.mjs + e2e agents-target"
+    },
+    {
+      "capability": "project-wiring / retire stamped vendor leftovers",
+      "library": "packages/cli/src/install.mjs",
+      "runtimeOwner": "forgekit install CLI after writing the .agents dest",
+      "writes": "deletion of stamped ~/.cursor/skills/<skill> (and sibling vendor paths)",
+      "reads": ".forgekit.json ownership stamp",
+      "uiConsumer": "forgekit install report",
+      "evidence": "packages/cli/src/install.test.mjs + e2e agents-target"
+    }
+  ]
+}

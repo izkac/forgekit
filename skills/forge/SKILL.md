@@ -158,9 +158,10 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 
 | Agent | Skill (after `forgekit install`) | Project wiring (`forge init`) |
 | ----- | ----------------------------- | ----------------------------- |
-| **Cursor** | `~/.cursor/skills/forge/` | commands, `forge.mdc`, SessionStart hook |
+| **Cursor** | `~/.agents/skills/forge/` (pick that harness) | commands, `forge.mdc`, SessionStart hook (`forge init --cursor`) |
 | **Claude Code** | `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks |
-| **Codex CLI** | `~/.codex/skills/forge/` | thin rule |
+| **Codex CLI** | `~/.agents/skills/forge/` (pick that harness) | thin rule |
+| **Copilot / Gemini / OpenCode** | `~/.agents/skills/forge/` (pick that harness; one dest) | *(none — global skill only)* |
 
 **Planning (all agents):** after brainstorm, proceed directly to the configured engine — no plan-mode prompt. See [references/plan-routing.md](./references/plan-routing.md). Hooks remind agents to run the propose flow when `planType` is unset.
 

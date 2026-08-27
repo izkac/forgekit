@@ -786,7 +786,7 @@ test('checkHookWiring: an unreadable hooks dir is a failure, not a clean skip (F
   }
 });
 
-// --- agents-install-target: project .agents/skills/forge copy ---
+// --- agents-default-install: project .agents/skills/forge is a legacy leftover ---
 
 test('runDoctorChecks: absent .agents/skills/forge means no agents-skill check at all', () => {
   const cwd = makeTempProject();
@@ -803,22 +803,54 @@ test('runDoctorChecks: absent .agents/skills/forge means no agents-skill check a
   }
 });
 
-test('runDoctorChecks: an unversioned .agents/skills/forge copy warns without flipping the exit code', () => {
+test('runDoctorChecks: an unstamped .agents/skills/forge directory is ignored as foreign', () => {
   const cwd = makeTempProject();
   try {
     fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
     fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
     fs.mkdirSync(path.join(cwd, '.agents', 'skills', 'forge'), { recursive: true });
-    fs.writeFileSync(path.join(cwd, '.agents', 'skills', 'forge', 'SKILL.md'), '# stale copy\n');
+    fs.writeFileSync(path.join(cwd, '.agents', 'skills', 'forge', 'SKILL.md'), '# foreign copy\n');
 
     const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
 
-    assert.ok(report.checks.agentsSkill, 'check present when the dir exists');
-    assert.equal(report.checks.agentsSkill.warning, true);
-    assert.match(report.checks.agentsSkill.message, /\.agents[/\\]skills[/\\]forge/);
-    assert.match(report.checks.agentsSkill.message, /stale/);
-    assert.match(report.checks.agentsSkill.message, /forge init --agents/);
-    assert.equal(report.ok, true, 'a stale project copy is a warning, not a failure');
+    assert.equal(report.checks.agentsSkill, undefined, 'unstamped dir is foreign, check skipped');
+    assert.equal(report.ok, true);
+
+    const out = capture();
+    const err = capture();
+    const code = runDoctor(['--json'], {
+      cwd,
+      stdout: out.stream,
+      stderr: err.stream,
+      runCommand: okRunCommand,
+    });
+    assert.equal(code, 0);
+    const parsed = JSON.parse(out.text());
+    assert.equal(parsed.checks.agentsSkill, undefined, 'JSON report has no agentsSkill check');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runDoctorChecks: a stamped .agents/skills/forge copy warns as a legacy leftover', () => {
+  const cwd = makeTempProject();
+  try {
+    fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
+    // home: cwd puts the managed dir at <cwd>/.agents/skills/forge — a
+    // current-stamped leftover from older `forge init --agents`.
+    installSkillsToAgents(['forge'], ['cursor'], { home: cwd });
+
+    const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
+
+    assert.ok(report.checks.agentsSkill, 'stamped copy produces a check');
+    assert.equal(report.checks.agentsSkill.ok, true);
+    assert.equal(report.checks.agentsSkill.warning, true, 'even a current stamp is a leftover');
+    assert.equal(report.checks.agentsSkill.status, 'present');
+    assert.match(report.checks.agentsSkill.message, /legacy/i);
+    assert.match(report.checks.agentsSkill.message, /forge init/);
+    assert.doesNotMatch(report.checks.agentsSkill.message, /--agents/);
+    assert.equal(report.ok, true, 'legacy leftover is a warning, not a failure');
 
     const out = capture();
     const err = capture();
@@ -828,39 +860,22 @@ test('runDoctorChecks: an unversioned .agents/skills/forge copy warns without fl
       stderr: err.stream,
       runCommand: okRunCommand,
     });
-    assert.equal(code, 0, 'exit code unaffected by the stale-copy warning');
-    assert.match(out.text(), /forge init --agents/);
+    assert.equal(code, 0, 'exit code unaffected by the legacy-copy warning');
+    const text = out.text();
+    assert.match(text, /legacy/i);
+    assert.match(text, /forge init/);
+    assert.doesNotMatch(text, /--agents/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test('runDoctorChecks: a current .agents/skills/forge copy is present with no warning', () => {
+test('runDoctorChecks: an outdated stamped copy still warns as legacy, exit unaffected', () => {
   const cwd = makeTempProject();
   try {
     fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
     fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
-    // home: cwd puts the managed dir at <cwd>/.agents/skills/forge — the
-    // exact tree `forge init --agents` writes, stamp and all.
-    installSkillsToAgents(['forge'], ['agents'], { home: cwd });
-
-    const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
-
-    assert.ok(report.checks.agentsSkill, 'check present when the dir exists');
-    assert.equal(report.checks.agentsSkill.warning, false);
-    assert.equal(report.checks.agentsSkill.status, 'present');
-    assert.equal(report.ok, true);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('runDoctorChecks: a valid stamp with a wrong contentHash warns as outdated, exit unaffected', () => {
-  const cwd = makeTempProject();
-  try {
-    fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
-    fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
-    installSkillsToAgents(['forge'], ['agents'], { home: cwd });
+    installSkillsToAgents(['forge'], ['cursor'], { home: cwd });
     const stampPath = path.join(cwd, '.agents', 'skills', 'forge', FORGEKIT_STAMP);
     const stamp = JSON.parse(fs.readFileSync(stampPath, 'utf8'));
     stamp.contentHash = 'deadbeef';
@@ -869,8 +884,11 @@ test('runDoctorChecks: a valid stamp with a wrong contentHash warns as outdated,
     const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
 
     assert.equal(report.checks.agentsSkill.status, 'outdated');
+    assert.equal(report.checks.agentsSkill.ok, true);
     assert.equal(report.checks.agentsSkill.warning, true);
-    assert.match(report.checks.agentsSkill.message, /forge init --agents/);
+    assert.match(report.checks.agentsSkill.message, /legacy/i);
+    assert.match(report.checks.agentsSkill.message, /forge init/);
+    assert.doesNotMatch(report.checks.agentsSkill.message, /--agents/);
     assert.equal(report.ok, true, 'an outdated copy is a warning, not a failure');
 
     const out = capture();
