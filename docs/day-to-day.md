@@ -76,6 +76,13 @@ things — Forge for a one-line change is waste, and the tooling agrees: even
 mid-Forge, a small plan (≤5 tasks, one capability, low-risk) triggers an
 **exit ramp** where the agent offers to leave Forge before scaffolding specs.
 
+**Using an agent without a dedicated Forge target?** There's a vendor-neutral
+option: `forgekit install` can put the skill in `~/.agents/skills/forge/`, and
+`forge init --agents` copies it into the repo at `.agents/skills/forge/` — one
+shared skill copy, and the repo can carry Forge for the whole team. What you
+don't get: no slash commands and no hooks — start work by asking for Forge by
+name ("use Forge …").
+
 ---
 
 ## 3. A feature, start to finish (what you'll see)

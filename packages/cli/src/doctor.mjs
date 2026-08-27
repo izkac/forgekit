@@ -19,6 +19,7 @@ import {
   resolveProjectPlanEngine,
 } from './plan-engine.mjs';
 import { ensureClaudeHookHints, ensureCursorHookHints } from './init.mjs';
+import { skillInstallStatus } from './install.mjs';
 import { collectHookCommands, isCommandReferenced, RETIRED_CLAUDE_HOOK_BASENAMES } from './hooks.mjs';
 
 export { OPENSPEC_PACKAGE, OPENSPEC_INSTALL_CMD };
@@ -161,6 +162,31 @@ export function checkSpecsProject(opts) {
     message: ok
       ? `${opts.dir}/changes/ + ${opts.dir}/specs/ found (built-in specs engine)`
       : `${missing.join(' + ')} missing — run \`forge init --no-openspec\` (optionally \`--plan-dir ${opts.dir}\`) to scaffold`,
+  };
+}
+
+/**
+ * Project-level `.agents/skills/forge` copy (written by `forge init --agents`).
+ * A stale copy is a warning, never a failure — `ok` stays true so the doctor
+ * exit code is unaffected. Returns null when the directory is absent: the
+ * check is skipped entirely.
+ * @param {{ cwd: string, existsSync?: typeof fs.existsSync }} opts
+ */
+export function checkAgentsSkill(opts) {
+  const existsSync = opts.existsSync ?? fs.existsSync;
+  const dest = path.join(opts.cwd, '.agents', 'skills', 'forge');
+  if (!existsSync(dest)) return null;
+  const status = skillInstallStatus('forge', dest);
+  const current = status === 'present';
+  return {
+    id: 'agents-skill',
+    ok: true,
+    warning: !current,
+    status,
+    dest,
+    message: current
+      ? '.agents/skills/forge is current'
+      : `.agents/skills/forge is a stale copy (${status}) — refresh with \`forge init --agents\``,
   };
 }
 
@@ -338,6 +364,7 @@ function installUnwiredHooks(cwd, hooks) {
 export function runDoctorChecks(opts = {}) {
   const cwd = opts.cwd ?? process.cwd();
   const engine = resolveProjectPlanEngine(cwd, { useUserDefault: false });
+  const agentsSkill = checkAgentsSkill({ cwd, existsSync: opts.existsSync });
 
   if (engine.engine === 'specs') {
     const project = checkSpecsProject({
@@ -370,7 +397,7 @@ export function runDoctorChecks(opts = {}) {
     return {
       ok: project.ok && cli.ok && hooks.ok,
       engine: engine.engine,
-      checks: { project, cli, hooks },
+      checks: { project, cli, hooks, ...(agentsSkill ? { agentsSkill } : {}) },
       installCommand: OPENSPEC_INSTALL_CMD,
       actions: [],
     };
@@ -434,7 +461,7 @@ export function runDoctorChecks(opts = {}) {
   return {
     ok,
     engine: engine.engine,
-    checks: { project, cli, hooks },
+    checks: { project, cli, hooks, ...(agentsSkill ? { agentsSkill } : {}) },
     installCommand: OPENSPEC_INSTALL_CMD,
     actions,
   };
@@ -483,11 +510,14 @@ export function runDoctor(argv, io = {}) {
   if (opts.json) {
     stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
-    const { project, cli, hooks } = report.checks;
+    const { project, cli, hooks, agentsSkill } = report.checks;
     stdout.write(`Forge doctor (plan engine: ${report.engine ?? 'openspec'})\n`);
     stdout.write(`  [${project.ok ? 'ok' : 'FAIL'}] ${project.message}\n`);
     stdout.write(`  [${cli.ok ? 'ok' : 'FAIL'}] ${cli.message}\n`);
     stdout.write(`  [${hooks.ok ? 'ok' : 'FAIL'}] ${hooks.message}\n`);
+    if (agentsSkill) {
+      stdout.write(`  [${agentsSkill.warning ? 'warn' : 'ok'}] ${agentsSkill.message}\n`);
+    }
     if (!cli.ok) {
       stdout.write(`\nOffer: install OpenSpec CLI?\n  ${cli.installCommand}\n`);
       stdout.write(`Or re-run with: forge doctor --install\n`);

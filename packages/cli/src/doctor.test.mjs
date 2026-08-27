@@ -15,6 +15,7 @@ import {
   runDoctorChecks,
   warnIfDoctorFails,
 } from './doctor.mjs';
+import { FORGEKIT_STAMP, installSkillsToAgents } from './install.mjs';
 
 function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-hook-wiring-'));
@@ -780,6 +781,107 @@ test('checkHookWiring: an unreadable hooks dir is a failure, not a clean skip (F
     const claude = result.surfaces.find((s) => s.surface === 'claude');
     assert.ok(claude);
     assert.equal(claude.ok, false);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// --- agents-install-target: project .agents/skills/forge copy ---
+
+test('runDoctorChecks: absent .agents/skills/forge means no agents-skill check at all', () => {
+  const cwd = makeTempProject();
+  try {
+    fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
+
+    const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
+
+    assert.equal(report.checks.agentsSkill, undefined, 'check skipped entirely when absent');
+    assert.equal(report.ok, true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runDoctorChecks: an unversioned .agents/skills/forge copy warns without flipping the exit code', () => {
+  const cwd = makeTempProject();
+  try {
+    fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
+    fs.mkdirSync(path.join(cwd, '.agents', 'skills', 'forge'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.agents', 'skills', 'forge', 'SKILL.md'), '# stale copy\n');
+
+    const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
+
+    assert.ok(report.checks.agentsSkill, 'check present when the dir exists');
+    assert.equal(report.checks.agentsSkill.warning, true);
+    assert.match(report.checks.agentsSkill.message, /\.agents[/\\]skills[/\\]forge/);
+    assert.match(report.checks.agentsSkill.message, /stale/);
+    assert.match(report.checks.agentsSkill.message, /forge init --agents/);
+    assert.equal(report.ok, true, 'a stale project copy is a warning, not a failure');
+
+    const out = capture();
+    const err = capture();
+    const code = runDoctor([], {
+      cwd,
+      stdout: out.stream,
+      stderr: err.stream,
+      runCommand: okRunCommand,
+    });
+    assert.equal(code, 0, 'exit code unaffected by the stale-copy warning');
+    assert.match(out.text(), /forge init --agents/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runDoctorChecks: a current .agents/skills/forge copy is present with no warning', () => {
+  const cwd = makeTempProject();
+  try {
+    fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
+    // home: cwd puts the managed dir at <cwd>/.agents/skills/forge — the
+    // exact tree `forge init --agents` writes, stamp and all.
+    installSkillsToAgents(['forge'], ['agents'], { home: cwd });
+
+    const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
+
+    assert.ok(report.checks.agentsSkill, 'check present when the dir exists');
+    assert.equal(report.checks.agentsSkill.warning, false);
+    assert.equal(report.checks.agentsSkill.status, 'present');
+    assert.equal(report.ok, true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runDoctorChecks: a valid stamp with a wrong contentHash warns as outdated, exit unaffected', () => {
+  const cwd = makeTempProject();
+  try {
+    fs.mkdirSync(path.join(cwd, 'openspec'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'openspec', 'config.yaml'), 'x: 1\n');
+    installSkillsToAgents(['forge'], ['agents'], { home: cwd });
+    const stampPath = path.join(cwd, '.agents', 'skills', 'forge', FORGEKIT_STAMP);
+    const stamp = JSON.parse(fs.readFileSync(stampPath, 'utf8'));
+    stamp.contentHash = 'deadbeef';
+    fs.writeFileSync(stampPath, `${JSON.stringify(stamp, null, 2)}\n`, 'utf8');
+
+    const report = runDoctorChecks({ cwd, runCommand: okRunCommand });
+
+    assert.equal(report.checks.agentsSkill.status, 'outdated');
+    assert.equal(report.checks.agentsSkill.warning, true);
+    assert.match(report.checks.agentsSkill.message, /forge init --agents/);
+    assert.equal(report.ok, true, 'an outdated copy is a warning, not a failure');
+
+    const out = capture();
+    const err = capture();
+    const code = runDoctor([], {
+      cwd,
+      stdout: out.stream,
+      stderr: err.stream,
+      runCommand: okRunCommand,
+    });
+    assert.equal(code, 0, 'exit code unaffected by the outdated-copy warning');
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

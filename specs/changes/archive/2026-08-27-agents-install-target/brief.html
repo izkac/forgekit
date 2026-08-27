@@ -1,0 +1,81 @@
+<!-- forge-brief-specs-hash:27de69d73e4dd1ff -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief — Vendor-neutral .agents install target</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #1a1a1a;
+         background: #fff; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.92em; }
+  li { margin: 0.3rem 0; }
+  .muted { color: #555; }
+</style>
+</head>
+<body>
+<h1>Vendor-neutral <code>.agents</code> install target</h1>
+
+<h2>TL;DR</h2>
+<p>Forge can currently only be installed per tool (Cursor, Claude Code, Codex, …).
+After this change you can also install it once into the shared <code>.agents</code>
+folder that a growing number of AI tools read — the same option OpenSpec ships.
+One copy serves every compatible tool, and a repo can carry the Forge skill for
+the whole team.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A new environment called <b>Shared .agents (vendor-neutral)</b> in the
+      <code>forgekit install</code> picker. Picking it puts skills in
+      <code>~/.agents/skills/</code>, where compatible tools find them.</li>
+  <li>A new <code>forge init --agents</code> option that puts the Forge skill
+      inside the project itself (<code>.agents/skills/forge/</code>), so anyone
+      cloning the repo has Forge available in a compatible tool with no setup.</li>
+  <li><code>forge doctor</code> tells you when the project copy is out of date
+      and how to refresh it.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>The shared target is <b>skills only</b>, deliberately. Slash-command menus and
+hooks are different in every tool, so those stay with the per-tool setups. In a
+tool that only knows the shared folder, you start Forge by asking for it by
+name ("use Forge") instead of a slash command — that invoke already works. You
+can pick the shared target <i>together with</i> the per-tool ones; each writes
+to its own place and they don't conflict.</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li><code>forgekit install</code> shows one more environment to tick.</li>
+  <li><code>forge init --agents</code> is new; combine freely, e.g.
+      <code>forge init --agents --cursor</code>.</li>
+  <li>Nothing changes for existing setups if you don't pick the new target.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>How tools invoke skills from the shared folder varies by tool; we
+      document "ask by name" as the common form, same caveat OpenSpec gives.</li>
+  <li>Codex reads both its own folder and <code>.agents</code>; if you use
+      both installs, the copies are refreshed by the same commands, but a
+      forgotten one can lag. <code>forge doctor</code> warns for the project copy.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>No editing of <code>AGENTS.md</code> files.</li>
+  <li>No shared command files or hooks — per-tool setups remain the
+      full-featured path.</li>
+  <li>Forgekit only manages its own folders under <code>.agents/skills/</code>;
+      everything else there is left alone.</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li><b>CLI</b> — install target, init target, doctor check (3 tasks)</li>
+  <li><b>Docs</b> — reference table, operator guide, changelog (2 tasks)</li>
+</ul>
+
+<p class="muted">Change: <code>agents-install-target</code> · specs engine</p>
+</body>
+</html>

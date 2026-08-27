@@ -199,6 +199,56 @@ test('a run that states no ADR preference leaves the stored one alone', () => {
   }
 });
 
+test('agents environment installs to ~/.agents/skills with stamp', () => {
+  assert.ok(AGENT_IDS.includes('agents'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-'));
+  try {
+    const results = installSkillsToAgents(['forge'], ['agents'], { home });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, 'installed');
+    const dest = path.join(home, '.agents', 'skills', 'forge');
+    assert.ok(fs.existsSync(path.join(dest, 'SKILL.md')));
+    assert.ok(fs.existsSync(path.join(dest, FORGEKIT_STAMP)));
+    const row = listInstallStatus({ home }).find(
+      (r) => r.skill === 'forge' && r.agent === 'agents',
+    );
+    assert.equal(row.status, 'present');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('updateOutdatedSkills never clobbers a foreign unstamped skill under ~/.agents', () => {
+  // ~/.agents/skills/ is a shared root: an unstamped dir at a managed path
+  // there belongs to another tool or a human, not forgekit. The stamp is the
+  // ownership marker — update must leave the foreign copy byte-identical.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-foreign-'));
+  try {
+    const dest = path.join(home, '.agents', 'skills', 'forge');
+    fs.mkdirSync(dest, { recursive: true });
+    const foreignBody = "# someone else's forge skill\n";
+    fs.writeFileSync(path.join(dest, 'SKILL.md'), foreignBody, 'utf8');
+
+    const { results } = updateOutdatedSkills({ home });
+
+    assert.equal(
+      fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'),
+      foreignBody,
+      'foreign unstamped copy left byte-identical',
+    );
+    assert.ok(
+      !fs.existsSync(path.join(dest, FORGEKIT_STAMP)),
+      'no ownership stamp planted on a foreign dir',
+    );
+    assert.ok(
+      !results.some((r) => r.agent === 'agents'),
+      'no install targeted the agents environment',
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('updateOutdatedSkills refreshes unversioned installs', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-upd-'));
   try {

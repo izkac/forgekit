@@ -34,8 +34,11 @@ import { resolveAsset } from './paths.mjs';
 import {
   AGENT_IDS,
   AGENTS,
+  copyDirRecursive,
   installedManagedPairs,
   promptOpenSpec,
+  resolveSkillSource,
+  writeInstallStamp,
 } from './install.mjs';
 import {
   collectHookCommands,
@@ -47,7 +50,7 @@ import {
 
 // Environments with project-local command/rule/hook templates. Others are
 // driven by the globally-installed skill alone (no per-project wiring).
-const WIRED_AGENTS = Object.freeze(['cursor', 'claude', 'codex']);
+const WIRED_AGENTS = Object.freeze(['cursor', 'claude', 'codex', 'agents']);
 
 /**
  * Lazy: `@inquirer/prompts` is a real amount of code that most importers of
@@ -95,6 +98,7 @@ export function parseArgs(argv) {
     else if (arg === '--gemini') opts.agents.push('gemini');
     else if (arg === '--windsurf') opts.agents.push('windsurf');
     else if (arg === '--opencode') opts.agents.push('opencode');
+    else if (arg === '--agents') opts.agents.push('agents');
     else if (arg === '--adr') opts.adr = true;
     else if (arg === '--no-adr') opts.adr = false;
     else if (arg === '--adr-dir') opts.adrDir = argv[++i];
@@ -116,6 +120,8 @@ Options:
   --cursor          Cursor (.cursor/commands, rules, hooks)
   --claude          Claude Code (.claude/commands, rules, hooks)
   --codex           Codex CLI (.codex/rules)
+  --agents          Shared .agents (vendor-neutral): copies the Forge skill to
+                    .agents/skills/forge — skills only, no commands or hooks
   --copilot/--gemini/--windsurf/--opencode
                     Offered in the picker for parity with \`forgekit install\`;
                     driven by the global skill (no per-project wiring yet)
@@ -638,6 +644,26 @@ export function initProject(selected, opts) {
     );
   }
 
+  if (selected.includes('agents')) {
+    const skillSource = resolveSkillSource('forge');
+    const dest = path.join(cwd, '.agents', 'skills', 'forge');
+    const existed = fs.existsSync(dest);
+    // Clear only the forge subtree (never anything broader under .agents/):
+    // a merge-copy would keep files the packaged skill no longer ships while
+    // the fresh stamp claims the copy is current.
+    if (existed) fs.rmSync(dest, { recursive: true, force: true });
+    copyDirRecursive(skillSource, dest);
+    writeInstallStamp(dest, 'forge', skillSource);
+    report.agentsSkill = {
+      dest: '.agents/skills/forge',
+      status: existed ? 'updated' : 'written',
+    };
+    report.agentsSkipped = {
+      commands: 'no universal command adapter',
+      hooks: 'hook wiring is host-specific',
+    };
+  }
+
   // Selected environments without project-wiring templates: the globally
   // installed skill is their interface — nothing to scaffold per project.
   report.skillOnly = selected.filter((id) => !WIRED_AGENTS.includes(id));
@@ -706,6 +732,7 @@ function wiredAgents(cwd) {
     cursor: path.join(cwd, '.cursor', 'commands'),
     claude: path.join(cwd, '.claude', 'commands'),
     codex: path.join(cwd, '.codex', 'rules'),
+    agents: path.join(cwd, '.agents', 'skills', 'forge'),
   };
   return new Set(
     Object.entries(markers)
@@ -890,7 +917,7 @@ async function main(argv = process.argv.slice(2)) {
   if (selected.length === 0) {
     if (!process.stdin.isTTY) {
       process.stderr.write(
-        'No agents specified. Pass --cursor/--claude/--codex/--copilot/--gemini/--windsurf/--opencode/--all, or run in a TTY.\n',
+        'No agents specified. Pass --cursor/--claude/--codex/--agents/--copilot/--gemini/--windsurf/--opencode/--all, or run in a TTY.\n',
       );
       return 1;
     }
@@ -955,6 +982,11 @@ async function main(argv = process.argv.slice(2)) {
     planDir,
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (report.agentsSkill) {
+    process.stdout.write(
+      `\nagents: skill → ${report.agentsSkill.dest} (commands/hooks skipped — no universal command adapter / hook wiring is host-specific)\n`,
+    );
+  }
   if (Array.isArray(report.skillOnly) && report.skillOnly.length) {
     const labels = report.skillOnly.map((id) => AGENTS[id].label).join(', ');
     process.stdout.write(

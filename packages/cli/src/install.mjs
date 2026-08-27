@@ -108,6 +108,10 @@ export const AGENTS = {
     skillDir: (home, skillId) =>
       path.join(home, '.config', 'opencode', 'skills', skillId),
   },
+  agents: {
+    label: 'Shared .agents (vendor-neutral)',
+    skillDir: (home, skillId) => path.join(home, '.agents', 'skills', skillId),
+  },
 };
 
 export const AGENT_IDS = Object.freeze(Object.keys(AGENTS));
@@ -473,7 +477,12 @@ export function updateOutdatedSkills(opts = {}) {
       if (agentFilter && !agentFilter.has(agentId)) continue;
       const dest = AGENTS[agentId].skillDir(home, skillId);
       const status = skillInstallStatus(skillId, dest);
-      if (status === 'outdated' || status === 'unversioned') {
+      // The shared .agents root holds other tools' skills too: an unstamped
+      // dir at a managed path there is foreign, not forgekit's to reinstall.
+      // The .forgekit.json stamp is the ownership marker — only stamped
+      // (outdated) copies are updated for the agents environment.
+      const owned = status === 'outdated' || (status === 'unversioned' && agentId !== 'agents');
+      if (owned) {
         skillSet.add(skillId);
         agentSet.add(agentId);
       }

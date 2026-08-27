@@ -173,6 +173,17 @@
  *                 archive` moves the change under `changes/archive/`, and
  *                 `forge phase done` then succeeds with no waiver at all
  *
+ * Agents-target loop (specs/changes/agents-install-target/e2e.json), its own
+ * scratch project AND scratch HOME/USERPROFILE (never the machine's real one):
+ *   agents-target  `forge init --agents` writes .agents/skills/forge (skill +
+ *                  stamp, no commands/) and prints the skipped commands/hooks
+ *                  note; a re-run clears a file the packaged skill no longer
+ *                  ships while a foreign .agents/agents.md survives
+ *                  byte-identical; `forgekit install --skills forge --agents
+ *                  agents` lands the same skill under <home>/.agents/skills/;
+ *                  deleting the project stamp turns the doctor check into a
+ *                  warning naming `forge init --agents` without failing
+ *
  * `all` is this rig's own recorded probe (`.forge/config.json`'s
  * `e2e.harness.probe`) — every phase above that is layered onto a shared
  * fixture or built once and forgotten stays out of it, because re-running it
@@ -3124,13 +3135,102 @@ if (phase === 'boot') {
     fail('settings.json lost forge-prompt-hook.mjs', JSON.stringify(settings));
   }
   process.stdout.write('RETIRE TRIAGE HOOK GREEN\n');
+} else if (phase === 'agents-target') {
+  const FORGEKIT_BIN = path.join(REPO, 'packages', 'cli', 'bin', 'forgekit.mjs');
+  const dir = `${SCRATCH}-agents-target`;
+  // Isolated home: the phase must never read or write the machine's real
+  // ~/.forgekit or ~/.agents (os.homedir() reads USERPROFILE on Windows,
+  // HOME elsewhere — set both).
+  const home = `${SCRATCH}-agents-target-home`;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
+  const homeEnv = { HOME: home, USERPROFILE: home };
+
+  // --- 1. project-level init writes the skill, no commands, and says so ---
+  const init = forge(dir, ['init', '--agents', '--no-openspec', '--no-adr'], homeEnv);
+  if (init.code !== 0) fail(`forge init --agents exited ${init.code}`, init.out);
+  const skillDir = path.join(dir, '.agents', 'skills', 'forge');
+  if (!fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
+    fail('.agents/skills/forge/SKILL.md missing after init', init.out);
+  }
+  if (!fs.existsSync(path.join(skillDir, '.forgekit.json'))) {
+    fail('.agents/skills/forge/.forgekit.json stamp missing after init', init.out);
+  }
+  if (fs.existsSync(path.join(dir, '.agents', 'commands'))) {
+    fail('.agents/commands/ was created — the agents target is skills-only', init.out);
+  }
+  if (!init.out.includes('commands/hooks skipped')) {
+    fail('init output does not print the skipped commands/hooks note', tail(init.out, 30));
+  }
+
+  // --- 2. re-run refreshes: deleted-upstream files go, foreign files stay ---
+  fs.writeFileSync(path.join(skillDir, 'stale-extra.md'), '# removed upstream\n');
+  const foreignPath = path.join(dir, '.agents', 'agents.md');
+  const foreignBody = '# user notes — not forgekit\'s\n';
+  fs.writeFileSync(foreignPath, foreignBody);
+  const reinit = forge(dir, ['init', '--agents', '--no-openspec', '--no-adr'], homeEnv);
+  if (reinit.code !== 0) fail(`re-run forge init --agents exited ${reinit.code}`, reinit.out);
+  if (fs.existsSync(path.join(skillDir, 'stale-extra.md'))) {
+    fail('stale-extra.md survived the refresh — merge-copy instead of clear+copy', reinit.out);
+  }
+  if (fs.readFileSync(foreignPath, 'utf8') !== foreignBody) {
+    fail('.agents/agents.md did not survive the re-init byte-identical', reinit.out);
+  }
+
+  // --- 3. user-level install lands under <home>/.agents/skills/forge ---
+  const installEnv = { ...process.env, ...homeEnv, FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet') };
+  delete installEnv.CLAUDE_CODE_SESSION_ID;
+  const install = spawnSync(
+    process.execPath,
+    [FORGEKIT_BIN, 'install', '--skills', 'forge', '--agents', 'agents', '--no-adr', '--no-openspec'],
+    { cwd: dir, encoding: 'utf8', env: installEnv },
+  );
+  const installOut = `${install.stdout ?? ''}${install.stderr ?? ''}`;
+  if (install.status !== 0) fail(`forgekit install exited ${install.status}`, installOut);
+  const homeSkillDir = path.join(home, '.agents', 'skills', 'forge');
+  if (!fs.existsSync(path.join(homeSkillDir, 'SKILL.md'))) {
+    fail('<home>/.agents/skills/forge/SKILL.md missing after forgekit install', installOut);
+  }
+  if (!fs.existsSync(path.join(homeSkillDir, '.forgekit.json'))) {
+    fail('<home>/.agents/skills/forge/.forgekit.json stamp missing after forgekit install', installOut);
+  }
+
+  // --- 4. a stampless project copy is a doctor warning, never a failure ---
+  fs.rmSync(path.join(skillDir, '.forgekit.json'));
+  const doctor = forge(dir, ['doctor', '--json'], homeEnv);
+  let report;
+  try {
+    report = JSON.parse(doctor.stdout);
+  } catch {
+    fail('forge doctor --json did not print parseable JSON', tail(doctor.out, 30));
+  }
+  const agentsCheck = report.checks?.agentsSkill;
+  if (!agentsCheck) fail('doctor report has no checks.agentsSkill for a present copy', doctor.stdout);
+  // This scratch project passes every other check, so the run's own verdict
+  // and exit code are exactly what the stale-copy warning must not move.
+  if (report.ok !== true || doctor.code !== 0) {
+    fail(
+      `the stale-copy warning flipped the doctor verdict (ok=${report.ok}, exit=${doctor.code}) — it must stay a warning`,
+      doctor.out,
+    );
+  }
+  if (agentsCheck.warning !== true || agentsCheck.status !== 'unversioned') {
+    fail('a stampless copy did not surface as an unversioned warning', doctor.stdout);
+  }
+  if (!agentsCheck.message.includes('forge init --agents')) {
+    fail('the warning does not name `forge init --agents` as the refresh', doctor.stdout);
+  }
+
+  process.stdout.write('AGENTS TARGET GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'init-preserves-config|checkpoint-scope|retire-triage-hook\n',
+      'init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target\n',
   );
   process.exit(1);
 }

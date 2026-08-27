@@ -1,0 +1,33 @@
+{
+  "change": "agents-install-target",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "User-level shared .agents skills install",
+      "library": "packages/cli/src/install.mjs AGENTS map (agents entry)",
+      "runtimeOwner": "forgekit install --agents agents (also picker, list, update, uninstall, prune)",
+      "writes": "~/.agents/skills/<skill>/ tree + .forgekit.json stamp",
+      "reads": "packaged skill source (resolveSkillSource)",
+      "uiConsumer": "operator running forgekit install; agnostic agents reading ~/.agents/skills",
+      "evidence": "packages/cli/src/install.test.mjs"
+    },
+    {
+      "capability": "Project-level .agents/skills/forge wiring",
+      "library": "packages/cli/src/init.mjs initProject agents branch",
+      "runtimeOwner": "forge init --agents (flag and picker)",
+      "writes": "<project>/.agents/skills/forge/ tree + stamp; report notes commands/hooks skipped",
+      "reads": "packaged forge skill",
+      "uiConsumer": "operator running forge init; team agents reading the repo's .agents/skills",
+      "evidence": "packages/cli/src/init.test.mjs"
+    },
+    {
+      "capability": "Doctor reports stale project .agents copy",
+      "library": "packages/cli/src/doctor.mjs",
+      "runtimeOwner": "forge doctor",
+      "writes": "checks report entry (warn on outdated, skip on absent)",
+      "reads": ".agents/skills/forge stamp vs packaged skill hash",
+      "uiConsumer": "operator reading forge doctor",
+      "evidence": "packages/cli/src/doctor.test.mjs"
+    }
+  ]
+}

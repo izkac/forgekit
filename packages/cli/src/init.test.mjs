@@ -13,7 +13,7 @@ import {
   resolveInitPlanEngine,
   resolveTemplatesRoot,
 } from './init.mjs';
-import { installSkillsToAgents } from './install.mjs';
+import { FORGEKIT_STAMP, installSkillsToAgents, resolveSkillSource } from './install.mjs';
 import { loadProjectConfig, saveUserConfig } from './config.mjs';
 import { DEFAULT_SPECS_DIR, writeProjectPlanConfig } from './plan-engine.mjs';
 import { DEFAULT_ADR_DIR, decisionsDocFor, disableProjectAdr, writeProjectAdrConfig } from './adr.mjs';
@@ -727,10 +727,12 @@ test('forge init: a first-run project with no recorded plan.dir still gets the d
   try {
     assert.equal(loadProjectConfig(cwd).plan, undefined, 'fixture has no recorded plan yet');
 
+    // os.homedir() reads USERPROFILE on Windows, HOME elsewhere — set both so
+    // the machine's real ~/.forgekit/config.json cannot leak into the fixture.
     const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
       cwd,
       encoding: 'utf8',
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, USERPROFILE: home },
     });
     assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
 
@@ -813,6 +815,119 @@ test('forge init: a flagless re-init keeps a recorded adr.enabled:true project e
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// --- agents-install-target: project-level `agents` target (.agents/skills/forge) ---
+
+test('init parseArgs accepts --agents as a target shorthand', () => {
+  assert.deepEqual(parseArgs(['--agents']).agents, ['agents']);
+});
+
+test('initProject with agents writes .agents/skills/forge and nothing else under .agents', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-init-'));
+  try {
+    const report = initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
+    const dest = path.join(cwd, '.agents', 'skills', 'forge');
+    assert.ok(fs.existsSync(path.join(dest, 'SKILL.md')), 'skill copied');
+    assert.ok(fs.existsSync(path.join(dest, FORGEKIT_STAMP)), 'stamp written');
+    assert.ok(!fs.existsSync(path.join(cwd, '.agents', 'commands')), 'no command files');
+    assert.deepEqual(report.agentsSkill, {
+      dest: '.agents/skills/forge',
+      status: 'written',
+    });
+    assert.deepEqual(report.agentsSkipped, {
+      commands: 'no universal command adapter',
+      hooks: 'hook wiring is host-specific',
+    });
+    assert.ok(!report.skillOnly.includes('agents'), 'agents is wired, not skill-only');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('initProject agents target combines with other targets', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-combo-'));
+  try {
+    initProject(['agents', 'cursor'], { cwd, force: true, adr: false, planEngine: null });
+    assert.ok(fs.existsSync(path.join(cwd, '.agents', 'skills', 'forge', 'SKILL.md')));
+    assert.ok(fs.existsSync(path.join(cwd, '.cursor', 'commands', 'forge.md')));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('re-running init refreshes a stale .agents/skills/forge copy in place', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-refresh-'));
+  try {
+    initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
+    const dest = path.join(cwd, '.agents', 'skills', 'forge');
+    const skillFile = path.join(dest, 'SKILL.md');
+    fs.writeFileSync(skillFile, '# stale forge skill\n', 'utf8');
+    // A file the packaged skill no longer ships: a merge-copy would leave it
+    // behind while the stamp claims the copy is current.
+    fs.writeFileSync(path.join(dest, 'stale-extra.md'), '# removed upstream\n', 'utf8');
+
+    const report = initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
+    const sourceBody = fs.readFileSync(
+      path.join(resolveSkillSource('forge'), 'SKILL.md'),
+      'utf8',
+    );
+    assert.equal(fs.readFileSync(skillFile, 'utf8'), sourceBody, 'stale copy refreshed');
+    assert.equal(
+      fs.existsSync(path.join(dest, 'stale-extra.md')),
+      false,
+      'files deleted upstream are removed, not merge-copied over',
+    );
+    assert.equal(report.agentsSkill.status, 'updated');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('forge init --agents prints the skipped commands/hooks note in human output', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-stdout-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-stdout-home-'));
+  try {
+    // os.homedir() reads USERPROFILE on Windows, HOME elsewhere — set both so
+    // the machine's real ~/.forgekit/config.json cannot leak into the fixture.
+    const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--agents', '--force'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
+    assert.match(result.stdout, /agents: skill → \.agents\/skills\/forge/);
+    assert.match(result.stdout, /commands\/hooks skipped/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('agents init never touches foreign content under .agents/', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-agents-foreign-'));
+  try {
+    fs.mkdirSync(path.join(cwd, '.agents', 'skills', 'other-skill'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.agents', 'agents.md'), '# user notes\n', 'utf8');
+    fs.writeFileSync(
+      path.join(cwd, '.agents', 'skills', 'other-skill', 'SKILL.md'),
+      '# other skill\n',
+      'utf8',
+    );
+
+    initProject(['agents'], { cwd, force: true, adr: false, planEngine: null });
+
+    assert.equal(
+      fs.readFileSync(path.join(cwd, '.agents', 'agents.md'), 'utf8'),
+      '# user notes\n',
+    );
+    assert.equal(
+      fs.readFileSync(path.join(cwd, '.agents', 'skills', 'other-skill', 'SKILL.md'), 'utf8'),
+      '# other skill\n',
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 

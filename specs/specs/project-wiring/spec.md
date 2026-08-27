@@ -62,74 +62,25 @@ failure (unwired basenames) without changing the warn-only exit behaviour.
 - AND session creation still succeeds
 
 ### Requirement: Init merges the hooks snippet into settings.json
-`forge init` SHALL structurally merge the generated hooks snippet into
-`.claude/settings.json` — creating the file when missing, appending only
-hook entries whose commands are not already referenced, and never removing
-or reordering existing user entries. The merge SHALL be idempotent. When
-`.claude/settings.json` exists but cannot be parsed, init SHALL refuse to
-write it and print the manual merge instruction instead. `forge doctor
---install` SHALL perform the same merge. The snippet file SHALL still be
-written for transparency.
-
-#### Scenario: Fresh project ends up wired
-
-- GIVEN a project with no `.claude/settings.json`
-- WHEN the operator runs `forge init`
-- THEN `.claude/settings.json` exists and references every forge hook on disk
-- AND `forge doctor` hook-wiring check passes
-
-#### Scenario: Existing user hooks are preserved
-
-- GIVEN a `.claude/settings.json` with a user-defined PostToolUse hook
-- WHEN `forge init` runs
-- THEN the user hook entry is unchanged
-- AND the forge hooks are appended
+Existing groups in `settings.json` are never reordered. Forge-owned retired hook basenames (currently `forge-triage-hook.mjs`) are an explicit exception: they are removed as specified under “Init retires leftover auto-triage wiring”. Unrelated user entries remain untouched.
 
 #### Scenario: Re-running init adds nothing
 
-- GIVEN a project already wired by `forge init`
-- WHEN `forge init` runs again
-- THEN `.claude/settings.json` is structurally unchanged
+*(unchanged)*
 
-#### Scenario: Malformed settings are never overwritten
+#### Scenario: Existing user hooks are preserved
 
-- GIVEN an unparseable `.claude/settings.json`
-- WHEN `forge init` runs
-- THEN the file is left byte-identical
-- AND the output names the snippet file and the manual merge step
+*(unchanged)*
 
 ### Requirement: Hooks never pass untrusted text through a shell
-A hook that spawns `forge` with caller-supplied text — the user's prompt, a
-file path, any value it did not author — SHALL NOT use a shell on platforms
-where one is unnecessary. Node joins argv into a command string when
-`shell: true`, without quoting, so any metacharacter in that text is
-interpreted rather than passed through.
-
-A shell SHALL be used only on win32, where `forge` resolves to a `.cmd` shim
-and cannot be spawned directly, and quoting SHALL be confined to that branch.
-
-Prompt text containing shell metacharacters SHALL reach `forge` unchanged.
-The realistic trigger is not an attacker: a backtick or a semicolon in a
-pasted code snippet is ordinary prompt content, and it fires on every
-`UserPromptSubmit` in a wired project.
-
-#### Scenario: Metacharacters in a prompt are not executed
-
-- GIVEN a wired project
-- WHEN a user prompt containing `; touch <marker> #` is submitted
-- THEN no marker file is created
-
-#### Scenario: A prompt containing metacharacters is relayed intact
-
-- GIVEN a prompt containing a backtick, `$(…)`, a semicolon, a pipe and quotes
-- WHEN the hook relays it to `forge`
-- THEN `forge` receives the prompt text unchanged
+The remaining prompt-bearing hook is `forge-prompt-hook.mjs`. The retired `forge-triage-hook.mjs` is no longer in the shipped set.
 
 #### Scenario: The shipped hook and the project copy stay identical
 
-- GIVEN the template hooks under `templates/project/claude/hooks/`
-- WHEN compared against this repo's own `.claude/hooks/` copies
-- THEN they are byte-identical
+- **GIVEN** the template hooks under `templates/project/claude/hooks/`
+- **WHEN** compared against this repo's own `.claude/hooks/` copies
+- **THEN** they are byte-identical
+- **AND** `forge-triage-hook.mjs` is absent from both trees
 
 ### Requirement: Portable declared CI matrix
 The project SHALL keep tests portable across every operating system and Node version declared by its CI matrix. Tests of filesystem denial SHALL use deterministic coded failures rather than permission semantics unavailable on a declared host.
@@ -186,3 +137,109 @@ no recorded value SHALL be resolved exactly as a first-time init is today.
 - **WHEN** `forge init --claude` runs with no engine flag and no TTY
 - **THEN** the engine resolves exactly as it does today (the user default),
   because there is no recorded value to preserve
+
+### Requirement: Auto-triage hook is not shipped
+`forge init --claude` SHALL NOT copy `forge-triage-hook.mjs` into the project and SHALL NOT register it in `forge-hooks.snippet.json` or `.claude/settings.json`. The generated UserPromptSubmit wiring SHALL still include `forge-prompt-hook.mjs`.
+
+#### Scenario: Fresh Claude init has no triage hook
+
+- **GIVEN** a project with no `.claude/` directory
+- **WHEN** `forge init --claude` runs
+- **THEN** `.claude/hooks/forge-triage-hook.mjs` does not exist
+- **AND** neither `forge-hooks.snippet.json` nor `settings.json` references `forge-triage-hook.mjs`
+- **AND** `forge-prompt-hook.mjs` is present and wired on UserPromptSubmit
+
+### Requirement: Init retires leftover auto-triage wiring
+`forge init --claude` and `forge doctor --install` SHALL delete `.claude/hooks/forge-triage-hook.mjs` when that file exists, SHALL remove hook entries whose command basename is exactly `forge-triage-hook.mjs` from `.claude/settings.json` and `.claude/settings.local.json` when those files parse as JSON, and SHALL rewrite `forge-hooks.snippet.json` so it no longer lists the retired hook. Entries whose basename is a wrapper (for example `my-forge-triage-hook.mjs`) SHALL be left in place. Other user hook entries SHALL be left in place.
+
+#### Scenario: Leftover hook is unwired and deleted
+
+- **GIVEN** a project whose `.claude/hooks/` contains `forge-triage-hook.mjs`
+- **AND** `.claude/settings.json` registers that file on UserPromptSubmit
+- **WHEN** `forge init --claude` runs
+- **THEN** the hook file is gone
+- **AND** `settings.json` no longer references `forge-triage-hook.mjs`
+- **AND** `forge-prompt-hook.mjs` remains wired
+
+#### Scenario: Wrapper-named hook is not stripped
+
+- **GIVEN** settings.json contains a command whose basename is `my-forge-triage-hook.mjs`
+- **WHEN** retired-hook stripping runs
+- **THEN** that command is still present
+
+### Requirement: Doctor ignores leftover retired hook files
+`forge doctor` SHALL treat `forge-triage-hook.mjs` as absent when listing forge hooks on disk. A leftover copy SHALL NOT appear as unwired and SHALL NOT fail the hook-wiring check.
+
+#### Scenario: Leftover retired file does not fail doctor
+
+- **GIVEN** `.claude/hooks/forge-triage-hook.mjs` exists
+- **AND** no other forge hooks are present
+- **WHEN** `forge doctor` runs the hook-wiring check
+- **THEN** the check is skipped or ok
+- **AND** `forge-triage-hook.mjs` is not listed as unwired
+
+### Requirement: Vendor-neutral `.agents` install target
+`forgekit install` SHALL offer an `agents` environment that installs selected
+skills to `~/.agents/skills/<skill>/` with the standard forgekit stamp, and
+`forge init` SHALL offer an `agents` target (`--agents` flag and picker entry)
+that copies the packaged Forge skill to `<project>/.agents/skills/forge/`
+with a stamp, refreshing it on re-run. The target SHALL be skills-only: init
+SHALL NOT write command files or hooks for it and SHALL report both as
+intentionally skipped. The target SHALL be combinable with any other agent
+target in the same run. Forgekit SHALL only manage its own skill directories
+under `.agents/skills/` and SHALL NOT read, list, or remove anything else
+under `.agents/`.
+
+#### Scenario: Install to the shared user-level root
+
+- **GIVEN** a home directory without `~/.agents`
+- **WHEN** `forgekit install --skills forge --agents agents` runs
+- **THEN** `~/.agents/skills/forge/SKILL.md` exists
+- **AND** the directory carries a `.forgekit.json` stamp
+- **AND** `forgekit list` shows the `forge × agents` pair as present
+
+#### Scenario: Project init writes the skill tree and skips commands and hooks
+
+- **GIVEN** a project with no `.agents/` directory
+- **WHEN** `forge init --agents` runs
+- **THEN** `.agents/skills/forge/SKILL.md` exists with a stamp
+- **AND** no `.agents/commands/` and no hook wiring is created
+- **AND** the report marks commands and hooks as skipped for this target
+
+#### Scenario: The agents target is not exclusive
+
+- **GIVEN** a project with no wiring
+- **WHEN** `forge init --agents --cursor` runs
+- **THEN** both `.agents/skills/forge/` and `.cursor/commands/forge.md` exist
+
+#### Scenario: Re-init refreshes a stale project copy
+
+- **GIVEN** `.agents/skills/forge/` containing an older skill tree
+- **WHEN** `forge init --agents` runs again
+- **THEN** the tree matches the packaged skill and the stamp is current
+
+#### Scenario: Foreign content under .agents is untouched
+
+- **GIVEN** `.agents/skills/other-skill/` and `.agents/agents.md` exist
+- **WHEN** `forge init --agents` runs
+- **THEN** both are left exactly as they were
+
+### Requirement: Doctor reports the project `.agents` skill copy
+When `<project>/.agents/skills/forge/` exists, `forge doctor` SHALL report it —
+ok when current against the packaged skill, a warning (not a failure) when
+outdated or unversioned, naming `forge init --agents` as the refresh. When the
+directory is absent the check SHALL be skipped without affecting the exit
+code.
+
+#### Scenario: Outdated project copy warns but does not fail
+
+- **GIVEN** `.agents/skills/forge/` with a stamp from an older version
+- **WHEN** `forge doctor` runs
+- **THEN** the exit code is unaffected by this check
+- **AND** the output names the stale copy and `forge init --agents`
+
+#### Scenario: Absent directory is skipped
+
+- **GIVEN** a project with no `.agents/` directory
+- **WHEN** `forge doctor` runs
+- **THEN** no `.agents` check appears as failed or warned
