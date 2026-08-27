@@ -19,7 +19,7 @@ import {
   resolveProjectPlanEngine,
 } from './plan-engine.mjs';
 import { ensureClaudeHookHints, ensureCursorHookHints } from './init.mjs';
-import { collectHookCommands, isCommandReferenced } from './hooks.mjs';
+import { collectHookCommands, isCommandReferenced, RETIRED_CLAUDE_HOOK_BASENAMES } from './hooks.mjs';
 
 export { OPENSPEC_PACKAGE, OPENSPEC_INSTALL_CMD };
 
@@ -228,7 +228,9 @@ export function checkHookWiring(opts) {
       });
       continue;
     }
-    const present = entries.filter((name) => FORGE_HOOK_FILE_RE.test(name));
+    const present = entries.filter(
+      (name) => FORGE_HOOK_FILE_RE.test(name) && !RETIRED_CLAUDE_HOOK_BASENAMES.includes(name),
+    );
     if (present.length === 0) continue;
 
     const wiringPaths = def.wiringPaths.filter((p) => existsSync(p));

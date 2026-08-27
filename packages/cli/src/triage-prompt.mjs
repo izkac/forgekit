@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Suppression filter for Forge auto-triage on agent UserPromptSubmit hooks.
- * references/substantial-work.md holds the agent's judgment criteria for
- * whether work is substantial — this module does not decide that. It only
- * decides whether to ask: it suppresses prompts that carry no work content
- * and lets everything else reach the agent as a question, not a verdict.
+ * Prompt classification for Forge invocation and the optional `forge triage`
+ * CLI. Auto-triage on every UserPromptSubmit is retired — this module no
+ * longer drives a per-prompt hook. `isForgeInvocation` is the on-switch
+ * (`/forge` or natural-language "use Forge"). references/substantial-work.md
+ * is Step 0 after that invoke, not a filter that starts Forge on its own.
  */
 
 import path from 'node:path';
@@ -15,7 +15,11 @@ export function isForgeSkip(prompt) {
 }
 
 export function isForgeInvocation(prompt) {
-  return /^\s*\/forge(?::|\s|$)/i.test((prompt || '').trim());
+  const p = (prompt || '').trim();
+  if (!p) return false;
+  if (/^\s*\/forge(?::|\s|$)/i.test(p)) return true;
+  // Keep in sync with templates/project/claude/hooks/forge-prompt-hook.mjs
+  return /\b(?:use(?:\s+the)?|using)\s+forge\b/i.test(p);
 }
 
 // I1-R (round 3, final review round 2): the previous split gated

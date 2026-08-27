@@ -1,0 +1,88 @@
+<!-- forge-brief-specs-hash:2aac7a3c9fa78f11 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Opt-in Forge</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a1a; background: #fff;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5; padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .88em; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .3rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 6px; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Opt-in Forge</h1>
+<p class="sub">Operator brief — change <code>opt-in-forge-only</code></p>
+
+<h2>TL;DR</h2>
+<p>
+  Forge will no longer jump in whenever a request looks like a feature.
+  It starts only when you type <code>/forge</code> or say <strong>use Forge</strong>.
+  After that, triage is still the first step, so tiny work can skip the ceremony.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Plain chat (“add rate limiting”) is implemented directly — no session, no brief, no subagents.</li>
+  <li><code>/forge …</code> or “Use Forge. …” still runs the full pipeline, starting with triage.</li>
+  <li>An already-open Forge session continues for follow-ups on that work without typing <code>/forge</code> again.</li>
+  <li>Claude Code stops injecting a Forge reminder on every prompt. Session-start reminders for an active session stay.</li>
+</ul>
+
+<h2>How it works</h2>
+<pre class="mermaid">
+flowchart TD
+  A[Your message] --> B{Invoked /forge or "use Forge"?}
+  B -->|No| C[Do the work directly]
+  B -->|Yes| D[Triage]
+  D -->|Substantial| E[Forge pipeline]
+  D -->|Trivial or skip| C
+</pre>
+<p>
+  Already-wired projects keep the old Claude hook until you re-run
+  <code>forge init</code> or <code>forge doctor --install</code>. Agents pick up the new
+  default after <code>forgekit install --skills forge --force</code>.
+</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>To use Forge, say so. The agent will not start it from a plain feature request.</li>
+  <li>Codex has no slash commands: “use Forge” is the invoke there.</li>
+  <li><code>/forge:skip</code> still means “this task only, no ceremony.”</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>On Windows, Claude Code may keep the old hook file locked until the app restarts. Init deletes it when it can; doctor ignores a leftover copy so it will not nag you to wire it back.</li>
+  <li>Eval arms that already say “use the Forge workflow” still count as an invoke.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Removing the <code>forge triage</code> CLI (still there if you run it by hand).</li>
+  <li>Requiring <code>/forge</code> on every turn of an active session.</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>Invocation detection (slash + “use Forge”) — 2 tasks</li>
+  <li>Retire the auto-triage hook and clean already-wired projects — 3 tasks</li>
+  <li>Skill, thin rules, operator docs — 2 tasks</li>
+</ul>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

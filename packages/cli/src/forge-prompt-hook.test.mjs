@@ -1,15 +1,15 @@
 /**
- * `templates/project/claude/hooks/forge-prompt-hook.mjs` and
- * `templates/project/claude/hooks/forge-triage-hook.mjs` — both
- * UserPromptSubmit hooks relay the raw user prompt to `forge` via
- * `spawnSync(..., { shell: true })`. With shell:true, Node joins argv into
- * an unquoted command string, so any shell metacharacter in the prompt is
- * interpreted rather than passed through (finding F79).
+ * `templates/project/claude/hooks/forge-prompt-hook.mjs` — UserPromptSubmit
+ * hook that relays the raw user prompt to `forge` via spawnSync. With
+ * shell:true, Node joins argv into an unquoted command string, so any shell
+ * metacharacter in the prompt is interpreted rather than passed through
+ * (finding F79).
  *
  * These tests prove: (1) the injection is closed — shell metacharacters in
  * a prompt never execute; (2) the prompt still reaches `forge` byte-for-byte
  * unchanged, including metacharacters and quotes; (3) the template and
- * `.claude/hooks` copies stay identical.
+ * `.claude/hooks` copies stay identical; (4) the hook fires on `/forge` and
+ * "use Forge", not on a plain work request.
  *
  * The win32 branch (where `forge` is a `.cmd` shim and needs a shell) is
  * NOT exercised here: forcing `process.platform` to `'win32'` also flips
@@ -32,7 +32,7 @@ const SRC = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SRC, '..', '..', '..');
 const POSIX_ONLY = { skip: process.platform === 'win32' };
 
-const HOOK_NAMES = ['forge-prompt-hook.mjs', 'forge-triage-hook.mjs'];
+const HOOK_NAMES = ['forge-prompt-hook.mjs'];
 const TEMPLATE_HOOKS = Object.fromEntries(
   HOOK_NAMES.map((name) => [name, path.join(resolveTemplatesRoot(), 'claude', 'hooks', name)]),
 );
@@ -40,31 +40,18 @@ const REPO_HOOKS = Object.fromEntries(
   HOOK_NAMES.map((name) => [name, path.join(REPO_ROOT, '.claude', 'hooks', name)]),
 );
 
-// A prompt that opens each hook's own gate, so the run actually reaches every
+// A prompt that opens the hook's own gate, so the run actually reaches the
 // prompt-carrying spawn site instead of short-circuiting before it. The
-// prompt hook only relays past `isForgeInvocation`; the triage hook only
-// proceeds past `forge triage --check` for prompt text substantial enough to
-// look like real work.
+// prompt hook only relays past `isForgeInvocation`.
 const LEAD_IN = {
   'forge-prompt-hook.mjs': '/forge ',
-  'forge-triage-hook.mjs': 'add a new feature ',
 };
 
-// Each hook's prompt-carrying spawn sites, identified structurally by the
-// subcommand shape (not by whether they currently carry the prompt — that
-// would make the classification itself blind to a dropped/mangled arg).
 // forge-prompt-hook.mjs: one site (`forge reminder --prompt <p>`).
-// forge-triage-hook.mjs: two sites (`triage --check <p>`, `triage --message
-// [--has-session] <p>`); its third call (`reminder --format plain`) carries
-// no prompt and must NOT be counted.
 const PROMPT_SITES = {
   'forge-prompt-hook.mjs': {
     count: 1,
     isPromptBearing: (argv) => argv[0] === 'reminder',
-  },
-  'forge-triage-hook.mjs': {
-    count: 2,
-    isPromptBearing: (argv) => argv[0] === 'triage' && (argv[1] === '--check' || argv[1] === '--message'),
   },
 };
 
@@ -139,12 +126,8 @@ for (const name of HOOK_NAMES) {
   const HOOK = TEMPLATE_HOOKS[name];
 
   test(`${name}: never executes shell metacharacters embedded in the prompt (command injection)`, POSIX_ONLY, () => {
-    // A stub `forge` on PATH keeps `forge triage --check` deterministic (exit
-    // 0 always) so the run reaches every prompt-carrying site regardless of
-    // the real CLI's own triage heuristic — without it, a prompt that the
-    // real `forge triage --check` rejects short-circuits before the
-    // triage hook's `--message` site ever runs, and this test would prove
-    // nothing about that site.
+    // A stub `forge` on PATH keeps `forge reminder` deterministic (exit
+    // 0 always) so the run reaches the prompt-carrying site.
     const root = makeProject();
     const stubDir = tmp('hook-injection-stub-');
     makeForgeStub(stubDir);
@@ -184,7 +167,7 @@ for (const name of HOOK_NAMES) {
   });
 }
 
-test('template and .claude copies of forge-prompt-hook.mjs and forge-triage-hook.mjs are byte-identical', () => {
+test('template and .claude copies of forge-prompt-hook.mjs are byte-identical', () => {
   for (const name of HOOK_NAMES) {
     assert.ok(fs.existsSync(TEMPLATE_HOOKS[name]), `missing ${TEMPLATE_HOOKS[name]}`);
     assert.ok(fs.existsSync(REPO_HOOKS[name]), `missing ${REPO_HOOKS[name]}`);
@@ -193,4 +176,53 @@ test('template and .claude copies of forge-prompt-hook.mjs and forge-triage-hook
       `templates/project/claude/hooks/${name} and .claude/hooks/${name} must be in sync`,
     );
   }
+});
+
+test('retired forge-triage-hook.mjs is not shipped in templates', () => {
+  const name = 'forge-triage-hook.mjs';
+  assert.equal(
+    fs.existsSync(path.join(resolveTemplatesRoot(), 'claude', 'hooks', name)),
+    false,
+  );
+});
+
+test('prompt hook matcher stays in sync with isForgeInvocation', () => {
+  const hookSrc = fs.readFileSync(TEMPLATE_HOOKS['forge-prompt-hook.mjs'], 'utf8');
+  const cliSrc = fs.readFileSync(path.join(SRC, 'triage-prompt.mjs'), 'utf8');
+  const needle = String.raw`/\b(?:use(?:\s+the)?|using)\s+forge\b/i`;
+  assert.ok(hookSrc.includes(needle), 'prompt hook missing the use-Forge matcher');
+  assert.ok(cliSrc.includes(needle), 'triage-prompt.mjs missing the use-Forge matcher');
+});
+
+test('prompt hook fires on natural-language use Forge', POSIX_ONLY, () => {
+  const root = makeProject();
+  const stubDir = tmp('hook-use-forge-stub-');
+  const logFile = path.join(stubDir, 'calls.jsonl');
+  makeForgeStub(stubDir);
+  const r = runHook(TEMPLATE_HOOKS['forge-prompt-hook.mjs'], root, {
+    prompt: 'Use Forge. Add a health endpoint.',
+    stubDir,
+    logFile,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const calls = readStubCalls(logFile);
+  assert.ok(
+    calls.some((argv) => argv[0] === 'reminder'),
+    `expected a reminder call, got ${JSON.stringify(calls)}`,
+  );
+});
+
+test('prompt hook stays silent on a plain work request', POSIX_ONLY, () => {
+  const root = makeProject();
+  const stubDir = tmp('hook-plain-stub-');
+  const logFile = path.join(stubDir, 'calls.jsonl');
+  makeForgeStub(stubDir);
+  const r = runHook(TEMPLATE_HOOKS['forge-prompt-hook.mjs'], root, {
+    prompt: 'Add rate limiting to the public API.',
+    stubDir,
+    logFile,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readStubCalls(logFile), []);
+  assert.equal((r.stdout || '').includes('[forge]'), false);
 });

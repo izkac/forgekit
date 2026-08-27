@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Forge starts only when you type `/forge` or ask to **use Forge**. It no longer
+auto-triages every chat request. After you invoke it, triage is still the first
+step (tiny work can still skip the rest of the pipeline). Claude's per-prompt
+auto-triage hook is retired; `forge init` / `forge doctor --install` unwire and
+delete leftovers. Reinstall the skill (`forgekit install --skills forge --force`)
+so agents pick up the new default.
+
 ## 0.3.45 — 2026-08-24
 
 Docs: new `docs/day-to-day.md` — the operator's guide to Forge. Scenario-driven:

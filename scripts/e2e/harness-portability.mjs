@@ -3087,13 +3087,50 @@ if (phase === 'boot') {
   }
 
   process.stdout.write('CHECKPOINT SCOPE GREEN\n');
+} else if (phase === 'retire-triage-hook') {
+  const dir = `${SCRATCH}-retire-triage-hook`;
+  fs.rmSync(dir, { recursive: true, force: true });
+  const hooksDir = path.join(dir, '.claude', 'hooks');
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.writeFileSync(path.join(hooksDir, 'forge-triage-hook.mjs'), '// leftover auto-triage\n');
+  const triageCmd = 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-triage-hook.mjs"';
+  const promptCmd = 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-prompt-hook.mjs"';
+  fs.writeFileSync(
+    path.join(dir, '.claude', 'settings.json'),
+    `${JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [
+              { type: 'command', command: triageCmd },
+              { type: 'command', command: promptCmd },
+            ],
+          },
+        ],
+      },
+    }, null, 2)}\n`,
+  );
+
+  const init = forge(dir, ['init', '--claude', '--no-openspec', '--no-adr', '--force']);
+  if (init.code !== 0) fail(`forge init exited ${init.code}`, init.out);
+  if (fs.existsSync(path.join(hooksDir, 'forge-triage-hook.mjs'))) {
+    fail('leftover forge-triage-hook.mjs was not deleted', init.out);
+  }
+  const settings = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.json'), 'utf8'));
+  if (JSON.stringify(settings).includes('forge-triage-hook.mjs')) {
+    fail('settings.json still references forge-triage-hook.mjs', JSON.stringify(settings));
+  }
+  if (!JSON.stringify(settings).includes('forge-prompt-hook.mjs')) {
+    fail('settings.json lost forge-prompt-hook.mjs', JSON.stringify(settings));
+  }
+  process.stdout.write('RETIRE TRIAGE HOOK GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'init-preserves-config|checkpoint-scope\n',
+      'init-preserves-config|checkpoint-scope|retire-triage-hook\n',
   );
   process.exit(1);
 }

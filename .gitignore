@@ -10,3 +10,9 @@ Thumbs.db
 
 # Agent handoff notes — local, not shared
 .handoffs/
+
+# Retired Claude auto-triage hook. May remain locked on Windows while the
+# host still has the old file open; init deletes it when it can, doctor
+# ignores it, and it is no longer tracked.
+.claude/hooks/forge-triage-hook.mjs
+

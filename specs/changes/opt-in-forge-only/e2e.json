@@ -1,0 +1,11 @@
+{
+  "change": "opt-in-forge-only",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "retire-triage-hook",
+      "cmd": "node scripts/e2e/harness-portability.mjs retire-triage-hook",
+      "expect": "RETIRE TRIAGE HOOK GREEN"
+    }
+  ]
+}

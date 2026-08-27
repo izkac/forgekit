@@ -46,18 +46,24 @@ The gates do the nagging so you don't have to.
 Add rate limiting to the public API. 100 req/min per key.
 ```
 
-The agent triages it. A feature or logic-changing bug fix → Forge starts
-(`forge new add-rate-limiting`, brainstorm begins). A typo, rename, question,
-or docs tweak → it just does it, no session. If it's ambiguous the agent asks
-one question: "would this produce a tracked change?"
+The agent does the work directly. Forge does **not** start unless you invoke it.
 
-### b) Force Forge on
+### b) Start Forge
 
 ```text
 /forge add rate limiting to the public API
 ```
 
-Use this when you know it's substantial or the agent keeps under-triaging.
+or:
+
+```text
+Use Forge. Add rate limiting to the public API. 100 req/min per key.
+```
+
+Triage is still the first step: a feature or logic-changing bug fix continues
+the pipeline (`forge new …`, brainstorm). A typo, rename, or question may still
+execute directly. If it's ambiguous the agent asks one question: "would this
+produce a tracked change?"
 
 ### c) Force Forge off (this task only)
 
@@ -256,7 +262,7 @@ forge finding add "export ignores timezone" --kind bug --severity major
 
 ```text
 # In chat
-/forge <task>            start Forge explicitly
+/forge <task>            start Forge (or say “use Forge”)
 /forge:skip <task>       do it directly, no ceremony
 /forge:apply [<change>]  implement an approved plan
 /forge:status            progress

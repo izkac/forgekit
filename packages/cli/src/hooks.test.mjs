@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { collectHookCommands, commandBasename, isCommandReferenced } from './hooks.mjs';
+import { collectHookCommands, commandBasename, isCommandReferenced, stripRetiredHookCommands } from './hooks.mjs';
 import { checkHookWiring } from './doctor.mjs';
 import { initProject, mergeHooksIntoSettings } from './init.mjs';
 
@@ -230,4 +230,45 @@ test('end-to-end agreement: forge init from an unwired state produces a project 
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test('stripRetiredHookCommands: removes forge-triage-hook.mjs and keeps the prompt hook', () => {
+  const settings = {
+    permissions: { allow: ['Bash'] },
+    hooks: {
+      UserPromptSubmit: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-triage-hook.mjs"',
+            },
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-prompt-hook.mjs"',
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const stripped = stripRetiredHookCommands(settings);
+  const out = new Set();
+  collectHookCommands(stripped.hooks, out);
+  assert.deepEqual([...out], [
+    'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-prompt-hook.mjs"',
+  ]);
+  assert.deepEqual(stripped.permissions, settings.permissions);
+  assert.equal(settings.hooks.UserPromptSubmit[0].hooks.length, 2, 'input is not mutated');
+});
+
+test('stripRetiredHookCommands: leaves a wrapper-named triage hook in place', () => {
+  const command = 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/my-forge-triage-hook.mjs"';
+  const settings = {
+    hooks: {
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command }] }],
+    },
+  };
+  const stripped = stripRetiredHookCommands(settings);
+  assert.equal(stripped.hooks.UserPromptSubmit[0].hooks[0].command, command);
 });

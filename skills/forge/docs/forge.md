@@ -790,8 +790,8 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 | Agent | Skill (after install) | Project wiring (`forge init`) | Session hooks |
 | ----- | --------------------- | ----------------------------- | ------------- |
 | **Cursor** | `~/.cursor/skills/forge/` | commands, `forge.mdc`, SessionStart hook | SessionStart → active session reminder |
-| **Claude Code** | `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks | SessionStart + substantial-work UserPromptSubmit + `/forge` UserPromptSubmit |
-| **Codex CLI** | `~/.codex/skills/forge/` | thin rule | *(none — read skill on substantial work)* |
+| **Claude Code** | `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks | SessionStart + `/forge` or “use Forge” UserPromptSubmit |
+| **Codex CLI** | `~/.codex/skills/forge/` | thin rule | *(none — start only when the user asks to use Forge)* |
 
 ### Slash commands (Cursor + Claude Code)
 
@@ -809,8 +809,8 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 
 ### Codex CLI
 
-No slash commands. On substantial work: read the **`forge`** skill, check
-`forge status`, bootstrap with `forge new <slug>` when needed.
+No slash commands. Start Forge only when the user asks to **use Forge** (or types `/forge` in the prompt). Then triage is Step 0 — read the **`forge`** skill, check
+`forge status`, bootstrap with `forge new <slug>` when the work is substantial.
 After brainstorm, proceed directly to the configured engine's propose flow — see
 [plan-routing.md](../references/plan-routing.md).
 User can say “skip forge” or `/forge:skip` to opt out.

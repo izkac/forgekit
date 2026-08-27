@@ -1,0 +1,33 @@
+{
+  "change": "opt-in-forge-only",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "isForgeInvocation is the on-switch (slash or use Forge)",
+      "library": "packages/cli/src/triage-prompt.mjs",
+      "runtimeOwner": "templates/project/claude/hooks/forge-prompt-hook.mjs — UserPromptSubmit on invoke only",
+      "writes": "session reminder injected into the agent prompt",
+      "reads": "the user prompt",
+      "uiConsumer": "the agent, only when the user invoked Forge",
+      "evidence": "packages/cli/src/triage-prompt.test.mjs + packages/cli/src/forge-prompt-hook.test.mjs"
+    },
+    {
+      "capability": "Init retires leftover auto-triage hook file and wiring",
+      "library": "packages/cli/src/hooks.mjs stripRetiredHookCommands + packages/cli/src/init.mjs",
+      "runtimeOwner": "forge init --claude / forge doctor --install (ensureClaudeHookHints)",
+      "writes": ".claude/settings.json, settings.local.json, deletes .claude/hooks/forge-triage-hook.mjs, refreshes forge-hooks.snippet.json",
+      "reads": "existing Claude settings and leftover hook file",
+      "uiConsumer": "operator running forge init or forge doctor",
+      "evidence": "packages/cli/src/init.test.mjs + packages/cli/src/hooks.test.mjs + scripts/e2e/harness-portability.mjs retire-triage-hook"
+    },
+    {
+      "capability": "Doctor ignores leftover retired hook files",
+      "library": "packages/cli/src/doctor.mjs",
+      "runtimeOwner": "forge doctor",
+      "writes": "checks.hooks report (does not list forge-triage-hook.mjs as unwired)",
+      "reads": ".claude/hooks/",
+      "uiConsumer": "operator reading forge doctor",
+      "evidence": "packages/cli/src/doctor.test.mjs"
+    }
+  ]
+}

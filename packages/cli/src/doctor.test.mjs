@@ -386,6 +386,21 @@ test('checkHookWiring: non-forge files in the hooks dir are ignored', () => {
   }
 });
 
+test('checkHookWiring: leftover retired forge-triage-hook.mjs does not fail as unwired', () => {
+  const cwd = makeTempProject();
+  try {
+    writeHookFiles(cwd, ['.claude', 'hooks'], ['forge-triage-hook.mjs']);
+
+    const result = checkHookWiring({ cwd });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, true);
+    assert.deepEqual(result.surfaces, []);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 // --- Task 2.1: checkHookWiring wired into runDoctorChecks / runDoctor / warnIfDoctorFails ---
 
 function okRunCommand() {

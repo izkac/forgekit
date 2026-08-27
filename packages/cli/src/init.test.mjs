@@ -77,6 +77,29 @@ test('thin-rule templates are engine-neutral (no hardcoded OpenSpec-only flow)',
   }
 });
 
+test('thin-rule templates are opt-in (no auto-triage default)', () => {
+  const root = resolveTemplatesRoot();
+  for (const rel of ['claude/rules/forge.md', 'cursor/rules/forge.mdc', 'codex/rules/forge.md']) {
+    const body = fs.readFileSync(path.join(root, ...rel.split('/')), 'utf8');
+    assert.ok(
+      !/triage before implementation/i.test(body),
+      `${rel} still auto-triages every request`,
+    );
+    assert.ok(/use Forge/i.test(body), `${rel} missing natural-language invoke`);
+    assert.ok(body.includes('/forge'), `${rel} missing /forge invoke`);
+  }
+});
+
+test('Forge skill is opt-in and still triages after invoke', () => {
+  const skill = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../skills/forge/SKILL.md'),
+    'utf8',
+  );
+  assert.match(skill, /disable-model-invocation:\s*true/);
+  assert.match(skill, /Triage \(after invoke\)/);
+  assert.ok(!/Use when building features, fixing non-trivial bugs/.test(skill));
+});
+
 test('claude init ships the model-policy hook and registers it in the snippet', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-model-hook-'));
   try {
@@ -299,13 +322,19 @@ test('mergeHooksIntoSettings: only the still-missing groups are appended when so
 });
 
 test('mergeHooksIntoSettings: a partially-wired group is topped up command-by-command, not duplicated whole', () => {
-  const snippet = realSnippet();
-  // UserPromptSubmit's snippet group carries two commands (triage + prompt).
-  // Discriminating fixture: only the first is pre-wired, so a correct merge
-  // must add exactly the second, once — an all-or-nothing group check would
-  // either duplicate the first or skip the second.
-  const wiredLeaf = snippet.hooks.UserPromptSubmit[0].hooks[0];
-  const missingLeaf = snippet.hooks.UserPromptSubmit[0].hooks[1];
+  // Synthetic two-command group: the real UserPromptSubmit snippet now ships
+  // a single command (prompt hook). Merge still has to top up leaf-by-leaf.
+  const wiredLeaf = {
+    type: 'command',
+    command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-prompt-hook.mjs"',
+  };
+  const missingLeaf = {
+    type: 'command',
+    command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-other-hook.mjs"',
+  };
+  const snippet = {
+    hooks: { UserPromptSubmit: [{ hooks: [wiredLeaf, missingLeaf] }] },
+  };
   assert.notEqual(wiredLeaf.command, missingLeaf.command, 'fixture sanity: two distinct commands');
 
   const settings = {
@@ -766,5 +795,82 @@ test('forge init: a flagless re-init keeps a recorded adr.enabled:true project e
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('claude init does not ship or wire the retired auto-triage hook', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-no-triage-hook-'));
+  try {
+    initProject(['claude'], { cwd, force: true, adr: false, planEngine: null });
+    assert.equal(
+      fs.existsSync(path.join(cwd, '.claude', 'hooks', 'forge-triage-hook.mjs')),
+      false,
+    );
+    const snippet = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'forge-hooks.snippet.json'), 'utf8'),
+    );
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'),
+    );
+    const blob = `${JSON.stringify(snippet)}${JSON.stringify(settings)}`;
+    assert.equal(blob.includes('forge-triage-hook.mjs'), false);
+    assert.equal(
+      fs.existsSync(path.join(cwd, '.claude', 'hooks', 'forge-prompt-hook.mjs')),
+      true,
+    );
+    assert.ok(blob.includes('forge-prompt-hook.mjs'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('claude init deletes leftover forge-triage-hook.mjs and strips it from settings', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-retire-triage-'));
+  try {
+    const hooksDir = path.join(cwd, '.claude', 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(path.join(hooksDir, 'forge-triage-hook.mjs'), '// leftover\n');
+    const triageCmd =
+      'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-triage-hook.mjs"';
+    const promptCmd =
+      'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-prompt-hook.mjs"';
+    fs.writeFileSync(
+      path.join(cwd, '.claude', 'settings.json'),
+      `${JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                { type: 'command', command: triageCmd },
+                { type: 'command', command: promptCmd },
+              ],
+            },
+          ],
+        },
+      }, null, 2)}\n`,
+    );
+    fs.writeFileSync(
+      path.join(cwd, '.claude', 'settings.local.json'),
+      `${JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [{ hooks: [{ type: 'command', command: triageCmd }] }],
+        },
+      }, null, 2)}\n`,
+    );
+
+    initProject(['claude'], { cwd, force: true, adr: false, planEngine: null });
+
+    assert.equal(fs.existsSync(path.join(hooksDir, 'forge-triage-hook.mjs')), false);
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'),
+    );
+    const local = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'settings.local.json'), 'utf8'),
+    );
+    assert.equal(JSON.stringify(settings).includes('forge-triage-hook.mjs'), false);
+    assert.equal(JSON.stringify(local).includes('forge-triage-hook.mjs'), false);
+    assert.ok(JSON.stringify(settings).includes('forge-prompt-hook.mjs'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
   }
 });

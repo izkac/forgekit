@@ -37,7 +37,13 @@ import {
   installedManagedPairs,
   promptOpenSpec,
 } from './install.mjs';
-import { collectHookCommands, commandBasename, isCommandReferenced } from './hooks.mjs';
+import {
+  collectHookCommands,
+  commandBasename,
+  isCommandReferenced,
+  RETIRED_CLAUDE_HOOK_BASENAMES,
+  stripRetiredHookCommands,
+} from './hooks.mjs';
 
 // Environments with project-local command/rule/hook templates. Others are
 // driven by the globally-installed skill alone (no per-project wiring).
@@ -288,10 +294,12 @@ function filterMissingGroupCommands(group, existingCommands) {
  * duplicates appear. `localSettings` is read-only input: it informs
  * "already wired" but is never itself written to or returned.
  *
- * Existing groups in `settings` are never reordered, rewritten, or removed,
- * and unrelated top-level keys (`permissions`, `env`, …) pass through
- * untouched. Pure: no filesystem access, and neither `settings`, `snippet`,
- * nor `localSettings` is mutated.
+ * Existing groups in `settings` are never reordered. Forge-owned retired
+ * hook basenames (`RETIRED_CLAUDE_HOOK_BASENAMES`) are stripped after merge
+ * by `writeMergedClaudeSettings` — that is the only removal. Unrelated
+ * user entries and unrelated top-level keys (`permissions`, `env`, …) pass
+ * through untouched. Pure merge: no filesystem access, and neither
+ * `settings`, `snippet`, nor `localSettings` is mutated.
  *
  * Refuses (rather than silently discarding) a `settings.hooks` that is
  * present but not a plain object — `ok: false`, `settings` returned
@@ -409,9 +417,34 @@ function writeMergedClaudeSettings(settingsPath, snippet) {
     return { merged: false, error: result.error };
   }
 
+  const stripped = stripRetiredHookCommands(result.settings);
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-  fs.writeFileSync(settingsPath, `${JSON.stringify(result.settings, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(settingsPath, `${JSON.stringify(stripped, null, 2)}\n`, 'utf8');
   return { merged: true, warnings: [...warnings, ...result.warnings] };
+}
+
+/**
+ * Delete retired Claude hook files and strip their commands from
+ * settings.local.json when that file parses. settings.json is stripped in
+ * writeMergedClaudeSettings; this covers the leftover file and local overlay.
+ * @param {string} cwd
+ */
+function retireClaudeTriageHook(cwd) {
+  const hooksDir = path.join(cwd, '.claude', 'hooks');
+  for (const name of RETIRED_CLAUDE_HOOK_BASENAMES) {
+    const file = path.join(hooksDir, name);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
+  const localPath = path.join(cwd, '.claude', 'settings.local.json');
+  if (!fs.existsSync(localPath)) return;
+  try {
+    const raw = fs.readFileSync(localPath, 'utf8');
+    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    const stripped = stripRetiredHookCommands(parsed);
+    fs.writeFileSync(localPath, `${JSON.stringify(stripped, null, 2)}\n`, 'utf8');
+  } catch {
+    // Leave an unparseable local file byte-identical (same posture as merge).
+  }
 }
 
 /**
@@ -420,6 +453,7 @@ function writeMergedClaudeSettings(settingsPath, snippet) {
  * @param {{ force?: boolean }} opts
  */
 export function ensureClaudeHookHints(cwd, opts) {
+  void opts;
   const settingsPath = path.join(cwd, '.claude', 'settings.json');
   const notePath = path.join(cwd, '.claude', 'forge-hooks.snippet.json');
   const snippet = {
@@ -439,10 +473,6 @@ export function ensureClaudeHookHints(cwd, opts) {
       UserPromptSubmit: [
         {
           hooks: [
-            {
-              type: 'command',
-              command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-triage-hook.mjs"',
-            },
             {
               type: 'command',
               command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-prompt-hook.mjs"',
@@ -476,11 +506,10 @@ export function ensureClaudeHookHints(cwd, opts) {
   };
   fs.mkdirSync(path.dirname(notePath), { recursive: true });
   const settingsExisted = fs.existsSync(settingsPath);
-  if (!fs.existsSync(notePath) || opts.force) {
-    fs.writeFileSync(notePath, `${JSON.stringify(snippet, null, 2)}\n`, 'utf8');
-  }
+  fs.writeFileSync(notePath, `${JSON.stringify(snippet, null, 2)}\n`, 'utf8');
 
   const mergeResult = writeMergedClaudeSettings(settingsPath, snippet);
+  retireClaudeTriageHook(cwd);
 
   return {
     settingsExists: settingsExisted,

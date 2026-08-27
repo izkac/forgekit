@@ -1,12 +1,11 @@
 ---
 name: forge
 description: >-
-  Forge — self-contained disciplined development workflow. Triage substantial work,
-  brainstorm, tracked plan (OpenSpec or built-in specs engine), subagent-driven TDD
-  implementation, verify, review, and finish.
-  Use when building features, fixing non-trivial bugs, or when the user invokes /forge.
-  Skip only when user says /forge:skip or work is trivial.
-disable-model-invocation: false
+  Forge — self-contained disciplined development workflow. Brainstorm, tracked
+  plan, subagent-driven TDD, verify, review, and finish.
+  Use when the user invokes /forge or asks to use Forge. Triage is always the
+  first step after invoke. Do not start Forge on uninvoked requests.
+disable-model-invocation: true
 ---
 
 # Forge
@@ -56,14 +55,21 @@ Local overlays: [docs/forge.md](./docs/forge.md) § Checkout-local overrides.
 | Verification | [skills/verification-before-completion/SKILL.md](./skills/verification-before-completion/SKILL.md) | verify phase |
 | Code review | [skills/requesting-code-review/SKILL.md](./skills/requesting-code-review/SKILL.md) | review phase |
 
-## Step 0 — Triage (default)
+## Step 0 — Triage (after invoke)
 
-Before coding on any non-trivial request, run triage per
-[references/substantial-work.md](./references/substantial-work.md).
+Forge starts only when the user invoked `/forge` / `/forge:*` (except `/forge:skip`)
+or asked to **use Forge**. Do not self-start on substantial-looking work.
+
+Once invoked, triage per
+[references/substantial-work.md](./references/substantial-work.md) **before**
+brainstorm or plan — invocation does not skip this step.
 
 - **Substantial (tracked-change-worthy)** → continue Forge (bootstrap session if needed)
 - **Too small for a tracked change** → execute directly, no session
 - **`/forge:skip`** → mark session `phase: skipped` if one exists; execute directly
+
+If an active session exists, continue it for follow-ups on that work. An
+unrelated request without an invoke does not start a new session.
 
 Bootstrap session when entering Forge:
 

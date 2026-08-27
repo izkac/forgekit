@@ -1,32 +1,32 @@
 # Substantial work triage
 
-**You decide** whether work is substantial enough for Forge — you can see the
-conversation, the repository and the session; the prompt-time filter cannot.
+Run this check **as Step 0 after the user invoked Forge** — `/forge` /
+`/forge:*` (except `/forge:skip`), or natural language “use Forge” /
+“using Forge” / “use the Forge …”. Do **not** enter Forge on a plain
+request, even if the work looks substantial.
 
-The prompt-time filter (`forge triage --check`) does not make that call. Its
-only job is to suppress the reminder — decide whether to ask you at all — for
-prompts carrying no work content: empty, `/forge:skip`, a bare conversational
-reply ("thanks", "continue"), a read-only question, or a stated trivial edit
-(typo, formatting-only, comment-only, rename with zero behavior change,
-docs-only). Everything else reaches you as a question to weigh, never a
-verdict already reached.
+**You decide** whether invoked work is substantial enough to continue the
+pipeline. You can see the conversation, the repository and the session.
 
-**Forge = OpenSpec.** If work is substantial enough for Forge, it is
-substantial enough for a tracked OpenSpec change. Smaller work skips Forge
-entirely (direct execution).
+**Forge = a tracked change.** If work continues through Forge, it is
+substantial enough for a tracked change (OpenSpec or the built-in specs
+engine). Smaller work executes directly after this step.
 
-## Enter Forge when ANY apply
+## Enter / continue Forge when invoked AND ANY apply
 
-- New feature or behavior change
-- Bug fix that changes logic (not typo-only)
-- Multi-file or multi-workspace edit
-- Public API, Zod schema, OpenAPI, shared package export, or config schema change
-- Cross-package / cross-product impact (grep consumers)
-- User invokes `/forge` or any `/forge:*` command (except `/forge:skip`)
-- Work would likely produce an ADR or new `openspec/specs/` capability
+- User invoked `/forge` or any `/forge:*` command (except `/forge:skip`)
+- User asked to **use Forge** (or “using Forge” / “use the Forge …”)
+- An active session already exists for this work (follow-ups may continue without a second invoke)
 
-## Skip Forge (execute directly) when ANY apply
+Then continue the pipeline when the work is a feature, logic-changing bug,
+multi-file edit, public API/schema change, or would produce a tracked
+capability. Honor `/forge` on small work by still running this step — you
+may execute directly if it is truly trivial, and the plan-time exit ramp
+still applies once the work is shaped.
 
+## Skip the rest of the pipeline (execute directly) when ANY apply
+
+- No invoke and no active session for this work
 - Pure question, explanation, or read-only review
 - Typo, comment, formatting-only, or rename with zero behavior change
 - User explicitly sent **`/forge:skip`** for this task
@@ -40,6 +40,6 @@ entirely (direct execution).
 2. Do **not** start brainstorm or plan for this task.
 3. Proceed with the user's request under normal project rules.
 
-## Ambiguous cases
+## Ambiguous cases (only after invoke)
 
-Ask one clarifying question: **would this produce an OpenSpec change?** If yes → Forge (OpenSpec). If no → execute directly.
+Ask one clarifying question: **would this produce a tracked change?** If yes → continue Forge. If no → execute directly.

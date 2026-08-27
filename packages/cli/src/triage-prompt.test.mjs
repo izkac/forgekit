@@ -21,6 +21,19 @@ test('isForgeInvocation matches forge commands', () => {
   assert.equal(isForgeInvocation('/forge:brainstorm'), true);
 });
 
+test('isForgeInvocation matches natural-language use Forge', () => {
+  assert.equal(isForgeInvocation('Use Forge. Add rate limiting.'), true);
+  assert.equal(isForgeInvocation('please use Forge for this'), true);
+  assert.equal(isForgeInvocation('using Forge, add a health endpoint'), true);
+  assert.equal(isForgeInvocation('Use the Forge workflow for this change'), true);
+});
+
+test('isForgeInvocation does not match a plain work request', () => {
+  assert.equal(isForgeInvocation('Add rate limiting to the public API.'), false);
+  assert.equal(isForgeInvocation('What is forge?'), false);
+  assert.equal(isForgeInvocation('use forgekit to install skills'), false);
+});
+
 test('read-only questions skip triage', () => {
   assert.equal(isReadOnlyQuestion('How does auth work?'), true);
   assert.equal(isReadOnlyQuestion('What is forge?'), true);

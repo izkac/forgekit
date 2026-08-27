@@ -72,3 +72,52 @@ export function isCommandReferenced(basename, commands) {
   }
   return false;
 }
+
+/** Forge-owned hook basenames that init/doctor must unwire and delete. */
+export const RETIRED_CLAUDE_HOOK_BASENAMES = Object.freeze(['forge-triage-hook.mjs']);
+
+/**
+ * Return a copy of a Claude `settings.json` document with hook leaves whose
+ * command basename is in `retiredBasenames` removed. Wrapper names
+ * (`my-forge-triage-hook.mjs`) and unrelated user entries stay. Empty groups
+ * after filtering are dropped. Does not mutate `settings`.
+ * @param {unknown} settings
+ * @param {Iterable<string>} [retiredBasenames]
+ * @returns {unknown}
+ */
+export function stripRetiredHookCommands(
+  settings,
+  retiredBasenames = RETIRED_CLAUDE_HOOK_BASENAMES,
+) {
+  const retired = retiredBasenames instanceof Set ? retiredBasenames : new Set(retiredBasenames);
+  if (!settings || typeof settings !== 'object') return settings;
+  const clone = JSON.parse(JSON.stringify(settings));
+  if (!clone.hooks || typeof clone.hooks !== 'object' || Array.isArray(clone.hooks)) {
+    return clone;
+  }
+  for (const [event, groups] of Object.entries(clone.hooks)) {
+    if (!Array.isArray(groups)) continue;
+    clone.hooks[event] = groups.map((group) => stripRetiredGroup(group, retired)).filter(Boolean);
+  }
+  return clone;
+}
+
+/**
+ * @param {unknown} group
+ * @param {Set<string>} retired
+ * @returns {unknown | null}
+ */
+function stripRetiredGroup(group, retired) {
+  if (!group || typeof group !== 'object') return group;
+  const leaf = /** @type {{ command?: unknown, hooks?: unknown }} */ (group);
+  if (typeof leaf.command === 'string' && retired.has(commandBasename(leaf.command))) {
+    return null;
+  }
+  if (!Array.isArray(leaf.hooks)) return group;
+  const hooks = leaf.hooks.filter((item) => {
+    const name = commandBasename(/** @type {{ command?: unknown }} */ (item)?.command);
+    return !name || !retired.has(name);
+  });
+  if (hooks.length === 0) return null;
+  return { ...leaf, hooks };
+}

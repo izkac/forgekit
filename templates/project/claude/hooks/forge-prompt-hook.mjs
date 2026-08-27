@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * UserPromptSubmit: when the user invokes /forge or /forge:*, inject session context.
- * Requires `forge` on PATH.
+ * UserPromptSubmit: when the user invokes /forge or asks to use Forge,
+ * inject session context. Requires `forge` on PATH.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -41,7 +41,11 @@ function extractPrompt(raw) {
 }
 
 function isForgeInvocation(prompt) {
-  return /^\s*\/forge(?::|\s|$)/i.test(prompt);
+  const p = (prompt || '').trim();
+  if (!p) return false;
+  if (/^\s*\/forge(?::|\s|$)/i.test(p)) return true;
+  // Keep in sync with packages/cli/src/triage-prompt.mjs
+  return /\b(?:use(?:\s+the)?|using)\s+forge\b/i.test(p);
 }
 
 function emit(message) {
