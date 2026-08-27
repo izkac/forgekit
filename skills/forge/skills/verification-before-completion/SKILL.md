@@ -22,6 +22,7 @@ Three tiers: [test-strategy.md](../../references/test-strategy.md).
 3. **Runtime wiring audit** — for each capability requirement, name the production caller. Library-only / stub / false success → incomplete. See [runtime-integrity.md](../../references/runtime-integrity.md).
 4. **E2E-or-BLOCKED** — one real fixture path through each critical live entry point, or an explicit `BLOCKED` list in `verify-evidence.md`. Do not claim complete while checkboxing around missing E2E.
 5. Cite tier 3 + wiring/E2E evidence when claiming the implementation passes.
+6. **OpenSpec leftover sweep** — when `openspec-verify-change` / `/opsx:verify` is in the project and `planType` is `openspec`, run it, fix every finding (CRITICAL / WARNING / SUGGESTION, including files `tasks.md` forgot), save `openspec-verify.md` with `Remaining: none`, **then** dispatch the final reviewer. See [phases/verify.md](../../phases/verify.md) §7.
 
 Re-run tier 3 only when it failed, coordinator edited code after verify evidence, reviewers flagged gaps, or the user asks. Per-task tier 2 runs **are** evidence for task-scoped claims; tier 3 **is** evidence for "full workspace passes." Do not duplicate tier 2 at verify; do not skip tier 3 because tier 2 passed; never run full workspace per implement task.
 

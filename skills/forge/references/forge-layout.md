@@ -48,6 +48,7 @@ Optional `cursorChatId` on `session.json` when available — not required.
       decisions.md
     plan.md                    ← throwaway plans only
     verify-evidence.md         ← tier 3 (scope from pace)
+    openspec-verify.md         ← OpenSpec leftover sweep (when skill present)
     tasks/
       01-<slug>/
         brief.md

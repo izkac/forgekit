@@ -12,7 +12,7 @@ matches the project's test globs (`.forge/config.json → guard.testGlobs`,
 defaulting to `**/*.test.*`, `**/*.spec.*`, `**/__tests__/**`, `**/test/**`,
 `**/tests/**`) **and** was tracked at the session's `baseCommit`, is a forge
 integrity artifact (`spine.json`, `e2e.json`, `e2e-results.json`,
-`verify-evidence.md`, `test-evidence.md`, `tdd-runs.jsonl`) regardless of
+`verify-evidence.md`, `openspec-verify.md`, `test-evidence.md`, `tdd-runs.jsonl`) regardless of
 tracking state, or is one of Forge's own control-surface files under
 `.forge/` (`config.json`, `active.json`, any session's `session.json`)
 regardless of tracking state or the current `guard.testGlobs` value. One
@@ -96,9 +96,9 @@ names a different, non-guarding session. An explicit `--session <id>`
 evaluates only that session (no cross-session consideration).
 
 Some guarded classes freeze later than the general implement→finish window:
-`verify-evidence.md` (authored during the verify phase itself, per
-verify.md) is unrestricted through implement and verify, and freezes from
-review onward. All other guarded classes (test files, `spine.json`,
+`verify-evidence.md` and `openspec-verify.md` (authored during the verify phase
+itself, per verify.md) are unrestricted through implement and verify, and freeze
+from review onward. All other guarded classes (test files, `spine.json`,
 `e2e.json`, `e2e-results.json`, `test-evidence.md`, `tdd-runs.jsonl`, and
 Forge's own control-surface files) keep the implement-onward window.
 
@@ -153,6 +153,18 @@ Forge's own control-surface files) keep the implement-onward window.
 
 - GIVEN the same session moved to phase review
 - WHEN a Write tool call targets `verify-evidence.md`
+- THEN the hook denies the call
+
+#### Scenario: openspec-verify.md is editable during its own authoring phase
+
+- GIVEN an active session in phase verify
+- WHEN a Write tool call targets that session's `openspec-verify.md`
+- THEN the hook allows the call
+
+#### Scenario: openspec-verify.md freezes from review onward
+
+- GIVEN the same session moved to phase review
+- WHEN a Write tool call targets `openspec-verify.md`
 - THEN the hook denies the call
 
 ### Requirement: Allowances are recorded, reasoned, and surfaced

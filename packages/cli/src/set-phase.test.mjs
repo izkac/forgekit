@@ -68,10 +68,13 @@ function makeForgeFixture(dir, sessionId) {
 function runSetPhase(cwd, args, env = {}) {
   // These tests may themselves run inside a host session, so drop the
   // inherited id and config dir: a test that means "no host" must get one
-  // anywhere, including on a machine with a relocated ~/.claude.
+  // anywhere, including on a machine with a relocated ~/.claude or inside
+  // Cursor (CURSOR_CONVERSATION_ID / CURSOR_TRACE_ID).
   const base = { ...process.env };
   delete base.CLAUDE_CODE_SESSION_ID;
   delete base.CLAUDE_CONFIG_DIR;
+  delete base.CURSOR_CONVERSATION_ID;
+  delete base.CURSOR_TRACE_ID;
   return execFileSync(process.execPath, [SCRIPT, ...args], {
     cwd,
     encoding: 'utf8',
@@ -113,6 +116,129 @@ test('phase verify announces the combined-close path imperatively on stderr', ()
     } finally {
       fs.rmSync(dir2, { recursive: true, force: true });
     }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function plantOpenSpecVerifySkill(dir) {
+  const rel = path.join('.cursor', 'skills', 'openspec-verify-change', 'SKILL.md');
+  fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+  fs.writeFileSync(path.join(dir, rel), '---\nname: openspec-verify-change\n---\n');
+}
+
+test('phase verify announces OpenSpec verify when the vendor skill is present', () => {
+  const dir = tmp('forge-verify-osv-announce-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-osv-announce');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'openspec';
+    s.openspecChange = 'add-hmac';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    plantOpenSpecVerifySkill(dir);
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'verify'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /OpenSpec verify is available/i);
+    assert.match(r.stderr, /openspec-verify-change/);
+    assert.match(r.stderr, /Remaining: none/);
+    assert.match(r.stderr, /tasks\.md/);
+
+    const dir2 = tmp('forge-verify-osv-quiet-');
+    try {
+      const sessionFile2 = makeForgeFixture(dir2, 'sess-osv-quiet');
+      const s2 = JSON.parse(fs.readFileSync(sessionFile2, 'utf8'));
+      s2.planType = 'openspec';
+      fs.writeFileSync(sessionFile2, `${JSON.stringify(s2, null, 2)}\n`);
+      const r2 = spawnSync(process.execPath, [SCRIPT, 'verify'], { cwd: dir2, encoding: 'utf8' });
+      assert.equal(r2.status, 0, r2.stderr);
+      assert.doesNotMatch(r2.stderr, /OpenSpec verify is available/i);
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase verify does not announce OpenSpec verify on a specs-engine session', () => {
+  const dir = tmp('forge-verify-osv-specs-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-osv-specs');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    plantOpenSpecVerifySkill(dir);
+    const r = spawnSync(process.execPath, [SCRIPT, 'verify'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /OpenSpec verify is available/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase review refuses OpenSpec leftover sweep until Remaining: none', () => {
+  const dir = tmp('forge-review-osv-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-osv-review');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'openspec';
+    s.openspecChange = 'add-hmac';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    plantOpenSpecVerifySkill(dir);
+
+    const missing = spawnSync(process.execPath, [SCRIPT, 'review'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(missing.status, 0, 'must refuse without openspec-verify.md');
+    assert.match(missing.stderr, /openspec-verify\.md/);
+    assert.match(missing.stderr, /final reviewer/i);
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'openspec-verify.md'),
+      'No critical issues. Ready for archive (with noted improvements).\n',
+    );
+    const leftover = spawnSync(process.execPath, [SCRIPT, 'review'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(leftover.status, 0, 'vendor ready-for-archive is not enough');
+    assert.match(leftover.stderr, /leftover findings/);
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'openspec-verify.md'),
+      '## Forge disposition\n\n- Remaining: none\n',
+    );
+    const ok = spawnSync(process.execPath, [SCRIPT, 'review'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(ok.status, 0, ok.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done refuses OpenSpec leftover sweep until Remaining: none', () => {
+  const dir = tmp('forge-done-osv-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-osv-done');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'openspec';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    plantOpenSpecVerifySkill(dir);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const refused = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(refused.status, 0, 'must refuse without openspec-verify.md');
+    assert.match(refused.stderr, /openspec-verify\.md/);
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'openspec-verify.md'),
+      '## Forge disposition\n\n- Remaining: none\n',
+    );
+    const ok = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(ok.status, 0, ok.stderr);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -2176,8 +2302,8 @@ test('the done gate does not refuse a high-risk change when host evidence is una
     const { sessionFile, sessionDir } = makeHighRiskFixture(dir, 'sess-floor-blind');
     writeFinalReview(sessionDir, INDEPENDENT_PROSE);
 
-    // runSetPhase strips CLAUDE_CODE_SESSION_ID and CLAUDE_CONFIG_DIR, so this
-    // child genuinely has no host to read, on any machine.
+    // runSetPhase strips host ids and CLAUDE_CONFIG_DIR, so this child
+    // genuinely has no host to read, on any machine.
     runSetPhase(dir, ['done']);
 
     const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));

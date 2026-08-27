@@ -118,8 +118,11 @@ forge status     # phase, tasks 4/9, pace, health: healthy | stale | red | done
 ```
 
 **5. Verify + final review.** Tests run for real (evidence is stamped, not
-claimed), and an independent reviewer reads the whole session diff. On small
-low-risk changes these two collapse into one "closer" pass automatically.
+claimed). On OpenSpec projects with `openspec-verify-change` installed, Forge
+sweeps leftovers (docs, missed files, naming) and fixes them before the
+independent reviewer reads the whole session diff. On small low-risk changes
+verify + review collapse into one "closer" pass — the leftover sweep still
+runs first.
 
 **6. Finish.** The change is archived, `forge phase done` runs the integrity
 gate and writes a scorecard. If it refuses, see §6.

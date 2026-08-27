@@ -253,3 +253,46 @@ When the user invokes Forge over a change that is already proposed (OpenSpec `op
 - **WHEN** the user sends `/forge implement the add-auth change`
 - **THEN** the `/forge` command itself routes to the apply flow (session, implement phase, subagents)
 - **AND** the agent does not implement the change inline in coordinator context
+
+### Requirement: OpenSpec leftover sweep before final review
+When a session's `planType` is `openspec` and the vendor `openspec-verify-change`
+skill or `/opsx:verify` command exists in the project, Forge SHALL run that
+sweep during verify, fix every reported finding (including files not listed in
+`tasks.md`), and record `.forge/sessions/<id>/openspec-verify.md` with a
+`Remaining: none` line **before** dispatching the final reviewer. `forge phase
+review` and `forge phase done|finish` SHALL refuse while that file is missing
+or lacks `Remaining: none`. Specs-engine sessions, and OpenSpec sessions whose
+project has no verify skill, SHALL skip the gate. `--allow-incomplete` waives
+it the same way as other done-gate problems.
+
+#### Scenario: OpenSpec verify skill present refuses review without the report
+
+- **GIVEN** a session with `planType` `openspec`
+- **AND** `.cursor/skills/openspec-verify-change/SKILL.md` exists
+- **AND** the session has no `openspec-verify.md`
+- **WHEN** `forge phase review` runs
+- **THEN** the command exits non-zero
+- **AND** the message names `openspec-verify.md`
+
+#### Scenario: Vendor ready-for-archive is not enough
+
+- **GIVEN** the same session
+- **AND** `openspec-verify.md` says ready for archive with noted improvements
+- **AND** it has no `Remaining: none` line
+- **WHEN** `forge phase review` runs
+- **THEN** the command exits non-zero
+
+#### Scenario: Remaining none opens review, then final review
+
+- **GIVEN** the same session
+- **AND** `openspec-verify.md` contains a `Remaining: none` line
+- **WHEN** `forge phase review` runs
+- **THEN** the transition succeeds
+- **AND** the coordinator dispatches the final reviewer on the post-fix diff
+
+#### Scenario: Specs-engine skips the gate
+
+- **GIVEN** a session with `planType` `specs`
+- **AND** the vendor verify skill exists in the project
+- **WHEN** `forge phase done` runs (other done gates passing)
+- **THEN** missing `openspec-verify.md` does not refuse the transition

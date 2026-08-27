@@ -15,5 +15,6 @@ Run after refreshing OpenSpec skills/commands from upstream (usually via `forge 
 | `opsx-apply-implement-step.md` | Step 6 in `opsx-apply` / `opsx/apply` commands |
 | `opsx-apply-completion-step.md` | Step 7 “all done” bullet in same commands |
 | `openspec-apply-change-footer.md` | Footer on `openspec-apply-change/SKILL.md` (all agents) |
+| `openspec-verify-change-footer.md` | Footer on `openspec-verify-change/SKILL.md` (all agents) |
 
 **Forge-owned (never overwritten):** `/forge:apply` command, `forge/` skill tree.

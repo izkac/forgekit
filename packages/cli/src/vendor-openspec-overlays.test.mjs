@@ -55,6 +55,15 @@ test('applySkillFooter adds overlay block once', () => {
   assert.equal((twice.match(/## Forge overlay/g) || []).length, 1);
 });
 
+test('applySkillFooter can stamp the verify-change footer', () => {
+  const skill = '---\nname: openspec-verify-change\n---\n\nBody.\n';
+  const once = applySkillFooter(skill, 'cursor', undefined, 'openspec-verify-change-footer.md');
+  assert.match(once, /Remaining: none/);
+  assert.match(once, /tasks\.md/);
+  const twice = applySkillFooter(once, 'cursor', undefined, 'openspec-verify-change-footer.md');
+  assert.equal((twice.match(/## Forge overlay/g) || []).length, 1);
+});
+
 test('stripOverlayBlock removes footer', () => {
   const withFooter = applySkillFooter('body\n', 'cursor');
   const stripped = stripOverlayBlock(withFooter);

@@ -508,6 +508,30 @@ test('I4: verify-evidence.md is unrestricted at implement too — nothing legiti
   assert.equal(out.reason, 'phase-out-of-window');
 });
 
+test('I4: openspec-verify.md is editable during verify (its own authoring phase)', () => {
+  const { root, sessionDir } = makeProject({ phase: 'verify' });
+  const file = path.join(sessionDir, 'openspec-verify.md');
+  fs.writeFileSync(file, '# OpenSpec verify\n', 'utf8');
+  const rel = path.relative(root, file).split(path.sep).join('/');
+  const r = runGuard(root, ['check', '--file', rel, '--json']);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'allow');
+  assert.equal(out.reason, 'phase-out-of-window');
+});
+
+test('I4: openspec-verify.md is frozen from review onward', () => {
+  const { root, sessionDir } = makeProject({ phase: 'review' });
+  const file = path.join(sessionDir, 'openspec-verify.md');
+  fs.writeFileSync(file, '# OpenSpec verify\n', 'utf8');
+  const rel = path.relative(root, file).split(path.sep).join('/');
+  const r = runGuard(root, ['check', '--file', rel, '--json']);
+  assert.equal(r.status, 2, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'deny');
+  assert.equal(out.rule, 'integrity-artifact:openspec-verify.md');
+});
+
 test('I4: a different integrity artifact (spine.json) keeps the default window — frozen from implement onward, unaffected by the verify-evidence.md refinement', () => {
   const { root, sessionDir } = makeProject({ phase: 'implement' });
   const file = path.join(sessionDir, 'spine.json');

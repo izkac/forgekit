@@ -784,7 +784,7 @@ function changedGuardCandidatePaths({ cwd, baseCommit }) {
  * rename the whole change dir to `changes/archive/<YYYY-MM-DD>-<change>/`.
  * For a change that predates the session's `baseCommit`, git reports every
  * tracked file in it as deleted — and change-dir artifacts (`spine.json`,
- * `verify-evidence.md`, …) are guarded regardless of age, so a routine
+ * `verify-evidence.md`, `openspec-verify.md`, …) are guarded regardless of age, so a routine
  * archive presented at done as "guarded file deleted without allowance".
  *
  * A deletion whose content survives byte-identical at the archived location

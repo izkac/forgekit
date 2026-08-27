@@ -16,7 +16,7 @@ tags: [workflow, forge, retrospective]
 Then read for narrative context only:
 
 - `.forge/scorecards.jsonl` — per-session deductions, caps and incomplete reasons. `forge analyze` reports the grades; the *reasons* live here.
-- `.forge/sessions/*/` for sessions still on disk: `scorecard.md`, `verify-evidence.md`, `reviews/final-review.md`, `deferrals.json`, `session.json`, `metrics.json`.
+- `.forge/sessions/*/` for sessions still on disk: `scorecard.md`, `verify-evidence.md`, `openspec-verify.md`, `reviews/final-review.md`, `deferrals.json`, `session.json`, `metrics.json`.
 
 If `coverage.sessionsTotal` is 0, tell the user there is nothing to analyze yet and stop.
 

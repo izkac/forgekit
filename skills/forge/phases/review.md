@@ -107,4 +107,8 @@ forge phase review
 
 Address Critical and Important findings before finish.
 
+If this session ran OpenSpec verify, leftover files outside the original
+task list should already be in the diff. Do not start this phase while
+`openspec-verify.md` still has findings — `forge phase review` refuses.
+
 Then proceed to [finish.md](./finish.md).

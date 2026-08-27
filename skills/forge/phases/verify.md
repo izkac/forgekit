@@ -124,6 +124,49 @@ Fix any failure before proceeding — `forge phase done|finish` refuses on the s
 - For OpenSpec: `openspec instructions apply --change "<name>" --json` shows expected progress.
 - Requirements met = line-by-line vs **capability specs**, not vs a narrowed task reading.
 
+### 7. OpenSpec leftover sweep (when the vendor skill is present)
+
+Forge's implementers and reviewers stay inside `tasks.md` and the session
+diff. That is why leftover consumers, docs, and files nobody listed survive a
+green verify. OpenSpec's `openspec-verify-change` / `/opsx:verify` is the
+repo-wide sweep that catches them.
+
+**If available, this step is required, and it runs before final review.**
+
+Available means the vendor skill or slash command exists in the project
+(`.cursor/skills/openspec-verify-change/`, `/opsx:verify`, …) **and** this
+session's `planType` is `openspec`. Specs-engine sessions skip it. If the
+skill is missing, skip it — do not invent a parallel sweep.
+
+1. Follow the vendor `openspec-verify-change` skill (or `/opsx:verify`) for
+   the session's change. You (the coordinator) run this — not the final
+   reviewer, who is forbidden from directory sweeps. Search the tree,
+   including files `tasks.md` never named.
+2. Fix **every** finding: CRITICAL, WARNING, **and SUGGESTION**. Leftover
+   local copies, stale imports, missed files, and docs examples count.
+   Dispatch a fix subagent for anything non-trivial.
+3. Skip a finding only when it explicitly says no action, or it matches a
+   recorded design decision that fixing would contradict. Record those under
+   **Skipped** with the reason. Do not skip "nice to have" leftovers.
+4. If you edited code after `verify-evidence.md` was recorded, re-run tier 3
+   (see below). Then re-run OpenSpec verify. Cap at two extra passes (three
+   total). Still dirty → stop and ask the user; do not loop.
+5. Save the vendor report plus this block to
+   `.forge/sessions/<id>/openspec-verify.md`:
+
+```markdown
+## Forge disposition
+
+- Fixed: <what you changed, or none>
+- Skipped: <finding> — <design-decision / explicit no-action reason>
+- Remaining: none
+```
+
+`forge phase review` and `forge phase done` refuse while that file is missing
+or lacks a `Remaining: none` line. The vendor's "ready for archive (with
+noted improvements)" is **not** enough — that is how SUGGESTION leftovers
+used to ship.
+
 ```bash
 forge phase verify
 ```
@@ -140,4 +183,5 @@ forge phase verify
 - Tier 2 narrow commands — already audited; duplicating them is slow and redundant
 - Tier 3 passed and nothing changed since — do not run full suite again "for freshness"
 
-Then proceed to [review.md](./review.md) if not already done per task.
+Then proceed to [review.md](./review.md). OpenSpec findings must already be
+fixed — the final reviewer reads the **post-fix** diff.

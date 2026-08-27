@@ -21,17 +21,20 @@ const DENY_WINDOW_PHASES = new Set(['implement', 'verify', 'review', 'finish']);
 
 /**
  * I4: per-rule refinement of the window above. Every guarded class is frozen
- * for the whole implement→finish span EXCEPT `verify-evidence.md`, which
- * `verify.md` requires the coordinator to *author* during the verify phase
- * itself — freezing it starting at implement (before verify even begins)
- * made every session record a routine allowance for its own required verify
- * evidence (F88), normalizing the escape hatch the guard exists to avoid.
- * It is frozen starting `review` instead, once its content is meant to be
- * settled. `spine.json`/`e2e.json` keep the default (implement onward): per
- * plan-specs.md they are plan deliverables, authored before `forge phase
- * implement` is called, not during it.
+ * for the whole implement→finish span EXCEPT `verify-evidence.md` and
+ * `openspec-verify.md`, which `verify.md` requires the coordinator to *author*
+ * during the verify phase itself — freezing them starting at implement (before
+ * verify even begins) made every session record a routine allowance for its
+ * own required verify evidence (F88), normalizing the escape hatch the guard
+ * exists to avoid. They freeze starting `review` instead, once their content
+ * is meant to be settled. `spine.json`/`e2e.json` keep the default (implement
+ * onward): per plan-specs.md they are plan deliverables, authored before
+ * `forge phase implement` is called, not during it.
  */
-const RULE_GUARD_FROM_PHASE = { 'integrity-artifact:verify-evidence.md': 'review' };
+const RULE_GUARD_FROM_PHASE = {
+  'integrity-artifact:verify-evidence.md': 'review',
+  'integrity-artifact:openspec-verify.md': 'review',
+};
 const PHASE_ORDER = ['implement', 'verify', 'review', 'finish'];
 
 /**

@@ -30,7 +30,7 @@ Honor [../../references/pace.md](../../references/pace.md) (`forge prefs` / sess
    If skipped, write a pace self-check `task-review.md`. Group reviews write `group-review.md` covering every task in the section.
 4. Reviewer REJECTED → same implementer fixes → re-review. Repeat until APPROVED (cap at `review.maxRounds`). Never skip the re-review when a reviewer was dispatched.
 5. Save test evidence; mark each task in the unit complete.
-6. After all units: proceed to verify/review phases (final reviewer subject to pace).
+6. After all units: proceed to verify/review phases (OpenSpec leftover sweep when available, then final reviewer subject to pace).
 
 ## Work units (what one implementer dispatch covers)
 
@@ -128,4 +128,4 @@ Claude Code projects may enforce that overlay at dispatch time (`forge enforce-m
 - **Plan source:** OpenSpec (`openspec/changes/<name>/tasks.md`)
 - **Subagents must follow:** [references/tdd-core.md](../../references/tdd-core.md) (condensed TDD rules; full skill at [skills/test-driven-development](../test-driven-development/SKILL.md) when stuck)
 - **On blockers:** [skills/systematic-debugging](../systematic-debugging/SKILL.md) before guessing fixes
-- **After all tasks:** [phases/verify.md](../../phases/verify.md) → [phases/review.md](../../phases/review.md) → [phases/finish.md](../../phases/finish.md)
+- **After all tasks:** [phases/verify.md](../../phases/verify.md) (includes OpenSpec leftover sweep when available) → [phases/review.md](../../phases/review.md) → [phases/finish.md](../../phases/finish.md)

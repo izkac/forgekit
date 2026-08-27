@@ -199,14 +199,15 @@ forge phase implement --tasks-complete <N> --subagents <total dispatched so far>
 
 A test file that already existed at the session's `baseCommit` (matching
 `guard.testGlobs`), plus Forge's own integrity artifacts (`spine.json`,
-`e2e.json`, `e2e-results.json`, `verify-evidence.md`, `test-evidence.md`,
-`tdd-runs.jsonl`), is **guarded** against tool-call edits: a `PreToolUse` hook
-on `Edit`/`Write`/`NotebookEdit`/`MultiEdit` denies implementer edits to it
+`e2e.json`, `e2e-results.json`, `verify-evidence.md`, `openspec-verify.md`,
+`test-evidence.md`, `tdd-runs.jsonl`), is **guarded** against tool-call edits: a
+`PreToolUse` hook on `Edit`/`Write`/`NotebookEdit`/`MultiEdit` denies implementer
+edits to it
 during implement/verify/review/finish. Tests an implementer writes fresh
 during this session are not guarded — TDD still works. `verify-evidence.md`
-is the one exception to the implement-onward window: it is authored during
-verify itself (see [verify.md](./verify.md)), so it stays editable through
-implement and verify and freezes starting review.
+and `openspec-verify.md` are the exception to the implement-onward window:
+they are authored during verify itself (see [verify.md](./verify.md)), so they
+stay editable through implement and verify and freeze starting review.
 
 Forge's own control surface is guarded too, unconditionally, regardless of
 `guard.testGlobs` or tracking state: `.forge/config.json`, `.forge/active.json`,

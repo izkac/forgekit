@@ -36,7 +36,14 @@ review, it just fails the gate later.
    forge phase verify
    ```
 
-2. **One closer dispatch.** Take the label first — the closer **is** the
+2. **OpenSpec leftover sweep (when available).** Follow
+   [verify.md](./verify.md) §7 **before** the closer. The closer is scoped to
+   the session diff and must not grep the tree — files `tasks.md` forgot are
+   invisible unless you sweep and fix them first. Save
+   `openspec-verify.md` with `Remaining: none`. Skip this step only when the
+   vendor skill is absent or `planType` is not `openspec`.
+
+3. **One closer dispatch.** Take the label first — the closer **is** the
    session's final reviewer:
 
    ```bash
@@ -51,7 +58,7 @@ review, it just fails the gate later.
    workspace(s), `{GUARD_ALLOWANCES}` pasted or "none". **Model:** resolve via
    `forge resolve-model --tier standard` and honor `omitModel`/`model` literally.
 
-3. **Record.** Save the closer's report to
+4. **Record.** Save the closer's report to
    `.forge/sessions/<id>/reviews/final-review.md`. **Check the first line
    before saving:** it must be the attribution — `Reviewer: <model> (closer)`.
    If the closer's report does not open with it, prepend the line yourself
@@ -67,12 +74,12 @@ review, it just fails the gate later.
    forge phase review
    ```
 
-4. **Fix round (at most one).** `NOT READY` → fix the named findings (dispatch a
+5. **Fix round (at most one).** `NOT READY` → fix the named findings (dispatch a
    fix subagent for anything non-trivial), have the **same closer** re-check the
    changed files only, and update both records. Still `NOT READY` → escalate to
    the human with the findings; do not loop.
 
-5. **Finish as normal** — [finish.md](./finish.md): archive, `forge phase done`
+6. **Finish as normal** — [finish.md](./finish.md): archive, `forge phase done`
    (runs `forge integrity-check`), cleanup. Every gate that guards the full tail
    guards this one.
 

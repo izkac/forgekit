@@ -34,16 +34,19 @@ const AGENT_PATHS = {
     skillRoot: '.cursor/skills/forge',
     opsxApply: '.cursor/commands/opsx-apply.md',
     applySkill: '.cursor/skills/openspec-apply-change/SKILL.md',
+    verifySkill: '.cursor/skills/openspec-verify-change/SKILL.md',
   },
   claude: {
     skillRoot: '.claude/skills/forge',
     opsxApply: '.claude/commands/opsx/apply.md',
     applySkill: '.claude/skills/openspec-apply-change/SKILL.md',
+    verifySkill: '.claude/skills/openspec-verify-change/SKILL.md',
   },
   codex: {
     skillRoot: '.codex/skills/forge',
     opsxApply: null,
     applySkill: '.codex/skills/openspec-apply-change/SKILL.md',
+    verifySkill: '.codex/skills/openspec-verify-change/SKILL.md',
   },
 };
 
@@ -79,11 +82,13 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function applySkillFooter(content, agentKey, overlayDir = resolveOverlayDir()) {
-  const footer = renderOverlay(
-    readOverlay(overlayDir, 'openspec-apply-change-footer.md'),
-    agentKey,
-  );
+export function applySkillFooter(
+  content,
+  agentKey,
+  overlayDir = resolveOverlayDir(),
+  overlayFile = 'openspec-apply-change-footer.md',
+) {
+  const footer = renderOverlay(readOverlay(overlayDir, overlayFile), agentKey);
   let out = stripOverlayBlock(content);
   if (!out.endsWith('\n')) out += '\n';
   return out + footer;
@@ -157,6 +162,15 @@ function main() {
       (content) => applySkillFooter(content, agentKey, overlayDir),
       'patched-skill-footer',
     );
+
+    if (paths.verifySkill) {
+      patchFile(
+        paths.verifySkill,
+        (content) =>
+          applySkillFooter(content, agentKey, overlayDir, 'openspec-verify-change-footer.md'),
+        'patched-verify-skill-footer',
+      );
+    }
   }
 
   process.stdout.write('\nDone. Forge-owned /forge:apply commands are not modified.\n');

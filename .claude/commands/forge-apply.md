@@ -50,7 +50,7 @@ Pause on unclear tasks, design issues, errors, or user interrupt.
 
 ## 7. Verify (Forge — REQUIRED when all tasks done)
 
-Follow ~/.claude/skills/forge/phases/verify.md`:
+Follow `~/.claude/skills/forge/phases/verify.md`:
 
 ```bash
 forge phase verify
@@ -58,15 +58,19 @@ forge phase verify
 
 Run affected workspace tests — **audit per-task `test-evidence.md`**; do not re-run the same commands if subagents already recorded passing runs (see verify phase).
 
+On OpenSpec sessions, if `openspec-verify-change` / `/opsx:verify` is present:
+run it, **fix every finding** (including files not in `tasks.md`), save
+`.forge/sessions/<id>/openspec-verify.md` with `Remaining: none`. Then review.
+
 ## 8. Review (Forge — REQUIRED)
 
-Follow ~/.claude/skills/forge/phases/review.md`:
+Follow `~/.claude/skills/forge/phases/review.md`:
 
 ```bash
 forge phase review
 ```
 
-Final reviewer; save to `.forge/sessions/<id>/reviews/final-review.md`.
+Final reviewer **after** OpenSpec leftover fixes; save to `.forge/sessions/<id>/reviews/final-review.md`.
 
 ## 9. Finish
 

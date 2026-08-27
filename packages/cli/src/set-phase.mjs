@@ -9,7 +9,9 @@
  * or specs/changes/<change>).
  *
  * `finish` / `done` refuse unless verify-evidence.md exists and all tasks are
- * complete, unless `--allow-incomplete "<reason>"` is provided.
+ * complete, unless `--allow-incomplete "<reason>"` is provided. OpenSpec
+ * leftover sweep: `review` / `done` / `finish` also refuse without
+ * `openspec-verify.md` (`Remaining: none`) when the vendor skill is present.
  */
 
 import fs from 'node:fs';
@@ -35,6 +37,7 @@ import { bindHost } from './metrics/host.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { openFindings } from './findings.mjs';
+import { checkOpenSpecVerifyArtifact } from './openspec-verify.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -400,10 +403,37 @@ function announceCombinedClose() {
   );
 }
 
+/**
+ * Same reason as announceCombinedClose: prose in verify.md is advisory.
+ * The verify transition is the surface every OpenSpec session actually
+ * crosses, so say the leftover-file sweep here when the vendor skill exists.
+ */
+function announceOpenSpecVerify() {
+  if (phase !== 'verify') return;
+  const result = checkOpenSpecVerifyArtifact({
+    cwd: process.cwd(),
+    sessionDir: dir,
+    session,
+  });
+  if (!result.required) return;
+  const reportRel = `.forge/sessions/${session.id}/openspec-verify.md`;
+  process.stderr.write(
+    '[forge] OpenSpec verify is available — run openspec-verify-change / /opsx:verify before final review.\n' +
+      '[forge] Fix every finding (CRITICAL, WARNING, SUGGESTION), including files not listed in tasks.md.\n' +
+      `[forge] Save ${reportRel} with a "Remaining: none" line; review and done refuse without it.\n`,
+  );
+  if (session.resolvedCeremony === 'combined') {
+    process.stderr.write(
+      '[forge] Combined close: finish OpenSpec verify and those fixes BEFORE dispatching the closer.\n',
+    );
+  }
+}
+
 maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
 maybeResolveCeremonyFromPlan();
 announceCombinedClose();
+announceOpenSpecVerify();
 
 /**
  * Hard gate: implementation may not start until the operator brief exists and
@@ -431,6 +461,32 @@ function enforceBriefGate() {
 }
 
 enforceBriefGate();
+
+/**
+ * OpenSpec leftover sweep must finish before the final reviewer reads the
+ * diff — otherwise files tasks.md forgot stay invisible (reviewers are
+ * scoped to the session diff and must not grep the tree).
+ */
+function enforceOpenSpecVerifyGate() {
+  if (phase !== 'review' && phase !== 'done' && phase !== 'finish') return;
+  const result = checkOpenSpecVerifyArtifact({
+    cwd: process.cwd(),
+    sessionDir: dir,
+    session,
+  });
+  if (!result.required || result.ok) return;
+  if (allowIncomplete) return;
+  if (phase === 'review') {
+    process.stderr.write(
+      `Cannot enter phase "review":\n  - ${result.problem}\n` +
+        'Do not dispatch the final reviewer until leftover findings are fixed.\n' +
+        'Or pass --allow-incomplete "<reason>".\n',
+    );
+    process.exit(1);
+  }
+}
+
+enforceOpenSpecVerifyGate();
 
 /**
  * Refuse finish/done without verify evidence, full task completion, and a
@@ -500,6 +556,13 @@ function enforceDoneGate() {
   // archived made session.json disagree with the sessions.jsonl ledger row
   // written by the waiving transition, and `forge status` / the reminder
   // hooks read session.json.
+
+  const osVerify = checkOpenSpecVerifyArtifact({
+    cwd: process.cwd(),
+    sessionDir: dir,
+    session,
+  });
+  if (osVerify.required && !osVerify.ok) problems.push(osVerify.problem);
 
   const integrity = runIntegrityChecks({ sessionDir: dir, session });
   problems.push(...integrity.problems);
