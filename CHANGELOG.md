@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.47 — 2026-08-27
+
+Fix: `/forge` over an already-proposed change (OpenSpec or specs) implemented
+it inline — no session, no subagents, no reviews. The `/forge` command now
+routes existing changes to the `/forge:apply` flow itself (session,
+`forge phase implement`, subagent-driven TDD, verify, review), and the skill,
+`substantial-work.md`, and thin rules carry the same rule: never implement an
+already-proposed change inline. Also, invoking Forge by name now matches any
+phrasing — "with Forge", "do forge work", "run the forge workflow", "start a
+forge session" — not just "use Forge".
+
 ## 0.3.46 — 2026-08-27
 
 Forge starts only when you type `/forge` or ask to **use Forge**. It no longer
