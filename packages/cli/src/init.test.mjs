@@ -182,6 +182,59 @@ test('test-guard PreToolUse matcher includes MultiEdit (it carries file_path lik
   }
 });
 
+test('claude init ships the stop-hook and registers a Stop entry in the snippet', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-stop-hook-'));
+  try {
+    initProject(['claude'], { cwd, force: true, adr: false, planEngine: null });
+
+    const hook = path.join(cwd, '.claude', 'hooks', 'forge-stop-hook.mjs');
+    assert.ok(fs.existsSync(hook), 'hook body copied into the project');
+    assert.match(fs.readFileSync(hook, 'utf8'), /'integrity-check'/);
+
+    const snippet = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'forge-hooks.snippet.json'), 'utf8'),
+    );
+    assert.ok(Array.isArray(snippet.hooks.Stop), 'snippet declares a Stop event');
+    const stopGroup = snippet.hooks.Stop[0];
+    assert.match(stopGroup.hooks[0].command, /forge-stop-hook\.mjs/);
+
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'),
+    );
+    assert.ok(Array.isArray(settings.hooks.Stop), 'merged settings.json carries the Stop event');
+    assert.match(settings.hooks.Stop[0].hooks[0].command, /forge-stop-hook\.mjs/);
+
+    // The existing SessionStart/UserPromptSubmit/PreToolUse entries must
+    // still be present, unreplaced.
+    assert.ok(Array.isArray(snippet.hooks.SessionStart));
+    assert.ok(Array.isArray(snippet.hooks.UserPromptSubmit));
+    assert.ok(Array.isArray(snippet.hooks.PreToolUse));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('claude init instructions mention Stop alongside SessionStart/UserPromptSubmit/PreToolUse and its inert condition', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-stop-hook-instructions-'));
+  try {
+    initProject(['claude'], { cwd, force: true, adr: false, planEngine: null });
+    const snippet = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.claude', 'forge-hooks.snippet.json'), 'utf8'),
+    );
+    const comment = String(snippet._comment ?? '');
+    assert.match(comment, /SessionStart/);
+    assert.match(comment, /UserPromptSubmit/);
+    assert.match(comment, /PreToolUse/);
+    assert.match(comment, /Stop/);
+    assert.match(
+      comment,
+      /the Stop hook is inert without an active Forge session claiming completion/,
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('initProject wires templated envs and marks the rest skill-only', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-init-'));
   try {

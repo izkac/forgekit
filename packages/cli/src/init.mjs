@@ -475,7 +475,7 @@ export function ensureClaudeHookHints(cwd, opts) {
   const notePath = path.join(cwd, '.claude', 'forge-hooks.snippet.json');
   const snippet = {
     _comment:
-      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit + PreToolUse). Paths assume forge CLI is on PATH. The model-policy PreToolUse hook is inert until .forge/models.local.json exists; the test-guard PreToolUse hook is inert without an active Forge session in implement/verify/review/finish.',
+      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit + PreToolUse + Stop). Paths assume forge CLI is on PATH. The model-policy PreToolUse hook is inert until .forge/models.local.json exists; the test-guard PreToolUse hook is inert without an active Forge session in implement/verify/review/finish; the Stop hook is inert without an active Forge session claiming completion.',
     hooks: {
       SessionStart: [
         {
@@ -515,6 +515,16 @@ export function ensureClaudeHookHints(cwd, opts) {
               type: 'command',
               command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-test-guard.mjs"',
               statusMessage: 'Checking test-guard policy',
+            },
+          ],
+        },
+      ],
+      Stop: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-stop-hook.mjs"',
             },
           ],
         },

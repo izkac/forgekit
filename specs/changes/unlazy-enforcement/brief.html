@@ -1,0 +1,109 @@
+<!-- forge-brief-specs-hash:afebfb85042be2af -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brief — Honest "done" enforcement</title>
+<style>
+  body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem;
+         font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+         color: #1a1a1a; background: #fff; line-height: 1.55; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f3f3f3; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.9em; }
+  li { margin: 0.3rem 0; }
+  .note { background: #f6f8e8; border-left: 4px solid #b5c452; padding: 0.6rem 1rem; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</head>
+<body>
+
+<h1>Honest "done" — turn-end backstop and optional task gates</h1>
+
+<h2>TL;DR</h2>
+<p>Today, all of Forge's integrity checks run only when the agent voluntarily
+runs the closing command — an agent can simply <em>say</em> "done" in chat and
+nothing stops it. After this change, a lightweight hook catches that moment:
+if the session claims to be finished but the integrity checks fail, the agent
+is blocked from ending its turn and told exactly what to fix. Projects that
+want more can also opt into per-task-group checks. Nothing gets slower by
+default.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>An agent can no longer report "done" while deferrals are open, the spine
+      is missing, or the product loop is red — the turn is blocked with the
+      list of problems.</li>
+  <li>Normal work is untouched: mid-session turns with open tasks are never
+      blocked, and the check adds under ~50&nbsp;ms of file reads per turn.</li>
+  <li>An optional (off by default) gates feature: each task group gets one
+      runnable check, and the coordinator must see it pass before ticking that
+      group's boxes — no more taking a subagent's word for it.</li>
+  <li>Test-run records become tamper-evident: each executed step also stores a
+      digest of its output and where/how it ran.</li>
+  <li>A written rule that session files and command output are data, never
+      instructions (prompt-injection hygiene).</li>
+</ul>
+
+<h2>How it works</h2>
+<p>When the agent tries to end its turn, a small script looks at the active
+session. If the session isn't claiming completion, the script stays silent.
+Only when every task is ticked (or the session is in its closing phases) does
+it run the existing integrity check — and blocks the turn if that check
+fails. It always errs on the side of letting the turn end if anything about
+the check itself breaks, and it never blocks twice in a row, so it can't trap
+anyone in a loop. It can be switched off per project.</p>
+
+<pre class="mermaid">
+flowchart TD
+  A[Agent ends turn] --> B{Active Forge session?}
+  B -- no --> OK[Allow]
+  B -- yes --> C{Claiming done?<br/>all tasks ticked or closing phase}
+  C -- no --> OK
+  C -- yes --> D{Integrity check passes?}
+  D -- yes --> OK
+  D -- no --> E[Block turn:<br/>show problems + commands to fix]
+</pre>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Re-running <code>forge init --claude</code> on a project adds the new
+      Stop hook alongside the existing hooks (a settings merge, as before).</li>
+  <li>New optional command family: <code>forge gate init / check / status</code>
+      — inert unless you set <code>gates.enabled: true</code> in
+      <code>.forge/config.json</code>.</li>
+  <li>Off-switch for the backstop if you ever want it:
+      <code>hooks.stopGate: "off"</code>.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>A hook that blocks turn-end is intrusive if buggy — mitigated by the
+      fail-open design (any internal error = allow), the loop guard, the
+      off-switch, and dedicated tests for each path.</li>
+  <li>The hook's blocking message format follows Claude Code's hook contract;
+      if that contract shifts in a future Claude Code release, the hook
+      degrades to doing nothing (fail-open), not to blocking.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Path-ownership claims for parallel workers (recorded as an idea for
+      later — no value for serial sessions).</li>
+  <li>Any approval/permission store for running commands — Forge keeps its
+      interactive trust model.</li>
+  <li>Hooks for agents other than Claude Code (they lack a Stop-hook
+      surface today).</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>1. Stop hook script + install wiring — 2 tasks</li>
+  <li>2. Gate command (opt-in) — 2 tasks</li>
+  <li>3. Integrity integration for gates — 1 task</li>
+  <li>4. Output fingerprints in test-run records — 1 task</li>
+  <li>5. Docs, vendored copies, executed end-to-end proof — 3 tasks</li>
+</ul>
+
+</body>
+</html>

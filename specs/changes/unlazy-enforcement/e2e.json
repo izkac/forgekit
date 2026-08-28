@@ -1,0 +1,34 @@
+{
+  "steps": [
+    {
+      "name": "stop hook blocks false completion claim (claim-state + red integrity)",
+      "cmd": "node scripts/e2e/unlazy-enforcement-loop.mjs stop-blocks",
+      "expect": "STOP_BLOCKS_ON_RED",
+      "timeoutMs": 120000
+    },
+    {
+      "name": "stop hook fast-path allows mid-implement open tasks without spawning",
+      "cmd": "node scripts/e2e/unlazy-enforcement-loop.mjs stop-allows",
+      "expect": "STOP_ALLOWS_FAST_PATH",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "gates loop: init -> red integrity -> green gate check -> integrity ok",
+      "cmd": "node scripts/e2e/unlazy-enforcement-loop.mjs gates-loop",
+      "expect": "GATES_GREEN_INTEGRITY_OK",
+      "timeoutMs": 120000
+    },
+    {
+      "name": "gate opt-in wall: disabled project refuses and writes nothing",
+      "cmd": "node scripts/e2e/unlazy-enforcement-loop.mjs gates-disabled",
+      "expect": "GATES_DISABLED_WALL",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "step results carry outputSha256/cwd/shell fingerprints",
+      "cmd": "node scripts/e2e/unlazy-enforcement-loop.mjs fingerprints",
+      "expect": "FINGERPRINT_PRESENT",
+      "timeoutMs": 120000
+    }
+  ]
+}

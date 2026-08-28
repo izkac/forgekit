@@ -37,6 +37,7 @@ const COMMANDS = {
   change: { script: 'change.mjs' },
   spine: { script: 'spine.mjs' },
   e2e: { script: 'e2e.mjs' },
+  gate: { script: 'gate.mjs' },
   guard: { script: 'guard-cli.mjs' },
   'test-allow': { script: 'test-allow-cli.mjs' },
   tdd: { script: 'tdd-run.mjs' },
@@ -79,6 +80,7 @@ Commands:
   spine init|check        Capability→runtime spine matrix (spine.json)
   e2e init|run|check      Executable product-loop acceptance (e2e.json)
   e2e disable|enable      Operator-only project e2e off switch
+  gate init|check|status  Opt-in per-group executable gates (gates.json; .forge/config.json → gates.enabled)
   guard check --file <path> [--json]  Guarded-file check (used by the test-guard hook)
   test-allow <path> --reason "<why>"  Record a guard allowance (escape hatch)
   tdd run --task <nn-slug> --expect fail|pass [--] <cmd>  Execute + stamp red/green evidence

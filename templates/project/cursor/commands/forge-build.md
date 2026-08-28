@@ -5,7 +5,7 @@ category: Workflow
 description: Forge — implement phase (subagent-driven + TDD)
 ---
 
-Implement phase. Follow ~/.cursor/skills/forge/phases/implement.md`.
+Implement phase. Follow `~/.agents/skills/forge/phases/implement.md`.
 
 **REQUIRED:** forge `skills/subagent-driven-development` + `skills/test-driven-development` per task.
 

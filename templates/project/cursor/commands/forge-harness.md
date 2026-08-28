@@ -48,4 +48,4 @@ forge e2e harness --set "<what/where>" \
 
 Then commit `.forge/config.json`. Every future session sees the harness on `forge e2e init` and reuses it instead of rebuilding or asking again.
 
-Reference: `~/.cursor/skills/forge/docs/forge.md`
+Reference: `~/.agents/skills/forge/docs/forge.md`

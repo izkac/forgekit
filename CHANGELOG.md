@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Cursor `/forge*` command and rule templates now point at
+`~/.agents/skills/forge` (Cursor reads that root natively;
+`~/.cursor/skills/forge` is no longer created).
+
 ## 0.3.53 — 2026-08-28
 
 Skills live only in `~/.agents/skills/<skill>/`. Cursor, Codex, Copilot,

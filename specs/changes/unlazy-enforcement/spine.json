@@ -1,0 +1,31 @@
+{
+  "rows": [
+    {
+      "capability": "stop-gate: turn-end completion backstop",
+      "library": "templates/project/claude/hooks/forge-stop-hook.mjs",
+      "runtimeOwner": "Claude Code Stop hook, wired by forge init --claude (packages/cli/src/init.mjs settings snippet)",
+      "writes": "stdout {\"decision\":\"block\",\"reason\":…} on false completion claims",
+      "reads": ".forge/active.json, session.json, .forge/config.json, forge integrity-check exit code",
+      "uiConsumer": "Claude Code turn-end (blocked message shown to agent/user)",
+      "evidence": "packages/cli/src/forge-stop-hook.test.mjs + e2e steps stop-blocks/stop-allows"
+    },
+    {
+      "capability": "task-gates: opt-in per-group executable gates",
+      "library": "packages/cli/src/gate.mjs (runner reused from integrity.mjs)",
+      "runtimeOwner": "forge gate init|check|status CLI (routed in packages/cli/bin/forge.mjs); consumed by runIntegrityChecks in integrity.mjs",
+      "writes": "change gates.json (init); session gate-results.json with checksHash (check)",
+      "reads": "gates.json, tasks.md groups, .forge/config.json gates.enabled, session task counts",
+      "uiConsumer": "forge gate status table; forge integrity-check problems output",
+      "evidence": "packages/cli/src/gate.test.mjs + integrity.test.mjs + e2e step gates-loop"
+    },
+    {
+      "capability": "e2e-harness: step evidence fingerprints",
+      "library": "step runner in packages/cli/src/integrity.mjs (shared by e2e.mjs and gate.mjs)",
+      "runtimeOwner": "forge e2e run / forge gate check",
+      "writes": "e2e-results.json / gate-results.json step fields outputSha256, cwd, shell",
+      "reads": "e2e.json / gates.json steps",
+      "uiConsumer": "N/A",
+      "evidence": "integrity.test.mjs / e2e-cli.test.mjs field assertions + e2e step fingerprints"
+    }
+  ]
+}
