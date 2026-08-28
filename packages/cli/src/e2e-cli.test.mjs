@@ -232,6 +232,8 @@ test('e2e disable/enable toggles the project off switch; check honors it', () =>
   const check = JSON.parse(run(root, ['check']));
   assert.equal(check.ok, true);
   assert.equal(check.disabled, 'slow legacy stack');
+  assert.equal(check.skipped, true);
+  assert.equal(check.source, 'project');
 
   assert.throws(() => run(root, ['disable']), /reason is required/);
 
@@ -239,6 +241,31 @@ test('e2e disable/enable toggles the project off switch; check honors it', () =>
   const cfg2 = JSON.parse(fs.readFileSync(path.join(root, '.forge', 'config.json'), 'utf8'));
   assert.equal(cfg2.e2e.disabled, null);
   // gate demands e2e.json again once re-enabled → non-zero exit
+  assert.throws(() => run(root, ['check']));
+});
+
+test('e2e skip/unskip is session-scoped; check honors it', () => {
+  const root = tmp('e2e-skip-');
+  makeFixture(root);
+
+  assert.throws(() => run(root, ['skip']), /reason is required/);
+  assert.match(run(root, ['skip', 'user asked — HMAC unit suite is enough']), /E2E skipped for this session/);
+  const session = JSON.parse(
+    fs.readFileSync(path.join(root, '.forge', 'sessions', 's1', 'session.json'), 'utf8'),
+  );
+  assert.equal(session.e2eSkip, 'user asked — HMAC unit suite is enough');
+
+  const check = JSON.parse(run(root, ['check']));
+  assert.equal(check.ok, true);
+  assert.equal(check.skipped, true);
+  assert.equal(check.source, 'session');
+  assert.match(check.reason, /HMAC/);
+
+  run(root, ['unskip']);
+  const session2 = JSON.parse(
+    fs.readFileSync(path.join(root, '.forge', 'sessions', 's1', 'session.json'), 'utf8'),
+  );
+  assert.equal(session2.e2eSkip, undefined);
   assert.throws(() => run(root, ['check']));
 });
 

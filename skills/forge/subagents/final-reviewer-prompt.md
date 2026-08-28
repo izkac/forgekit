@@ -49,20 +49,18 @@ job, …) that invokes the implementing code. Cross-check against `spine.json`
 - Stub handler / false success / enqueueable-but-unhandled kind → **`NOT READY`**
 - Job kind on the product surface that is neither wired end-to-end nor deleted → **`NOT READY`**
 - UI/API reads a collection or artifact nothing in the production path writes → **`NOT READY`**
-- Missing E2E fixture path with no explicit `BLOCKED` in `verify-evidence.md` → **`NOT READY`**
+- Missing E2E fixture path with no explicit `BLOCKED` **and** no recorded project/session skip → **`NOT READY`**
 
-## Product-loop acceptance (required — executed, not described)
+## Product-loop acceptance (required — executed, skipped, or blocked)
 
-`forge e2e check` must be green: `e2e.json` steps drive the **closed loop**
-(produce → consume → decision changes output) and `e2e-results.json` records a
-green, current run (steps hash matches). A single job slice (e.g. ingest→file)
-or a library-level E2E does **not** count as platform E2E. Read the steps —
-would they pass against a stubbed handler? If yes, they prove nothing.
+`forge e2e check` must be green **or** report a recorded skip (project disable or session `e2eSkip`). When run: `e2e.json` steps drive the **closed loop** (produce → consume → decision changes output) and `e2e-results.json` records a green, current run (steps hash matches). A single job slice (e.g. ingest→file) or a library-level E2E does **not** count as platform E2E. Read the steps — would they pass against a stubbed handler? If yes, they prove nothing.
 
-- No green, current e2e run and no `BLOCKED` in `verify-evidence.md` → **`NOT READY`**
+- No green, current e2e run, no recorded skip, and no `BLOCKED` in `verify-evidence.md` → **`NOT READY`**
 - E2E steps assert no domain side effects (would pass on a stub) → **`NOT READY`**
 - `e2e.json` `notApplicable` without a reason no command could overcome → **`NOT READY`**
-- `BLOCKED` present → **`NOT READY`** (honest, but not READY)
+- Recorded skip (project or session) with a reason → **not** `NOT READY` for missing E2E
+- `BLOCKED` present while the loop is still required (not skipped, not green) → **`NOT READY`** (honest, but not READY)
+- `BLOCKED` leftover while the loop is skipped or `e2e-results.json` is green and current → ignore for readiness
 - Unresolved deferrals in `forge defer list` → **`NOT READY`**
 
 ## Attribution (first line of your report)

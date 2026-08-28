@@ -20,7 +20,8 @@ Three tiers: [test-strategy.md](../../references/test-strategy.md).
 1. **Audit** tier 2 evidence per task — exit code, pass summary, reviewer approvals. Do **not** re-run tier 2 commands.
 2. **Run tier 3 once** — fresh full workspace test per affected workspace (plus consumer workspaces if contracts changed). Save to `verify-evidence.md`.
 3. **Runtime wiring audit** — for each capability requirement, name the production caller. Library-only / stub / false success → incomplete. See [runtime-integrity.md](../../references/runtime-integrity.md).
-4. **E2E-or-BLOCKED** — one real fixture path through each critical live entry point, or an explicit `BLOCKED` list in `verify-evidence.md`. Do not claim complete while checkboxing around missing E2E.
+4. **E2E — run, skip, or BLOCKED** — run `forge e2e run` for a green product loop, **or** honor a project/session skip (`forge e2e disable` / `forge e2e skip`) without writing `BLOCKED`, **or** write an explicit `BLOCKED` list only when the required loop could not run. A missing recorded harness is not a skip. Known debt uses `## Known debt`, not `BLOCKED`.
+
 5. Cite tier 3 + wiring/E2E evidence when claiming the implementation passes.
 6. **Leftover sweep** — see [phases/verify.md](../../phases/verify.md) §7. Specs (`planType: specs`): always run `specs-verify-change`, fix every finding (CRITICAL / WARNING / SUGGESTION, including files `tasks.md` forgot), save `spec-verify.md` with `Remaining: none`. OpenSpec (`planType: openspec`): when `openspec-verify-change` / `/opsx:verify` is in the project, run it, fix every finding the same way, save `openspec-verify.md` with `Remaining: none`. **Then** dispatch the final reviewer.
 

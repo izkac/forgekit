@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { e2ePath, e2eStepsHash, loadE2eResults } from './integrity.mjs';
+import { e2ePath, e2eStepsHash, e2eSkipState, e2eLoopIsGreen, loadE2eResults } from './integrity.mjs';
 import { hasBlockedMarker, readJson } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { readPlanTaskProgress } from './plan-progress.mjs';
@@ -74,28 +74,32 @@ export function sessionHealth(opts) {
     };
   }
 
+  const skip = e2eSkipState({ cwd, session });
+
   // --- executed product loop: the strongest signal we have on disk ---
   try {
-    const results = loadE2eResults(sessionDir);
-    if (results) {
-      let currentHash = null;
-      try {
-        const doc = readJson(e2ePath({ cwd, session, sessionDir }));
-        currentHash = e2eStepsHash(doc.steps);
-      } catch {
-        currentHash = null;
-      }
-      // A failed run outranks a stale one: staleness asks "does this proof
-      // still describe the current steps", a failure says the loop is broken
-      // either way.
-      if (results.ok === false) {
-        const step = failedStepName(results);
-        const since = results.ranAt ? ` since ${results.ranAt}` : '';
-        reasons.push(`e2e failing${since}${step ? ` at step "${step}"` : ''}`);
-        escalate('red');
-      } else if (currentHash && results.stepsHash !== currentHash) {
-        reasons.push('e2e results are stale — e2e.json changed since the last run');
-        escalate('stale');
+    if (!skip.skipped) {
+      const results = loadE2eResults(sessionDir);
+      if (results) {
+        let currentHash = null;
+        try {
+          const doc = readJson(e2ePath({ cwd, session, sessionDir }));
+          currentHash = e2eStepsHash(doc.steps);
+        } catch {
+          currentHash = null;
+        }
+        // A failed run outranks a stale one: staleness asks "does this proof
+        // still describe the current steps", a failure says the loop is broken
+        // either way.
+        if (results.ok === false) {
+          const step = failedStepName(results);
+          const since = results.ranAt ? ` since ${results.ranAt}` : '';
+          reasons.push(`e2e failing${since}${step ? ` at step "${step}"` : ''}`);
+          escalate('red');
+        } else if (currentHash && results.stepsHash !== currentHash) {
+          reasons.push('e2e results are stale — e2e.json changed since the last run');
+          escalate('stale');
+        }
       }
     }
   } catch {
@@ -104,10 +108,14 @@ export function sessionHealth(opts) {
 
   // --- an explicit BLOCKED beats any inference we could make ---
   try {
-    const verify = path.join(sessionDir, 'verify-evidence.md');
-    if (fs.existsSync(verify) && hasBlockedMarker(fs.readFileSync(verify, 'utf8'))) {
-      reasons.push('verify-evidence records BLOCKED — product loop not proven');
-      escalate('red');
+    if (!skip.skipped) {
+      const verify = path.join(sessionDir, 'verify-evidence.md');
+      if (fs.existsSync(verify) && hasBlockedMarker(fs.readFileSync(verify, 'utf8'))) {
+        if (!e2eLoopIsGreen({ cwd, session, sessionDir })) {
+          reasons.push('verify-evidence records BLOCKED — product loop not proven');
+          escalate('red');
+        }
+      }
     }
   } catch {
     /* ignore */
