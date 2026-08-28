@@ -12,6 +12,8 @@
  * complete, unless `--allow-incomplete "<reason>"` is provided. OpenSpec
  * leftover sweep: `review` / `done` / `finish` also refuse without
  * `openspec-verify.md` (`Remaining: none`) when the vendor skill is present.
+ * Specs leftover sweep: the same phases refuse without `spec-verify.md`
+ * (`Remaining: none`) when `planType` is `specs` — always on, no skill probe.
  */
 
 import fs from 'node:fs';
@@ -37,7 +39,7 @@ import { bindHost } from './metrics/host.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { openFindings } from './findings.mjs';
-import { checkOpenSpecVerifyArtifact } from './openspec-verify.mjs';
+import { checkOpenSpecVerifyArtifact, checkSpecVerifyArtifact } from './openspec-verify.mjs';
 
 const VALID_PHASES = new Set([
   'triage',
@@ -429,11 +431,38 @@ function announceOpenSpecVerify() {
   }
 }
 
+/**
+ * Specs leftover sweep is always on for `planType: specs` — Forge ships the
+ * skill, so there is no vendor-skill probe. Same surface as OpenSpec: the
+ * verify transition is what every specs session actually crosses.
+ */
+function announceSpecVerify() {
+  if (phase !== 'verify') return;
+  const result = checkSpecVerifyArtifact({
+    cwd: process.cwd(),
+    sessionDir: dir,
+    session,
+  });
+  if (!result.required) return;
+  const reportRel = `.forge/sessions/${session.id}/spec-verify.md`;
+  process.stderr.write(
+    '[forge] Spec leftover sweep is required — run specs-verify-change before final review.\n' +
+      '[forge] Fix every finding (CRITICAL, WARNING, SUGGESTION), including files not listed in tasks.md.\n' +
+      `[forge] Save ${reportRel} with a "Remaining: none" line; review and done refuse without it.\n`,
+  );
+  if (session.resolvedCeremony === 'combined') {
+    process.stderr.write(
+      '[forge] Combined close: finish the leftover sweep and those fixes BEFORE dispatching the closer.\n',
+    );
+  }
+}
+
 maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
 maybeResolveCeremonyFromPlan();
 announceCombinedClose();
 announceOpenSpecVerify();
+announceSpecVerify();
 
 /**
  * Hard gate: implementation may not start until the operator brief exists and
@@ -487,6 +516,31 @@ function enforceOpenSpecVerifyGate() {
 }
 
 enforceOpenSpecVerifyGate();
+
+/**
+ * Specs leftover sweep must finish before the final reviewer reads the
+ * diff — always on for `planType: specs`, no vendor skill probe.
+ */
+function enforceSpecVerifyGate() {
+  if (phase !== 'review' && phase !== 'done' && phase !== 'finish') return;
+  const result = checkSpecVerifyArtifact({
+    cwd: process.cwd(),
+    sessionDir: dir,
+    session,
+  });
+  if (!result.required || result.ok) return;
+  if (allowIncomplete) return;
+  if (phase === 'review') {
+    process.stderr.write(
+      `Cannot enter phase "review":\n  - ${result.problem}\n` +
+        'Do not dispatch the final reviewer until leftover findings are fixed.\n' +
+        'Or pass --allow-incomplete "<reason>".\n',
+    );
+    process.exit(1);
+  }
+}
+
+enforceSpecVerifyGate();
 
 /**
  * Refuse finish/done without verify evidence, full task completion, and a
@@ -563,6 +617,13 @@ function enforceDoneGate() {
     session,
   });
   if (osVerify.required && !osVerify.ok) problems.push(osVerify.problem);
+
+  const specVerify = checkSpecVerifyArtifact({
+    cwd: process.cwd(),
+    sessionDir: dir,
+    session,
+  });
+  if (specVerify.required && !specVerify.ok) problems.push(specVerify.problem);
 
   const integrity = runIntegrityChecks({ sessionDir: dir, session });
   problems.push(...integrity.problems);

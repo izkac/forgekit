@@ -533,6 +533,7 @@ test('status and the session-start reminder report ambiguity instead of assertin
   const out = execFileSync(process.execPath, [reminder], { cwd: root, encoding: 'utf8' });
   assert.match(out, /Active Forge session: sess-a/);
   assert.match(out, /2 sessions are unfinished/, 'the line the agent believes must say so');
+  assert.match(out, /one review per tasks\.md ## group/);
 
   // With one session open there is nothing to report, and neither should.
   fs.rmSync(path.join(root, '.forge', 'sessions', 'sess-b'), { recursive: true });

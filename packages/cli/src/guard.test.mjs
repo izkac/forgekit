@@ -393,6 +393,7 @@ test('integrity artifacts are guarded regardless of tracking state, in a subdire
     'e2e-results.json',
     'verify-evidence.md',
     'openspec-verify.md',
+    'spec-verify.md',
     'test-evidence.md',
     'tdd-runs.jsonl',
   ];

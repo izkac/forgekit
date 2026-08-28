@@ -244,6 +244,129 @@ test('phase done refuses OpenSpec leftover sweep until Remaining: none', () => {
   }
 });
 
+function plantSpecVerifyCleared(sessionDir) {
+  fs.writeFileSync(
+    path.join(sessionDir, 'spec-verify.md'),
+    '## Forge disposition\n\n- Remaining: none\n',
+  );
+}
+
+test('phase review refuses spec leftover sweep until Remaining: none', () => {
+  const dir = tmp('forge-review-sv-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-sv-review');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.openspecChange = 'leftover-demo';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+
+    const missing = spawnSync(process.execPath, [SCRIPT, 'review'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(missing.status, 0, 'must refuse without spec-verify.md');
+    assert.match(missing.stderr, /spec-verify\.md/);
+    assert.match(missing.stderr, /final reviewer/i);
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'spec-verify.md'),
+      'No critical issues. Ready for archive (with noted improvements).\n',
+    );
+    const leftover = spawnSync(process.execPath, [SCRIPT, 'review'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(leftover.status, 0, 'ready-for-archive is not enough');
+    assert.match(leftover.stderr, /leftover findings/);
+
+    plantSpecVerifyCleared(sessionDir);
+    const ok = spawnSync(process.execPath, [SCRIPT, 'review'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(ok.status, 0, ok.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase review --allow-incomplete waives spec leftover check', () => {
+  const dir = tmp('forge-review-sv-allow-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-sv-review-allow');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+
+    const r = spawnSync(
+      process.execPath,
+      [SCRIPT, 'review', '--allow-incomplete', 'in-flight session cannot re-run verify'],
+      { cwd: dir, encoding: 'utf8' },
+    );
+    assert.equal(r.status, 0, r.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done refuses spec leftover sweep until Remaining: none', () => {
+  const dir = tmp('forge-done-sv-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-sv-done');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.tasksTotal = 2;
+    s.tasksComplete = 2;
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+    );
+
+    const refused = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(refused.status, 0, 'must refuse without spec-verify.md');
+    assert.match(refused.stderr, /spec-verify\.md/);
+
+    plantSpecVerifyCleared(sessionDir);
+    const ok = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(ok.status, 0, ok.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase verify announces spec leftover sweep on a specs session', () => {
+  const dir = tmp('forge-verify-sv-announce-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-sv-announce');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    plantOpenSpecVerifySkill(dir);
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'verify'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /spec-verify\.md/);
+    assert.match(r.stderr, /Remaining: none/);
+    assert.doesNotMatch(r.stderr, /OpenSpec verify is available/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase verify combined close tells coordinator to finish spec leftover sweep first', () => {
+  const dir = tmp('forge-verify-sv-combined-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-sv-combined');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.resolvedCeremony = 'combined';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'verify'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /spec-verify\.md/);
+    assert.match(r.stderr, /Combined close:.*BEFORE dispatching the closer/i);
+    assert.doesNotMatch(r.stderr, /OpenSpec verify is available/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('phase done refuses a combined session with no final review on file', () => {
   // The other half of the cohort-4 failure: two combined sessions reached
   // done with empty reviews/ directories. The closer IS the final reviewer;
@@ -334,6 +457,7 @@ test('phase done refuses a specs-engine session whose change dir is still live',
       path.join(sessionDir, 'spine.json'),
       `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
     );
+    plantSpecVerifyCleared(sessionDir);
     const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
@@ -396,6 +520,7 @@ test('phase done reaches done when the change exists only under the archive path
     s.tasksComplete = 2;
     fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
     fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+    plantSpecVerifyCleared(sessionDir);
     const liveDir = path.join(dir, 'specs', 'changes', 'shipped-change');
     assert.ok(!fs.existsSync(liveDir), 'fixture: the live path must not exist');
     const archivedDir = path.join(dir, 'specs', 'changes', 'archive', '2026-01-01-shipped-change');
@@ -459,6 +584,7 @@ test('phase done accepts --archive-waived, records the reason, and does not mark
       path.join(sessionDir, 'spine.json'),
       `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
     );
+    plantSpecVerifyCleared(sessionDir);
     const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
@@ -497,6 +623,7 @@ test('phase done --archive-waived with no reason still refuses', () => {
       path.join(sessionDir, 'spine.json'),
       `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
     );
+    plantSpecVerifyCleared(sessionDir);
     const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
@@ -536,6 +663,7 @@ test('phase done: archiving after a waiver must not erase the recorded waiver (F
       path.join(sessionDir, 'spine.json'),
       `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
     );
+    plantSpecVerifyCleared(sessionDir);
     const changeDir = path.join(dir, 'specs', 'changes', 'demo-change');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'tasks.md'), '- [x] task\n');
@@ -2214,6 +2342,7 @@ function makeHighRiskFixture(dir, sessionId) {
   raw.openspecChange = 'add-refunds';
   fs.writeFileSync(sessionFile, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
   fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+  plantSpecVerifyCleared(sessionDir);
   const changeDir = path.join(dir, 'specs', 'changes', 'archive', '2026-01-01-add-refunds');
   fs.mkdirSync(changeDir, { recursive: true });
   fs.writeFileSync(
@@ -2621,6 +2750,8 @@ test('done and finish refuse an ambiguous session; reversible phases warn and pr
     const base = { ...process.env };
     delete base.CLAUDE_CODE_SESSION_ID;
     delete base.CLAUDE_CONFIG_DIR;
+    delete base.CURSOR_CONVERSATION_ID;
+    delete base.CURSOR_TRACE_ID;
     const run = (...args) =>
       spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env: base });
 

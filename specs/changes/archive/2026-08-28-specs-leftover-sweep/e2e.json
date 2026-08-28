@@ -1,0 +1,11 @@
+{
+  "change": "specs-leftover-sweep",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "spec-leftover-gate",
+      "cmd": "node scripts/e2e/spec-leftover-gate.mjs",
+      "expect": "SPEC LEFTOVER GATE GREEN"
+    }
+  ]
+}

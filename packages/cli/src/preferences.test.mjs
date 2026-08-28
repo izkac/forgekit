@@ -29,7 +29,7 @@ test('suggestPaceFromSignals: money/auth holds standard, and never falls to bris
   assert.equal(suggestPaceFromSignals('mongo migration for orders').pace, 'standard');
   // "tweak" alone is brisk; the secret in the same breath outranks it.
   assert.equal(suggestPaceFromSignals('tweak the hmac secret rotation').pace, 'standard');
-  assert.match(suggestPaceFromSignals('add stripe refund flow').reason, /per-task/i);
+  assert.match(suggestPaceFromSignals('add stripe refund flow').reason, /task lines/i);
 });
 
 test('suggestPaceFromSignals: standard for ecosystem/api', () => {
@@ -274,6 +274,31 @@ test('high-risk floor: a task touching payment logic gets an immediate per-task 
       groupComplete: false,
     }),
     true,
+  );
+});
+
+test('high-risk floor: a kebab slug is not a task line — migrate in the change name does not review every task', () => {
+  const expanded = expandPace({ pace: 'standard' });
+  assert.equal(
+    shouldRunPerTaskReview(expanded, {
+      signalText: 'shared-migrate-valicon-platform-http',
+      groupComplete: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRunPerTaskReview(expanded, {
+      signalText: 'Add HMAC canonicalization for the request body',
+      groupComplete: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRunPerTaskReview(expanded, {
+      signalText: 'Retarget Mercury fixture paths to consumer-owned vectors',
+      groupComplete: false,
+    }),
+    false,
   );
 });
 

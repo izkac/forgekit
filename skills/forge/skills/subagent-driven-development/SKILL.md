@@ -17,7 +17,7 @@ Use when you have an implementation plan with mostly independent tasks and you'r
 
 ## Pace
 
-Honor [../../references/pace.md](../../references/pace.md) (`forge prefs` / session `resolvedPace`). Reviewers may be deferred to **OpenSpec group** boundaries under `standard` (`per-group`), or skipped for low-risk work under `brisk`/`lite`; **never** skip review for money/auth/contracts/migrations (immediate per-task review). Tier-2 test evidence stays mandatory for behavior changes on every task.
+Honor [../../references/pace.md](../../references/pace.md) (`forge prefs` / session `resolvedPace`). Reviewers may be deferred to **`tasks.md` group** boundaries under `standard` (`per-group`), or skipped for low-risk work under `brisk`/`lite`; **never** skip review for a task whose **own line** is money/auth/contracts/migrations (immediate per-task review). A high-risk change name does not make every task 1:1. Tier-2 test evidence stays mandatory for behavior changes on every task.
 
 ## Per-unit loop
 
@@ -30,7 +30,7 @@ Honor [../../references/pace.md](../../references/pace.md) (`forge prefs` / sess
    If skipped, write a pace self-check `task-review.md`. Group reviews write `group-review.md` covering every task in the section.
 4. Reviewer REJECTED → same implementer fixes → re-review. Repeat until APPROVED (cap at `review.maxRounds`). Never skip the re-review when a reviewer was dispatched.
 5. Save test evidence; mark each task in the unit complete.
-6. After all units: proceed to verify/review phases (OpenSpec leftover sweep when available, then final reviewer subject to pace).
+6. After all units: proceed to verify/review phases (leftover sweep: specs always → `spec-verify.md`; OpenSpec when available → `openspec-verify.md`; then final reviewer subject to pace).
 
 ## Work units (what one implementer dispatch covers)
 
@@ -47,8 +47,9 @@ order, keeping its context warm across them.
 **Split a group into smaller units when any of these is true:**
 
 - **A task is high-risk** — money, auth, shared contracts, migrations, secrets.
-  Those keep 1:1 dispatch, always, with their own review. Not negotiable, and not
-  a judgment call about how risky it looks.
+  Those keep 1:1 dispatch, always, with their own review. Match that **task
+  line**, not the change slug. Not negotiable, and not a judgment call about
+  how risky the rest of the change looks.
 - **The group exceeds 4 tasks.** Split into units of at most 4. A long unit puts
   more work behind one failure and eventually spends the context it was saving.
 - **A later task needs an earlier task's review verdict** — a real dependency on
@@ -128,4 +129,4 @@ Claude Code projects may enforce that overlay at dispatch time (`forge enforce-m
 - **Plan source:** OpenSpec (`openspec/changes/<name>/tasks.md`)
 - **Subagents must follow:** [references/tdd-core.md](../../references/tdd-core.md) (condensed TDD rules; full skill at [skills/test-driven-development](../test-driven-development/SKILL.md) when stuck)
 - **On blockers:** [skills/systematic-debugging](../systematic-debugging/SKILL.md) before guessing fixes
-- **After all tasks:** [phases/verify.md](../../phases/verify.md) (includes OpenSpec leftover sweep when available) → [phases/review.md](../../phases/review.md) → [phases/finish.md](../../phases/finish.md)
+- **After all tasks:** [phases/verify.md](../../phases/verify.md) (includes leftover sweep: `spec-verify.md` for specs, `openspec-verify.md` for OpenSpec when available) → [phases/review.md](../../phases/review.md) → [phases/finish.md](../../phases/finish.md)

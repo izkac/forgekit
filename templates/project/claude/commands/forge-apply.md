@@ -40,10 +40,12 @@ Handle blocked / all_done states per vendor skill before implementing.
 
 ## 6. Implement (Forge — REQUIRED)
 
-Follow ~/.claude/skills/forge/phases/implement.md`:
+Follow `~/.claude/skills/forge/phases/implement.md`:
 
 - **Do not** implement all tasks inline in coordinator context
-- Per pending task: brief → **implementer** subagent (TDD first) → **spec reviewer** → **quality reviewer** → mark `- [x]` in `tasks.md`
+- One **implementer** per `tasks.md` **group** (`##` section), tasks in order. Split 1:1 only when that task's **own line** is money/auth/contracts/migrations/secrets, the group has more than 4 tasks, or the tasks share nothing
+- One **task reviewer** (spec + quality in one pass) when the group closes. Mid-group low-risk: coordinator self-check. Immediate review only for that high-risk task line — **not** because the change name or slug matched
+- Mark `- [x]` in `tasks.md` as each task lands
 - Bundled skills: `skills/subagent-driven-development` + `skills/test-driven-development`
 
 Pause on unclear tasks, design issues, errors, or user interrupt.
@@ -62,6 +64,10 @@ On OpenSpec sessions, if `openspec-verify-change` / `/opsx:verify` is present:
 run it, **fix every finding** (including files not in `tasks.md`), save
 `.forge/sessions/<id>/openspec-verify.md` with `Remaining: none`. Then review.
 
+On specs sessions, leftover sweep is always on: follow `specs-verify-change`,
+**fix every finding** (including files not in `tasks.md`), save
+`.forge/sessions/<id>/spec-verify.md` with `Remaining: none`. Then review.
+
 ## 8. Review (Forge — REQUIRED)
 
 Follow `~/.claude/skills/forge/phases/review.md`:
@@ -70,7 +76,7 @@ Follow `~/.claude/skills/forge/phases/review.md`:
 forge phase review
 ```
 
-Final reviewer **after** OpenSpec leftover fixes; save to `.forge/sessions/<id>/reviews/final-review.md`.
+Final reviewer **after** leftover fixes; save to `.forge/sessions/<id>/reviews/final-review.md`.
 
 ## 9. Finish
 

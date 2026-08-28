@@ -274,7 +274,7 @@ export function suggestPaceFromPlan(facts) {
     return {
       pace: 'standard',
       reason:
-        'plan touches money/auth/contracts/migrations — per-task review floor covers the risky tasks',
+        'plan touches money/auth/contracts/migrations — session stays standard; only matching task lines get an immediate review',
     };
   }
   if (facts.tasks >= STANDARD_TASKS) {

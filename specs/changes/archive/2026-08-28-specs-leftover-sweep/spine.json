@@ -1,0 +1,24 @@
+{
+  "change": "specs-leftover-sweep",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "Specs leftover sweep refuses review/done without Remaining: none",
+      "library": "packages/cli/src/openspec-verify.mjs checkSpecVerifyArtifact",
+      "runtimeOwner": "forge phase review | done | finish (set-phase.mjs)",
+      "writes": ".forge/sessions/<id>/spec-verify.md is the gated report (agent-authored)",
+      "reads": "session.planType, spec-verify.md",
+      "uiConsumer": "coordinator: stderr announce on forge phase verify; refusal on review/done",
+      "evidence": "packages/cli/src/openspec-verify.test.mjs + packages/cli/src/set-phase.test.mjs + scripts/e2e/spec-leftover-gate.mjs"
+    },
+    {
+      "capability": "spec-verify.md freeze from review",
+      "library": "packages/cli/src/guard.mjs + guard-cli.mjs RULE_GUARD_FROM_PHASE",
+      "runtimeOwner": "forge guard check (PreToolUse hook)",
+      "writes": "deny/allow for Write/Edit of spec-verify.md",
+      "reads": "session phase, target path",
+      "uiConsumer": "the agent hitting the guard during review+",
+      "evidence": "packages/cli/src/guard.test.mjs + packages/cli/src/guard-cli.test.mjs"
+    }
+  ]
+}

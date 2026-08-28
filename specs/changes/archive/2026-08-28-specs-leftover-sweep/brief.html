@@ -1,0 +1,93 @@
+<!-- forge-brief-specs-hash:453eca15a0b62502 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator brief — Specs leftover sweep</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    max-width: 48rem; margin: 3rem auto; padding: 0 1.25rem;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a1a; background: #fff;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; border-bottom: 1px solid #e5e5e5; padding-bottom: .3rem; }
+  .sub { color: #666; margin-top: 0; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .88em; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .3rem 0; }
+  pre.mermaid { background: #fafafa; padding: 1rem; border-radius: 6px; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Specs leftover sweep</h1>
+<p class="sub">Operator brief — change <code>specs-leftover-sweep</code></p>
+
+<h2>TL;DR</h2>
+<p>
+  Built-in specs projects will get the same leftover check OpenSpec already has:
+  after the work is implemented, the agent searches the whole repo for stragglers
+  (old names, missed files, docs that still describe the old world), fixes them,
+  and only then asks a final reviewer to look at the result.
+</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Specs-engine sessions cannot finish until that sweep is done and recorded.</li>
+  <li>The record is a session file with an explicit <code>Remaining: none</code> line — “ready for archive, with notes” is not enough.</li>
+  <li>OpenSpec projects keep using their existing vendor check and file. Nothing about that path changes.</li>
+  <li>Small changes that combine verify and review into one pass still run this sweep first.</li>
+</ul>
+
+<h2>How it works</h2>
+<pre class="mermaid">
+flowchart TD
+  A[All tasks done] --> B[Forge verify]
+  B --> C{Planning engine?}
+  C -->|OpenSpec + vendor skill| D[Vendor leftover sweep]
+  C -->|Built-in specs| E[Forge leftover sweep]
+  D --> F[Report: Remaining none]
+  E --> F
+  F --> G[Final review of the post-fix diff]
+</pre>
+<p>
+  The agent doing the sweep is the coordinator, not the final reviewer.
+  Reviewers stay inside the session diff on purpose — that is why leftovers
+  used to ship. The sweep is what looks at the rest of the tree.
+</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>On a specs-engine project, verify will mention the leftover sweep. You do not run a new command.</li>
+  <li>If a session was already in review when this ships, finishing it may need <code>--allow-incomplete</code> or a quick sweep pass.</li>
+  <li>Reinstall the Forge skill after release so agents pick up the new verify steps.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>Every specs session pays for an extra search-and-fix pass, including small ones. That is deliberate: leftovers are how “the task list was complete” still leaves old names in docs and Dockerfiles.</li>
+  <li>The search skips archived changes and old changelog history so it does not turn into busywork. If that skip is too wide, leftovers in those places will still ship.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Changing how OpenSpec leftover sweep works.</li>
+  <li>A Forge command that greps the tree for you — the agent still does the search; the CLI only refuses to finish without the report.</li>
+  <li>The review-cadence copy fix (already on the branch, separate from this change).</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>CLI gate — refuse review/done without the report (2 tasks)</li>
+  <li>Guard freeze — the report can be written during verify, then locks (1 task)</li>
+  <li>Coordinator skill and verify/apply copy (2 tasks)</li>
+  <li>Product-loop script plus operator docs (2 tasks)</li>
+</ul>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

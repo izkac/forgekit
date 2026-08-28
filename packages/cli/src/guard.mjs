@@ -31,6 +31,7 @@ const INTEGRITY_ARTIFACTS = new Set([
   'e2e-results.json',
   'verify-evidence.md',
   'openspec-verify.md',
+  'spec-verify.md',
   'test-evidence.md',
   'tdd-runs.jsonl',
 ]);

@@ -36,10 +36,12 @@ At session start: `Using Forge for this work. Pace: auto → brisk (…)` (use
 
 \*Hard floor: money / auth / shared contracts / migrations / secrets **always**
 get a per-task review (and final review if the session touched high-risk work),
-even under `lite` / `brisk` / mid-group `standard`.
+even under `lite` / `brisk` / mid-group `standard`. Match the **task line**,
+not the change name — hmac or migrate in the slug does not make fixture or
+docs tasks 1:1.
 
 **`thorough` vs `standard`:** identical cadence — both review once per
-**OpenSpec group** (top-level `##` section in `tasks.md`), except high-risk
+**`tasks.md` group** (top-level `##` section), except high-risk
 tasks which still get an immediate per-task review — and identical review
 `depth` (`full`). They differ only in `maxRounds`: thorough allows 3
 fix→re-review rounds before escalating remaining findings to the human,

@@ -119,7 +119,9 @@ export function buildForgeMessage(info) {
   }
   lines.push(RUNTIME_INTEGRITY_REMINDER);
   lines.push('Resume: invoke the forge skill for the current phase.');
-  lines.push('Honor pace: see forge references/pace.md (`forge prefs`).');
+  lines.push(
+    'Honor pace: standard/thorough = one review per tasks.md ## group. Immediate review only when that task line is money/auth/contracts/migrations/secrets — not the change name. See forge references/pace.md.',
+  );
   lines.push('Skip Forge for this task only: /forge:skip');
   lines.push('Guide: Forge skill + docs/forge.md (under the installed forge skill)');
   return lines.join('\n');

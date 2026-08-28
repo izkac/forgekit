@@ -162,7 +162,7 @@ test('money/auth anywhere in the plan holds standard, not thorough', () => {
   const { pace, reason } = suggestPaceFromPlan(facts);
   assert.equal(pace, 'standard');
   assert.match(reason, /money|auth|risk/i);
-  assert.match(reason, /per-task/i);
+  assert.match(reason, /task lines/i);
 });
 
 test('a high-risk plan never resolves to brisk, however small it is', () => {

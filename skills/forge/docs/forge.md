@@ -192,7 +192,7 @@ See the Forge skill’s [references/plan-routing.md](../references/plan-routing.
 | **brainstorm** | Explore intent, approaches, approval | `skills/brainstorming` |
 | **plan** | Tracked-change propose; **`forge spine init` every change** (rows or `notApplicable`); rows → `forge e2e init` (steps are a plan deliverable); wiring + product-loop tasks when async | [plan-routing.md](../references/plan-routing.md) |
 | **implement** | Subagent per work unit (one `tasks.md` group by default; 1:1 for high-risk), TDD per task, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../references/test-strategy.md) |
-| **verify** | `combined` ceremony (small low-risk change) → one closer pass covers verify + review ([phases/close.md]). Otherwise: audit tier 2; tier 3; green `forge e2e run`; `forge integrity-check`; OpenSpec leftover sweep when `openspec-verify-change` is present | `skills/verification-before-completion` + `verify-evidence.md` + `openspec-verify.md` |
+| **verify** | `combined` ceremony (small low-risk change) → one closer pass covers verify + review ([phases/close.md]). Otherwise: audit tier 2; tier 3; green `forge e2e run`; `forge integrity-check`; leftover sweep (`spec-verify.md` always on for specs; `openspec-verify.md` when `openspec-verify-change` is present for OpenSpec) | `skills/verification-before-completion` + `verify-evidence.md` + `spec-verify.md` / `openspec-verify.md` |
 | **review** | Covered by the closer when ceremony is `combined`. Otherwise: combined task reviewer (spec + quality) per unit, scoped to the diff range; final review (spine + executed e2e) | `skills/requesting-code-review` |
 | **finish** | Archive (+ ADR if the project uses that); `forge phase done` (integrity gate); cleanup | `/opsx:archive`, `forge cleanup` |
 
@@ -241,6 +241,7 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
         decisions.md
       plan.md                         ← legacy throwaway plans only (deprecated)
       verify-evidence.md              ← tier 3 + loop narrative (or BLOCKED)
+      spec-verify.md                  ← specs leftover sweep (always on for planType: specs)
       openspec-verify.md              ← OpenSpec leftover sweep (when skill present)
       e2e-results.json                ← forge e2e run results (steps hash + per-step outcomes)
       deferrals.json                  ← forge defer registry (when used)
@@ -632,7 +633,7 @@ most 4 tasks, and always 1:1 for money/auth/contracts/migrations. Each unit:
 2. **Implementer** subagent — must follow `skills/test-driven-development` first, one task at a time, red→green stamps per task.
 3. **Task reviewer** subagent (spec then quality) — unless pace skips low-risk work — reading the unit's **diff range**, not the repository.
 4. Mark each finished task complete (`tasks.md` checkbox or session progress).
-5. After all tasks: **verify** (tier 3 scope from pace; OpenSpec leftover sweep when `openspec-verify-change` is present) → **final reviewer** (unless pace skips; dispatch it with the Task description exactly what `forge review-label final` prints, which also stamps the dispatch into `reviews/dispatches.json` so the evidence survives host-transcript pruning — see [phases/review.md](../phases/review.md)) → finish.
+5. After all tasks: **verify** (tier 3 scope from pace; leftover sweep: `spec-verify.md` always on for specs, `openspec-verify.md` when `openspec-verify-change` is present) → **final reviewer** (unless pace skips; dispatch it with the Task description exactly what `forge review-label final` prints, which also stamps the dispatch into `reviews/dispatches.json` so the evidence survives host-transcript pruning — see [phases/review.md](../phases/review.md)) → finish.
 
 Test tiers: [test-strategy.md](../references/test-strategy.md) — scoped TDD per task, narrow evidence per task, full workspace **once** at verify when pace requires it (not every task).
 
@@ -779,7 +780,8 @@ The bundled skills are a **maintained fork** of Superpowers (MIT — see `skills
 | Planning sink | OpenSpec or built-in specs engine | Engine per project (`.forge/config.json`); no throwaway or direct modes for new work |
 | OpenSpec skills | Vendor (`openspec-*`, `opsx:*`) | **Do not hand-edit** — run `forge overlay` after upgrade |
 | OpenSpec implement | Forge **`/forge:apply`** | Full subagent TDD + verify + leftover sweep + review; survives OpenSpec upgrades |
-| OpenSpec verify | Vendor `openspec-verify-change` / `/opsx:verify` | Run at end of Forge verify when present; fix every finding, then final review |
+| OpenSpec verify | Vendor `openspec-verify-change` / `/opsx:verify` | Run at end of Forge verify when present; fix every finding, save `openspec-verify.md`, then final review |
+| Specs verify | Bundled `specs-verify-change` | Always on for `planType: specs`; fix every finding, save `spec-verify.md`, then final review |
 | Archive follow-up | Optional ADRs (`forge init --adr`) | When `.forge/config.json` has `adr.enabled`, run **archive-to-adr** (path from `adr.dir`, default `docs/adr`) |
 
 ---

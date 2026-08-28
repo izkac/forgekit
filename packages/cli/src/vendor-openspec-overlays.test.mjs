@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   applySkillFooter,
   patchOpsxApplyContent,
   stripOverlayBlock,
 } from './vendor-openspec-overlays.mjs';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const VANILLA = `---
 name: test
@@ -35,8 +40,11 @@ test('patchOpsxApplyContent injects Forge implement step', () => {
   assert.equal(status, 'patched');
   assert.match(content, /REQUIRED \(Forge\):/);
   assert.match(content, /\.cursor\/skills\/forge\/phases\/implement\.md/);
-  assert.match(content, /Dispatch \*\*implementer\*\* subagent/);
+  assert.match(content, /Dispatch one \*\*implementer\*\* for the group/);
+  assert.match(content, /Per pending `##` group/);
   assert.doesNotMatch(content, /Make the code changes required/);
+  assert.doesNotMatch(content, /For each pending task/);
+  assert.doesNotMatch(content, /\*\*spec\*\* \+ \*\*quality\*\* reviewers/);
 });
 
 test('patchOpsxApplyContent is idempotent on re-run', () => {
@@ -68,4 +76,20 @@ test('stripOverlayBlock removes footer', () => {
   const withFooter = applySkillFooter('body\n', 'cursor');
   const stripped = stripOverlayBlock(withFooter);
   assert.doesNotMatch(stripped, /forgekit:openspec-overlay/);
+});
+
+test('/forge:apply commands review per group, not per task with two reviewers', () => {
+  const rels = [
+    path.join('.cursor', 'commands', 'forge-apply.md'),
+    path.join('.claude', 'commands', 'forge-apply.md'),
+    path.join('templates', 'project', 'cursor', 'commands', 'forge-apply.md'),
+    path.join('templates', 'project', 'claude', 'commands', 'forge-apply.md'),
+  ];
+  for (const rel of rels) {
+    const text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+    assert.match(text, /One \*\*implementer\*\* per `tasks\.md` \*\*group\*\*/, rel);
+    assert.doesNotMatch(text, /Per pending task:/, rel);
+    assert.doesNotMatch(text, /\*\*spec reviewer\*\*/, rel);
+    assert.doesNotMatch(text, /\*\*quality reviewer\*\*/, rel);
+  }
 });

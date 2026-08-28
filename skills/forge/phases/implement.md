@@ -24,11 +24,12 @@ On test failures or unexpected behavior, use [../skills/systematic-debugging/SKI
 | `review.perTask` | When to dispatch reviewer |
 | ---------------- | ------------------------- |
 | `always` | After every unit (`thorough`) |
-| `per-group` | When the unit closes a `tasks.md` group (`##` section — OpenSpec or specs engine), or immediately if any task in it is high-risk (`standard`) |
+| `per-group` | When the unit closes a `tasks.md` group (`##` section — OpenSpec or specs engine), or immediately when **that unit's task line** is high-risk (`standard`) |
 | `high-risk-only` / `never` | Only when hard-floor high-risk |
 
 A high-risk task is its own unit and gets its own reviewer, on every pace — that
-floor is what lets the rest of a change ride in larger, cheaper units.
+floor is what lets the rest of a change ride in larger, cheaper units. Match the
+**task line**, not the change name or slug.
 
 **Review labels — the rules; the reasoning is in [../references/review-labels.md](../references/review-labels.md).**
 
@@ -200,14 +201,15 @@ forge phase implement --tasks-complete <N> --subagents <total dispatched so far>
 A test file that already existed at the session's `baseCommit` (matching
 `guard.testGlobs`), plus Forge's own integrity artifacts (`spine.json`,
 `e2e.json`, `e2e-results.json`, `verify-evidence.md`, `openspec-verify.md`,
-`test-evidence.md`, `tdd-runs.jsonl`), is **guarded** against tool-call edits: a
-`PreToolUse` hook on `Edit`/`Write`/`NotebookEdit`/`MultiEdit` denies implementer
-edits to it
+`spec-verify.md`, `test-evidence.md`, `tdd-runs.jsonl`), is **guarded** against
+tool-call edits: a `PreToolUse` hook on `Edit`/`Write`/`NotebookEdit`/`MultiEdit`
+denies implementer edits to it
 during implement/verify/review/finish. Tests an implementer writes fresh
-during this session are not guarded — TDD still works. `verify-evidence.md`
-and `openspec-verify.md` are the exception to the implement-onward window:
-they are authored during verify itself (see [verify.md](./verify.md)), so they
-stay editable through implement and verify and freeze starting review.
+during this session are not guarded — TDD still works. `verify-evidence.md`,
+`openspec-verify.md`, and `spec-verify.md` are the exception to the
+implement-onward window: they are authored during verify itself (see
+[verify.md](./verify.md)), so they stay editable through implement and verify
+and freeze starting review.
 
 Forge's own control surface is guarded too, unconditionally, regardless of
 `guard.testGlobs` or tracking state: `.forge/config.json`, `.forge/active.json`,

@@ -6,13 +6,15 @@
  * final reviewer) when the skill or slash command is on disk, then demands a
  * session report that attests leftover findings were fixed — including files
  * `tasks.md` never listed. Specs-engine sessions skip this even if a leftover
- * skill file is present.
+ * skill file is present — they use `spec-verify.md` instead (always on, no
+ * vendor skill probe).
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 export const OPENSPEC_VERIFY_BASENAME = 'openspec-verify.md';
+export const SPEC_VERIFY_BASENAME = 'spec-verify.md';
 
 /** Project-local skill / command paths OpenSpec writes for the verify workflow. */
 export const OPENSPEC_VERIFY_SKILL_PATHS = Object.freeze([
@@ -49,6 +51,14 @@ export function findOpenSpecVerifySkill(cwd, opts = {}) {
  */
 export function sessionNeedsOpenSpecVerify(session) {
   return session?.planType === 'openspec';
+}
+
+/**
+ * @param {Record<string, unknown>} session
+ * @returns {boolean}
+ */
+export function sessionNeedsSpecVerify(session) {
+  return session?.planType === 'specs';
 }
 
 /**
@@ -116,4 +126,58 @@ export function checkOpenSpecVerifyArtifact(opts) {
   }
 
   return { required: true, ok: true, skillPath, reportPath, problem: null };
+}
+
+/**
+ * Specs leftover sweep is always on — Forge ships the skill, so absence of a
+ * skill file is a packaging bug, not an optional profile.
+ *
+ * @param {{
+ *   cwd: string,
+ *   sessionDir: string,
+ *   session: Record<string, unknown>,
+ *   existsSync?: typeof fs.existsSync,
+ *   readFileSync?: typeof fs.readFileSync,
+ * }} opts
+ * @returns {{
+ *   required: boolean,
+ *   ok: boolean,
+ *   reportPath: string,
+ *   problem: string | null,
+ * }}
+ */
+export function checkSpecVerifyArtifact(opts) {
+  const existsSync = opts.existsSync ?? fs.existsSync;
+  const readFileSync = opts.readFileSync ?? fs.readFileSync;
+  const reportPath = path.join(opts.sessionDir, SPEC_VERIFY_BASENAME);
+
+  if (!sessionNeedsSpecVerify(opts.session)) {
+    return { required: false, ok: true, reportPath, problem: null };
+  }
+
+  if (!existsSync(reportPath)) {
+    return {
+      required: true,
+      ok: false,
+      reportPath,
+      problem:
+        `missing ${SPEC_VERIFY_BASENAME} — run the specs leftover sweep ` +
+        '(skills/specs-verify-change), fix every finding (including files not in tasks.md), ' +
+        'then write Remaining: none',
+    };
+  }
+
+  const content = readFileSync(reportPath, 'utf8');
+  if (!remainingFindingsCleared(content)) {
+    return {
+      required: true,
+      ok: false,
+      reportPath,
+      problem:
+        `${SPEC_VERIFY_BASENAME} still has leftover findings — fix them ` +
+        '(including files not in tasks.md) or record a design-decision skip, then set Remaining: none',
+    };
+  }
+
+  return { required: true, ok: true, reportPath, problem: null };
 }

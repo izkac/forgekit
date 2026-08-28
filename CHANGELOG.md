@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Specs leftover sweep before final review. When a session is `planType: specs`,
+Forge verify always runs the bundled `specs-verify-change` skill (no vendor
+CLI), fixes every finding (CRITICAL, WARNING, SUGGESTION — including files
+`tasks.md` never listed), and records `spec-verify.md` with `Remaining: none`.
+`forge phase review` and `forge phase done` refuse without it. OpenSpec still
+uses `openspec-verify.md` when the vendor skill is present. Combined close
+still runs the sweep before the closer.
+
+Review cadence copy matches `implement.md`. `/forge:apply` and the OpenSpec
+apply overlay dispatch one implementer per `tasks.md` `##` group and one
+combined task reviewer at the group boundary. The session-start reminder and
+pace reasons say the high-risk floor is each **task line**, not the change
+name. `shouldRunPerTaskReview` ignores kebab slugs passed as `signalText`
+(hmac/migrate in the slug no longer reviews every task).
+
 ## 0.3.50 — 2026-08-27
 
 OpenSpec leftover sweep before final review. When `openspec-verify-change` /

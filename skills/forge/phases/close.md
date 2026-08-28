@@ -36,12 +36,15 @@ review, it just fails the gate later.
    forge phase verify
    ```
 
-2. **OpenSpec leftover sweep (when available).** Follow
-   [verify.md](./verify.md) §7 **before** the closer. The closer is scoped to
-   the session diff and must not grep the tree — files `tasks.md` forgot are
-   invisible unless you sweep and fix them first. Save
-   `openspec-verify.md` with `Remaining: none`. Skip this step only when the
-   vendor skill is absent or `planType` is not `openspec`.
+2. **Leftover sweep (both engines).** Follow [verify.md](./verify.md) §7
+   **before** the closer. The closer is scoped to the session diff and must
+   not grep the tree — files `tasks.md` forgot are invisible unless you sweep
+   and fix them first.
+   - Specs (`planType: specs`): always run `specs-verify-change`; save
+     `spec-verify.md` with `Remaining: none`.
+   - OpenSpec (`planType: openspec`): run the vendor skill when present; save
+     `openspec-verify.md` with `Remaining: none`. Skip the OpenSpec file only
+     when the vendor skill is absent. Do not invent a parallel sweep.
 
 3. **One closer dispatch.** Take the label first — the closer **is** the
    session's final reviewer:

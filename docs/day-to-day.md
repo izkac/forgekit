@@ -120,9 +120,10 @@ forge status     # phase, tasks 4/9, pace, health: healthy | stale | red | done
 **5. Verify + final review.** Tests run for real (evidence is stamped, not
 claimed). On OpenSpec projects with `openspec-verify-change` installed, Forge
 sweeps leftovers (docs, missed files, naming) and fixes them before the
-independent reviewer reads the whole session diff. On small low-risk changes
-verify + review collapse into one "closer" pass — the leftover sweep still
-runs first.
+independent reviewer reads the whole session diff. On specs-engine projects the
+sweep is always on and records `spec-verify.md` with `Remaining: none` before
+that reviewer. On small low-risk changes verify + review collapse into one
+"closer" pass — the leftover sweep still runs first.
 
 **6. Finish.** The change is archived, `forge phase done` runs the integrity
 gate and writes a scorecard. If it refuses, see §6.
@@ -150,9 +151,10 @@ forge prefs standard              # this checkout, permanently (gitignored file)
 
 Or just say it in chat: `Pace: brisk` in your task message works.
 
-Two floors you can't lower, on purpose: high-risk tasks (money, auth,
-contracts, migrations) always get per-task review and an independent final
-review, on every pace. And `auto` fails *closed* — an unrecognized task
+Two floors you can't lower, on purpose: a **task line** that is money, auth,
+contracts, or migrations always gets its own review (and the session still
+gets an independent final review). A high-risk *change name* does not make
+every task 1:1. And `auto` fails *closed* — an unrecognized task
 resolves to `standard`, never to `brisk`.
 
 ---

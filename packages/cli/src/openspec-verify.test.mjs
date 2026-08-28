@@ -5,9 +5,12 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   checkOpenSpecVerifyArtifact,
+  checkSpecVerifyArtifact,
   findOpenSpecVerifySkill,
   remainingFindingsCleared,
   sessionNeedsOpenSpecVerify,
+  sessionNeedsSpecVerify,
+  SPEC_VERIFY_BASENAME,
 } from './openspec-verify.mjs';
 
 function tmp(prefix) {
@@ -167,6 +170,113 @@ test('checkOpenSpecVerifyArtifact: Remaining: none passes', () => {
     assert.equal(result.required, true);
     assert.equal(result.ok, true);
     assert.equal(result.problem, null);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('SPEC_VERIFY_BASENAME is spec-verify.md', () => {
+  assert.equal(SPEC_VERIFY_BASENAME, 'spec-verify.md');
+});
+
+test('sessionNeedsSpecVerify: only planType specs', () => {
+  assert.equal(sessionNeedsSpecVerify({ planType: 'specs' }), true);
+  assert.equal(sessionNeedsSpecVerify({ planType: 'openspec' }), false);
+  assert.equal(sessionNeedsSpecVerify({ planType: null }), false);
+  assert.equal(sessionNeedsSpecVerify({}), false);
+});
+
+test('checkSpecVerifyArtifact: specs session without the file is required and not ok', () => {
+  const cwd = tmp('sv-miss-');
+  try {
+    const sessionDir = path.join(cwd, 'sess');
+    fs.mkdirSync(sessionDir);
+    const result = checkSpecVerifyArtifact({
+      cwd,
+      sessionDir,
+      session: { planType: 'specs' },
+    });
+    assert.equal(result.required, true);
+    assert.equal(result.ok, false);
+    assert.match(result.problem, /spec-verify\.md/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('checkSpecVerifyArtifact: Remaining: none passes', () => {
+  const cwd = tmp('sv-ok-');
+  try {
+    const sessionDir = path.join(cwd, 'sess');
+    fs.mkdirSync(sessionDir);
+    fs.writeFileSync(
+      path.join(sessionDir, 'spec-verify.md'),
+      '## Forge disposition\n\n- Remaining: none\n',
+    );
+    const result = checkSpecVerifyArtifact({
+      cwd,
+      sessionDir,
+      session: { planType: 'specs' },
+    });
+    assert.equal(result.required, true);
+    assert.equal(result.ok, true);
+    assert.equal(result.problem, null);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('checkSpecVerifyArtifact: ready-for-archive is not enough', () => {
+  const cwd = tmp('sv-vendor-');
+  try {
+    const sessionDir = path.join(cwd, 'sess');
+    fs.mkdirSync(sessionDir);
+    fs.writeFileSync(
+      path.join(sessionDir, 'spec-verify.md'),
+      'No critical issues. Ready for archive (with noted improvements).\n',
+    );
+    const result = checkSpecVerifyArtifact({
+      cwd,
+      sessionDir,
+      session: { planType: 'specs' },
+    });
+    assert.equal(result.required, true);
+    assert.equal(result.ok, false);
+    assert.match(result.problem, /leftover findings/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('checkSpecVerifyArtifact: OpenSpec session does not require spec-verify.md', () => {
+  const cwd = tmp('sv-os-');
+  try {
+    const sessionDir = path.join(cwd, 'sess');
+    fs.mkdirSync(sessionDir);
+    const result = checkSpecVerifyArtifact({
+      cwd,
+      sessionDir,
+      session: { planType: 'openspec' },
+    });
+    assert.equal(result.required, false);
+    assert.equal(result.ok, true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('checkSpecVerifyArtifact: always required for specs — no skill-file probe', () => {
+  const cwd = tmp('sv-noskill-');
+  try {
+    const sessionDir = path.join(cwd, 'sess');
+    fs.mkdirSync(sessionDir);
+    const result = checkSpecVerifyArtifact({
+      cwd,
+      sessionDir,
+      session: { planType: 'specs' },
+    });
+    assert.equal(result.required, true);
+    assert.equal(result.ok, false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

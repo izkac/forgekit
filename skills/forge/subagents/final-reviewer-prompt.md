@@ -31,10 +31,12 @@ Your two required sections below — the spec-to-runtime trace and product-loop
 acceptance — send you outside the diff on purpose: follow a capability to its
 production caller, read `spine.json` and `e2e.json`, open the file a spine row
 names. That is directed reading and the whole point of this review. If
-`.forge/sessions/<id>/openspec-verify.md` exists, read the Forge disposition
-(leftover files should already be in this diff). Everything else stays inside
-the diff: no directory sweeps, no grepping for related code, no reading modules
-this session never touched to see how the project generally works.
+`.forge/sessions/<id>/openspec-verify.md` or `spec-verify.md` exists, read the
+Forge disposition (leftover files should already be in this diff). Specs
+sessions use `spec-verify.md`; OpenSpec sessions use `openspec-verify.md`.
+Everything else stays inside the diff: no directory sweeps, no grepping for
+related code, no reading modules this session never touched to see how the
+project generally works.
 
 ## Spec-to-runtime trace (required)
 

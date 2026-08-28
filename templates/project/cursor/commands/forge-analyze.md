@@ -10,7 +10,7 @@ description: Forge — analyze recent sessions and write an improvement report
 ## 1. Gather
 
 - `.forge/scorecards.jsonl` — durable one-line-per-session ledger (score, grade, deductions, caps, pace, incomplete reasons). Survives session cleanup; this is your history.
-- `.forge/sessions/*/` for sessions still on disk: `scorecard.md`, `verify-evidence.md`, `openspec-verify.md`, `reviews/final-review.md`, `deferrals.json`, `session.json`.
+- `.forge/sessions/*/` for sessions still on disk: `scorecard.md`, `verify-evidence.md`, `spec-verify.md`, `openspec-verify.md`, `reviews/final-review.md`, `deferrals.json`, `session.json`.
 
 If both are empty, tell the user there is nothing to analyze yet and stop.
 

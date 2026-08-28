@@ -173,7 +173,8 @@ export function suggestPaceFromSignals(signalText = '') {
     // never resolve to a pace that skips reviews.
     return {
       pace: 'standard',
-      reason: 'high-risk signals (money/auth/contracts/migrations/secrets) — per-task review floor applies',
+      reason:
+        'high-risk signals (money/auth/contracts/migrations/secrets) — session stays standard; only matching task lines get an immediate review',
     };
   }
   if (STANDARD_RE.test(text)) {
@@ -339,6 +340,18 @@ export function resolveEffectivePreferences(opts = {}) {
 }
 
 /**
+ * Task lines have spaces. Session slugs and change names are kebab-case and
+ * often contain migrate/hmac/auth as tokens — passing one as `signalText`
+ * would fire the hard floor after every task.
+ *
+ * @param {unknown} text
+ * @returns {boolean}
+ */
+function isTaskLineText(text) {
+  return /\s/.test(String(text || '').trim());
+}
+
+/**
  * Whether to dispatch a reviewer *now* (after the current task / group boundary).
  *
  * @param {Record<string, unknown>} effective
@@ -347,12 +360,15 @@ export function resolveEffectivePreferences(opts = {}) {
  *   signalText?: string,
  *   groupComplete?: boolean,
  * }} [ctx]
- *   `groupComplete` — true when the just-finished task closes an OpenSpec
+ *   `signalText` — the **current task's** wording (a phrase). Do not pass the
+ *   session slug or change name.
+ *   `groupComplete` — true when the just-finished task closes a
  *   `tasks.md` section (top-level heading group). Required for `per-group`
  *   cadence on low-risk work.
  */
 export function shouldRunPerTaskReview(effective, ctx = {}) {
-  const highRisk = Boolean(ctx.highRisk) || isHighRiskText(ctx.signalText);
+  const fromTaskLine = isTaskLineText(ctx.signalText) && isHighRiskText(ctx.signalText);
+  const highRisk = Boolean(ctx.highRisk) || fromTaskLine;
   const perTask = effective.review?.perTask;
   if (perTask === 'always') return true;
   if (perTask === 'per-group') {

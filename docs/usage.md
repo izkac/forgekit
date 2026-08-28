@@ -433,6 +433,7 @@ Cannot enter phase "done":
   - spine: row 1 (REQ-GOV-01): runtimeOwner still has scaffold placeholder
   - e2e-results.json missing — run forge e2e run (a green run is required before done)
   - missing openspec-verify.md — run openspec-verify-change / /opsx:verify, then Remaining: none
+  - missing spec-verify.md — run specs-verify-change, then Remaining: none
 ```
 
 ### 6f. Test-tamper guard & TDD evidence (mostly automatic)
@@ -442,8 +443,8 @@ when the session started (or any Forge integrity artifact) via a tool call —
 a `PreToolUse` hook on Edit/Write/NotebookEdit/MultiEdit denies it during
 implement/verify/review/finish (a shell `rm`/`sed -i`/redirect is not
 intercepted by this hook — agents are instructed never to use one to route
-around a deny). `verify-evidence.md` and `openspec-verify.md` freeze later than the rest (from
-review, not implement) since it is authored during verify itself. Forge's
+around a deny). `verify-evidence.md`, `openspec-verify.md`, and `spec-verify.md` freeze later than the rest (from
+review, not implement) since they are authored during verify itself. Forge's
 own control surface — `.forge/config.json`, `.forge/active.json`, and any
 session's `session.json` — is guarded unconditionally too, so the guard's
 configuration and trust anchors can't be edited around instead of the file a
