@@ -75,7 +75,7 @@ The agent triages, brainstorms with you, plans a tracked change, writes the oper
 ## Docs
 
 - **[How to use Forgekit](https://github.com/izkac/forgekit/blob/main/docs/usage.md)** — full tutorial: install, project wiring, worked examples, integrity gates, fleet, cheat sheet
-- **[Full Forge reference](https://github.com/izkac/forgekit/blob/main/skills/forge/docs/forge.md)** — phases, pace matrix, integrity rules (also installed at `~/.claude/skills/forge/docs/forge.md`)
+- **[Full Forge reference](https://github.com/izkac/forgekit/blob/main/skills/forge/docs/forge.md)** — phases, pace matrix, integrity rules (also installed at `~/.agents/skills/forge/docs/forge.md`)
 - **[Repository](https://github.com/izkac/forgekit#readme)**
 
 ## License

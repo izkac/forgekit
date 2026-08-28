@@ -30,9 +30,9 @@ Usage:
   forgekit <command> [args...]
 
 Commands:
-  install                 Install skills into ~/.agents/skills/ (Claude/Windsurf: vendor paths)
+  install                 Install skills into ~/.agents/skills/ (Claude/Windsurf: symlink from vendor path)
   list                    Show installed / missing / outdated (unique dest + harness aliases)
-  update                  Reinstall outdated skills
+  update                  Refresh outdated skills; npm i -g a newer @izkac/forgekit if published
   uninstall               Remove installed skill directories
 
 Install picks skills and agents (interactive on TTY, or via flags).

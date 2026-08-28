@@ -22,9 +22,23 @@ import {
   SKILL_IDS,
   AGENT_IDS,
   AGENTS,
+  versionIsNewer,
+  runningFromMonorepo,
 } from './install.mjs';
 import * as installApi from './install.mjs';
 import { loadUserConfig, saveUserConfig } from './config.mjs';
+
+function assertVendorLink(home, agentId, skillId = 'forge') {
+  const dest = AGENTS[agentId].skillDir(home, skillId);
+  const linkFn = AGENTS[agentId].vendorLink;
+  assert.ok(linkFn, `${agentId} should have a vendorLink`);
+  const link = linkFn(home, skillId);
+  const st = fs.lstatSync(link);
+  assert.ok(st.isSymbolicLink(), `${agentId} vendor path should be a symlink`);
+  assert.ok(fs.existsSync(path.join(link, 'SKILL.md')));
+  const resolved = path.resolve(path.dirname(link), fs.readlinkSync(link));
+  assert.equal(path.normalize(resolved), path.normalize(path.resolve(dest)));
+}
 
 test('parseArgs supports multi skills and agents', () => {
   const opts = parseArgs([
@@ -45,25 +59,26 @@ test('parseArgs accepts --skill singular and shorthand agents', () => {
   assert.deepEqual(opts.agents, ['cursor', 'codex']);
 });
 
-test('AGENTS has no selectable agents key; five harnesses share ~/.agents/skills', () => {
+test('AGENTS has no selectable agents key; every harness shares ~/.agents/skills', () => {
   assert.equal(AGENTS.agents, undefined);
   assert.ok(!AGENT_IDS.includes('agents'));
   const home = '/home/u';
   const shared = path.join(home, '.agents', 'skills', 'forge');
-  for (const id of ['cursor', 'codex', 'copilot', 'gemini', 'opencode']) {
+  for (const id of AGENT_IDS) {
     assert.equal(AGENTS[id].skillDir(home, 'forge'), shared);
   }
   assert.equal(
-    AGENTS.claude.skillDir(home, 'forge'),
+    AGENTS.claude.vendorLink(home, 'forge'),
     path.join(home, '.claude', 'skills', 'forge'),
   );
   assert.equal(
-    AGENTS.windsurf.skillDir(home, 'forge'),
+    AGENTS.windsurf.vendorLink(home, 'forge'),
     path.join(home, '.codeium', 'windsurf', 'skills', 'forge'),
   );
+  assert.equal(AGENTS.cursor.vendorLink, undefined);
 });
 
-test('AGENTS_SHARING_AGENTS_ROOT is the five .agents-capable ids, frozen', () => {
+test('AGENTS_SHARING_AGENTS_ROOT is the five native .agents ids, frozen', () => {
   assert.ok(installApi.AGENTS_SHARING_AGENTS_ROOT);
   assert.deepEqual([...installApi.AGENTS_SHARING_AGENTS_ROOT], [
     'cursor',
@@ -73,6 +88,10 @@ test('AGENTS_SHARING_AGENTS_ROOT is the five .agents-capable ids, frozen', () =>
     'opencode',
   ]);
   assert.ok(Object.isFrozen(installApi.AGENTS_SHARING_AGENTS_ROOT));
+});
+
+test('AGENTS_WITH_VENDOR_LINK is claude and windsurf', () => {
+  assert.deepEqual([...installApi.AGENTS_WITH_VENDOR_LINK], ['claude', 'windsurf']);
 });
 
 test('parseArgs --shared throws naming --cursor and --codex', () => {
@@ -116,12 +135,13 @@ test('defaultAgentSelection unions installed agents and dedupes', () => {
   assert.deepEqual(defaultAgentSelection(['windsurf']), [...sharing, 'windsurf']);
 });
 
-test('parseArgs --all-skills / --all-agents / --update / --uninstall', () => {
+test('parseArgs --all-skills / --all-agents / --update / --uninstall / --no-pkg', () => {
   const opts = parseArgs(['--all-skills', '--all-agents', '--update']);
   assert.equal(opts.allSkills, true);
   assert.equal(opts.allAgents, true);
   assert.equal(opts.update, true);
   assert.equal(parseArgs(['--uninstall']).uninstall, true);
+  assert.equal(parseArgs(['--update', '--no-pkg']).noPkg, true);
 });
 
 test('installSkillsToAgents installs and stamps .forgekit.json', () => {
@@ -131,17 +151,19 @@ test('installSkillsToAgents installs and stamps .forgekit.json', () => {
       home,
       force: true,
     });
-    assert.equal(results.length, 2);
+    assert.equal(results.length, 1);
     assert.ok(results.every((r) => r.status === 'installed'));
     const dest = path.join(home, '.agents', 'skills', 'forge');
     assert.ok(fs.existsSync(path.join(dest, 'SKILL.md')));
     assert.ok(fs.existsSync(path.join(dest, FORGEKIT_STAMP)));
     assert.ok(!fs.existsSync(path.join(home, '.cursor', 'skills', 'forge')));
-    assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'forge', 'SKILL.md')));
+    assertVendorLink(home, 'claude');
     const stamp = readInstallStamp(dest);
     assert.equal(stamp.skill, 'forge');
     assert.ok(stamp.contentHash);
     assert.ok(stamp.version);
+    assert.ok(stamp.agents.includes('cursor'));
+    assert.ok(stamp.agents.includes('claude'));
 
     const again = installSkillsToAgents(['forge'], ['cursor'], { home });
     assert.equal(again[0].status, 'exists');
@@ -153,14 +175,8 @@ test('installSkillsToAgents installs and stamps .forgekit.json', () => {
 test('listInstallStatus reports unique dests with the agent ids that map there', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-list-'));
   try {
-    const expectedKeys = new Set();
-    for (const skillId of SKILL_IDS) {
-      for (const agentId of AGENT_IDS) {
-        expectedKeys.add(`${skillId}\0${AGENTS[agentId].skillDir(home, skillId)}`);
-      }
-    }
     const rows = listInstallStatus({ home });
-    assert.equal(rows.length, expectedKeys.size, 'one row per unique skill×dest');
+    assert.equal(rows.length, SKILL_IDS.length, 'one row per skill (shared dest)');
     assert.equal(
       new Set(rows.map((r) => `${r.skill}\0${r.dest}`)).size,
       rows.length,
@@ -172,12 +188,7 @@ test('listInstallStatus reports unique dests with the agent ids that map there',
     const sharedDest = path.join(home, '.agents', 'skills', 'forge');
     const shared = rows.find((r) => r.skill === 'forge' && r.dest === sharedDest);
     assert.ok(shared, 'shared .agents dest is listed once');
-    assert.deepEqual(shared.agents, [...installApi.AGENTS_SHARING_AGENTS_ROOT]);
-
-    const claude = rows.find(
-      (r) => r.skill === 'forge' && r.dest === path.join(home, '.claude', 'skills', 'forge'),
-    );
-    assert.deepEqual(claude.agents, ['claude']);
+    assert.deepEqual(shared.agents.sort(), [...AGENT_IDS].sort());
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -210,56 +221,57 @@ test('forgekit --help names ~/.agents/skills and unique dests', () => {
   assert.doesNotMatch(result.stdout, /skill × agent/);
 });
 
-test('uninstallSkillsFromAgents removes installed dirs', () => {
+test('uninstallSkillsFromAgents removes installed dirs and the vendor symlink', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-uninst-'));
   try {
     installSkillsToAgents(['forge'], ['claude'], { home, force: true });
+    const dest = path.join(home, '.agents', 'skills', 'forge');
     const results = uninstallSkillsFromAgents(['forge'], ['claude'], { home });
     assert.equal(results[0].status, 'removed');
+    assert.ok(!fs.existsSync(dest));
     assert.ok(!fs.existsSync(path.join(home, '.claude', 'skills', 'forge')));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('expanded environments resolve to their global skills dirs', () => {
+test('expanded environments resolve to the shared ~/.agents dest; claude/windsurf have vendorLink', () => {
   const home = '/home/u';
   assert.ok(AGENT_IDS.includes('copilot'));
   assert.ok(AGENT_IDS.includes('windsurf'));
+  const shared = path.join(home, '.agents', 'skills', 'forge');
+  assert.equal(AGENTS.copilot.skillDir(home, 'forge'), shared);
+  assert.equal(AGENTS.windsurf.skillDir(home, 'forge'), shared);
+  assert.equal(AGENTS.opencode.skillDir(home, 'forge'), shared);
   assert.equal(
-    AGENTS.copilot.skillDir(home, 'forge'),
-    path.join(home, '.agents', 'skills', 'forge'),
-  );
-  assert.equal(
-    AGENTS.windsurf.skillDir(home, 'forge'),
+    AGENTS.windsurf.vendorLink(home, 'forge'),
     path.join(home, '.codeium', 'windsurf', 'skills', 'forge'),
-  );
-  assert.equal(
-    AGENTS.opencode.skillDir(home, 'forge'),
-    path.join(home, '.agents', 'skills', 'forge'),
   );
 });
 
-test('reconcileInstall prunes deselected pairs and remembers installs', () => {
+test('reconcileInstall prunes deselected linked harness and keeps shared dest', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-recon-'));
   try {
-    // Independent dests (claude + windsurf) so prune is not coupled to shared .agents.
     reconcileInstall(['forge'], ['claude', 'windsurf'], { home, prune: true });
     let managed = installedManagedPairs(home);
     assert.equal(managed.length, 2);
+    const dest = path.join(home, '.agents', 'skills', 'forge');
+    assert.ok(fs.existsSync(dest));
+    assertVendorLink(home, 'claude');
+    assertVendorLink(home, 'windsurf');
 
-    // Re-select: forge on claude only → windsurf pair pruned.
     const { removed } = reconcileInstall(['forge'], ['claude'], {
       home,
       prune: true,
     });
-    assert.equal(removed.length, 1);
-    assert.equal(removed[0].agent, 'windsurf');
+    assert.ok(removed.some((r) => r.agent === 'windsurf'));
     managed = installedManagedPairs(home);
     assert.deepEqual(
       managed.map((p) => `${p.skill}:${p.agent}`),
       ['forge:claude'],
     );
+    assert.ok(fs.existsSync(dest), 'claude still owns the shared dest');
+    assertVendorLink(home, 'claude');
     assert.ok(
       !fs.existsSync(path.join(home, '.codeium', 'windsurf', 'skills', 'forge')),
     );
@@ -397,15 +409,46 @@ test('updateOutdatedSkills never clobbers a foreign unstamped skill under ~/.age
   }
 });
 
-test('updateOutdatedSkills refreshes unversioned installs', () => {
+test('updateOutdatedSkills refreshes stamped outdated installs', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-upd-'));
   try {
     installSkillsToAgents(['forge'], ['claude'], { home, force: true });
-    const dest = path.join(home, '.claude', 'skills', 'forge');
-    fs.unlinkSync(path.join(dest, FORGEKIT_STAMP));
+    const dest = path.join(home, '.agents', 'skills', 'forge');
+    const stamp = readInstallStamp(dest);
+    stamp.contentHash = 'stale';
+    fs.writeFileSync(
+      path.join(dest, FORGEKIT_STAMP),
+      `${JSON.stringify(stamp, null, 2)}\n`,
+      'utf8',
+    );
     const { results } = updateOutdatedSkills({ home });
     assert.ok(results.some((r) => r.skill === 'forge' && r.status === 'installed'));
-    assert.ok(fs.existsSync(path.join(dest, FORGEKIT_STAMP)));
+    assert.notEqual(readInstallStamp(dest).contentHash, 'stale');
+    assertVendorLink(home, 'claude');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('updateOutdatedSkills does not add unrecorded linked harnesses', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-upd-no-windsurf-'));
+  try {
+    installSkillsToAgents(['forge'], ['cursor', 'claude'], { home, force: true });
+    const dest = path.join(home, '.agents', 'skills', 'forge');
+    const stamp = readInstallStamp(dest);
+    stamp.contentHash = 'stale';
+    fs.writeFileSync(
+      path.join(dest, FORGEKIT_STAMP),
+      `${JSON.stringify(stamp, null, 2)}\n`,
+      'utf8',
+    );
+    updateOutdatedSkills({ home });
+    assert.deepEqual(readInstallStamp(dest).agents.sort(), ['claude', 'cursor']);
+    assert.ok(
+      !fs.existsSync(path.join(home, '.codeium', 'windsurf', 'skills', 'forge')),
+      'windsurf was never recorded, so no vendor link',
+    );
+    assertVendorLink(home, 'claude');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -481,12 +524,11 @@ test('install without --force still records a second alias on the shared dest', 
   }
 });
 
-test('uninstall of every .agents alias removes the shared dest', () => {
+test('uninstall of native .agents aliases keeps dest while claude remains', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-uninst-all-'));
   try {
     installSkillsToAgents(['forge'], ['cursor'], { home, force: true });
     const dest = path.join(home, '.agents', 'skills', 'forge');
-    const claudeDest = path.join(home, '.claude', 'skills', 'forge');
     installSkillsToAgents(['forge'], ['claude'], { home, force: true });
 
     const results = uninstallSkillsFromAgents(
@@ -494,11 +536,10 @@ test('uninstall of every .agents alias removes the shared dest', () => {
       [...installApi.AGENTS_SHARING_AGENTS_ROOT],
       { home },
     );
-    assert.ok(
-      results.some((r) => r.status === 'removed' && r.dest === dest),
-    );
-    assert.ok(!fs.existsSync(dest));
-    assert.ok(fs.existsSync(claudeDest), 'claude dest is independent');
+    assert.ok(results.some((r) => r.status === 'kept' && r.dest === dest));
+    assert.ok(fs.existsSync(dest), 'claude still owns the dest');
+    assertVendorLink(home, 'claude');
+    assert.deepEqual(readInstallStamp(dest).agents, ['claude']);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -516,7 +557,8 @@ test('reconcileInstall prune keeps dest if another desired harness maps there', 
       prune: true,
     });
     assert.ok(fs.existsSync(dest), 'cursor still desired for this dest');
-    assert.ok(!removed.some((r) => r.dest === dest));
+    assert.deepEqual(readInstallStamp(dest).agents, ['cursor']);
+    assert.ok(!removed.some((r) => r.status === 'removed' && r.dest === dest));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -561,4 +603,93 @@ test('unstamped vendor leftover survives an install to ~/.agents/skills', () => 
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test('cursor install does not create a Claude vendor path', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-no-claude-link-'));
+  try {
+    installSkillsToAgents(['forge'], ['cursor'], { home, force: true });
+    assert.ok(!fs.existsSync(path.join(home, '.claude', 'skills', 'forge')));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('stamped Claude vendor copy is replaced with a symlink on install', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-claude-migrate-'));
+  try {
+    const vendor = path.join(home, '.claude', 'skills', 'forge');
+    fs.mkdirSync(vendor, { recursive: true });
+    fs.writeFileSync(path.join(vendor, 'SKILL.md'), 'old claude copy\n', 'utf8');
+    fs.writeFileSync(
+      path.join(vendor, FORGEKIT_STAMP),
+      `${JSON.stringify({ skill: 'forge', contentHash: 'stale', agents: ['claude'] })}\n`,
+      'utf8',
+    );
+
+    installSkillsToAgents(['forge'], ['claude'], { home, force: true });
+
+    assertVendorLink(home, 'claude');
+    const dest = path.join(home, '.agents', 'skills', 'forge');
+    assert.ok(readInstallStamp(dest).agents.includes('claude'));
+    assert.notEqual(
+      fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'),
+      'old claude copy\n',
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('unstamped Claude vendor directory is not replaced by a symlink', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-claude-foreign-'));
+  try {
+    const vendor = path.join(home, '.claude', 'skills', 'forge');
+    fs.mkdirSync(vendor, { recursive: true });
+    const body = 'hand-written claude skill\n';
+    fs.writeFileSync(path.join(vendor, 'SKILL.md'), body, 'utf8');
+
+    installSkillsToAgents(['forge'], ['claude'], { home, force: true });
+
+    assert.equal(fs.readFileSync(path.join(vendor, 'SKILL.md'), 'utf8'), body);
+    assert.ok(!fs.lstatSync(vendor).isSymbolicLink());
+    assert.ok(fs.existsSync(path.join(home, '.agents', 'skills', 'forge', 'SKILL.md')));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('updateOutdatedSkills migrates a stamped Claude vendor copy to a symlink', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-upd-migrate-'));
+  try {
+    const dest = path.join(home, '.agents', 'skills', 'forge');
+    installSkillsToAgents(['forge'], ['cursor'], { home, force: true });
+    const vendor = path.join(home, '.claude', 'skills', 'forge');
+    fs.mkdirSync(vendor, { recursive: true });
+    fs.writeFileSync(path.join(vendor, 'SKILL.md'), 'stale vendor\n', 'utf8');
+    fs.writeFileSync(
+      path.join(vendor, FORGEKIT_STAMP),
+      `${JSON.stringify({ skill: 'forge', contentHash: 'stale' })}\n`,
+      'utf8',
+    );
+
+    const { results } = updateOutdatedSkills({ home });
+    assert.ok(results.length > 0);
+    assertVendorLink(home, 'claude');
+    assert.ok(readInstallStamp(dest).agents.includes('claude'));
+    assert.ok(readInstallStamp(dest).agents.includes('cursor'));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('versionIsNewer compares dotted versions', () => {
+  assert.equal(versionIsNewer('0.3.53', '0.3.52'), true);
+  assert.equal(versionIsNewer('0.3.52', '0.3.52'), false);
+  assert.equal(versionIsNewer('0.3.51', '0.3.52'), false);
+  assert.equal(versionIsNewer('1.0.0', '0.9.9'), true);
+});
+
+test('runningFromMonorepo is true in this checkout', () => {
+  assert.equal(runningFromMonorepo(), true);
 });

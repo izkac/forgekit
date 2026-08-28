@@ -40,8 +40,8 @@ into your agent settings if hooks are not picked up automatically.
 **Editing this file, `pace.md`, or anything else under `skills/forge/`?**
 Those edits change this repo checkout, not what's installed. Every machine
 running Forge — including this one, if it already installed — keeps reading
-its old copy under `~/.claude/skills/forge/…` (or the Cursor/Codex equivalent)
-until it re-runs `forgekit install --skills forge --force`.
+its old copy under `~/.agents/skills/forge/…` until it re-runs
+`forgekit install --skills forge --force` (or `forgekit update`).
 
 ---
 
@@ -794,9 +794,10 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 | Agent | Skill (after install) | Project wiring (`forge init`) | Session hooks |
 | ----- | --------------------- | ----------------------------- | ------------- |
 | **Cursor** | `~/.agents/skills/forge/` (pick that harness) | commands, `forge.mdc`, SessionStart hook (`forge init --cursor`) | SessionStart → active session reminder |
-| **Claude Code** | `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks | SessionStart + `/forge` or “use Forge” UserPromptSubmit |
+| **Claude Code** | `~/.agents/skills/forge/` via symlink at `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks | SessionStart + `/forge` or “use Forge” UserPromptSubmit |
 | **Codex CLI** | `~/.agents/skills/forge/` (pick that harness) | thin rule | *(none — start only when the user asks to use Forge)* |
 | **Copilot / Gemini / OpenCode** | `~/.agents/skills/forge/` (pick that harness; one dest) | *(none — global skill only)* | *(none — start only when the user asks to use Forge)* |
+| **Windsurf** | `~/.agents/skills/forge/` via vendor-path symlink | *(none — global skill only)* | *(none — start only when the user asks to use Forge)* |
 
 ### Slash commands (Cursor + Claude Code)
 
@@ -822,14 +823,16 @@ User can say “skip forge” or `/forge:skip` to opt out.
 
 ### Vendor-neutral `.agents` target
 
-`.agents` is not a picker item. Selecting Cursor, Codex, Copilot, Gemini, or
-OpenCode writes the skill once to `~/.agents/skills/forge/` — those harnesses
-discover that root natively. There is no `--shared` flag. Claude Code still
-needs `--claude` (`~/.claude/skills/forge/`). `forge init --agents` errors and
-points at `forgekit install`. Leftover stamped project copies at
-`.agents/skills/forge/` (from 0.3.48) are warned by `forge doctor` and retired
-by the next `forge init`; unstamped / other `.agents/` content is left alone.
-In agnostic tools, invoke Forge **by name** (“use Forge”, “do forge work”).
+`.agents` is not a picker item. Selecting any harness writes the skill once
+to `~/.agents/skills/forge/`. Cursor, Codex, Copilot, Gemini, and OpenCode
+discover that root natively. Claude Code and Windsurf get a directory
+symlink from their vendor skill path to the same folder. There is no
+`--shared` flag. Claude still needs `--claude` so the symlink is created.
+`forge init --agents` errors and points at `forgekit install`. Leftover
+stamped project copies at `.agents/skills/forge/` (from 0.3.48) are warned
+by `forge doctor` and retired by the next `forge init`; unstamped / other
+`.agents/` content is left alone. In agnostic tools, invoke Forge **by name**
+(“use Forge”, “do forge work”).
 
 ---
 

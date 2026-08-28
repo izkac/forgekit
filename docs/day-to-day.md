@@ -79,11 +79,13 @@ mid-Forge, a small plan (≤5 tasks, one capability, low-risk) triggers an
 **Using Cursor, Codex, Copilot, Gemini, or OpenCode?** Pick that harness at
 `forgekit install` — the skill lands once at `~/.agents/skills/forge/`. There
 is no `--shared` flag and no separate shared target. Claude still needs
-`--claude`. `forge init --agents` is gone: it errors and points at install. A
-leftover stamped project copy is a `forge doctor` warning and is retired by
-`forge init`. What you don't get from the skill alone: no slash commands and
-no hooks — start work by asking for Forge by name ("use Forge …"). Cursor
-still gets commands/rules/hooks via `forge init --cursor`.
+`--claude`: it gets a symlink at `~/.claude/skills/forge/` pointing at the
+same folder (Windsurf the same at its vendor path). `forge init --agents` is
+gone: it errors and points at install. A leftover stamped project copy is a
+`forge doctor` warning and is retired by `forge init`. What you don't get
+from the skill alone: no slash commands and no hooks — start work by asking
+for Forge by name ("use Forge …"). Cursor still gets commands/rules/hooks
+via `forge init --cursor`.
 
 ---
 

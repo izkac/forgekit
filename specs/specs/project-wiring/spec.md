@@ -180,17 +180,17 @@ no recorded value SHALL be resolved exactly as a first-time init is today.
 
 ### Requirement: Vendor-neutral `.agents` install target
 `forgekit install` SHALL NOT offer a selectable `agents` environment or a
-`--shared` flag. Harnesses that natively discover `~/.agents/skills/`
-(Cursor, Codex CLI, GitHub Copilot, Gemini CLI, OpenCode) SHALL install
-selected skills to `~/.agents/skills/<skill>/` with the standard forgekit
-stamp. Selecting more than one of those harnesses SHALL write each skill to
-that destination **once**. Claude Code SHALL keep `~/.claude/skills/<skill>/`.
-Windsurf SHALL keep its vendor skill path. `--shared` SHALL fail with an
-error that names `--cursor` / `--codex` (or other harness flags). The
-interactive picker SHALL pre-check the `.agents`-capable harnesses when
-nothing is installed yet. Forgekit SHALL only manage its own skill
-directories under `.agents/skills/` and SHALL NOT read, list, or remove
-anything else under `.agents/`.
+`--shared` flag. Every selected skill SHALL be written once to
+`~/.agents/skills/<skill>/` with the standard forgekit stamp. Harnesses that
+natively discover that root (Cursor, Codex CLI, GitHub Copilot, Gemini CLI,
+OpenCode) SHALL have no extra files. Harnesses that do not (Claude Code,
+Windsurf) SHALL get a directory symlink at their vendor skill path pointing
+at `~/.agents/skills/<skill>/`. `--shared` SHALL fail with an error that
+names `--cursor` / `--codex` (or other harness flags). The interactive
+picker SHALL pre-check the native `.agents` harnesses when nothing is
+installed yet. Forgekit SHALL only manage its own skill directories under
+`.agents/skills/` and SHALL NOT read, list, or remove anything else under
+`.agents/`.
 
 #### Scenario: Install to the shared user-level root
 
@@ -199,13 +199,21 @@ anything else under `.agents/`.
 - **THEN** `~/.agents/skills/forge/SKILL.md` exists
 - **AND** the directory carries a `.forgekit.json` stamp
 - **AND** `~/.cursor/skills/forge` is not created
+- **AND** `~/.claude/skills/forge` is not created
 
-#### Scenario: Two `.agents`-capable harnesses share one dest
+#### Scenario: Two native `.agents` harnesses share one dest
 
 - **GIVEN** a home directory without `~/.agents`
 - **WHEN** `forgekit install --skills forge --cursor --codex` runs
 - **THEN** exactly one copy exists at `~/.agents/skills/forge/`
 - **AND** `~/.codex/skills/forge` is not created
+
+#### Scenario: Claude gets a vendor symlink
+
+- **GIVEN** a home directory without `~/.agents`
+- **WHEN** `forgekit install --skills forge --claude` runs
+- **THEN** `~/.agents/skills/forge/SKILL.md` exists with a stamp
+- **AND** `~/.claude/skills/forge` is a directory symlink to that dest
 
 #### Scenario: `--shared` fails with guidance
 
@@ -273,16 +281,23 @@ forgekit stamp SHALL be left byte-identical, as SHALL all other content under
 - **WHEN** `forge init --cursor` runs
 - **THEN** both are left exactly as they were
 
-### Requirement: Shared dest is not deleted while another harness still maps there
-Uninstalling or pruning one `.agents`-capable harness SHALL NOT remove
-`~/.agents/skills/<skill>/` while another selected or remaining harness
-still maps to that destination.
+### Requirement: Shared dest is not deleted while another harness still owns it
+Uninstalling or pruning one harness SHALL NOT remove
+`~/.agents/skills/<skill>/` while another recorded owner remains. Pruning a
+linked harness SHALL remove its vendor symlink and leave the dest in place.
 
 #### Scenario: Uninstall Cursor keeps the dest if Codex remains
 
 - **GIVEN** `~/.agents/skills/forge/` installed via `--cursor --codex`
 - **WHEN** `forgekit uninstall --skills forge --agents cursor` runs
 - **THEN** `~/.agents/skills/forge/` still exists
+
+#### Scenario: Uninstall Cursor keeps the dest if Claude remains
+
+- **GIVEN** `~/.agents/skills/forge/` installed via `--cursor --claude`
+- **WHEN** `forgekit uninstall --skills forge --agents cursor` runs
+- **THEN** `~/.agents/skills/forge/` still exists
+- **AND** `~/.claude/skills/forge` remains a symlink to that dest
 
 ### Requirement: Stamped vendor leftovers are retired on `.agents` install
 When `forgekit install` writes a skill to `~/.agents/skills/<skill>/`, it
@@ -302,3 +317,33 @@ SHALL be left byte-identical.
 - **GIVEN** `~/.cursor/skills/forge/` without a `.forgekit.json` stamp
 - **WHEN** `forgekit install --skills forge --cursor --force` runs
 - **THEN** the unstamped vendor directory is left exactly as it was
+
+#### Scenario: Stamped Claude vendor copy becomes a symlink
+
+- **GIVEN** a stamped real directory at `~/.claude/skills/forge/`
+- **WHEN** `forgekit install --skills forge --claude --force` runs
+- **THEN** `~/.claude/skills/forge` is a directory symlink to `~/.agents/skills/forge/`
+
+### Requirement: `forgekit update` refreshes skills and may bump the global package
+`forgekit update` SHALL reinstall stamped skills that are outdated, migrate a
+stamped real copy at a linked vendor path to a symlink, and leave unstamped
+directories under `~/.agents/skills/` alone. When a newer `@izkac/forgekit`
+is on the npm registry and the CLI is not running from the forgekit git
+checkout, it SHALL install that version globally (`npm i -g`) and then
+refresh skills from the new package. `--no-pkg` SHALL skip the npm step.
+A checkout SHALL skip the npm step.
+
+#### Scenario: Outdated stamped dest is recopied
+
+- **GIVEN** `~/.agents/skills/forge/` with a stale content hash
+- **WHEN** `forgekit update --no-pkg` runs
+- **THEN** the dest is recopied from the packaged skill
+- **AND** recorded vendor symlinks still point at that dest
+
+#### Scenario: Git checkout skips npm
+
+- **GIVEN** forgekit is running from the monorepo checkout
+- **WHEN** `forgekit update` runs
+- **THEN** it does not run `npm i -g`
+- **AND** it still refreshes outdated skills
+

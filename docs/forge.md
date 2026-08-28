@@ -8,9 +8,9 @@ After `forgekit install`:
 
 | Agent | Path |
 | ----- | ---- |
-| Cursor | `~/.cursor/skills/forge/docs/forge.md` |
-| Claude Code | `~/.claude/skills/forge/docs/forge.md` |
-| Codex CLI | `~/.codex/skills/forge/docs/forge.md` |
+| Cursor / Codex / Copilot / Gemini / OpenCode | `~/.agents/skills/forge/docs/forge.md` |
+| Claude Code | same files, via `~/.claude/skills/forge/` (symlink) |
+| Windsurf | same files, via the Windsurf vendor skill symlink |
 
 **Editing a skill doc (this file's target, `pace.md`, etc.)?** That edit lands
 in this repo checkout only. Every machine that already ran `forgekit install`

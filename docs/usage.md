@@ -44,7 +44,10 @@ review --version
 
 What this does:
 
-- Copies skills into `~/.cursor/skills/`, `~/.claude/skills/`, and/or `~/.codex/skills/`
+- Copies each skill once into `~/.agents/skills/<skill>/`
+- For Claude Code and Windsurf, adds a directory symlink from their vendor
+  skill path to that folder (Cursor/Codex/Copilot/Gemini/OpenCode read
+  `.agents` natively — no extra files)
 - Saves your defaults in `~/.forgekit/config.json` (planning engine, ADR preference)
 
 **Without a global install** (one-shot):
@@ -56,9 +59,15 @@ npx @izkac/forgekit install --skills forge --agents cursor --force
 After you change skills upstream, refresh:
 
 ```bash
-forgekit install --skills forge --force
-# or: forgekit update
+forgekit update
+# skills only (no npm): forgekit update --no-pkg
+# or: forgekit install --skills forge --force
 ```
+
+`forgekit update` recopies outdated installed skills and, when a newer
+`@izkac/forgekit` is on npm, installs that global package first so you do
+not have to run `npm i -g` by hand. A git checkout of this repo skips the
+npm step.
 
 ---
 
@@ -649,7 +658,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 | Agent never enters Forge | Say `/forge` or “use Forge”; check triage / `/forge:skip` |
 | `forge: command not found` | `npm i -g @izkac/forgekit` and ensure PATH; hooks need `forge` on PATH |
 | `forge doctor` fails (OpenSpec) | `npm i -g @fission-ai/openspec` or `forge init --no-openspec` |
-| Skills outdated after upgrade | `forgekit install --skills forge --force` |
+| Skills outdated after upgrade | `forgekit update` |
 | `forge phase done` refuses — missing spine | `forge spine init`; fill rows **or** set `notApplicable` (required every change) |
 | `forge phase done` refuses — deferrals / e2e | `forge integrity-check`; resolve deferrals; `forge e2e init` + author steps + green `forge e2e run` (or spine `notApplicable` for sync-only) |
 | `forge phase done` refuses — stale e2e results | `e2e.json` changed after the last run — re-run `forge e2e run` |
@@ -934,6 +943,8 @@ installed — a different finding entirely, and `forge analyze` says which one i
 # Machine
 npm i -g @izkac/forgekit
 forgekit install --skills forge --agents cursor,claude --force
+forgekit update                    # newer npm package + outdated skills
+forgekit update --no-pkg           # skills only
 
 # Project
 cd your-project && forge init --cursor --claude

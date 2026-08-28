@@ -89,8 +89,9 @@ forgekit/
 | `forgekit install --no-adr` | Disable ADRs preference |
 | `forgekit install --adr --adr-project` | Also scaffold ADR docs into `--cwd` |
 | `forgekit install --all-skills --all-agents --force` | Everything |
-| `forgekit list` | Installed / missing / outdated for every skill × agent |
-| `forgekit update` | Reinstall outdated skills |
+| `forgekit list` | Installed / missing / outdated for every skill dest |
+| `forgekit update` | Refresh outdated skills; `npm i -g` a newer package if npm has one |
+| `forgekit update --no-pkg` | Refresh skills only |
 | `forgekit uninstall --skills … --agents …` | Remove installed skill dirs |
 
 ### Planning engine (OpenSpec optional)
@@ -178,4 +179,4 @@ npm run lint
 node packages/cli/bin/forgekit.mjs --help
 ```
 
-After editing a skill, re-install with `forgekit install --force` (or `forgekit update`).
+After editing a skill, re-install with `forgekit update` (or `forgekit install --force`).

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.3.53 — 2026-08-28
+
+Skills live only in `~/.agents/skills/<skill>/`. Cursor, Codex, Copilot,
+Gemini, and OpenCode read that folder directly. Claude Code and Windsurf get
+a directory symlink from their vendor skill path (on Windows a junction if a
+real symlink is refused). `forgekit update` still refreshes outdated skills
+and now also `npm i -g` a newer `@izkac/forgekit` when npm has one (skipped
+in a git checkout; `--no-pkg` skips the npm step).
+
 ## 0.3.52 — 2026-08-28
 
 Optional product-loop skip with no grade penalty. `forge e2e skip "<reason>"`
