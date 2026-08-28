@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.52 — 2026-08-28
+
 Optional product-loop skip with no grade penalty. `forge e2e skip "<reason>"`
 / `forge e2e unskip` skip the executed loop for the active session.
 `forge e2e disable` (project) already existed; both paths now award
