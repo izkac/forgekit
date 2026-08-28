@@ -108,16 +108,16 @@ test('operator docs name spec-verify.md for specs leftover and keep openspec-ver
   );
 
   const changelog = fs.readFileSync(path.join(REPO_ROOT, 'CHANGELOG.md'), 'utf8');
-  const unreleased = changelogSection(changelog, 'Unreleased');
+  const v0351 = changelogSection(changelog, '0\\.3\\.51 — 2026-08-28');
   assert.match(
-    unreleased,
+    v0351,
     /\bspec-verify\.md/,
-    'CHANGELOG Unreleased must describe the specs leftover sweep',
+    'CHANGELOG 0.3.51 must describe the specs leftover sweep',
   );
   assert.doesNotMatch(
-    unreleased,
+    v0351,
     /specs-engine sessions skip/i,
-    'Unreleased must not claim specs sessions skip leftover sweep',
+    '0.3.51 must not claim specs sessions skip leftover sweep',
   );
   const v0350 = changelogSection(changelog, '0\\.3\\.50 — 2026-08-27');
   assert.match(

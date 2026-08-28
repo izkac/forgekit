@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.51 — 2026-08-28
+
 Specs leftover sweep before final review. When a session is `planType: specs`,
 Forge verify always runs the bundled `specs-verify-change` skill (no vendor
 CLI), fixes every finding (CRITICAL, WARNING, SUGGESTION — including files
