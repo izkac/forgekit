@@ -12,7 +12,7 @@ agent*, not by you. Your day-to-day surface is small:
 |-----|-----------|
 | Chat: `/forge`, `/forge:apply`, `/forge:skip`, plain requests | `forge new`, `forge phase`, `forge spine`, `forge e2e run`, reviews |
 | `forge status`, `forge brief open`, `forge fleet …` | `forge resolve-model`, `forge integrity-check`, `forge score` |
-| `forge prefs`, `forge models`, `forge e2e disable` | everything else |
+| `forge prefs`, `forge models`, `forge e2e disable`, `forge e2e skip` | everything else |
 
 ---
 
@@ -172,14 +172,17 @@ agent authors `e2e.json` steps at plan time and `forge e2e run` has to go
 green before the session can finish. This is the expensive part of Forge and
 the reason it exists: it catches "library written, nothing calls it".
 
-The only command you personally might run here is the off switch:
+The only commands you personally might run here are the off switches:
 
 ```bash
-forge e2e disable "slow legacy stack — manual verification accepted"
+forge e2e disable "slow legacy stack — manual verification accepted"   # project-wide
 forge e2e enable
+forge e2e skip "this session — HMAC already covered by unit tests"  # this session
+forge e2e unskip
 ```
 
-That's operator-only by design — agents are forbidden from running it. Details
+Project disable is operator-only — agents are forbidden from running it.
+Session skip is allowed when you ask in that conversation. Details
 and a full worked example: [usage.md §6](usage.md).
 
 ---
@@ -193,7 +196,7 @@ Gates fail with a named reason. The common ones, in plain words:
 | brief missing/stale | specs changed after you approved the brief | agent rewrites + re-stamps; re-read it |
 | spine missing | nobody said who runs this code in production | agent fills rows or `notApplicable` |
 | unresolved deferrals | "wire it later" was promised, later never came | agent finishes the wiring, or it stays open debt |
-| e2e missing/red/stale | product loop never ran green (or steps changed after the run) | agent re-runs; or `BLOCKED` with the reason |
+| e2e missing/red/stale | product loop never ran green (or steps changed after the run) | agent re-runs; or skip/disable; or `BLOCKED` with the reason |
 | final review missing | high-risk change with no independent reader | let it dispatch a reviewer, or waive with a recorded reason |
 | change not archived | finish step skipped | `forge change archive <name>` / `openspec archive` |
 
@@ -292,6 +295,7 @@ forge brief open                 # read what you're approving
 forge prefs [pace]               # ceremony dial
 forge models [included|metered]  # subagent billing lane
 forge fleet list|watch|send      # all sessions, all projects
-forge e2e disable "<reason>"     # operator-only e2e off switch
+forge e2e disable "<reason>"     # operator-only project e2e off switch
+forge e2e skip "<reason>"        # this session (when you ask)
 forge doctor                     # is the project wired right
 ```

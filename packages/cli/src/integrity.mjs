@@ -678,7 +678,7 @@ export function sessionJobsSignalText(session) {
  * non-empty reason string. Operator-set via `forge e2e disable "<reason>"` —
  * agents must never set it themselves. When set, the integrity gate stops
  * demanding an executed green e2e run (the most time-consuming part of a
- * session); spine, deferrals, evidence, and BLOCKED checks still apply.
+ * session). Combined with session skip via `e2eSkipState`.
  *
  * @param {string} [cwd]
  * @returns {string | null} the reason, or null when e2e is enabled
@@ -690,6 +690,52 @@ export function e2eDisabledReason(cwd = process.cwd()) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Unified product-loop skip: project disable wins, then session `e2eSkip`.
+ * A missing recorded harness is not a skip.
+ *
+ * @param {{ cwd?: string, session?: Record<string, unknown> | null }} [opts]
+ * @returns {{ skipped: boolean, source: 'project' | 'session' | null, reason: string | null }}
+ */
+export function e2eSkipState(opts = {}) {
+  const cwd = opts.cwd ?? process.cwd();
+  const project = e2eDisabledReason(cwd);
+  if (project) return { skipped: true, source: 'project', reason: project };
+  const raw = opts.session?.e2eSkip;
+  const sessionReason = isNonEmptyString(raw) ? String(raw).trim() : null;
+  if (sessionReason) return { skipped: true, source: 'session', reason: sessionReason };
+  return { skipped: false, source: null, reason: null };
+}
+
+/**
+ * True when e2e.json has a green, current executed run (not notApplicable).
+ *
+ * @param {{ cwd?: string, session?: Record<string, unknown> | null, sessionDir: string }} opts
+ */
+export function e2eLoopIsGreen(opts) {
+  try {
+    const e2eFile = e2ePath(opts);
+    const gate = checkE2eGate({ e2eFile, sessionDir: opts.sessionDir });
+    const problems = gate.problems ?? [];
+    return problems.length === 0 && !gate.notApplicable;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Line-owned BLOCKED in verify-evidence fails the loop only when the loop is
+ * still required: not skipped, and not already proven by a green current run.
+ *
+ * @param {{ cwd?: string, session?: Record<string, unknown> | null, sessionDir: string, body?: string }} opts
+ */
+export function blockedMarkerBlocksLoop(opts) {
+  if (!hasBlockedMarker(opts.body ?? '')) return false;
+  if (e2eSkipState(opts).skipped) return false;
+  if (e2eLoopIsGreen(opts)) return false;
+  return true;
 }
 
 /**
@@ -1344,17 +1390,26 @@ export function runIntegrityChecks(opts) {
 
   let e2eFile = null;
   const e2eDisabled = e2eDisabledReason(cwd);
+  const e2eSkip = e2eSkipState({ cwd, session });
   if (spineExists && spineHasRows) {
-    if (!e2eDisabled) {
+    if (!e2eSkip.skipped) {
       e2eFile = e2ePath({ cwd, session, sessionDir });
       problems.push(...checkE2eGate({ e2eFile, sessionDir }).problems);
     }
 
     const evidenceFile = path.join(sessionDir, 'verify-evidence.md');
-    if (fs.existsSync(evidenceFile) && hasBlockedMarker(fs.readFileSync(evidenceFile, 'utf8'))) {
+    const evidenceBody = fs.existsSync(evidenceFile) ? fs.readFileSync(evidenceFile, 'utf8') : '';
+    if (
+      blockedMarkerBlocksLoop({
+        cwd,
+        session,
+        sessionDir,
+        body: evidenceBody,
+      })
+    ) {
       problems.push('verify-evidence.md contains BLOCKED — change cannot be marked done while E2E is blocked');
     }
   }
 
-  return { ok: problems.length === 0, problems, spineFile, spineExists, e2eFile, e2eDisabled };
+  return { ok: problems.length === 0, problems, spineFile, spineExists, e2eFile, e2eDisabled, e2eSkip };
 }

@@ -120,6 +120,34 @@ test('BLOCKED verify evidence is RED', () => {
   assert.match(health.reasons.join(' '), /BLOCKED/);
 });
 
+test('BLOCKED heading is not RED when e2e ran green', () => {
+  const p = makeProject({ phase: 'verify' });
+  writeE2e(p, { ok: true });
+  fs.writeFileSync(
+    path.join(p.sessionDir, 'verify-evidence.md'),
+    '# Verify\n\n## Product loop\n\nGreen.\n\n## BLOCKED / known\n\nUnrelated F2 debt.\n',
+    'utf8',
+  );
+  const health = sessionHealth({ ...p, now: NOW });
+  assert.notEqual(health.state, 'red');
+  assert.doesNotMatch(health.reasons.join(' '), /BLOCKED/);
+});
+
+test('BLOCKED heading is not RED when e2e is skipped', () => {
+  const p = makeProject({
+    phase: 'verify',
+    e2eSkip: 'user asked — HMAC already covered by unit suite',
+  });
+  fs.writeFileSync(
+    path.join(p.sessionDir, 'verify-evidence.md'),
+    '# Verify\n\nBLOCKED — leftover heading from a template.\n',
+    'utf8',
+  );
+  const health = sessionHealth({ ...p, now: NOW });
+  assert.notEqual(health.state, 'red');
+  assert.doesNotMatch(health.reasons.join(' '), /BLOCKED/);
+});
+
 test('a prose mention of BLOCKED mid-line is not a marker (F89)', () => {
   const p = makeProject({ phase: 'verify' });
   fs.writeFileSync(

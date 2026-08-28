@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Optional product-loop skip with no grade penalty. `forge e2e skip "<reason>"`
+/ `forge e2e unskip` skip the executed loop for the active session.
+`forge e2e disable` (project) already existed; both paths now award
+product-loop 20/20 N/A instead of scoring prose. A missing recorded harness
+does not skip. Line-owned `BLOCKED` in `verify-evidence.md` is ignored when
+the loop is skipped or `e2e-results.json` is green and current.
+
 ## 0.3.51 — 2026-08-28
 
 Specs leftover sweep before final review. When a session is `planType: specs`,

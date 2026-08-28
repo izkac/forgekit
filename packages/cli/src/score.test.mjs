@@ -2141,6 +2141,84 @@ test('scoreSession: green e2e run proves the loop even without the phrase', () =
   }
 });
 
+test('scoreSession: skipped e2e awards product_loop 20/20 N/A', () => {
+  const root = tmp('forge-score-skip-');
+  try {
+    const { sessionDir, session } = makeSession(root, {
+      slug: 'jobs-loop',
+      e2eSkip: 'user asked — HMAC already covered by unit suite',
+    });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify(validSpine([validRow()]), null, 2)}\n`,
+      'utf8',
+    );
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const loop = card.checks.find((c) => c.id === 'product_loop');
+    assert.equal(loop.points, 20);
+    assert.match(loop.notes.join('\n'), /e2e skipped \(session\)/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: project disable awards product_loop 20/20 N/A', () => {
+  const root = tmp('forge-score-e2eoff-');
+  try {
+    const { sessionDir, session } = makeSession(root, { slug: 'jobs-loop' });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify(validSpine([validRow()]), null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(root, '.forge', 'config.json'),
+      `${JSON.stringify({ e2e: { disabled: 'slow stack — manual verification accepted' } }, null, 2)}\n`,
+      'utf8',
+    );
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const loop = card.checks.find((c) => c.id === 'product_loop');
+    assert.equal(loop.points, 20);
+    assert.match(loop.notes.join('\n'), /e2e skipped \(project\)/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('scoreSession: BLOCKED heading does not zero the loop when e2e ran green', () => {
+  const root = tmp('forge-score-blocked-green-');
+  try {
+    const { sessionDir, session } = makeSession(root, { slug: 'jobs-loop' });
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify(validSpine([validRow()]), null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\n## Product loop\n\nGreen run.\n\n## BLOCKED / known\n\nF2 is unrelated debt.\n',
+      'utf8',
+    );
+    const steps = [{ name: 'probe', cmd: 'node -e "console.log(1)"' }];
+    fs.writeFileSync(
+      path.join(sessionDir, 'e2e.json'),
+      `${JSON.stringify({ change: null, notApplicable: null, steps }, null, 2)}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(sessionDir, 'e2e-results.json'),
+      `${JSON.stringify({ ok: true, stepsHash: e2eStepsHash(steps), steps: [{ name: 'probe', ok: true, exitCode: 0 }] }, null, 2)}\n`,
+      'utf8',
+    );
+    const card = scoreSession({ cwd: root, sessionDir, session });
+    const loop = card.checks.find((c) => c.id === 'product_loop');
+    assert.ok(loop.points >= 8, `expected >= 8 loop points, got ${loop.points}`);
+    assert.doesNotMatch(loop.notes.join('\n'), /product-loop not proven/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('forge cleanup harvests scorecard.json into the ledger before pruning', () => {
   const root = tmp('forge-cleanup-harvest-');
   try {

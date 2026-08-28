@@ -12,6 +12,8 @@
  *                                    [--probe "<cmd>"] [--dir <path>]
  *   forge e2e disable "<reason>"      # OPERATOR ONLY: project-level e2e off switch
  *   forge e2e enable                  # re-enable the executed-run requirement
+ *   forge e2e skip "<reason>"          # this session only (user-requested)
+ *   forge e2e unskip                 # clear this session's skip
  *   [--session <id>]
  *
  * e2e.json lives next to spine.json (change dir, falling back to the session
@@ -21,13 +23,14 @@
  */
 
 import fs from 'node:fs';
-import { loadSession, resolveSessionOrExit, readJson } from './lib.mjs';
+import { loadSession, resolveSessionOrExit, readJson, saveSession } from './lib.mjs';
 import { loadProjectConfig, saveProjectConfig } from './config.mjs';
 import {
   checkE2eGate,
   e2eDisabledReason,
   e2ePath,
   e2eResultsPath,
+  e2eSkipState,
   e2eStepsHash,
   initE2e,
   loadE2eResults,
@@ -41,7 +44,7 @@ const sub = args[0] && !args[0].startsWith('--') ? args[0] : 'status';
 
 if (args[0] === '--help' || sub === 'help') {
   process.stdout.write(
-    'Usage: forge e2e [init [--force] | run | check | status | harness [--set <desc> --start <cmd> --setup <cmd> --probe <cmd> --dir <path>] | disable "<reason>" | enable] [--session <id>]\n',
+    'Usage: forge e2e [init [--force] | run | check | status | harness [--set <desc> --start <cmd> --setup <cmd> --probe <cmd> --dir <path>] | disable "<reason>" | enable | skip "<reason>" | unskip] [--session <id>]\n',
   );
   process.exit(0);
 }
@@ -169,6 +172,34 @@ const { dir, session } = loadSession(sessionId);
 // init writes: target the live change dir only (never fall back into the
 // archive). run/check/status read: allow the archive fallback.
 const file = e2ePath({ session, sessionDir: dir, forWrite: sub === 'init' });
+
+if (sub === 'skip') {
+  const reason = args
+    .slice(1)
+    .filter((a) => !a.startsWith('--'))
+    .join(' ')
+    .trim();
+  if (!reason) {
+    process.stderr.write('Usage: forge e2e skip "<reason>" — a reason is required.\n');
+    process.exit(1);
+  }
+  session.e2eSkip = reason;
+  saveSession(dir, session);
+  process.stdout.write(
+    `E2E skipped for this session: ${reason}\n` +
+      `Integrity gates stop demanding an executed e2e run. Clear: forge e2e unskip\n`,
+  );
+  process.exit(0);
+}
+
+if (sub === 'unskip') {
+  delete session.e2eSkip;
+  saveSession(dir, session);
+  process.stdout.write(
+    'E2E skip cleared for this session — executed green runs are required again where the spine has rows.\n',
+  );
+  process.exit(0);
+}
 
 if (sub === 'init') {
   try {
@@ -307,10 +338,23 @@ if (sub === 'run') {
 }
 
 if (sub === 'check') {
+  const skip = e2eSkipState({ cwd: process.cwd(), session });
   const disabled = e2eDisabledReason(process.cwd());
-  if (disabled) {
+  if (skip.skipped) {
     process.stdout.write(
-      `${JSON.stringify({ file, ok: true, disabled, problems: [] }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          file,
+          ok: true,
+          skipped: true,
+          source: skip.source,
+          reason: skip.reason,
+          disabled,
+          problems: [],
+        },
+        null,
+        2,
+      )}\n`,
     );
     process.exit(0);
   }
@@ -330,7 +374,13 @@ if (sub === 'status') {
   if (!fs.existsSync(file)) {
     process.stdout.write(
       JSON.stringify(
-        { file, exists: false, disabled: e2eDisabledReason(process.cwd()), harness: loadHarness() },
+        {
+          file,
+          exists: false,
+          disabled: e2eDisabledReason(process.cwd()),
+          skip: e2eSkipState({ cwd: process.cwd(), session }),
+          harness: loadHarness(),
+        },
         null,
         2,
       ),
@@ -355,6 +405,7 @@ if (sub === 'status') {
         ok: valid.ok,
         problems: valid.problems,
         disabled: e2eDisabledReason(process.cwd()),
+        skip: e2eSkipState({ cwd: process.cwd(), session }),
         harness: loadHarness(),
         results: results
           ? {

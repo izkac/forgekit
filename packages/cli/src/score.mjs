@@ -12,9 +12,8 @@ import { hasBlockedMarker, readJson, writeJson } from './lib.mjs';
 import { loadAllowances } from './guard.mjs';
 import {
   JOBS_SIGNAL_RE,
-  checkE2eGate,
-  e2eDisabledReason,
-  e2ePath,
+  e2eLoopIsGreen,
+  e2eSkipState,
   loadDeferrals,
   openDeferrals,
   readTddRunStamps,
@@ -231,13 +230,7 @@ function loadAllowancesForScorecard(sessionDir) {
  * @param {{ cwd?: string, session?: Record<string, unknown> | null, sessionDir: string }} opts
  */
 function e2eRunGreen(opts) {
-  try {
-    const e2eFile = e2ePath(opts);
-    const gate = checkE2eGate({ e2eFile, sessionDir: opts.sessionDir });
-    return gate.problems.length === 0 && !gate.notApplicable;
-  } catch {
-    return false;
-  }
+  return e2eLoopIsGreen(opts);
 }
 
 /**
@@ -249,9 +242,12 @@ function scoreProductLoopBody(body, executedGreen = false) {
   const notes = [];
   let pts = 0;
   const max = 20;
-  if (hasBlockedMarker(body)) {
+  if (hasBlockedMarker(body) && !executedGreen) {
     notes.push('verify-evidence contains BLOCKED — product-loop not proven');
     return { points: 0, max, notes };
+  }
+  if (hasBlockedMarker(body) && executedGreen) {
+    notes.push('BLOCKED heading ignored because e2e ran green');
   }
   if (executedGreen) {
     pts += 8;
@@ -456,15 +452,20 @@ export function scoreSession(opts) {
       // ignore
     }
   }
+  const e2eSkip = e2eSkipState({ cwd, session });
   if (spineNotApplicable) {
     loopPts = 20;
     loopNotes = ['sync/docs notApplicable — product-loop N/A (full credit)'];
+  } else if (e2eSkip.skipped) {
+    loopPts = 20;
+    loopNotes = [
+      `e2e skipped (${e2eSkip.source}): "${e2eSkip.reason}" — product-loop N/A (full credit)`,
+    ];
   } else if (!fs.existsSync(evidenceFile)) {
     loopNotes = ['verify-evidence.md missing'];
   } else {
     const body = fs.readFileSync(evidenceFile, 'utf8');
-    const e2eOff = e2eDisabledReason(cwd);
-    const executedGreen = !e2eOff && e2eRunGreen({ cwd, session, sessionDir });
+    const executedGreen = e2eRunGreen({ cwd, session, sessionDir });
     if (spineHasRows || JOBS_SIGNAL_RE.test(sessionJobsSignalText(session))) {
       const scored = scoreProductLoopBody(body, executedGreen);
       loopPts = scored.points;
@@ -479,9 +480,6 @@ export function scoreSession(opts) {
         loopPts = 10;
         loopNotes = ['no spine rows and no jobs signal — partial credit without product-loop'];
       }
-    }
-    if (e2eOff) {
-      loopNotes.push(`e2e disabled by project config ("${e2eOff}") — scored from evidence text only`);
     }
   }
   checks.push({

@@ -73,3 +73,49 @@ recorded.
 - THEN the install command is recorded via `--setup`
 - AND the skill text presents this as a tool-agnostic rule, not a
   Playwright-specific note
+
+### Requirement: Product loop can be skipped without a grade penalty
+Project disable (`e2e.disabled`) and session skip (`session.e2eSkip`) SHALL
+skip the executed-run demand and award product-loop full credit (N/A). A
+missing recorded harness SHALL NOT skip the loop. Agents SHALL NOT run
+`forge e2e disable`. Agents MAY run `forge e2e skip` only when the user asked
+in that conversation.
+
+#### Scenario: Project disable skips the executed run
+- GIVEN `.forge/config.json` has `e2e.disabled` set to a reason
+- WHEN `forge integrity-check` / `forge e2e check` / `forge score` run
+- THEN the executed green run is not demanded
+- AND product_loop scores 20/20 with an N/A note naming the project skip
+
+#### Scenario: Session skip skips the executed run
+- GIVEN the active session has `e2eSkip` set to a reason
+- WHEN `forge integrity-check` / `forge e2e check` / `forge score` run
+- THEN the executed green run is not demanded
+- AND product_loop scores 20/20 with an N/A note naming the session skip
+
+#### Scenario: Missing harness is not a skip
+- GIVEN the project has no recorded `e2e.harness`
+- AND e2e is not disabled and the session is not skipped
+- AND the spine has rows
+- WHEN `forge integrity-check` runs
+- THEN the executed green run is still demanded
+
+### Requirement: BLOCKED does not fail a proven or skipped loop
+A line-owned `BLOCKED` marker in `verify-evidence.md` SHALL fail integrity,
+zero product_loop, and mark health red only when the loop is still required.
+It SHALL NOT apply when the loop is skipped or `e2e-results.json` is green
+and current.
+
+#### Scenario: Green run plus BLOCKED heading
+- GIVEN a green, current `e2e-results.json`
+- AND `verify-evidence.md` contains a line-owned `BLOCKED` heading
+- WHEN integrity, score, and health run
+- THEN integrity does not fail for BLOCKED
+- AND product_loop is not zeroed for BLOCKED
+- AND health is not red for BLOCKED
+
+#### Scenario: Skip plus BLOCKED heading
+- GIVEN project disable or session `e2eSkip`
+- AND `verify-evidence.md` contains a line-owned `BLOCKED` heading
+- WHEN integrity, score, and health run
+- THEN BLOCKED is ignored for the loop

@@ -85,9 +85,20 @@ records `e2e.disabled` in `.forge/config.json` and the gate stops demanding
 executed runs project-wide (`forge e2e enable` restores it). This is the
 **human's** trade-off to make — an agent must NEVER run `forge e2e disable`,
 suggest it to dodge a red gate, or edit the config key. If the gate blocks
-you, fix the loop or ask the operator. When it is disabled, keep the
-`## Product loop` narrative in `verify-evidence.md` — with no executed run,
-prose is the only loop evidence the scorecard can grade.
+you, fix the loop or ask the operator.
+
+**Session skip (user-requested).** `forge e2e skip "<reason>"` records
+`e2eSkip` on the active session (`forge e2e unskip` clears it). Agents may
+run this only when the user asked in this conversation — never to dodge a
+red gate. A missing recorded harness is not a skip: still author a cheap
+`e2e.json` unless skip/disable is set.
+
+When the loop is skipped (project or session), do **not** run `forge e2e run`,
+do **not** write `BLOCKED`, and keep a one-line skip reason under
+`## Product loop`. The scorecard awards product-loop 20/20 N/A. `BLOCKED` is
+only for "the required loop could not run." Known debt uses `## Known debt`
+/ `## Out of scope`. A leftover `BLOCKED` heading is ignored when the loop is
+skipped or `e2e-results.json` is green and current.
 
 ### Keeping the loop cheap (cost policy)
 

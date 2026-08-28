@@ -20,6 +20,7 @@ import {
 import { resolveEffectivePreferences } from './preferences.mjs';
 import { sessionHealth } from './health.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
+import { e2eSkipState } from './integrity.mjs';
 
 function getActiveSessionInfo() {
   // Resolved the same way `forge phase` resolves it, and reported the same way:
@@ -102,6 +103,10 @@ export function buildForgeMessage(info) {
     }`,
   );
   lines.push(formatPaceLine(session));
+  const e2eSkip = e2eSkipState({ cwd: REPO_ROOT, session });
+  if (e2eSkip.skipped) {
+    lines.push(`E2E: skipped (${e2eSkip.source}) — ${e2eSkip.reason}`);
+  }
   if (session.tasksTotal > 0) {
     lines.push(`Tasks: ${session.tasksComplete}/${session.tasksTotal}`);
   }

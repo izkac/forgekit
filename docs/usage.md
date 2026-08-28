@@ -350,8 +350,21 @@ forge e2e disable "slow legacy stack — manual verification accepted"
 forge e2e enable    # restore the executed-run requirement
 ```
 
-While disabled, integrity gates stop demanding green runs and the scorecard
-grades the product loop from evidence prose only (noted on every scorecard).
+While disabled or skipped, integrity gates stop demanding green runs and the
+scorecard awards product-loop **20/20 N/A** (named on every scorecard). A
+missing recorded harness is **not** a skip — author a cheap `e2e.json` unless
+the operator disabled the project or the user skipped this session.
+
+```bash
+forge e2e skip "user asked — HMAC path already covered by unit tests"   # this session
+forge e2e unskip                                                       # clear session skip
+```
+
+Agents may run `forge e2e skip` only when the user asked in this conversation.
+They must never run `forge e2e disable`. `BLOCKED` in `verify-evidence.md`
+is only for "the required loop could not run." Known debt uses `## Known debt`
+/ `## Out of scope`. A green current run (or a skip) ignores a leftover
+`BLOCKED` heading.
 
 ```json
 {
@@ -400,7 +413,9 @@ step list that would pass against a stubbed handler is invalid, and reviewers
 reject it. Keep a short `## Product loop` narrative in `verify-evidence.md`
 as reviewer context (the gate checks the executed results, not the heading).
 
-If you cannot run E2E here, say so in `verify-evidence.md`:
+If the loop is skipped (`forge e2e skip` / `forge e2e disable`), do **not**
+write `BLOCKED` — record the skip reason under `## Product loop`. If the loop
+could not run and is still required, say so in `verify-evidence.md`:
 
 ```markdown
 ## Product loop
@@ -639,6 +654,7 @@ archiving the change. Pending ADR reminders come from project hooks.
 | `forge phase done` refuses — deferrals / e2e | `forge integrity-check`; resolve deferrals; `forge e2e init` + author steps + green `forge e2e run` (or spine `notApplicable` for sync-only) |
 | `forge phase done` refuses — stale e2e results | `e2e.json` changed after the last run — re-run `forge e2e run` |
 | E2E too slow for this project | Operator runs `forge e2e disable "<reason>"` (agents must never) — `forge e2e enable` restores |
+| E2E too slow for this session | User asks; agent runs `forge e2e skip "<reason>"` — `forge e2e unskip` clears |
 | `forge phase implement` refuses — brief missing/stale | Agent writes/updates `brief.html`, then `forge brief stamp` (or `--allow-incomplete "<reason>"`) |
 | `forge checkpoint` says checkpoints are off | Opt in: `.forge/config.json` → `{ "git": { "checkpoint": "per-group" } }` |
 | `forge checkpoint` refuses — default branch | Forge work belongs on a branch; create one, or `--allow-default-branch` / `git.allowDefaultBranch: true` |

@@ -77,15 +77,15 @@ For each requirement in the change's **capability specs** (not only `tasks.md`):
 
 Record the trace in `verify-evidence.md` (a short REQ → caller table is enough).
 
-### 4. Product-loop E2E — executed, or BLOCKED
+### 4. Product-loop E2E — executed, skipped, or BLOCKED
 
-Before leaving verify / claiming the change complete:
+Before leaving verify / claiming the change complete, pick **one**:
 
-1. Confirm `e2e.json` (scaffolded at plan time via `forge e2e init`) drives the **closed product loop** — not a single job slice. When the design has a producer/consumer split (analyze vs execute, proposals vs ratify), the loop is: produce artifact → consumer reads it → decision/state change → **next run's output differs from baseline**. Steps must assert domain side effects; a step list that would pass against a stubbed handler is invalid.
-2. `forge e2e run` — executes the steps sequentially and writes `e2e-results.json` (per-step exit codes, output tails, steps hash) into the session dir. A **green run** is required; results go stale if `e2e.json` changes afterwards (re-run). Prose in `verify-evidence.md` no longer satisfies the done gate. **Or**
-3. Leave an explicit **`BLOCKED`** list in `verify-evidence.md` explaining why E2E cannot run here — the done gate then refuses `done` until unblocked or the user signs `--allow-incomplete`. (`e2e.json` `notApplicable` is only for loops no command can drive — reviewers police the reason.)
+1. **Run.** Confirm `e2e.json` (scaffolded at plan time via `forge e2e init`) drives the **closed product loop** — not a single job slice. When the design has a producer/consumer split (analyze vs execute, proposals vs ratify), the loop is: produce artifact → consumer reads it → decision/state change → **next run's output differs from baseline**. Steps must assert domain side effects; a step list that would pass against a stubbed handler is invalid. Then `forge e2e run` — a **green run** is required; results go stale if `e2e.json` changes afterwards (re-run). Prose in `verify-evidence.md` no longer satisfies the done gate.
+2. **Skip.** If the project is `forge e2e disable`'d or this session was `forge e2e skip`'d (user asked this conversation), do **not** run E2E and do **not** write `BLOCKED`. Record the skip reason under `## Product loop`. A missing recorded harness is not a skip — still author a cheap `e2e.json` unless skip/disable is set.
+3. **BLOCKED.** Only when the required loop could not run. Leave an explicit **`BLOCKED`** list in `verify-evidence.md`. The done gate then refuses `done` until unblocked or the user signs `--allow-incomplete`. Known debt uses `## Known debt` / `## Out of scope`, never `BLOCKED`. (`e2e.json` `notApplicable` is only for loops no command can drive — reviewers police the reason.)
 
-Keep a short loop narrative under `## Product loop` in `verify-evidence.md` as reviewer context — the gate checks the executed results, not the heading.
+Keep a short loop narrative under `## Product loop` in `verify-evidence.md` as reviewer context — the gate checks the executed results, not the heading. A leftover `BLOCKED` heading is ignored when the loop is skipped or `e2e-results.json` is green and current.
 
 Also enforce **job-kind closure**: every product-surface job kind is wired end-to-end or deleted from enums/API/UI before complete. And the **consumer–producer rule**: anything the UI/API reads must be proven written by the production path.
 

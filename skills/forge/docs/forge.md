@@ -123,7 +123,7 @@ User request
             └─────────────┬─────────────┘
                           ▼
          Verify: audit tier 2 + tier 3 (scope from pace)
-                  + forge e2e run (green, or BLOCKED)
+                  + forge e2e run (green), skip, or BLOCKED
                   + forge integrity-check
                           │
                           ▼

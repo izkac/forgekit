@@ -625,23 +625,64 @@ test('runIntegrityChecks: project-level e2e disable skips the executed-run deman
     assert.equal(result.ok, true);
     assert.equal(result.e2eDisabled, 'operator accepts manual verification');
 
-    // BLOCKED evidence still blocks — the off switch only drops the run demand.
+    // BLOCKED is ignored when the loop is skipped — skip is N/A, not incomplete.
     fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), 'BLOCKED: cannot verify\n', 'utf8');
     result = runIntegrityChecks({ cwd, sessionDir, session });
-    assert.equal(result.ok, false);
-    assert.match(result.problems.join('\n'), /BLOCKED/);
+    assert.equal(result.ok, true, result.problems.join('\n'));
+    assert.equal(result.e2eSkip.source, 'project');
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test('runIntegrityChecks: BLOCKED in verify-evidence blocks even with green e2e', () => {
-  const cwd = tmp('forge-int-blocked-');
+test('runIntegrityChecks: session e2eSkip skips the executed-run demand', () => {
+  const cwd = tmp('forge-int-e2eskip-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    writeSpineWithRows(sessionDir);
+    const session = {
+      slug: 'wire-worker-jobs',
+      openspecChange: null,
+      e2eSkip: 'user asked — HMAC path already covered by unit suite',
+    };
+    const result = runIntegrityChecks({ cwd, sessionDir, session });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+    assert.equal(result.e2eSkip.source, 'session');
+    assert.match(result.e2eSkip.reason, /HMAC path/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: BLOCKED with green current e2e does not fail the gate', () => {
+  const cwd = tmp('forge-int-blocked-green-');
   try {
     const sessionDir = makeSessionDir(cwd);
     writeSpineWithRows(sessionDir);
     writeE2eDoc(sessionDir, { notApplicable: null, steps: [greenStep()] });
     writeE2eResults(sessionDir, runE2eSteps({ steps: [greenStep()] }));
+    fs.writeFileSync(
+      path.join(sessionDir, 'verify-evidence.md'),
+      '# Verify\n\n## BLOCKED / known\n\nF2 is pre-existing debt, not this loop.\n',
+      'utf8',
+    );
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: { slug: 'wire-worker-jobs', openspecChange: null },
+    });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: BLOCKED without a green run still fails', () => {
+  const cwd = tmp('forge-int-blocked-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    writeSpineWithRows(sessionDir);
+    writeE2eDoc(sessionDir, { notApplicable: null, steps: [greenStep()] });
     fs.writeFileSync(
       path.join(sessionDir, 'verify-evidence.md'),
       '# Verify\n\nBLOCKED: ratify UI unreachable in CI\n',
