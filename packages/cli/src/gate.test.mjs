@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { taskGateChecksHash } from './integrity.mjs';
 
 const GATE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'gate.mjs');
 const FORGE_BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'forge.mjs');
@@ -202,6 +203,34 @@ test('gate check: passing check+expect writes a green results file with checksHa
   assert.equal(typeof entry.durationMs, 'number');
   assert.equal(entry.checksHash, computeChecksHash(group), 'checksHash must match the group that was run');
   assert.equal(typeof results.ranAt, 'string');
+});
+
+test('gate check: recorded checksHash agrees with integrity.mjs taskGateChecksHash for the same group (hash-drift cross-check, no gate.mjs import)', () => {
+  // Pins gate.mjs's groupChecksHash formula and integrity.mjs's
+  // taskGateChecksHash formula to each other end-to-end, without ever
+  // importing gate.mjs (a CLI entrypoint — see taskGateChecksHash's doc
+  // comment in integrity.mjs for why that import is unsafe). The real
+  // `forge gate check` CLI is spawned as a child process against a scratch
+  // project; the checksHash it actually recorded is then compared against
+  // taskGateChecksHash computed independently, in this process, off the
+  // identical fixture group object. A drift between the two formulas would
+  // show up here as a real mismatch, not a passed test that never exercised
+  // gate.mjs's own hashing code path.
+  const root = tmp('gate-hashdrift-');
+  const { changeDir, sessionDir } = makeFixture(root);
+  const group = { id: '1', title: 'g1', check: nodeCmd('OK-TOKEN', 0), expect: 'OK-TOKEN', timeoutMs: 15000 };
+  writeGates(changeDir, [group]);
+
+  const out = run(root, ['check']);
+  assert.match(out, /GREEN/);
+
+  const results = readGateResults(sessionDir);
+  const recordedHash = results.groups[0].checksHash;
+  assert.equal(
+    recordedHash,
+    taskGateChecksHash(group),
+    'gate.mjs (groupChecksHash) and integrity.mjs (taskGateChecksHash) must agree on the same group',
+  );
 });
 
 test('gate check: failing exit code is unmet even when output contains the expect token', () => {

@@ -1343,6 +1343,151 @@ export function checkTddEvidence({ sessionDir, session }) {
   return { problems };
 }
 
+const TASK_GATES_FILE = 'gates.json';
+const TASK_GATE_RESULTS_FILE = 'gate-results.json';
+
+/**
+ * Path to gates.json: change dir when available, else session dir. Mirrors
+ * gate.mjs's own resolution exactly (`changeDir ? .../gates.json : .../gates.json`
+ * off the session dir) — deliberately no stray-fallback like spinePath/e2ePath
+ * carry for F50: gates.json postdates that legacy ordering bug.
+ *
+ * @param {{ cwd?: string, session?: Record<string, unknown> | null, sessionDir?: string }} opts
+ */
+function taskGatesPath(opts = {}) {
+  const changeDir = resolveChangeDir(opts);
+  if (changeDir) return path.join(changeDir, TASK_GATES_FILE);
+  if (opts.sessionDir) return path.join(opts.sessionDir, TASK_GATES_FILE);
+  return null;
+}
+
+/**
+ * Hash of a group's check + expect — used to tell whether a recorded
+ * gate-results.json entry is still current for its gates.json group.
+ *
+ * Deliberately reproduces `gate.mjs`'s exported `groupChecksHash` (identical
+ * algorithm: sha256 of `JSON.stringify({ check, expect })`) rather than
+ * importing it. `gate.mjs` is a CLI entrypoint, not a library: its top level
+ * unconditionally runs the feature's opt-in wall — `loadProjectConfig` then
+ * `process.exit(1)` when `gates.enabled` is not `true` — and, past the wall,
+ * session resolution against `process.argv`, the instant the module is
+ * evaluated, before any exported function is ever called. Verified directly:
+ * `node -e "import('./gate.mjs')"` from this package (gates disabled here)
+ * prints the wall message and exits the process rather than resolving.
+ * `integrity.mjs` is imported by nearly every forge command (`integrity-
+ * check.mjs`, `set-phase.mjs`, `score.mjs`, this test file, ...), including
+ * every project that has never touched gates — a static or dynamic `import`
+ * of gate.mjs here would run that CLI logic as a side effect of merely
+ * loading integrity.mjs, which both breaks unrelated commands and violates
+ * this task's hard requirement that the disabled default path must not even
+ * read gates.json. (Once enabled, it would still run gate.mjs's own session
+ * resolution against the host process's argv, not this check's — a second,
+ * independent reason it cannot be imported.) `lib.mjs`'s `appendPhaseHistory`
+ * already documents this exact pattern for `set-phase.mjs` ("set-phase.mjs
+ * is a script that runs the CLI on import — importing it from
+ * new-session.mjs exits 1"); `gate.mjs` follows the identical shape and is
+ * unsafe to import for the same reason. This
+ * one-line hash formula is reproduced instead, and exported so tests (and
+ * any other reader) compute expected hashes from this code, never from a
+ * hand-typed string — the same role `e2eStepsHash` already plays for e2e
+ * results.
+ *
+ * @param {{ check?: string, expect?: string }} group
+ */
+export function taskGateChecksHash(group) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify({ check: group?.check ?? '', expect: group?.expect ?? '' }))
+    .digest('hex');
+}
+
+/**
+ * Task-gates integrity check (task 3.1, `specs/changes/unlazy-enforcement/specs/task-gates/spec.md`).
+ *
+ * Opt-in and inert by default: returns no problems, and never reads
+ * gates.json, unless ALL of the following hold —
+ *   1. `.forge/config.json` → `gates.enabled === true`;
+ *   2. gates.json exists (change dir, else session dir) with at least one
+ *      group whose `check` is a non-empty string;
+ *   3. the session reports every task complete (`tasksTotal > 0 &&
+ *      tasksComplete >= tasksTotal`) — partial progress never gates.
+ *
+ * Once all three hold, every group with a non-empty `check` must have a
+ * green (`ok === true`), current (`checksHash` matches the live
+ * `taskGateChecksHash` of that group) entry in the session's
+ * gate-results.json — one problem per group that is missing, red, or stale.
+ * A group with an empty `check` never needs an entry, whatever else is true.
+ *
+ * @param {{ cwd: string, sessionDir: string, session: Record<string, unknown> }} opts
+ * @returns {{ problems: string[] }}
+ */
+export function checkTaskGates({ cwd, sessionDir, session }) {
+  if (loadProjectConfig(cwd)?.gates?.enabled !== true) return { problems: [] };
+
+  const file = taskGatesPath({ cwd, session, sessionDir });
+  if (!file || !fs.existsSync(file)) return { problems: [] };
+
+  let doc;
+  try {
+    doc = readJson(file);
+  } catch (err) {
+    // Fails closed, unconditionally — mirrors spine.json's own unreadable
+    // handling below (and guard-allowances.json's in checkGuardedFiles): an
+    // unreadable gates.json is a measurable, attributable fault in a file
+    // this feature depends on, not silent equivalence to "no gates.json".
+    // Deliberately NOT gated on task completion the way the rest of this
+    // check is — "partial progress never gates" protects a session against
+    // being blocked by *unrun* checks while work is still in flight, not
+    // against a config file that cannot be parsed at all.
+    return {
+      problems: [
+        `gates.json unreadable at ${file} (${err instanceof Error ? err.message : err}) — fix the JSON, or ` +
+          'run forge gate init --force to rescaffold it; an unreadable gates.json cannot be trusted to say no group needs a gate result',
+      ],
+    };
+  }
+  const groups = Array.isArray(doc?.groups) ? doc.groups : [];
+  const checkedGroups = groups.filter((g) => isNonEmptyString(g?.check));
+  if (checkedGroups.length === 0) return { problems: [] };
+
+  const tasksTotal = Number(session?.tasksTotal) || 0;
+  const tasksComplete = Number(session?.tasksComplete) || 0;
+  if (!(tasksTotal > 0 && tasksComplete >= tasksTotal)) return { problems: [] };
+
+  const resultsFile = path.join(sessionDir, TASK_GATE_RESULTS_FILE);
+  let resultsDoc = null;
+  if (fs.existsSync(resultsFile)) {
+    try {
+      resultsDoc = readJson(resultsFile);
+    } catch {
+      resultsDoc = null;
+    }
+  }
+  const resultsById = new Map(
+    (Array.isArray(resultsDoc?.groups) ? resultsDoc.groups : []).map((r) => [r?.id, r]),
+  );
+
+  /** @type {string[]} */
+  const problems = [];
+  for (const group of checkedGroups) {
+    const entry = resultsById.get(group.id);
+    if (!entry) {
+      problems.push(
+        `gate group ${group.id}: no gate-results entry — run forge gate check --group ${group.id}`,
+      );
+    } else if (entry.ok !== true) {
+      problems.push(
+        `gate group ${group.id}: red (last recorded run failed) — run forge gate check --group ${group.id}`,
+      );
+    } else if (entry.checksHash !== taskGateChecksHash(group)) {
+      problems.push(
+        `gate group ${group.id}: stale gate result (check/expect changed since the last run) — run forge gate check --group ${group.id}`,
+      );
+    }
+  }
+  return { problems };
+}
+
 export function runIntegrityChecks(opts) {
   /** @type {string[]} */
   const problems = [];
@@ -1358,6 +1503,7 @@ export function runIntegrityChecks(opts) {
 
   problems.push(...checkGuardedFiles({ cwd, sessionDir, session }).problems);
   problems.push(...checkTddEvidence({ sessionDir, session }).problems);
+  problems.push(...checkTaskGates({ cwd, sessionDir, session }).problems);
 
   const spineFile = spinePath({ cwd, session, sessionDir });
   const spineExists = fs.existsSync(spineFile);

@@ -9,6 +9,7 @@ import {
   JOBS_SIGNAL_RE,
   addDeferral,
   checkE2eGate,
+  checkTaskGates,
   checkTddEvidence,
   e2ePath,
   e2eStepsHash,
@@ -24,6 +25,7 @@ import {
   sessionJobsSignalText,
   spinePath,
   spineTemplate,
+  taskGateChecksHash,
   validateE2e,
   validateSpine,
   writeE2eResults,
@@ -1396,7 +1398,7 @@ test('runIntegrityChecks: guardedFiles — rename-with-weakening (high-similarit
   }
 });
 
-test('runIntegrityChecks: guardedFiles — typechange (file replaced by a symlink) is caught', () => {
+test('runIntegrityChecks: guardedFiles — typechange (file replaced by a symlink) is caught', (t) => {
   const cwd = gitRepo('forge-guard-typechange-');
   try {
     const testFile = path.join(cwd, 'a.test.mjs');
@@ -1405,7 +1407,16 @@ test('runIntegrityChecks: guardedFiles — typechange (file replaced by a symlin
     const baseCommit = gitHead(cwd);
 
     fs.rmSync(testFile);
-    fs.symlinkSync('/dev/null', testFile);
+    try {
+      fs.symlinkSync('/dev/null', testFile);
+    } catch (err) {
+      // Windows denies unprivileged symlink creation (no admin / Developer Mode)
+      if (err && (err.code === 'EPERM' || err.code === 'EACCES')) {
+        t.skip('symlink creation unavailable in this environment');
+        return;
+      }
+      throw err;
+    }
     spawnSync('git', ['add', '-A'], { cwd });
 
     const sessionDir = makeSessionDir(cwd);
@@ -2282,6 +2293,367 @@ test('runIntegrityChecks wiring: forge phase done refuses through set-phase.mjs 
 
     const after = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
     assert.equal(after.phase, 'verify', 'the ungated session must not reach done');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Task gates (task 3.1) — opt-in per-group executable gates required   */
+/* only once the session reports all tasks complete.                    */
+/* ------------------------------------------------------------------ */
+
+/** Writes `.forge/config.json` with `gates.enabled` set as requested. */
+function writeGatesConfig(cwd, enabled = true) {
+  fs.mkdirSync(path.join(cwd, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, '.forge', 'config.json'),
+    `${JSON.stringify({ gates: { enabled } }, null, 2)}\n`,
+    'utf8',
+  );
+}
+
+/** `session` fixture carrying explicit task counts (checkTaskGates' input). */
+function gatesSession(overrides = {}) {
+  return { slug: 'x', openspecChange: null, tasksTotal: 0, tasksComplete: 0, ...overrides };
+}
+
+test('runIntegrityChecks: task gates — flag off ignores gates.json even with a real non-empty check and completed tasks (would otherwise fail)', () => {
+  const cwd = tmp('forge-gates-off-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    // No .forge/config.json at all → gates.enabled is not true. This
+    // gates.json is otherwise exactly the shape that WOULD fail the gate
+    // (non-empty check, tasks complete, no gate-results.json) — a
+    // discriminating fixture: if the flag guard were missing, this test
+    // would observe a real "no gate-results entry" problem, not just an
+    // absence of a crash.
+    fs.writeFileSync(
+      path.join(sessionDir, 'gates.json'),
+      `${JSON.stringify({ groups: [{ id: '1', title: 'Build', check: 'npm run build', expect: '' }] })}\n`,
+      'utf8',
+    );
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 1, tasksComplete: 1 }),
+    });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — flag off never even reads gates.json (a malformed file must not throw)', () => {
+  const cwd = tmp('forge-gates-off-poison-');
+  try {
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    fs.writeFileSync(path.join(sessionDir, 'gates.json'), '{ this is not json', 'utf8');
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 1, tasksComplete: 1 }),
+    });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — flag on, no gates.json → no gate problems', () => {
+  const cwd = tmp('forge-gates-none-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 1, tasksComplete: 1 }),
+    });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — flag on, malformed gates.json fails closed (names gates.json, not a silent pass)', () => {
+  const cwd = tmp('forge-gates-malformed-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    fs.writeFileSync(path.join(sessionDir, 'gates.json'), '{ this is not json', 'utf8');
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 1, tasksComplete: 1 }),
+    });
+    assert.equal(result.ok, false, 'an unreadable gates.json while enabled must not silently pass');
+    const joined = result.problems.join('\n');
+    assert.match(joined, /gates\.json/);
+    assert.match(joined, /unreadable/i);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('checkTaskGates: malformed gates.json fails closed even when tasks are still open (a corrupt config is always a fault, not gated on progress)', () => {
+  const cwd = tmp('forge-gates-malformed-open-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    fs.writeFileSync(path.join(sessionDir, 'gates.json'), '{ this is not json', 'utf8');
+    const result = checkTaskGates({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 3, tasksComplete: 1 }),
+    });
+    assert.equal(result.problems.length, 1);
+    assert.match(result.problems[0], /gates\.json/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — flag on, gates.json has only empty checks → no gate problems', () => {
+  const cwd = tmp('forge-gates-empty-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    fs.writeFileSync(
+      path.join(sessionDir, 'gates.json'),
+      `${JSON.stringify({
+        groups: [
+          { id: '1', title: 'Docs', check: '', expect: '' },
+          { id: '2', title: 'Blank', check: '   ', expect: '' },
+        ],
+      })}\n`,
+      'utf8',
+    );
+    // No gate-results.json at all — would fail every group if the empty
+    // checks were mistakenly treated as requiring evidence.
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 2, tasksComplete: 2 }),
+    });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — non-empty checks but tasks still OPEN → no gate problems (partial progress never gates)', () => {
+  const cwd = tmp('forge-gates-open-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    fs.writeFileSync(
+      path.join(sessionDir, 'gates.json'),
+      `${JSON.stringify({ groups: [{ id: '1', title: 'Build', check: 'exit 1', expect: '' }] })}\n`,
+      'utf8',
+    );
+    // No gate-results.json — would fail if evaluated at all.
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 3, tasksComplete: 1 }),
+    });
+    assert.equal(result.ok, true, result.problems.join('\n'));
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — all complete, missing gate-results entry → problem names the group (empty-check sibling group stays silent)', () => {
+  const cwd = tmp('forge-gates-missing-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    fs.writeFileSync(
+      path.join(sessionDir, 'gates.json'),
+      `${JSON.stringify({
+        groups: [
+          { id: '1', title: 'Build', check: 'npm run build', expect: '' },
+          { id: '2', title: 'Not gated yet', check: '', expect: '' },
+        ],
+      })}\n`,
+      'utf8',
+    );
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 2, tasksComplete: 2 }),
+    });
+    assert.equal(result.ok, false);
+    const joined = result.problems.join('\n');
+    assert.match(joined, /\b1\b/);
+    assert.match(joined, /no gate-results entry/);
+    assert.match(joined, /forge gate check --group 1/);
+    assert.doesNotMatch(joined, /\bgroup 2\b/, 'the empty-check sibling group must never be named as a problem');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — all complete, red entry (ok:false) → problem', () => {
+  const cwd = tmp('forge-gates-red-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    const group = { id: '1', title: 'Build', check: 'npm run build', expect: '' };
+    fs.writeFileSync(path.join(sessionDir, 'gates.json'), `${JSON.stringify({ groups: [group] })}\n`, 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'gate-results.json'),
+      `${JSON.stringify({
+        groups: [
+          { id: '1', ok: false, exitCode: 1, expectMatched: null, durationMs: 5, checksHash: taskGateChecksHash(group) },
+        ],
+        ranAt: new Date().toISOString(),
+      })}\n`,
+      'utf8',
+    );
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 1, tasksComplete: 1 }),
+    });
+    assert.equal(result.ok, false);
+    const joined = result.problems.join('\n');
+    assert.match(joined, /\b1\b/);
+    assert.match(joined, /red/);
+    assert.match(joined, /forge gate check --group 1/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — all complete, stale entry (checksHash mismatch) → problem', () => {
+  const cwd = tmp('forge-gates-stale-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    const currentGroup = { id: '1', title: 'Build', check: 'npm run build', expect: '' };
+    const oldGroup = { id: '1', title: 'Build', check: 'npm run build:old', expect: '' };
+    fs.writeFileSync(
+      path.join(sessionDir, 'gates.json'),
+      `${JSON.stringify({ groups: [currentGroup] })}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(sessionDir, 'gate-results.json'),
+      `${JSON.stringify({
+        groups: [
+          {
+            id: '1',
+            ok: true,
+            exitCode: 0,
+            expectMatched: null,
+            durationMs: 5,
+            // Hash of the OLD check text — a discriminating fixture: the
+            // live group's own hash would wrongly pass this test if the
+            // comparison were a no-op.
+            checksHash: taskGateChecksHash(oldGroup),
+          },
+        ],
+        ranAt: new Date().toISOString(),
+      })}\n`,
+      'utf8',
+    );
+    assert.notEqual(
+      taskGateChecksHash(oldGroup),
+      taskGateChecksHash(currentGroup),
+      'fixture sanity: old and current group hashes must differ',
+    );
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 1, tasksComplete: 1 }),
+    });
+    assert.equal(result.ok, false);
+    const joined = result.problems.join('\n');
+    assert.match(joined, /\b1\b/);
+    assert.match(joined, /stale/);
+    assert.match(joined, /forge gate check --group 1/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runIntegrityChecks: task gates — all complete, green current entries for every checked group → ok (spine/e2e/defer checks unaffected)', () => {
+  const cwd = tmp('forge-gates-green-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    writeNaSpine(sessionDir);
+    const groupA = { id: '1', title: 'Build', check: 'npm run build', expect: '' };
+    const groupB = { id: '2', title: 'Lint', check: 'npm run lint', expect: 'ok' };
+    const groupC = { id: '3', title: 'Not gated yet', check: '', expect: '' };
+    fs.writeFileSync(
+      path.join(sessionDir, 'gates.json'),
+      `${JSON.stringify({ groups: [groupA, groupB, groupC] })}\n`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(sessionDir, 'gate-results.json'),
+      `${JSON.stringify({
+        groups: [
+          { id: '1', ok: true, exitCode: 0, expectMatched: null, durationMs: 5, checksHash: taskGateChecksHash(groupA) },
+          { id: '2', ok: true, exitCode: 0, expectMatched: true, durationMs: 5, checksHash: taskGateChecksHash(groupB) },
+        ],
+        ranAt: new Date().toISOString(),
+      })}\n`,
+      'utf8',
+    );
+    // Regression anchor: an unresolved deferral must still fail alongside a
+    // fully green gate set — the new check must not swallow other problems.
+    addDeferral(sessionDir, { task: '9.9', reason: 'unrelated' });
+    const result = runIntegrityChecks({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 3, tasksComplete: 3 }),
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.problems.join('\n'), /unresolved deferrals: 9\.9/);
+    assert.doesNotMatch(
+      result.problems.join('\n'),
+      /gate group/,
+      'no gate problem should be reported once every checked group is green and current',
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('checkTaskGates: exported directly, matches the aggregate result for a green fixture', () => {
+  const cwd = tmp('forge-gates-direct-');
+  try {
+    writeGatesConfig(cwd, true);
+    const sessionDir = makeSessionDir(cwd);
+    const group = { id: '1', title: 'Build', check: 'npm run build', expect: '' };
+    fs.writeFileSync(path.join(sessionDir, 'gates.json'), `${JSON.stringify({ groups: [group] })}\n`, 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'gate-results.json'),
+      `${JSON.stringify({
+        groups: [{ id: '1', ok: true, exitCode: 0, expectMatched: null, durationMs: 5, checksHash: taskGateChecksHash(group) }],
+        ranAt: new Date().toISOString(),
+      })}\n`,
+      'utf8',
+    );
+    const result = checkTaskGates({
+      cwd,
+      sessionDir,
+      session: gatesSession({ tasksTotal: 1, tasksComplete: 1 }),
+    });
+    assert.deepEqual(result.problems, []);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

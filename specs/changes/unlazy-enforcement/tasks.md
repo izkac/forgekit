@@ -29,7 +29,7 @@
 
 ## 3. Integrity integration
 
-- [ ] 3.1 `runIntegrityChecks` in `packages/cli/src/integrity.mjs`: when
+- [x] 3.1 `runIntegrityChecks` in `packages/cli/src/integrity.mjs`: when
       `gates.enabled` AND gates.json has non-empty checks AND
       tasksComplete >= tasksTotal, require green + current gate-results per
       group; otherwise untouched. Tests in `integrity.test.mjs`: flag off →
