@@ -340,6 +340,7 @@ forge spine init|check            # capability→runtime spine matrix (spine.jso
 forge e2e init|run|check          # executable product-loop acceptance (e2e.json + e2e-results.json)
 forge defer add|resolve|list      # deferral registry — deferred wiring is tracked debt
 forge integrity-check             # mechanical gate: spine + deferrals + executed e2e
+forge gate init|check|status      # opt-in per-group executable gates (.forge/config.json → gates.enabled)
 forge score [--write] [--md]      # L2 session scorecard (also auto-written at phase done)
 forge metrics collect [--session <id>] [--json]
                                   # harvest the host's own transcripts into
@@ -515,6 +516,17 @@ Defaults (`integrity.forbidStubs`, `specsBeatNarrowTasks`, `requireE2E`) live in
 
 Escape hatch: `forge phase done --allow-incomplete "<reason>"` records an honest
 exception in the session — it does not silently checkbox past gaps.
+
+### Task gates (opt-in)
+
+Optional per-group executable checks, off by default
+(`.forge/config.json` → `gates.enabled: true`). `forge gate init` scaffolds
+`gates.json` (one entry per `tasks.md` `##` group) in the change dir; fill
+each group's `check` (command) and `expect` (regex). `forge gate check
+[--group <id>]` runs them and records session `gate-results.json`; `forge
+gate status` reports `met | unmet | stale | no-run | no-check` per group.
+Once every task is complete, `forge integrity-check` requires a green,
+current result for every group with a check — partial progress never gates.
 
 ### What runs automatically every session
 
@@ -794,7 +806,7 @@ per machine with `forgekit install`; wire project commands/hooks with `forge ini
 | Agent | Skill (after install) | Project wiring (`forge init`) | Session hooks |
 | ----- | --------------------- | ----------------------------- | ------------- |
 | **Cursor** | `~/.agents/skills/forge/` (pick that harness) | commands, `forge.mdc`, SessionStart hook (`forge init --cursor`) | SessionStart → active session reminder |
-| **Claude Code** | `~/.agents/skills/forge/` via symlink at `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks | SessionStart + `/forge` or “use Forge” UserPromptSubmit |
+| **Claude Code** | `~/.agents/skills/forge/` via symlink at `~/.claude/skills/forge/` | commands, `forge.md`, SessionStart + prompt hooks | SessionStart + `/forge` or “use Forge” UserPromptSubmit; Stop hook completion backstop (`hooks.stopGate: "off"` to disable) |
 | **Codex CLI** | `~/.agents/skills/forge/` (pick that harness) | thin rule | *(none — start only when the user asks to use Forge)* |
 | **Copilot / Gemini / OpenCode** | `~/.agents/skills/forge/` (pick that harness; one dest) | *(none — global skill only)* | *(none — start only when the user asks to use Forge)* |
 | **Windsurf** | `~/.agents/skills/forge/` via vendor-path symlink | *(none — global skill only)* | *(none — start only when the user asks to use Forge)* |

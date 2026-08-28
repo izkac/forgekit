@@ -170,6 +170,11 @@ where Forge's input tokens go.
 
    If an implementer's edit is denied by the test-tamper guard mid-task, see
    **Guarded files** below before re-dispatching.
+   **Gates enabled — coordinator re-verify.** When `.forge/config.json` →
+   `gates.enabled` is true and the just-finished group's `gates.json` entry
+   has a non-empty check, an implementer's task report is self-certification,
+   not acceptance: run `forge gate check --group <id>` yourself and require
+   green **before** the next step ticks that group's boxes.
 7. Mark every task the unit finished complete in `tasks.md` (`- [ ]` → `- [x]`) — tick them from the implementer's per-task report, not from its overall status; a unit that stopped part way leaves the rest unticked. That checklist is the source of truth — fleet/status/health derive `tasksComplete` from it (and heal the session cache). Still run the progress command below when you want `--subagents` updated. Detect group boundary: next line in `tasks.md` is a new `##` heading, or no remaining tasks under the current heading.
 8. **Checkpoint** — when the project opts in (`.forge/config.json` → `git.checkpoint`):
    ```bash

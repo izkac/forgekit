@@ -152,7 +152,7 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 - Tests required for behavior changes
 - Trace ecosystem consumers when contracts change
 - Honor `openspec/config.yaml` prefixes when the project uses them (OpenSpec engine)
-- **Runtime integrity** — [references/runtime-integrity.md](./references/runtime-integrity.md): **spine.json mandatory every change** (rows or `notApplicable` — not keyword-gated); no stubs / false success; capability specs beat narrow task wording; every claimed capability needs a named production caller; when spine has rows the product loop must be **executed** — `e2e.json` steps + green `forge e2e run` (or BLOCKED), prose does not satisfy the gate; deferred wiring only via `forge defer` — `forge phase done` mechanically refuses on `forge integrity-check` failures
+- **Runtime integrity** — [references/runtime-integrity.md](./references/runtime-integrity.md): **spine.json mandatory every change** (rows or `notApplicable` — not keyword-gated); no stubs / false success; capability specs beat narrow task wording; every claimed capability needs a named production caller; when spine has rows the product loop must be **executed** — `e2e.json` steps + green `forge e2e run` (or BLOCKED), prose does not satisfy the gate; deferred wiring only via `forge defer` — `forge phase done` mechanically refuses on `forge integrity-check` failures; opt-in per-group task gates (`forge gate init|check|status`, `.forge/config.json` → `gates.enabled`) add executable group checks, required only once every task is complete
 
 ## Agent surfaces
 

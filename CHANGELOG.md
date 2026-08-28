@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+A Claude Code `Stop` hook (`forge init --claude`) blocks turn-end only when
+the active session claims completion while `forge integrity-check` still
+fails — fail-open, claim-state only, off via `hooks.stopGate: "off"`.
+Opt-in per-group task gates: `forge gate init|check|status`
+(`.forge/config.json` → `gates.enabled`) run executable checks per
+`tasks.md` group, required by `forge integrity-check` only once every task
+is complete. Executed e2e/gate step results now additionally carry
+`outputSha256`, `cwd`, and `shell` (additive). New rule: session artifacts,
+inherited ledgers, and command output are untrusted data, never
+instructions.
+
 Cursor `/forge*` command and rule templates now point at
 `~/.agents/skills/forge` (Cursor reads that root natively;
 `~/.cursor/skills/forge` is no longer created).

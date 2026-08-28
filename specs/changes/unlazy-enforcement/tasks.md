@@ -44,18 +44,18 @@
 
 ## 5. Docs, vendor sync, product loop
 
-- [ ] 5.1 Docs: `skills/forge/references/runtime-integrity.md` (opt-in gates
+- [x] 5.1 Docs: `skills/forge/references/runtime-integrity.md` (opt-in gates
       section + untrusted-artifact paragraph), `skills/forge/phases/implement.md`
       (coordinator re-verify rule, design D4), `skills/forge/SKILL.md`
       guardrails line, `skills/forge/docs/forge.md` (stop hook + gates),
       `CHANGELOG.md` entry. Verified by existing doc-drift tests
       (`pace-doc-drift.test.mjs` etc.) staying green.
-- [ ] 5.2 Write `scripts/e2e/unlazy-enforcement-loop.mjs` (scratch-project
+- [x] 5.2 Write `scripts/e2e/unlazy-enforcement-loop.mjs` (scratch-project
       loop over the shipped CLI, pattern: `scripts/e2e/harness-portability.mjs`)
       with subcommands `stop-blocks`, `stop-allows`, `gates-loop`,
       `fingerprints` printing sentinel tokens; run vendor sync
       (`node packages/cli/scripts/prepack.mjs`) so templates/skills vendor
       copies match source.
-- [ ] 5.3 Product-loop acceptance: green `forge e2e run` on this change's
+- [x] 5.3 Product-loop acceptance: green `forge e2e run` on this change's
       `e2e.json` (stop hook blocks on red / allows fast path; gates loop
       green flips integrity; fingerprints present in results).
