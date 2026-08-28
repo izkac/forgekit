@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import {
   JOBS_SIGNAL_RE,
   addDeferral,
@@ -516,6 +517,15 @@ test('runE2eSteps: green run with expect match', () => {
   assert.equal(results.steps[0].exitCode, 0);
   assert.equal(results.steps[0].expectMatched, true);
   assert.equal(results.stepsHash, e2eStepsHash([greenStep({ expect: 'proposals: \\d+' })]));
+  // Anchor: every pre-existing field on an executed step keeps its name,
+  // type, and meaning after the fingerprint fields (task 4.1) were added.
+  const step = results.steps[0];
+  assert.equal(step.name, 'produce');
+  assert.equal(step.cmd, greenStep().cmd);
+  assert.equal(step.ok, true);
+  assert.equal(typeof step.durationMs, 'number');
+  assert.equal(typeof step.outputTail, 'string');
+  assert.equal(step.error, null);
 });
 
 test('runE2eSteps: non-zero exit fails and skips later steps', () => {
@@ -534,6 +544,60 @@ test('runE2eSteps: exit 0 but expect mismatch fails', () => {
   const results = runE2eSteps({ steps: [greenStep({ expect: 'ratified: \\d+' })] });
   assert.equal(results.ok, false);
   assert.equal(results.steps[0].expectMatched, false);
+});
+
+test('runE2eSteps: executed step carries outputSha256/cwd/shell fingerprints', () => {
+  const cwd = tmp('forge-e2e-fingerprint-');
+  try {
+    const step = greenStep();
+    const results = runE2eSteps({ steps: [step] }, { cwd });
+    const stepResult = results.steps[0];
+
+    // Independently reproduce the same command to derive the expected
+    // digest — never hardcoded, so a wrong hashing formula (wrong string,
+    // wrong algorithm) shows up as a real mismatch rather than a passed
+    // test that never checked anything.
+    const r = spawnSync(step.cmd, { shell: true, cwd, encoding: 'utf8' });
+    const expectedOutput = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    const expectedDigest = crypto.createHash('sha256').update(expectedOutput).digest('hex');
+
+    assert.equal(stepResult.outputSha256, expectedDigest);
+    assert.equal(stepResult.cwd, cwd, 'cwd must be the resolved working directory the step ran in');
+    assert.equal(
+      stepResult.shell,
+      process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : '/bin/sh',
+      'shell must name what the child actually ran under (mirrors the spawnSync shell:true call)',
+    );
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('runE2eSteps: outputSha256 differs for different output, matches for identical output', () => {
+  const results = runE2eSteps({
+    steps: [
+      { name: 'a', cmd: 'node -e "console.log(\'AAA\')"' },
+      { name: 'b', cmd: 'node -e "console.log(\'BBB\')"' },
+      { name: 'c', cmd: 'node -e "console.log(\'AAA\')"' },
+    ],
+  });
+  const [a, b, c] = results.steps;
+  assert.notEqual(a.outputSha256, b.outputSha256, 'different output must produce different digests');
+  assert.equal(a.outputSha256, c.outputSha256, 'identical output must produce identical digests');
+});
+
+test('runE2eSteps: skipped step carries none of the fingerprint fields', () => {
+  const results = runE2eSteps({
+    steps: [
+      { name: 'boom', cmd: 'node -e "process.exit(3)"' },
+      greenStep({ name: 'never' }),
+    ],
+  });
+  const skipped = results.steps[1];
+  assert.equal(skipped.skipped, true);
+  assert.equal('outputSha256' in skipped, false);
+  assert.equal('cwd' in skipped, false);
+  assert.equal('shell' in skipped, false);
 });
 
 test('checkE2eGate: missing file, missing results, stale hash, failed run, green, notApplicable', () => {

@@ -38,7 +38,7 @@
 
 ## 4. Evidence fingerprints
 
-- [ ] 4.1 Step runner records `outputSha256`, resolved `cwd`, `shell` per
+- [x] 4.1 Step runner records `outputSha256`, resolved `cwd`, `shell` per
       step (e2e + gate results). Extend runner tests in `integrity.test.mjs`
       / `e2e-cli.test.mjs` to assert the fields; existing readers unaffected.
 

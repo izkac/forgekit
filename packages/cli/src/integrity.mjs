@@ -437,6 +437,18 @@ function outputTail(text, lines = 30) {
 }
 
 /**
+ * The shell each step's `cmd` actually runs under, mirroring the
+ * `shell: true` passed to `spawnSync` below. Node resolves `shell: true` to
+ * `process.env.ComSpec` (falling back to `cmd.exe` when unset) on win32, and
+ * to `/bin/sh` on every other platform — never `$SHELL`, which `shell: true`
+ * does not consult.
+ */
+function effectiveShell() {
+  if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe';
+  return '/bin/sh';
+}
+
+/**
  * Execute e2e steps sequentially (shell). Stops at the first failure —
  * later steps depend on earlier ones. Exit code must be 0 and `expect`
  * (when present) must match combined stdout+stderr.
@@ -482,6 +494,9 @@ export function runE2eSteps(doc, opts = {}) {
       durationMs: Date.now() - started,
       outputTail: outputTail(output),
       error: r.error ? String(r.error.message ?? r.error) : null,
+      outputSha256: crypto.createHash('sha256').update(output).digest('hex'),
+      cwd,
+      shell: effectiveShell(),
     });
     if (!stepOk) ok = false;
   }

@@ -214,6 +214,11 @@ if (sub === 'check') {
       exitCode: stepResult.exitCode,
       expectMatched: stepResult.expectMatched,
       durationMs: stepResult.durationMs,
+      // Fingerprints (task 4.1): copied straight off the step result
+      // runE2eSteps already computed — no extra spawn or hashing here.
+      outputSha256: stepResult.outputSha256,
+      cwd: stepResult.cwd,
+      shell: stepResult.shell,
       checksHash: groupChecksHash(g),
     };
     resultsById.set(g.id, entry);

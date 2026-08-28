@@ -268,6 +268,32 @@ test('gate check: expect mismatch on exit 0 is unmet', () => {
   assert.equal(entry.ok, false, 'exit 0 alone is not enough — expect must also match');
 });
 
+test('gate check: results entries carry outputSha256/cwd/shell fingerprints (task 4.1)', () => {
+  const root = tmp('gate-check-fingerprint-');
+  const { changeDir, sessionDir } = makeFixture(root);
+  const group = { id: '1', title: 'g1', check: nodeCmd('OK-TOKEN', 0), expect: 'OK-TOKEN', timeoutMs: 15000 };
+  writeGates(changeDir, [group]);
+
+  const out = run(root, ['check']);
+  assert.match(out, /GREEN/);
+
+  const results = readGateResults(sessionDir);
+  const entry = results.groups[0];
+
+  // Independently reproduce the same check to derive the expected digest —
+  // never hardcoded, so a wrong hashing formula shows up as a mismatch.
+  const check = spawnSync(group.check, { shell: true, cwd: root, encoding: 'utf8' });
+  const expectedOutput = `${check.stdout ?? ''}${check.stderr ?? ''}`;
+  const expectedDigest = crypto.createHash('sha256').update(expectedOutput).digest('hex');
+
+  assert.equal(entry.outputSha256, expectedDigest);
+  assert.equal(entry.cwd, root, 'cwd must be the resolved directory the check actually ran in');
+  assert.equal(
+    entry.shell,
+    process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : '/bin/sh',
+  );
+});
+
 test('gate check: only groups with a non-empty check run; others are left out of results', () => {
   const root = tmp('gate-check-emptycheck-');
   const { changeDir, sessionDir } = makeFixture(root);
