@@ -245,6 +245,12 @@ integrity-check` requires a green, current result for it — but only once
 the session reports **every task complete** (`tasksComplete >= tasksTotal`);
 partial progress never gates.
 
+Rule 3 applies to gate checks too: a `check` that would pass against a
+no-op handler is invalid evidence, and reviewers police it. `gates.json`
+and `gate-results.json` are guarded integrity artifacts (like `e2e.json` /
+`e2e-results.json`) — hand-editing results to fake a green group is a
+tamper, not a shortcut.
+
 **Coordinator re-verify (gates enabled).** An implementer's task report is
 self-certification, not acceptance. When gates are enabled, the coordinator
 runs `forge gate check --group <id>` itself after the implementer returns and
@@ -264,6 +270,7 @@ REJECT the task (or final review → `NOT READY`) if any of:
 - Spine row for this capability missing or library-only
 - E2E steps would pass against a stubbed handler (no domain side-effect
   assertions), or `e2e.json` opts out via `notApplicable` without a real reason
+- A task gate's `check` would pass against a no-op handler (gates enabled)
 
 ## Plan seam (every change)
 

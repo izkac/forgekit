@@ -396,6 +396,8 @@ test('integrity artifacts are guarded regardless of tracking state, in a subdire
     'spec-verify.md',
     'test-evidence.md',
     'tdd-runs.jsonl',
+    'gates.json',
+    'gate-results.json',
   ];
   for (const basename of artifacts) {
     const relPath = `specs/changes/x/${basename}`;

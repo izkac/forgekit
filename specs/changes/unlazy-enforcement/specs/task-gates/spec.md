@@ -48,3 +48,15 @@ gate results — but only once the session reports all tasks complete.
   missing gate result for any group
 - WHEN `forge integrity-check` runs
 - THEN it exits non-zero naming the group
+
+### Requirement: Gate artifacts are tamper-guarded
+
+`gates.json` and `gate-results.json` SHALL be classified as guarded
+integrity artifacts (like `e2e.json` / `e2e-results.json`), regardless of
+tracking state, so a fake green result cannot be written by hand.
+
+#### Scenario: Hand-editing gate results is a tamper
+
+- GIVEN an active session in the guard's enforcement window
+- WHEN a tool call edits `gates.json` or `gate-results.json`
+- THEN the guarded-file classifier denies it (`integrity-artifact:<name>`)

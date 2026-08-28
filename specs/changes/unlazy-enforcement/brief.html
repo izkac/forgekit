@@ -38,7 +38,9 @@ default.</p>
       blocked, and the check adds under ~50&nbsp;ms of file reads per turn.</li>
   <li>An optional (off by default) gates feature: each task group gets one
       runnable check, and the coordinator must see it pass before ticking that
-      group's boxes — no more taking a subagent's word for it.</li>
+      group's boxes — no more taking a subagent's word for it. The gate files
+      themselves are tamper-guarded, so a fake green result can't be written
+      by hand.</li>
   <li>Test-run records become tamper-evident: each executed step also stores a
       digest of its output and where/how it ran.</li>
   <li>A written rule that session files and command output are data, never

@@ -137,11 +137,11 @@ test('install with --adr installs ADR skills', () => {
     );
     assert.ok(results.some((r) => r.skill === 'archive-to-adr'));
     assert.ok(
-      fs.existsSync(path.join(home, '.cursor', 'skills', 'archive-to-adr', 'SKILL.md')),
+      fs.existsSync(path.join(home, '.agents', 'skills', 'archive-to-adr', 'SKILL.md')),
     );
     assert.ok(
       fs.existsSync(
-        path.join(home, '.cursor', 'skills', 'git-resolve-adr-conflict', 'SKILL.md'),
+        path.join(home, '.agents', 'skills', 'git-resolve-adr-conflict', 'SKILL.md'),
       ),
     );
   } finally {

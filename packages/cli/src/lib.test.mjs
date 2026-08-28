@@ -629,7 +629,7 @@ test('forge evidence will not overwrite another session run it only guessed at',
   assert.match(`${r.stdout}${r.stderr}`, /--session/);
 });
 
-test('a session is what has a session.json, whatever its dirent says', () => {
+test('a session is what has a session.json, whatever its dirent says', (t) => {
   // F12. The first fix asked the dirent whether it was a directory — a check
   // copied from `cleanup-sessions.mjs`, where skipping means *don't delete* and
   // is safe, into the resolver, where skipping means *don't count* and hides a
@@ -648,7 +648,16 @@ test('a session is what has a session.json, whatever its dirent says', () => {
     path.join(sessions, 'plain', 'session.json'),
     `${JSON.stringify({ id: 'plain', slug: 'plain', phase: 'implement' })}\n`,
   );
-  fs.symlinkSync(outside, path.join(sessions, 'linked'));
+  try {
+    fs.symlinkSync(outside, path.join(sessions, 'linked'));
+  } catch (err) {
+    // Windows denies unprivileged symlink creation (no admin / Developer Mode)
+    if (err && (err.code === 'EPERM' || err.code === 'EACCES')) {
+      t.skip('symlink creation unavailable in this environment');
+      return;
+    }
+    throw err;
+  }
   // And a stray file, which genuinely is not a session.
   fs.writeFileSync(path.join(sessions, '.DS_Store'), 'junk');
 

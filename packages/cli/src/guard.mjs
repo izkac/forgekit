@@ -34,6 +34,8 @@ const INTEGRITY_ARTIFACTS = new Set([
   'spec-verify.md',
   'test-evidence.md',
   'tdd-runs.jsonl',
+  'gates.json',
+  'gate-results.json',
 ]);
 
 /**

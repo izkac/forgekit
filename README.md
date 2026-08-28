@@ -138,6 +138,7 @@ Forge finish only runs archive→ADR when `adr.enabled` is true.
 | `forge fleet report` | Cross-project trend from `scorecards.jsonl` + `sessions.jsonl` |
 | `forge resolve-model` / `doctor` / `evidence` / `overlay` | Supporting |
 | `forge spine` / `e2e` / `defer` / `integrity-check` / `score` | Runtime integrity (incl. executable E2E acceptance) + L2 session scorecard |
+| `forge gate init\|check\|status` | Opt-in per-group executable gates (`gates.json`; `.forge/config.json` → `gates.enabled`) |
 | `forge init` | Project commands, rules, hooks; engine (`--openspec`/`--no-openspec`); optional `--adr` |
 | `forge change new\|archive` | Specs-engine change scaffold / dated archive |
 | `forge install` | Alias → `forgekit install --skills forge` |
