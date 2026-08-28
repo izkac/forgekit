@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.54 — 2026-08-28
 
 A Claude Code `Stop` hook (`forge init --claude`) blocks turn-end only when
 the active session claims completion while `forge integrity-check` still
@@ -13,9 +13,11 @@ is complete. Executed e2e/gate step results now additionally carry
 inherited ledgers, and command output are untrusted data, never
 instructions.
 
-Cursor `/forge*` command and rule templates now point at
-`~/.agents/skills/forge` (Cursor reads that root natively;
-`~/.cursor/skills/forge` is no longer created).
+Cursor and Claude Code `/forge*` command and rule templates now point at
+`~/.agents/skills/forge` (Cursor reads that root natively; Claude Code
+reaches it through the 0.3.53 symlink; `~/.cursor/skills/forge` is no
+longer created). `gates.json` / `gate-results.json` join the tamper guard's
+integrity-artifact set, so a fake green gate result cannot be hand-written.
 
 ## 0.3.53 — 2026-08-28
 
