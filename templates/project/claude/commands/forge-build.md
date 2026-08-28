@@ -5,7 +5,7 @@ category: Workflow
 tags: [workflow, forge, openspec]
 ---
 
-Implement phase. Follow ~/.claude/skills/forge/phases/implement.md`.
+Implement phase. Follow ~/.agents/skills/forge/phases/implement.md`.
 
 **REQUIRED:** forge `skills/subagent-driven-development` + `skills/test-driven-development` per task.
 

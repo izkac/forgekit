@@ -7,7 +7,7 @@ tags: [workflow, forge, planning]
 
 Run the **Forge** workflow for substantial work.
 
-Read and follow the Forge skill (`~/.claude/skills/forge/SKILL.md`) and `~/.claude/skills/forge/docs/forge.md`.
+Read and follow the Forge skill (`~/.agents/skills/forge/SKILL.md`) and `~/.agents/skills/forge/docs/forge.md`.
 
 1. Triage — always the first step after invoke. The agent decides whether this
    is substantial work. A trivial edit or read-only question skips the rest of

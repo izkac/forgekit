@@ -53,4 +53,4 @@ Write `.forge/reports/analysis-<YYYY-MM-DD>.md`:
 
 Then summarize the TL;DR to the user in chat.
 
-Reference: `~/.claude/skills/forge/docs/forge.md`
+Reference: `~/.agents/skills/forge/docs/forge.md`

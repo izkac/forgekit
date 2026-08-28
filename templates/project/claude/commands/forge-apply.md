@@ -7,7 +7,7 @@ tags: [workflow, forge, openspec]
 
 **Forge-owned command.** Use this instead of bare `/opsx:apply` for disciplined implementation of a tracked change (OpenSpec or built-in specs engine — `.forge/config.json` → `plan.engine`).
 
-Read the Forge skill (`~/.claude/skills/forge/SKILL.md`) and `~/.claude/skills/forge/docs/forge.md`.
+Read the Forge skill (`~/.agents/skills/forge/SKILL.md`) and `~/.agents/skills/forge/docs/forge.md`.
 
 **Input**: Optionally specify a change name (e.g., `/forge:apply add-auth`). If omitted, infer from context or active Forge session.
 
@@ -40,7 +40,7 @@ Handle blocked / all_done states per vendor skill before implementing.
 
 ## 6. Implement (Forge — REQUIRED)
 
-Follow `~/.claude/skills/forge/phases/implement.md`:
+Follow `~/.agents/skills/forge/phases/implement.md`:
 
 - **Do not** implement all tasks inline in coordinator context
 - One **implementer** per `tasks.md` **group** (`##` section), tasks in order. Split 1:1 only when that task's **own line** is money/auth/contracts/migrations/secrets, the group has more than 4 tasks, or the tasks share nothing
@@ -52,7 +52,7 @@ Pause on unclear tasks, design issues, errors, or user interrupt.
 
 ## 7. Verify (Forge — REQUIRED when all tasks done)
 
-Follow `~/.claude/skills/forge/phases/verify.md`:
+Follow `~/.agents/skills/forge/phases/verify.md`:
 
 ```bash
 forge phase verify
@@ -70,7 +70,7 @@ On specs sessions, leftover sweep is always on: follow `specs-verify-change`,
 
 ## 8. Review (Forge — REQUIRED)
 
-Follow `~/.claude/skills/forge/phases/review.md`:
+Follow `~/.agents/skills/forge/phases/review.md`:
 
 ```bash
 forge phase review
@@ -80,6 +80,6 @@ Final reviewer **after** leftover fixes; save to `.forge/sessions/<id>/reviews/f
 
 ## 9. Finish
 
-When verify + review pass: suggest archive — `/opsx:archive` (OpenSpec) or `forge change archive <name>` (specs; merges deltas into `<plan.dir>/specs/`) — per [finish phase](~/.claude/skills/forge/phases/finish.md).
+When verify + review pass: suggest archive — `/opsx:archive` (OpenSpec) or `forge change archive <name>` (specs; merges deltas into `<plan.dir>/specs/`) — per [finish phase](~/.agents/skills/forge/phases/finish.md).
 
 **Skip Forge for this task only:** `/forge:skip` (runs work without brainstorm/plan/verify chain).

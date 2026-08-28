@@ -1,6 +1,6 @@
 # Forge (thin rule)
 
-Full workflow: `~/.claude/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.claude/skills/forge/SKILL.md` after `forge install`).
+Full workflow: `~/.agents/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.agents/skills/forge/SKILL.md` after `forge install`).
 
 **Default:** execute the request directly. Start Forge only when the user invokes `/forge` / `/forge:*` (except `/forge:skip`) or asks for **Forge by name** in any phrasing ("use Forge", "with Forge", "do forge work", "forge workflow").
 

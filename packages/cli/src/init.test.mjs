@@ -58,7 +58,7 @@ test('re-running init refreshes stale managed rule files in place', () => {
     const report = initProject(['claude'], { cwd, adr: false, planEngine: null });
     const updated = fs.readFileSync(rule, 'utf8');
     assert.ok(!updated.includes('forgekit `docs/forge.md`'), 'stale ref replaced');
-    assert.ok(updated.includes('~/.claude/skills/forge/docs/forge.md'), 'points to global skill doc');
+    assert.ok(updated.includes('~/.agents/skills/forge/docs/forge.md'), 'points to global skill doc');
     assert.ok(
       report.files.some((f) => f.file.includes('forge.md') && f.status === 'updated'),
       'reports the refresh as updated',

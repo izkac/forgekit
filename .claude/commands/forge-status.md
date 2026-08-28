@@ -13,4 +13,4 @@ forge status
 
 Summarize `phase`, `planType`, `openspecChange`, and task progress for the user.
 
-Reference: `~/.claude/skills/forge/docs/forge.md`
+Reference: `~/.agents/skills/forge/docs/forge.md`
