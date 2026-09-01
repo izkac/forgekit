@@ -188,6 +188,54 @@ function readMetricsDoc(sessionDir) {
   }
 }
 
+const ADR_CANDIDATE_RE = /ADR-candidate:/g;
+const ASSUMPTIONS_HEADING_RE = /^##\s+Assumptions\b/;
+const HEADING_RE = /^##\s+/;
+const ASSUMPTION_BULLET_RE = /^-\s+/;
+
+/**
+ * Brainstorm-hardening signals (design decision 3): whether
+ * `brainstorm/notes.md` exists, how many `- ` bullets sit under its
+ * `## Assumptions` heading, and how many `ADR-candidate:` entries were
+ * recorded in `brainstorm/decisions.md`. `cleanup-sessions` deletes the whole
+ * session dir at done — same "outlive the directory" argument as
+ * `readMetricsDoc` above — so a session dir already gone (or a read failure
+ * of any kind) degrades to null/zero rather than costing the digest line.
+ *
+ * @param {string} sessionDir
+ * @returns {{ notes: boolean | null, assumptions: number, adrCandidates: number }}
+ */
+function readBrainstormSignals(sessionDir) {
+  const absent = { notes: null, assumptions: 0, adrCandidates: 0 };
+  try {
+    if (!fs.existsSync(sessionDir)) return absent;
+    const notesFile = path.join(sessionDir, 'brainstorm', 'notes.md');
+    const notes = fs.existsSync(notesFile);
+    let assumptions = 0;
+    if (notes) {
+      let inAssumptions = false;
+      for (const line of fs.readFileSync(notesFile, 'utf8').split('\n')) {
+        if (ASSUMPTIONS_HEADING_RE.test(line)) {
+          inAssumptions = true;
+          continue;
+        }
+        if (!inAssumptions) continue;
+        if (HEADING_RE.test(line)) break;
+        if (ASSUMPTION_BULLET_RE.test(line)) assumptions += 1;
+      }
+    }
+    const decisionsFile = path.join(sessionDir, 'brainstorm', 'decisions.md');
+    let adrCandidates = 0;
+    if (fs.existsSync(decisionsFile)) {
+      const matches = fs.readFileSync(decisionsFile, 'utf8').match(ADR_CANDIDATE_RE);
+      adrCandidates = matches ? matches.length : 0;
+    }
+    return { notes, assumptions, adrCandidates };
+  } catch {
+    return absent;
+  }
+}
+
 /** @param {{ cwd?: string }} opts */
 function forgeDirOf(opts, sessionDir) {
   return opts.cwd ? path.join(opts.cwd, '.forge') : path.resolve(sessionDir, '..', '..');
@@ -323,6 +371,12 @@ export function appendSessionDigest(opts) {
       durationHours,
       startedAt: session.createdAt ?? null,
       endedAt: session.updatedAt ?? null,
+      // Spec-churn proxy (design decision 2/3): `forge brief stamp` increments
+      // these on the session; read back here rather than recomputed, same
+      // session-only-dies-at-cleanup argument as archiveWaived above.
+      briefStamps: session.briefStamps ?? null,
+      briefRestampsAfterImplement: session.briefRestampsAfterImplement ?? null,
+      brainstorm: readBrainstormSignals(sessionDir),
     };
     return appendLines(
       path.join(forgeDirOf(opts, sessionDir), 'sessions.jsonl'),

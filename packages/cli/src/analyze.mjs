@@ -141,6 +141,11 @@ export function buildAnalysis(options = {}) {
   let measured = 0;
   let predatesTelemetry = 0;
   let collectionFailed = 0;
+  // Brainstorm-hardening signals (design decision 4): spec churn after
+  // approval, and how thorough brainstorming's assumptions capture is.
+  let specChurnSessions = 0;
+  let assumptionsSum = 0;
+  let assumptionsSessions = 0;
 
   for (const entry of digests) {
     const card = cards.get(entry.sessionId) ?? null;
@@ -297,6 +302,19 @@ export function buildAnalysis(options = {}) {
       }
     }
 
+    const briefRestampsAfterImplement = entry.briefRestampsAfterImplement ?? null;
+    if (typeof briefRestampsAfterImplement === 'number' && briefRestampsAfterImplement > 0) {
+      specChurnSessions += 1;
+    }
+    const brainstorm =
+      entry.brainstorm && typeof entry.brainstorm === 'object'
+        ? entry.brainstorm
+        : { notes: null, assumptions: 0, adrCandidates: 0 };
+    if (brainstorm.notes === true) {
+      assumptionsSum += num(brainstorm.assumptions);
+      assumptionsSessions += 1;
+    }
+
     sessions.push({
       sessionId: entry.sessionId ?? null,
       slug: entry.slug ?? null,
@@ -318,6 +336,9 @@ export function buildAnalysis(options = {}) {
       subagents: entry.subagentsDispatched ?? (hasMetrics ? num(compact.subagents) : null),
       models: Array.isArray(compact?.models) ? compact.models : [],
       dispatchesSkipped: entry.dispatchesSkipped ?? (table ? num(table.skipped) : null),
+      briefStamps: entry.briefStamps ?? null,
+      briefRestampsAfterImplement,
+      brainstorm,
     });
   }
 
@@ -350,6 +371,8 @@ export function buildAnalysis(options = {}) {
     totals: {
       ...totals,
       errorRate: toolResults > 0 ? errorResults / toolResults : 0,
+      specChurnSessions,
+      meanAssumptions: assumptionsSessions > 0 ? assumptionsSum / assumptionsSessions : null,
     },
     sessions,
     byModel,
@@ -441,6 +464,10 @@ export function formatAnalysis(analysis) {
     `Totals across measured sessions: ${big(totals.requests)} requests, ` +
       `${big(totals.totalTokens)} tokens (${big(totals.outputTokens)} out), ` +
       `${big(totals.subagents)} subagents, ${pct(totals.errorRate)} tool errors`,
+  );
+  out.push(
+    `Spec churn: ${big(totals.specChurnSessions)} session(s) re-stamped the brief after implement started; ` +
+      `mean assumptions captured: ${typeof totals.meanAssumptions === 'number' ? totals.meanAssumptions.toFixed(1) : 'n/a'}`,
   );
 
   const models = Object.entries(a.byModel ?? {});

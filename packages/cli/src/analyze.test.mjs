@@ -914,3 +914,74 @@ test('forge analyze is registered, prints a table, and --json emits the object',
 
   assert.match(fs.readFileSync(bin, 'utf8'), /^ {2}analyze /m, 'listed in forge --help');
 });
+
+/* ---------- brainstorm-hardening signals ---------- */
+
+test('brainstorm signal: buildAnalysis carries per-session fields and aggregates specChurnSessions + meanAssumptions', () => {
+  const cwd = project({
+    digests: [
+      digest('churn-1', {
+        metrics: compact(),
+        briefStamps: 2,
+        briefRestampsAfterImplement: 1,
+        brainstorm: { notes: true, assumptions: 4, adrCandidates: 1 },
+      }),
+      digest('clean-1', {
+        metrics: compact(),
+        briefStamps: 1,
+        briefRestampsAfterImplement: 0,
+        brainstorm: { notes: true, assumptions: 2, adrCandidates: 0 },
+      }),
+      digest('nonotes-1', {
+        metrics: compact(),
+        briefStamps: null,
+        briefRestampsAfterImplement: null,
+        brainstorm: { notes: null, assumptions: 0, adrCandidates: 0 },
+      }),
+    ],
+  });
+
+  const analysis = buildAnalysis({ cwd });
+  const bySession = Object.fromEntries(analysis.sessions.map((s) => [s.sessionId, s]));
+
+  assert.equal(bySession['churn-1'].briefStamps, 2);
+  assert.equal(bySession['churn-1'].briefRestampsAfterImplement, 1);
+  assert.deepEqual(bySession['churn-1'].brainstorm, { notes: true, assumptions: 4, adrCandidates: 1 });
+  assert.equal(bySession['nonotes-1'].briefStamps, null);
+  assert.equal(bySession['nonotes-1'].briefRestampsAfterImplement, null);
+
+  // Only `churn-1` has a positive briefRestampsAfterImplement.
+  assert.equal(analysis.totals.specChurnSessions, 1);
+  // Mean of 4 and 2 — the two `brainstorm.notes === true` rows; `nonotes-1` is excluded.
+  assert.equal(analysis.totals.meanAssumptions, 3);
+});
+
+test('brainstorm signal: meanAssumptions is null and specChurnSessions is 0 when no session has brainstorm notes or churn', () => {
+  const cwd = project({
+    digests: [
+      digest('s1', {
+        metrics: compact(),
+        briefRestampsAfterImplement: 0,
+        brainstorm: { notes: null, assumptions: 0, adrCandidates: 0 },
+      }),
+    ],
+  });
+  const analysis = buildAnalysis({ cwd });
+  assert.equal(analysis.totals.specChurnSessions, 0);
+  assert.equal(analysis.totals.meanAssumptions, null);
+});
+
+test('brainstorm signal: formatAnalysis prints one summary line for spec churn and mean assumptions', () => {
+  const cwd = project({
+    digests: [
+      digest('s1', {
+        metrics: compact(),
+        briefRestampsAfterImplement: 1,
+        brainstorm: { notes: true, assumptions: 3, adrCandidates: 0 },
+      }),
+    ],
+  });
+  const text = formatAnalysis(buildAnalysis({ cwd }));
+  assert.match(text, /Spec churn: 1 session/);
+  assert.match(text, /mean assumptions captured: 3\.0/);
+});

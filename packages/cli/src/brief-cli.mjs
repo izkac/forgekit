@@ -9,7 +9,7 @@
  */
 
 import fs from 'node:fs';
-import { loadSession, resolveSessionOrExit } from './lib.mjs';
+import { loadSession, resolveSessionOrExit, saveSession } from './lib.mjs';
 import { resolveChangeDir } from './integrity.mjs';
 import { BRIEF_FILE, briefPath, checkBrief, openInBrowser, stampBrief } from './brief.mjs';
 
@@ -34,7 +34,7 @@ if (!sessionId) {
   });
 }
 
-const { session } = loadSession(sessionId);
+const { dir, session } = loadSession(sessionId);
 const changeDir = resolveChangeDir({ session });
 
 if (cmd === 'check') {
@@ -52,6 +52,15 @@ if (cmd === 'stamp') {
   // Never auto-open: re-stamps happen several times a session and each open
   // stole the operator's focus. `forge brief open` is the explicit opt-in.
   const hash = stampBrief(changeDir);
+  // Spec-churn proxy (design decision 2): count every stamp, and separately
+  // count stamps that land after `implement` has started — the brief hash
+  // already tracks spec edits, so a re-stamp post-implement ≈ spec churn
+  // after approval.
+  session.briefStamps = (session.briefStamps ?? 0) + 1;
+  if (Array.isArray(session.phaseHistory) && session.phaseHistory.some((p) => p.phase === 'implement')) {
+    session.briefRestampsAfterImplement = (session.briefRestampsAfterImplement ?? 0) + 1;
+  }
+  saveSession(dir, session);
   process.stdout.write(`Stamped ${briefPath(changeDir)} (specs hash ${hash})\n`);
   process.stdout.write(
     `Operator: review the brief at ${briefPath(changeDir)} — open it with \`forge brief open\`.\n`,

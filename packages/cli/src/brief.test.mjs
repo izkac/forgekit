@@ -14,6 +14,7 @@ import {
 } from './brief.mjs';
 
 const SET_PHASE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'set-phase.mjs');
+const BRIEF_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'brief-cli.mjs');
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -196,4 +197,40 @@ test('phase implement unaffected for sessions without a tracked change', () => {
   makePhaseFixture(root, { planType: null, openspecChange: null });
   const ok = runSetPhase(root, ['implement', '--tasks-total', '2']);
   assert.equal(ok.status, 0);
+});
+
+function runBriefCli(cwd, args) {
+  try {
+    const stdout = execFileSync(process.execPath, [BRIEF_CLI, ...args], {
+      cwd,
+      env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('brief-fleet-'), 's') },
+    });
+    return { status: 0, stdout: stdout.toString(), stderr: '' };
+  } catch (err) {
+    return { status: err.status, stdout: String(err.stdout), stderr: String(err.stderr) };
+  }
+}
+
+test('brief stamp counter: increments briefStamps, and briefRestampsAfterImplement once implement has started', () => {
+  const root = tmp('brief-counter-');
+  const changeDir = makeChange(root, 'my-change');
+  writeBrief(changeDir);
+  const sessionDir = makePhaseFixture(root, { phaseHistory: [{ phase: 'plan', at: new Date().toISOString() }] });
+
+  const first = runBriefCli(root, ['stamp']);
+  assert.equal(first.status, 0);
+  let session = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+  assert.equal(session.briefStamps, 1);
+  assert.equal(session.briefRestampsAfterImplement ?? 0, 0);
+
+  // Simulate implement having started, then edit a spec and re-stamp.
+  session.phaseHistory.push({ phase: 'implement', at: new Date().toISOString() });
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify(session)}\n`, 'utf8');
+  fs.appendFileSync(path.join(changeDir, 'tasks.md'), '- [ ] 1.9 late edit\n');
+
+  const second = runBriefCli(root, ['stamp']);
+  assert.equal(second.status, 0);
+  session = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
+  assert.equal(session.briefStamps, 2);
+  assert.equal(session.briefRestampsAfterImplement, 1);
 });

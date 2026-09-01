@@ -16,14 +16,14 @@
 
 ## 2. Quality signals
 
-- [ ] 2.1 In `packages/cli/src/brief-cli.mjs` `stamp`: after a successful
+- [x] 2.1 In `packages/cli/src/brief-cli.mjs` `stamp`: after a successful
       `stampBrief`, increment `session.briefStamps` (default 0) and, when
       `session.phaseHistory` contains an `implement` entry, also
       `session.briefRestampsAfterImplement`; `saveSession`. TDD in
       `packages/cli/src/brief.test.mjs` (first stamp → 1/0; re-stamp after
       implement in history → 2/1). Tier 2:
       `node --test packages/cli/src/brief.test.mjs`.
-- [ ] 2.2 In `packages/cli/src/ledger.mjs`: add to the digest row
+- [x] 2.2 In `packages/cli/src/ledger.mjs`: add to the digest row
       `briefStamps`, `briefRestampsAfterImplement`, and
       `brainstorm: { notes, assumptions, adrCandidates }` parsed from the
       session dir's `brainstorm/notes.md` (`- ` bullets under `## Assumptions`

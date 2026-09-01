@@ -788,3 +788,67 @@ test('the digest records which census rule judged its reviews', () => {
   assert.equal(entry.reviews.rule, CENSUS_RULE);
   assert.equal(entry.reviews.final, 'independent');
 });
+
+test('brainstorm signal: digest row carries briefStamps and parsed brainstorm notes/assumptions/adrCandidates', () => {
+  const root = tmp('forge-ledger-brainstorm-');
+  const { sessionDir, session } = makeSession(root, 's1', {
+    briefStamps: 3,
+    briefRestampsAfterImplement: 1,
+  });
+  const brainstormDir = path.join(sessionDir, 'brainstorm');
+  fs.mkdirSync(brainstormDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(brainstormDir, 'notes.md'),
+    [
+      '# Brainstorm notes',
+      '',
+      '## Assumptions',
+      '- the API stays backwards compatible',
+      '- operators read the brief before implement',
+      '- cleanup runs on a 14-day cadence',
+      '',
+      '## Open questions',
+      '- not a bullet under Assumptions, must not be counted',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(brainstormDir, 'decisions.md'),
+    [
+      '# Decisions',
+      '',
+      'ADR-candidate: record spec churn as a first-class signal',
+      '',
+      'Some unrelated prose.',
+      '',
+      'ADR-candidate: gate plan on brainstorm notes',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  const entry = digestOf(root);
+
+  assert.equal(entry.briefStamps, 3);
+  assert.equal(entry.briefRestampsAfterImplement, 1);
+  assert.equal(entry.brainstorm.notes, true);
+  assert.equal(entry.brainstorm.assumptions, 3);
+  assert.equal(entry.brainstorm.adrCandidates, 2);
+});
+
+test('brainstorm signal: parser degrades to null/zero without throwing when the session dir is already gone', () => {
+  const root = tmp('forge-ledger-brainstorm-gone-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  fs.rmSync(sessionDir, { recursive: true, force: true });
+
+  assert.equal(appendSessionDigest({ cwd: root, sessionDir, session, card: null }), 1);
+  const entry = digestOf(root);
+
+  assert.equal(entry.brainstorm.notes, null);
+  assert.equal(entry.brainstorm.assumptions, 0);
+  assert.equal(entry.brainstorm.adrCandidates, 0);
+  assert.equal(entry.briefStamps, null);
+  assert.equal(entry.briefRestampsAfterImplement, null);
+});
