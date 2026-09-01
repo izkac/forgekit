@@ -1,0 +1,80 @@
+<!-- forge-brief-specs-hash:9bec108ed6770178 -->
+<meta charset="utf-8">
+<title>Brief — frontier-round brainstorm interview</title>
+<style>
+  body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem;
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         line-height: 1.55; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; }
+  li { margin: .3rem 0; }
+</style>
+
+<h1>A faster, sharper brainstorm interview</h1>
+
+<h2>TL;DR</h2>
+<p>Forge's brainstorm phase currently asks you questions one at a time, with no
+recommendations and no clear end. After this change it interviews in <em>rounds</em>:
+every question that can be asked right now arrives together, each with a recommended
+answer, and the session ends only when nothing is left open or silently assumed. A
+ten-message interrogation becomes two or three rounds — or one reply of
+"all recommended".</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Questions arrive batched in numbered rounds instead of one per message;
+      follow-up questions that depend on your answers come in the next round.</li>
+  <li>Every question carries a recommended answer. Reply
+      <strong>"all recommended"</strong> to accept a whole round, or answer just the
+      ones you disagree with.</li>
+  <li>You are never asked something the agent could look up in the codebase — it
+      investigates in the background and only brings you real decisions.</li>
+  <li>The design you approve now includes an <strong>Assumptions</strong> section:
+      every default the agent adopted without asking is listed there for you to
+      review, so nothing is silently assumed.</li>
+  <li>Faster paces stay meaningful: at lower brainstorm depth, unasked branches
+      become recommended assumptions you approve with the design instead of
+      questions you never saw.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>The interview is modeled as a decision tree. At any moment some questions are
+ready to ask (their prerequisites are settled) and some are blocked behind them. The
+agent asks the whole ready set in one round, waits for your answers, recomputes what
+that unblocks, and repeats. Fact-finding never enters the rounds — it runs as
+background exploration. The interview is over when no question remains ready or
+blocked, and every noted default has either been answered or written into the
+design's Assumptions section.</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Brainstorm conversations look different: rounds of numbered questions with
+      recommendations, separated by dividers.</li>
+  <li>You gain the "all recommended" shortcut.</li>
+  <li>Design docs you approve gain an Assumptions section — worth a skim, it holds
+      the decisions you were <em>not</em> asked about.</li>
+  <li>No new commands, settings, or files; pace names are unchanged.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>This edits agent instructions, not code — the benefit depends on the agent
+      following them; there is no mechanical enforcement of round structure.</li>
+  <li>Three documents describe the interview; a consistency sweep keeps them
+      aligned, but future edits must keep them in step.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>The other researched improvements (scenario red-teaming, glossary/ADR pass,
+      spike classification, questionnaire hand-offs) — deferred.</li>
+  <li>Re-syncing the skill to other machines (existing
+      <code>forgekit install</code> flow).</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>Rewrite the brainstorming skill's interview engine (1 task).</li>
+  <li>Align the phase doc and pace reference (2 tasks).</li>
+  <li>Sweep for leftover old-style wording (1 task).</li>
+</ul>

@@ -15,3 +15,6 @@ plugin (MIT). Upstream is not required at runtime.
 These copies are a **maintained fork**: originally vendored from Superpowers (MIT), then
 restructured  (single task reviewer, tiered testing, trimmed prose). Do not re-vendor
 from upstream — edit here and run `forgekit install --skills forge --force`.
+
+The `brainstorming` skill's frontier-round interview engine is adapted from
+mattpocock/skills' `grilling` skill (MIT, https://github.com/mattpocock/skills).

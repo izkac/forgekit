@@ -7,7 +7,7 @@ description: Forge — brainstorm before plan. Internal skill; read via forge or
 
 Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
 
-Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and get user approval.
+Start by understanding the current project context, then interview the user in frontier rounds to refine the idea. Once you understand what you're building, present the design and get user approval.
 
 <HARD-GATE>
 Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
@@ -22,17 +22,17 @@ Every project goes through this process. A todo list, a single-function utility,
 You MUST create a task for each of these items and complete them in order:
 
 1. **Explore project context** — check files, docs, recent commits
-2. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria (genuinely visual questions use `design/<surface>/` mockups — see Visual questions below)
+2. **Interview in frontier rounds** — ask every question whose prerequisites are settled, one round at a time, each numbered with a recommended answer (genuinely visual questions use `design/<surface>/` mockups — see Visual questions below); facts go to the codebase or an exploration subagent, never to the user
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Present design** — in sections scaled to their complexity, get user approval after each section
-5. **Write design doc** — save to `.forge/sessions/<session-id>/brainstorm/notes.md` and `decisions.md`
-6. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
+5. **Write design doc** — save to `.forge/sessions/<session-id>/brainstorm/notes.md` and `decisions.md`, including the `## Assumptions` section from the interview ledger
+6. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope, silent assumptions (see below)
 7. **User reviews written spec** — ask user to review the spec file before proceeding
 8. **OpenSpec propose** — invoke `openspec-propose` or `/opsx:propose <prefix>-<slug>` per forge plan-routing (no plan-mode prompt)
 
 ## Process Flow
 
-Explore context → clarify (one question at a time) → propose 2-3 approaches → present design sections (revise until approved) → write design doc → spec self-review (fix inline) → user reviews spec (revise until approved) → **OpenSpec propose**.
+Explore context → interview in frontier rounds (facts resolved directly or via exploration subagent; decisions batched per round until the frontier and ledger are empty) → propose 2-3 approaches → present design sections (revise until approved) → write design doc with Assumptions → spec self-review (fix inline) → user reviews spec (revise until approved) → **OpenSpec propose**.
 
 **The terminal state is OpenSpec propose.** Do NOT invoke frontend-design, mcp-builder, or any other implementation skill. Run `/opsx:propose` (or `openspec-propose`) — do not implement until OpenSpec artefacts are approved.
 
@@ -43,10 +43,31 @@ Explore context → clarify (one question at a time) → propose 2-3 approaches 
 - Check out the current project state first (files, docs, recent commits)
 - Before asking detailed questions, assess scope: if the request describes multiple independent subsystems (e.g., "build a platform with chat, file storage, billing, and analytics"), flag this immediately. Don't spend questions refining details of a project that needs to be decomposed first.
 - If the project is too large for a single spec, help the user decompose into sub-projects: what are the independent pieces, how do they relate, what order should they be built? Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec → plan → implementation cycle.
-- For appropriately-scoped projects, ask questions one at a time to refine the idea
-- Prefer multiple choice questions when possible, but open-ended is fine too
-- Only one question per message - if a topic needs more exploration, break it into multiple questions
+- For appropriately-scoped projects, run the frontier-round interview below to refine the idea
 - Focus on understanding: purpose, constraints, success criteria
+
+**Interviewing in frontier rounds:**
+
+Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it. Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one. Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them.
+
+Use this round format:
+
+```
+❓ **Q1** - **<question title>**: <question body, may include multiple choices>
+
+➡️ <your recommended answer>
+
+---
+
+❓ **Q2** - **<question title>**: …
+
+➡️ <your recommended answer>
+```
+
+- **Facts vs decisions.** Finding facts is your job, never the user's. A frontier question answerable from the codebase, docs, or environment gets looked up directly or dispatched to an exploration subagent, non-blocking: only questions downstream of that fact wait for it — the rest of the frontier goes to the user now. Only genuine decisions go to the user.
+- **Fast path.** Every question carries a recommended answer with a one-line why. In the first round, tell the user once that they may reply "all recommended" to accept the whole round, or answer selectively (e.g. "Q1: b, rest recommended"). Prefer multiple choice where natural.
+- **Ledger + termination.** Maintain an open-questions-and-assumptions ledger in `.forge/sessions/<session-id>/brainstorm/notes.md` as you interview. The interview ends only when the frontier is empty AND every ledger entry is either answered or promoted to an explicit assumption. The design doc's `## Assumptions` section lists every default you adopted without asking, and it is presented for user review along with the rest of the design.
+- **Pace.** `brainstorm.depth: full` runs rounds until the frontier is empty; `short` caps at roughly two rounds, folding remaining open branches into recommended-answer entries in Assumptions; `minimal` runs at most one round confirming intent, and unasked branches become Assumptions.
 
 **Exploring approaches:**
 
@@ -91,6 +112,7 @@ After writing the spec document, look at it with fresh eyes:
 2. **Internal consistency:** Do any sections contradict each other? Does the architecture match the feature descriptions?
 3. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
 4. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.
+5. **Silent assumptions:** Is any default in play that is not listed under Assumptions? If so, add it.
 
 Fix any issues inline. No need to re-review — just fix and move on.
 
@@ -108,7 +130,10 @@ Wait for the user's response. If they request changes, make them and re-run the 
 
 ## Key Principles
 
-- **One question at a time** - Don't overwhelm with multiple questions
+- **Whole frontier per round** - Ask every question whose prerequisites are settled, not one at a time; a question still waiting on this round's answers moves to the next round
+- **Recommended answer on everything** - Every question carries a recommendation and a one-line why, so "all recommended" is always a valid reply
+- **Facts never asked of the user** - Look them up or dispatch an exploration subagent; only decisions go to the user
+- **Nothing silently assumed** - Every default not asked about is logged in the ledger and surfaces in the design doc's Assumptions section
 - **Multiple choice preferred** - Easier to answer than open-ended when possible
 - **YAGNI ruthlessly** - Remove unnecessary features from all designs
 - **Explore alternatives** - Always propose 2-3 approaches before settling
