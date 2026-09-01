@@ -22,7 +22,7 @@ Every project goes through this process. A todo list, a single-function utility,
 You MUST create a task for each of these items and complete them in order:
 
 1. **Explore project context** — check files, docs, recent commits
-2. **Interview in frontier rounds** — ask every question whose prerequisites are settled, one round at a time, each numbered with a recommended answer (genuinely visual questions use `design/<surface>/` mockups — see Visual questions below); facts go to the codebase or an exploration subagent, never to the user
+2. **Interview in frontier rounds** — ask every question whose prerequisites are settled (the whole frontier in each round), numbered with a recommended answer (genuinely visual questions use `design/<surface>/` mockups — see Visual questions below); facts go to the codebase or an exploration subagent, never to the user
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Present design** — in sections scaled to their complexity, get user approval after each section
 5. **Write design doc** — save to `.forge/sessions/<session-id>/brainstorm/notes.md` and `decisions.md`, including the `## Assumptions` section from the interview ledger
