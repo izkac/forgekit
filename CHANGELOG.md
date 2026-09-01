@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.56 — 2026-09-01
+
+The brainstorm Assumptions contract from 0.3.55 is now enforced: after a
+session enters brainstorm, `forge phase plan` refuses unless
+`brainstorm/notes.md` carries an `## Assumptions` section —
+`--notes-waived "<reason>"` is the recorded override (`session.notesWaived`,
+kept on the sessions.jsonl row). Sessions that never brainstormed are exempt.
+A new `brainstorm-gate` e2e harness phase drives refuse/pass/waiver against
+the shipped binary.
+
+Brainstorm quality becomes measurable: `forge brief stamp` counts stamps
+(`briefStamps`) and re-stamps after implement began
+(`briefRestampsAfterImplement` — the spec-churn proxy); sessions.jsonl rows
+additively carry those plus `brainstorm: { notes, assumptions,
+adrCandidates }` parsed from the session's notes/decisions, and
+`forge analyze` reports per-session values with a spec-churn /
+mean-assumptions summary line. Scoring is unchanged.
+
+The brainstorming skill also closes with durable-answer promotion: answers
+that are standing project truths get offered — with user consent — a
+permanent home in `CONTEXT.md`, `AGENTS.md`, or an `ADR-candidate:` entry.
+
 ## 0.3.55 — 2026-09-01
 
 The brainstorm phase now interviews in **frontier rounds**: every question
