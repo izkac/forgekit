@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.55 — 2026-09-01
+
+The brainstorm phase now interviews in **frontier rounds**: every question
+whose prerequisites are settled arrives in one numbered round, each with a
+recommended answer ("all recommended" accepts a round wholesale); facts are
+looked up or dispatched to an exploration subagent, never asked of the user;
+and an open-questions/assumptions ledger ends the interview only when nothing
+is left open or silently assumed — the design doc gains a mandatory
+Assumptions section the user reviews. Adapted from mattpocock/skills' MIT
+`grilling` skill (see skills/NOTICE.md). `brainstorm.depth` now counts rounds
+(`short` = ~2 rounds folding open branches into Assumptions), not option
+lists.
+
+Four depth extensions ride along: feasibility-shaped requests classify as
+**spikes** (time-boxed throwaway investigation ending in a recommendation;
+the session closes via `forge phase skipped --exit-reason "spike: …"`, never
+the plan pipeline, and spike approval never authorizes implementation); a
+frontier question only an absent stakeholder can answer becomes a repo-root
+`questionnaire-<slug>.md` hand-off while the interview continues; spec
+self-review gains a scenario red-team check (invent 2–3 edge cases, surface
+any the design can't answer); and when a `CONTEXT.md` glossary exists the
+interview challenges conflicting terms and marks triple-test decisions
+`ADR-candidate:` in decisions.md for the archive-to-adr flow.
+
 ## 0.3.54 — 2026-08-28
 
 A Claude Code `Stop` hook (`forge init --claude`) blocks turn-end only when
