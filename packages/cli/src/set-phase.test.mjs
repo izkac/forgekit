@@ -1940,7 +1940,9 @@ test('a session resumed under a second host session records both ids, without du
   try {
     const sessionFile = makeForgeFixture(dir, 'sess-resume');
     runSetPhase(dir, ['brainstorm'], { CLAUDE_CODE_SESSION_ID: 'host-A' });
-    runSetPhase(dir, ['plan'], { CLAUDE_CODE_SESSION_ID: 'host-B' });
+    // Not under test here: this fixture never writes brainstorm/notes.md, so
+    // the brainstorm-notes gate would otherwise refuse this transition.
+    runSetPhase(dir, ['plan', '--notes-waived', 'not under test here'], { CLAUDE_CODE_SESSION_ID: 'host-B' });
     runSetPhase(dir, ['implement'], { CLAUDE_CODE_SESSION_ID: 'host-A' });
 
     const { host } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
@@ -1957,7 +1959,9 @@ test('a transition with no host env leaves an existing binding intact', () => {
   try {
     const sessionFile = makeForgeFixture(dir, 'sess-nohost');
     runSetPhase(dir, ['brainstorm'], { CLAUDE_CODE_SESSION_ID: 'host-A' });
-    runSetPhase(dir, ['plan']);
+    // Not under test here: this fixture never writes brainstorm/notes.md, so
+    // the brainstorm-notes gate would otherwise refuse this transition.
+    runSetPhase(dir, ['plan', '--notes-waived', 'not under test here']);
 
     const { host } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
     assert.equal(host.agent, 'claude-code');
@@ -3264,6 +3268,148 @@ test('exitDeclined reaches the session ledger — a declined exit stays countabl
     const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
     assert.equal(entry.sessionId, 'sess-exit-declined-ledger');
     assert.equal(entry.exitDeclined, reason);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('forge phase plan refuses without brainstorm notes.md once the session passed through brainstorm (brainstorm notes gate)', () => {
+  const dir = tmp('forge-plan-brainstorm-notes-missing-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-notes-missing');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.phase = 'brainstorm';
+    s.phaseHistory = [{ phase: 'brainstorm', at: s.createdAt }];
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'plan'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'must refuse without brainstorm/notes.md');
+    assert.match(r.stderr, /notes\.md/);
+    assert.match(r.stderr, /--notes-waived/);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'brainstorm', 'a refused transition must persist nothing');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('forge phase plan refuses when brainstorm notes.md lacks the Assumptions heading (brainstorm notes gate)', () => {
+  const dir = tmp('forge-plan-brainstorm-notes-noheading-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-notes-noheading');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.phase = 'brainstorm';
+    s.phaseHistory = [{ phase: 'brainstorm', at: s.createdAt }];
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.mkdirSync(path.join(sessionDir, 'brainstorm'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, 'brainstorm', 'notes.md'),
+      '# Notes\n\nSome context, no heading.\n',
+    );
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'plan'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'must refuse without the Assumptions heading');
+    assert.match(r.stderr, /Assumptions/);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'brainstorm', 'a refused transition must persist nothing');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('forge phase plan passes once brainstorm notes.md has an Assumptions heading (brainstorm notes gate)', () => {
+  const dir = tmp('forge-plan-brainstorm-notes-ok-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-notes-ok');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.phase = 'brainstorm';
+    s.phaseHistory = [{ phase: 'brainstorm', at: s.createdAt }];
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    fs.mkdirSync(path.join(sessionDir, 'brainstorm'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, 'brainstorm', 'notes.md'),
+      '# Brainstorm\n\n## Assumptions\n\n- the API is stable\n',
+    );
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'plan'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'plan');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('forge phase plan brainstorm notes gate does not fire without a brainstorm entry in phaseHistory', () => {
+  const dir = tmp('forge-plan-brainstorm-notes-exempt-');
+  try {
+    // Default fixture phase is already 'plan' with no phaseHistory — a
+    // session created straight into plan, never brainstormed.
+    const sessionFile = makeForgeFixture(dir, 'sess-notes-exempt');
+    const r = spawnSync(process.execPath, [SCRIPT, 'plan'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /notes\.md/);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'plan');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('forge phase plan --notes-waived records session.notesWaived and allows the transition (brainstorm notes gate)', () => {
+  const dir = tmp('forge-plan-brainstorm-notes-waived-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-notes-waived');
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.phase = 'brainstorm';
+    s.phaseHistory = [{ phase: 'brainstorm', at: s.createdAt }];
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+
+    const reason = 'operator reviewed live, skipping the written ledger';
+    const r = spawnSync(process.execPath, [SCRIPT, 'plan', '--notes-waived', reason], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+
+    const after = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    assert.equal(after.phase, 'plan');
+    assert.equal(after.notesWaived, reason);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('notesWaived reaches the session ledger — a waived brainstorm gate stays countable past the session that waived it (brainstorm notes gate)', () => {
+  const dir = tmp('forge-notes-waived-ledger-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-notes-waived-ledger');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.phase = 'brainstorm';
+    s.phaseHistory = [{ phase: 'brainstorm', at: s.createdAt }];
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+
+    const reason = 'operator reviewed live, skipping the written ledger';
+    runSetPhase(dir, ['plan', '--notes-waived', reason]);
+
+    fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# ok\n', 'utf8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'spine.json'),
+      `${JSON.stringify({ rows: [], notApplicable: 'sync HTTP only' }, null, 2)}\n`,
+      'utf8',
+    );
+    runSetPhase(dir, ['done']);
+
+    const entry = readLedger(path.join(dir, '.forge', 'sessions.jsonl')).at(-1);
+    assert.equal(entry.sessionId, 'sess-notes-waived-ledger');
+    assert.equal(entry.notesWaived, reason);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

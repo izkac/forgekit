@@ -452,6 +452,29 @@ test('a session with no archive waiver records null, not an empty claim', () => 
   assert.equal(digestOf(root).archiveWaived, null);
 });
 
+test('a brainstorm-notes waiver survives cleanup, as set-phase promises it does (brainstorm notes gate)', () => {
+  // set-phase's --notes-waived records session.notesWaived so a plan
+  // transition waived past a missing Assumptions ledger stays that way in
+  // the record — same "session-only fields die at cleanup" argument as
+  // archiveWaived above.
+  const root = tmp('forge-ledger-notes-waiver-');
+  const { sessionDir, session } = makeSession(root, 's1', {
+    notesWaived: 'operator reviewed live, skipping the written ledger',
+  });
+
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  fs.rmSync(sessionDir, { recursive: true, force: true });
+
+  assert.equal(digestOf(root).notesWaived, 'operator reviewed live, skipping the written ledger');
+});
+
+test('a session with no brainstorm-notes waiver records null, not an empty claim (brainstorm notes gate)', () => {
+  const root = tmp('forge-ledger-nonoteswaiver-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  appendSessionDigest({ cwd: root, sessionDir, session, card: null });
+  assert.equal(digestOf(root).notesWaived, null);
+});
+
 /** A final review the prose rule reads as self-authored. */
 const SELF_PROSE = '# Final review\n\nReviewer: the coordinator — a self-check of the diff.\n';
 

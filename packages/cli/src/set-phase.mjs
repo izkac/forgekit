@@ -59,7 +59,7 @@ export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
   process.stderr.write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--notes-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
   );
   process.exit(1);
 }
@@ -80,6 +80,7 @@ let allowIncomplete = null;
 let finalReviewWaived = null;
 let archiveWaived = null;
 let reopenWaived = null;
+let notesWaived = null;
 let exitReason = null;
 let exitDeclined = null;
 
@@ -112,6 +113,9 @@ for (let i = 1; i < args.length; i += 1) {
     i += 1;
   } else if (flag === '--reopen-waived' && next) {
     reopenWaived = next;
+    i += 1;
+  } else if (flag === '--notes-waived' && next) {
+    notesWaived = next;
     i += 1;
   } else if (flag === '--exit-reason' && next) {
     exitReason = next;
@@ -490,6 +494,42 @@ function enforceBriefGate() {
 }
 
 enforceBriefGate();
+
+/**
+ * Hard gate: a session that went through brainstorm may not enter `plan`
+ * without the Assumptions ledger it produced there — a brainstorm that
+ * decided nothing worth writing down decided nothing at all.
+ * `--notes-waived "<reason>"` records an honest override, same shape as
+ * `enforceBriefGate`'s `--allow-incomplete`.
+ */
+function enforceBrainstormNotesGate() {
+  if (phase !== 'plan') return;
+  const history = Array.isArray(session.phaseHistory) ? session.phaseHistory : [];
+  const wasBrainstormed = history.some((entry) => entry && entry.phase === 'brainstorm');
+  if (!wasBrainstormed) return;
+
+  const notesPath = path.join(dir, 'brainstorm', 'notes.md');
+  const exists = fs.existsSync(notesPath);
+  const hasHeading = exists && /^##\s+Assumptions\b/m.test(fs.readFileSync(notesPath, 'utf8'));
+  if (exists && hasHeading) return;
+
+  if (notesWaived) {
+    session.notesWaived = notesWaived;
+    return;
+  }
+
+  const missing = !exists
+    ? `missing ${notesPath}`
+    : `${notesPath} has no "## Assumptions" heading`;
+  process.stderr.write(
+    `Cannot enter phase "plan":\n  - ${missing}\n` +
+      `Write the brainstorm ledger (${notesPath}) with a "## Assumptions" section, ` +
+      'or pass --notes-waived "<reason>".\n',
+  );
+  process.exit(1);
+}
+
+enforceBrainstormNotesGate();
 
 /**
  * OpenSpec leftover sweep must finish before the final reviewer reads the

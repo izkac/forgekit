@@ -307,6 +307,10 @@ export function appendSessionDigest(opts) {
       // at-cleanup argument as finalReviewWaived above, so it is read back
       // here rather than recomputed.
       archiveWaived: session.archiveWaived ?? null,
+      // set-phase's brainstorm-notes gate tells the operator --notes-waived is
+      // "kept on the session and in .forge/sessions.jsonl" — same
+      // session-only-dies-at-cleanup argument as archiveWaived above.
+      notesWaived: session.notesWaived ?? null,
       // I5 (final review): `paceSuppressed` and `exitDeclined` were written
       // by `set-phase.mjs` (`recordPaceSuppression`, `recordExitDeclined`)
       // and read by nothing in production — session-only, so both died with

@@ -1,0 +1,79 @@
+<!-- forge-brief-specs-hash:c7de3f1dd5a21bbc -->
+<meta charset="utf-8">
+<title>Brief — brainstorm hardening</title>
+<style>
+  body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem;
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         line-height: 1.55; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; }
+  li { margin: .3rem 0; }
+</style>
+
+<h1>Making the brainstorm contract real</h1>
+
+<h2>TL;DR</h2>
+<p>Until now the improved brainstorm was all instructions — nothing checked the
+agent actually kept its promises. This change adds teeth: Forge refuses to move
+from brainstorm to planning unless the Assumptions ledger was actually written,
+answers worth keeping get offered a permanent home instead of dying with the
+session, and Forge starts measuring whether designs hold up after approval.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li><strong>An enforced ledger:</strong> after a brainstorm, moving on to
+      planning fails unless the design notes contain an Assumptions section. A
+      recorded waiver (<code>--notes-waived "reason"</code>) exists for the rare
+      legitimate skip; sessions that never brainstormed are unaffected.</li>
+  <li><strong>Answers that stick:</strong> when a brainstorm closes, answers that
+      are really standing project rules ("jobs always go through the queue") get
+      offered — with your consent — a permanent home in your glossary, agent
+      rules, or decision records, so future sessions stop re-asking.</li>
+  <li><strong>A churn signal:</strong> every time the plan brief has to be
+      re-stamped after implementation started (meaning the approved spec was
+      edited mid-build), Forge counts it. <code>forge analyze</code> reports
+      which sessions churned and how rich their assumption ledgers were —
+      a direct read on interview quality. Grades and scores don't change.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>The gate joins the existing family of transition checks (the same mechanism
+that refuses implementation without a stamped brief) and fires only when the
+session actually went through brainstorm. The churn counter piggybacks on brief
+stamping, which already fingerprints the spec files. The new numbers ride along
+in the session ledger that <code>forge analyze</code> already reads. An
+end-to-end harness check drives the real CLI through refuse, pass, and waiver
+paths.</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>If an agent skips the Assumptions ledger, <code>forge phase plan</code>
+      now stops it with a message saying exactly what to write.</li>
+  <li>At the end of a brainstorm you may be asked "should this answer become a
+      permanent rule?" — nothing is written without your yes.</li>
+  <li><code>forge analyze</code> gains one summary line and richer per-session
+      rows. No new required steps.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>A session upgraded mid-flight could hit the gate without notes — the
+      refusal message and the waiver cover it.</li>
+  <li>Re-stamps are a proxy for spec churn, not a perfect measure; good enough
+      to spot patterns, not to grade individual sessions (deliberately kept out
+      of scoring).</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Any change to scoring or grades.</li>
+  <li>Judge-panel approach generation and prototype-as-interview-move (other
+      suggestions, not picked).</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>The plan gate with waiver + tests (1 task).</li>
+  <li>Churn counters, ledger fields, analyze surfacing + tests (2 tasks).</li>
+  <li>Skill/phase-doc updates and the end-to-end gate check (2 tasks).</li>
+</ul>
