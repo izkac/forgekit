@@ -30,6 +30,8 @@ After user approves the design:
 3. Read [../references/plan-routing.md](../references/plan-routing.md) and **proceed to OpenSpec propose** — do not ask for a plan mode
 4. Follow [plan-openspec.md](./plan-openspec.md) — **not** implementation until OpenSpec artefacts are approved
 
+`forge phase plan` refuses after a brainstorm unless `brainstorm/notes.md` contains an `## Assumptions` section; `--notes-waived "<reason>"` is the recorded override.
+
 ```bash
 forge phase brainstorm
 # after the exit check (step 2), if no exit was offered or it was declined:

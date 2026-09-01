@@ -37,14 +37,14 @@
 
 ## 3. Docs and product loop
 
-- [ ] 3.1 Docs: in `skills/forge/skills/brainstorming/SKILL.md` (After the
+- [x] 3.1 Docs: in `skills/forge/skills/brainstorming/SKILL.md` (After the
       Design) add the durable-answer promotion step — scan interview answers
       for permanent project truths and offer, with user consent, promotion to
       `CONTEXT.md` (domain terms), `AGENTS.md` (agent workflow rules), or an
       `ADR-candidate:` entry in decisions.md; never promote silently. In
       `skills/forge/phases/brainstorm.md` document the plan gate and
       `--notes-waived`. No TDD (docs).
-- [ ] 3.2 Product-loop acceptance: add harness phase `brainstorm-gate` to
+- [x] 3.2 Product-loop acceptance: add harness phase `brainstorm-gate` to
       `scripts/e2e/harness-portability.mjs` (own scratch project, modeled on
       `archive-gate` at ~2821): refuse missing notes; refuse missing heading;
       pass with a real `## Assumptions` section; waiver session records

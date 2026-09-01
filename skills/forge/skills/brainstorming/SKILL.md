@@ -120,6 +120,7 @@ Use this round format:
   - (User preferences for spec location override this default)
 - Use elements-of-style:writing-clearly-and-concisely skill if available
 - When writing `decisions.md`, prefix an entry with `ADR-candidate:` only when it passes all three of: hard to reverse, surprising without context, the result of a real trade-off. Projects with ADRs enabled pick these up at archive time; trivially reversible choices get no prefix.
+- **Durable-answer promotion.** Before closing the brainstorm, scan the interview's answers for permanent project truths — standing preferences, invariants, vocabulary — as opposed to one-change decisions scoped to this work. For each durable answer found, offer to promote it, with the user's explicit consent, to the home that fits: `CONTEXT.md` for domain terms, `AGENTS.md` for agent workflow rules, or an `ADR-candidate:` entry in `decisions.md` when it also passes the ADR-candidate test above. Never promote silently — no offer, no write. A one-change decision (e.g. "use a modal here, not a page") gets no offer at all.
 - Do not commit unless the user explicitly asks
 
 **Spec Self-Review:**

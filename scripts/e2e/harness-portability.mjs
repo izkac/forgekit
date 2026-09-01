@@ -556,6 +556,37 @@ function makeArchiveGateSession(dir, slug, changeName) {
   return { sessionId, sessionDir, changeDir };
 }
 
+/* ---------- brainstorm-gate fixture ---------- */
+
+/** Kept apart from every sibling project so a run interleaved with other
+ *  phases cannot `rmSync` it out from under a later step. */
+const BRAINSTORM_GATE_PROJECT = `${SCRATCH}-brainstorm-gate`;
+
+/**
+ * A session whose `phaseHistory` contains `brainstorm`, built entirely
+ * through the shipped binary (`forge new` + `forge phase brainstorm`) — the
+ * minimum shape `enforceBrainstormNotesGate` needs to fire on the later
+ * `forge phase plan` call. No `brainstorm/notes.md` is written here; each
+ * caller decides what (if anything) to put there.
+ */
+function makeBrainstormGateSession(dir, slug) {
+  const created = forge(dir, ['new', slug]);
+  if (created.code !== 0) fail(`forge new ${slug} exited ${created.code}`, created.out);
+  let createdOut;
+  try {
+    createdOut = JSON.parse(created.stdout);
+  } catch {
+    fail(`forge new ${slug} printed no parseable JSON on stdout`, created.out);
+  }
+  const sessionId = createdOut.sessionId;
+  const sessionDir = path.join(dir, '.forge', 'sessions', sessionId);
+
+  const entered = forge(dir, ['phase', 'brainstorm', '--session', sessionId]);
+  if (entered.code !== 0) fail(`forge phase brainstorm exited ${entered.code} for session ${sessionId}`, entered.out);
+
+  return { sessionId, sessionDir };
+}
+
 /* ---------- session telemetry fixture ---------- */
 
 const HOST_ID = 'e2e0host-0000-1111-2222-333344445555';
@@ -966,6 +997,7 @@ const ALL_ROSTER = [
   'test-guard',
   'tdd-evidence',
   'archive-gate',
+  'brainstorm-gate',
   'init-preserves-config',
   'checkpoint-scope',
 ];
@@ -2915,6 +2947,108 @@ if (phase === 'boot') {
   process.stdout.write('ARCHIVING UNBLOCKS THE GATE, NO WAIVER NEEDED\n');
 
   process.stdout.write('ARCHIVE GATE GREEN\n');
+} else if (phase === 'brainstorm-gate') {
+  // THE CLAIM: once a session's phaseHistory contains `brainstorm`, `forge
+  // phase plan` refuses without `brainstorm/notes.md` (and refuses again if
+  // that file has no "## Assumptions" heading), naming the missing piece and
+  // the `--notes-waived` escape each time; adding a real "## Assumptions"
+  // section unblocks the transition; and `--notes-waived "<reason>"` succeeds
+  // with no notes.md at all, recording the reason on session.json. Every step
+  // drives the SHIPPED binary against a throwaway specs-engine project; no
+  // module is imported and no gate is stubbed.
+  const dir = BRAINSTORM_GATE_PROJECT;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' } }, null, 2)}\n`,
+  );
+
+  // 1. No brainstorm/notes.md at all: refuse, naming the file and the waiver.
+  const blocked = makeBrainstormGateSession(dir, 'brainstorm-gate-blocked');
+  const notesPath = path.join(blocked.sessionDir, 'brainstorm', 'notes.md');
+
+  const refusedMissing = forge(dir, ['phase', 'plan', '--plan-type', 'specs', '--session', blocked.sessionId]);
+  if (refusedMissing.code === 0) {
+    fail('forge phase plan exited 0 with no brainstorm/notes.md at all', refusedMissing.out);
+  }
+  if (!refusedMissing.out.includes('notes.md')) {
+    fail('refusal did not mention notes.md', refusedMissing.out);
+  }
+  if (!refusedMissing.out.includes('--notes-waived')) {
+    fail('refusal did not mention --notes-waived', refusedMissing.out);
+  }
+  const afterMissingRefusal = JSON.parse(fs.readFileSync(path.join(blocked.sessionDir, 'session.json'), 'utf8'));
+  if (afterMissingRefusal.phase === 'plan') {
+    fail(
+      'session.json phase moved to plan despite the refused transition (missing notes.md)',
+      JSON.stringify(afterMissingRefusal),
+    );
+  }
+  process.stdout.write('PLAN REFUSES WITH NO NOTES.MD\n');
+
+  // 2. notes.md exists but has no "## Assumptions" heading: refuse, naming it.
+  fs.mkdirSync(path.dirname(notesPath), { recursive: true });
+  fs.writeFileSync(notesPath, '# Brainstorm notes\n\nNo assumptions section here.\n');
+
+  const refusedNoHeading = forge(dir, ['phase', 'plan', '--plan-type', 'specs', '--session', blocked.sessionId]);
+  if (refusedNoHeading.code === 0) {
+    fail('forge phase plan exited 0 with notes.md missing the "## Assumptions" heading', refusedNoHeading.out);
+  }
+  if (!refusedNoHeading.out.includes('Assumptions')) {
+    fail('refusal did not mention the "## Assumptions" heading', refusedNoHeading.out);
+  }
+  const afterHeadingRefusal = JSON.parse(fs.readFileSync(path.join(blocked.sessionDir, 'session.json'), 'utf8'));
+  if (afterHeadingRefusal.phase === 'plan') {
+    fail(
+      'session.json phase moved to plan despite the refused transition (missing heading)',
+      JSON.stringify(afterHeadingRefusal),
+    );
+  }
+  process.stdout.write('PLAN REFUSES WITHOUT THE ASSUMPTIONS HEADING\n');
+
+  // 3. Add a real "## Assumptions" section: the transition succeeds.
+  fs.writeFileSync(notesPath, '# Brainstorm notes\n\n## Assumptions\n\n- Assumed the default timeout is fine.\n');
+
+  const allowed = forge(dir, ['phase', 'plan', '--plan-type', 'specs', '--session', blocked.sessionId]);
+  if (allowed.code !== 0) {
+    fail(`forge phase plan exited ${allowed.code} once notes.md had an "## Assumptions" heading`, allowed.out);
+  }
+  const afterAllowed = JSON.parse(fs.readFileSync(path.join(blocked.sessionDir, 'session.json'), 'utf8'));
+  if (afterAllowed.phase !== 'plan') {
+    fail('session did not reach phase plan once the Assumptions heading was present', JSON.stringify(afterAllowed));
+  }
+  process.stdout.write('PLAN SUCCEEDS ONCE THE ASSUMPTIONS HEADING IS PRESENT\n');
+
+  // 4. A second, fresh session with no notes.md at all: --notes-waived
+  //    succeeds and records the reason on session.json.
+  const waivedReason = 'e2e waiver';
+  const waivedSession = makeBrainstormGateSession(dir, 'brainstorm-gate-waived');
+  const waived = forge(dir, [
+    'phase',
+    'plan',
+    '--plan-type',
+    'specs',
+    '--notes-waived',
+    waivedReason,
+    '--session',
+    waivedSession.sessionId,
+  ]);
+  if (waived.code !== 0) fail(`forge phase plan --notes-waived exited ${waived.code}`, waived.out);
+  const afterWaiver = JSON.parse(fs.readFileSync(path.join(waivedSession.sessionDir, 'session.json'), 'utf8'));
+  if (afterWaiver.phase !== 'plan') {
+    fail('session did not reach phase plan after --notes-waived', JSON.stringify(afterWaiver));
+  }
+  if (afterWaiver.notesWaived !== waivedReason) {
+    fail(
+      `session.notesWaived was ${JSON.stringify(afterWaiver.notesWaived)}, expected ${JSON.stringify(waivedReason)}`,
+      JSON.stringify(afterWaiver),
+    );
+  }
+  process.stdout.write('NOTES-WAIVED SUCCEEDS AND RECORDS THE REASON\n');
+
+  process.stdout.write('BRAINSTORM GATE GREEN\n');
 } else if (phase === 'init-preserves-config') {
   // THE F125 FIX, AGAINST THE SHIPPED BINARY: a flagless, non-TTY re-init on
   // a project that already recorded its own choices (specs engine, ADRs off)
@@ -3239,7 +3373,7 @@ if (phase === 'boot') {
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target\n',
+      'brainstorm-gate|init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target\n',
   );
   process.exit(1);
 }
