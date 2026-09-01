@@ -1,0 +1,5 @@
+{
+  "change": "brainstorm-depth-extensions",
+  "notApplicable": "docs-only change: extends agent instruction markdown (brainstorming skill + brainstorm phase doc); no runtime code, no writes, no wiring",
+  "rows": []
+}

@@ -164,7 +164,7 @@ Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1
 | **Copilot / Gemini / OpenCode** | `~/.agents/skills/forge/` (pick that harness; one dest) | *(none — global skill only)* |
 | **Windsurf** | `~/.agents/skills/forge/` via symlink at the Windsurf vendor skill path | *(none — global skill only)* |
 
-**Planning (all agents):** after brainstorm, proceed directly to the configured engine — no plan-mode prompt. See [references/plan-routing.md](./references/plan-routing.md). Hooks remind agents to run the propose flow when `planType` is unset.
+**Planning (all agents):** after brainstorm (unless it classified the work as a spike — see [phases/brainstorm.md](./phases/brainstorm.md) § Spike path), proceed directly to the configured engine — no plan-mode prompt. See [references/plan-routing.md](./references/plan-routing.md). Hooks remind agents to run the propose flow when `planType` is unset.
 
 **Distribute:** edit `skills/forge/` in forgekit, then `forgekit install --skills forge --force` on each machine. The bundled skills are a maintained fork (see [skills/NOTICE.md](./skills/NOTICE.md)) — do not re-vendor from Superpowers.
 
