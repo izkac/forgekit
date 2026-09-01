@@ -32,7 +32,7 @@ At session start: `Using Forge for this work. Pace: auto → brisk (…)` (use
 | **review.maxRounds** | 3 | 2 | 1 | 1 |
 | **verify.tier3** | full-workspace | full-workspace | affected-only | audit-tier2-only |
 | **models.bias** | default | default | prefer-fast | prefer-fast |
-| **brainstorm.depth** | full | full | short (≤2–3 options) | minimal |
+| **brainstorm.depth** | full | full | short (≤2 rounds) | minimal |
 
 \*Hard floor: money / auth / shared contracts / migrations / secrets **always**
 get a per-task review (and final review if the session touched high-risk work),
@@ -164,9 +164,9 @@ Cadence for the task/group reviewer (name is historical — values cover more th
 
 ### `brainstorm.depth`
 
-- `full` — existing brainstorming skill.
-- `short` — at most 2–3 approaches; faster approval.
-- `minimal` — confirm intent + one approach; skip long exploration when design is obvious.
+- `full` — frontier rounds until the frontier is empty (see the brainstorming skill).
+- `short` — cap at ~2 rounds; remaining open branches fold into recommended-answer entries in the design's Assumptions section.
+- `minimal` — at most one intent-confirming round; unasked branches become Assumptions.
 
 ## Unchanged (all paces)
 

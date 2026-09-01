@@ -13,10 +13,10 @@
 
 ## 2. Pace wiring
 
-- [ ] 2.1 Update the pace line in `skills/forge/phases/brainstorm.md` to the new
+- [x] 2.1 Update the pace line in `skills/forge/phases/brainstorm.md` to the new
       `brainstorm.depth` meanings. Verify: line references rounds, not option counts
       alone.
-- [ ] 2.2 Update `skills/forge/references/pace.md`: preset matrix `brainstorm.depth`
+- [x] 2.2 Update `skills/forge/references/pace.md`: preset matrix `brainstorm.depth`
       row and the `### brainstorm.depth` knob section. Verify: descriptions match
       design decision 5.
 

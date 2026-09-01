@@ -2,7 +2,7 @@
 
 Read and follow [../skills/brainstorming/SKILL.md](../skills/brainstorming/SKILL.md) in full.
 
-**Pace:** Honor `brainstorm.depth` from [../references/pace.md](../references/pace.md) / `forge status` — `full` (default skill), `short` (≤2–3 approaches), or `minimal` (confirm intent + one approach when design is obvious).
+**Pace:** Honor `brainstorm.depth` from [../references/pace.md](../references/pace.md) / `forge status` — `full` (frontier rounds until the frontier is empty), `short` (cap at ~2 rounds; remaining open branches fold into recommended-answer Assumptions), or `minimal` (at most one intent-confirming round; unasked branches become Assumptions).
 
 ## Terminal state
 
