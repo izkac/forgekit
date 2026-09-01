@@ -4,6 +4,16 @@ Read and follow [../skills/brainstorming/SKILL.md](../skills/brainstorming/SKILL
 
 **Pace:** Honor `brainstorm.depth` from [../references/pace.md](../references/pace.md) / `forge status` — `full` (frontier rounds until the frontier is empty), `short` (cap at ~2 rounds; remaining open branches fold into recommended-answer Assumptions), or `minimal` (at most one intent-confirming round; unasked branches become Assumptions).
 
+## Spike path
+
+If the skill classified this work as a **spike**: investigate the feasibility question within the agreed time box, report your recommendation, then end the session without change scaffolding:
+
+```bash
+forge phase skipped --exit-reason "spike: <question>"
+```
+
+A spike produces no design spec and no plan. Approval of the spike's recommendation is **not** approval to implement. Follow-up work starts a fresh brainstorm session with the spike's findings as context.
+
 ## Terminal state
 
 After user approves the design:

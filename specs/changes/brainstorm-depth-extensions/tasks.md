@@ -32,7 +32,7 @@
 
 ## 2. Phase wiring and sweep
 
-- [ ] 2.1 Update `skills/forge/phases/brainstorm.md`: add the spike terminal
+- [x] 2.1 Update `skills/forge/phases/brainstorm.md`: add the spike terminal
       state (spike → report recommendation → `forge phase skipped --exit-reason
       "spike: <question>"`, never the plan pipeline). Then sweep
       `skills/forge/` for contradictions with the four additions (e.g. text
