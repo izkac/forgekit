@@ -431,7 +431,7 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 | **review.maxRounds** | 3 | 2 | 1 | 1 |
 | **verify.tier3** | full-workspace | full-workspace | affected-only | audit-tier2-only |
 | **models.bias** | default | default | prefer-fast | prefer-fast |
-| **brainstorm.depth** | full | full | short (≤2–3 options) | minimal |
+| **brainstorm.depth** | full | full | short (≤2 rounds) | minimal |
 
 \*Hard floor: money / auth / contracts / migrations / secrets still get per-task review (and final if the session touched high-risk), even under `brisk` / `lite` / mid-group `standard`.
 

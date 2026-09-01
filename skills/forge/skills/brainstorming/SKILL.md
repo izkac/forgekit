@@ -17,12 +17,26 @@ Do NOT invoke any implementation skill, write any code, scaffold any project, or
 
 Every project goes through this process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it and get approval.
 
+## Spike or design?
+
+Before any interviewing, classify the request. If the core open question is
+*feasibility* ("can X work at all?", "is this library fast enough?"), it is a
+**spike**: agree the question and a time box with the user, investigate with
+throwaway code clearly labeled as such, and report a recommendation. A spike
+produces no spec and no design doc, and approval of a spike (or its
+recommendation) is NEVER approval to implement — follow-up work starts a fresh
+brainstorm with the spike's findings as context. Everything else takes the
+normal flow below.
+
 ## Checklist
+
+A spike-classified request skips this checklist and follows "Spike or
+design?" instead.
 
 You MUST create a task for each of these items and complete them in order:
 
 1. **Explore project context** — check files, docs, recent commits
-2. **Interview in frontier rounds** — ask every question whose prerequisites are settled (the whole frontier in each round), numbered with a recommended answer (genuinely visual questions use `design/<surface>/` mockups — see Visual questions below); facts go to the codebase or an exploration subagent, never to the user
+2. **Interview in frontier rounds** — ask every question whose prerequisites are settled (the whole frontier in each round), numbered with a recommended answer (genuinely visual questions use `design/<surface>/` mockups — see Visual questions below); facts go to the codebase or an exploration subagent, never to the user; a question only an absent stakeholder can answer gets a questionnaire hand-off instead of stalling the round (see below)
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Present design** — in sections scaled to their complexity, get user approval after each section
 5. **Write design doc** — save to `.forge/sessions/<session-id>/brainstorm/notes.md` and `decisions.md`, including the `## Assumptions` section from the interview ledger
@@ -67,6 +81,8 @@ Use this round format:
 - **Facts vs decisions.** Finding facts is your job, never the user's. A frontier question answerable from the codebase, docs, or environment gets looked up directly or dispatched to an exploration subagent, non-blocking: only questions downstream of that fact wait for it — the rest of the frontier goes to the user now. Only genuine decisions go to the user.
 - **Fast path.** Every question carries a recommended answer with a one-line why. In the first round, tell the user once that they may reply "all recommended" to accept the whole round, or answer selectively (e.g. "Q1: b, rest recommended"). Prefer multiple choice where natural.
 - **Ledger + termination.** Maintain an open-questions-and-assumptions ledger in `.forge/sessions/<session-id>/brainstorm/notes.md` as you interview. The interview ends only when the frontier is empty AND every ledger entry is either answered or promoted to an explicit assumption. The design doc's `## Assumptions` section lists every default you adopted without asking, and it is presented for user review along with the rest of the design.
+- **Questionnaire escape hatch.** When a frontier question can only be answered by someone not in the session (a stakeholder, another team), do not stall and do not guess: mark that branch **blocked** in the ledger, write a hand-off questionnaire to `questionnaire-<slug>.md` in the repo root (purpose and the decision riding on it; who it is for; one context paragraph; gap-targeted questions, most important first, each one idea with an answer stub beneath), tell the user its path so they can send it, and keep interviewing the rest of the frontier now. A blocked branch resolves only when answers come back, or by promotion to an explicit Assumption with the user's consent.
+- **Domain pass.** When the repo has a `CONTEXT.md` glossary, challenge terms that conflict with it ("your glossary defines 'cancellation' as X, but you seem to mean Y — which is it?") and propose precise canonical terms for fuzzy or overloaded ones ("'account' — Customer or User?"). No `CONTEXT.md` → skip silently.
 - **Pace.** `brainstorm.depth: full` runs rounds until the frontier is empty; `short` caps at roughly two rounds, folding remaining open branches into recommended-answer entries in Assumptions; `minimal` runs at most one round confirming intent, and unasked branches become Assumptions.
 
 **Exploring approaches:**
@@ -103,6 +119,7 @@ Use this round format:
 - Write the validated design (spec) to `.forge/sessions/<session-id>/brainstorm/notes.md`
   - (User preferences for spec location override this default)
 - Use elements-of-style:writing-clearly-and-concisely skill if available
+- When writing `decisions.md`, prefix an entry with `ADR-candidate:` only when it passes all three of: hard to reverse, surprising without context, the result of a real trade-off. Projects with ADRs enabled pick these up at archive time; trivially reversible choices get no prefix.
 - Do not commit unless the user explicitly asks
 
 **Spec Self-Review:**
@@ -113,6 +130,7 @@ After writing the spec document, look at it with fresh eyes:
 3. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
 4. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.
 5. **Silent assumptions:** Is any default in play that is not listed under Assumptions? If so, add it.
+6. **Scenario red-team:** invent 2–3 concrete edge-case scenarios that probe the design's boundaries and check the design answers each one. A scenario the design cannot answer becomes an open question to the user or an explicit Assumption — never silently dropped.
 
 Fix any issues inline. No need to re-review — just fix and move on.
 

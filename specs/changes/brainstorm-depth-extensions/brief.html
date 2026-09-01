@@ -1,0 +1,79 @@
+<!-- forge-brief-specs-hash:08a0cb3108b872a2 -->
+<meta charset="utf-8">
+<title>Brief — brainstorm depth extensions</title>
+<style>
+  body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem;
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         line-height: 1.55; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  code { background: #f2f2f2; padding: .1em .3em; border-radius: 3px; }
+  li { margin: .3rem 0; }
+</style>
+
+<h1>Four finishing touches for the brainstorm phase</h1>
+
+<h2>TL;DR</h2>
+<p>The new round-based brainstorm interview gets four researched extensions: a
+fast lane for "is this even feasible?" questions, a hand-off document for questions
+only someone outside the session can answer, a self-test where the agent tries to
+break its own design before showing it to you, and a vocabulary check against your
+project glossary that also flags decisions worth a permanent record.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li><strong>Spikes:</strong> a feasibility question gets a time-boxed throwaway
+      investigation ending in a recommendation — no spec ceremony. Saying "great"
+      to a spike never starts implementation; real work gets its own brainstorm.</li>
+  <li><strong>Questionnaires:</strong> when an answer lives with someone else (a
+      stakeholder, another team), the agent writes a ready-to-send
+      <code>questionnaire-*.md</code> with targeted questions and keeps
+      interviewing you about everything else instead of stalling.</li>
+  <li><strong>Design red-team:</strong> before you're asked to approve a spec, the
+      agent invents a few nasty edge-case scenarios and checks the design survives
+      them; anything it can't answer comes back to you as a question, not a
+      surprise in production.</li>
+  <li><strong>Glossary discipline:</strong> in projects with a
+      <code>CONTEXT.md</code>, terms that clash with your documented vocabulary get
+      challenged on the spot, and decisions that are hard to reverse, surprising,
+      and genuine trade-offs are tagged <code>ADR-candidate:</code> so your
+      architecture-decision records pick them up automatically.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>All four are additions to the same brainstorming instruction file the previous
+change rewrote. Classification happens first (spike or normal design flow); the
+questionnaire and glossary checks run during the interview rounds; the red-team
+runs during the agent's self-review just before you see the spec. The phase guide
+learns one new ending: a spike closes the session with its recommendation instead
+of flowing into planning.</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Feasibility questions stop producing full specs.</li>
+  <li>You may occasionally be handed a questionnaire file to forward.</li>
+  <li>Specs may arrive with a question like "the design can't handle X — accept or
+      address?" — that's the red-team working.</li>
+  <li>No new commands or settings; projects without a glossary or ADRs notice
+      nothing from the domain pass.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>Instruction-only change: benefits depend on the agent following the text —
+      no mechanical enforcement.</li>
+  <li>Spike misclassification is possible; the guard is that spikes always end in
+      a report to you, never silent implementation.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Any CLI/code change (spikes reuse the existing "skipped" session state).</li>
+  <li>Building integration code for ADR tooling — the tag is a text convention.</li>
+  <li>Re-syncing installed skill copies to other machines.</li>
+</ul>
+
+<h2>Work overview</h2>
+<ul>
+  <li>Add the four extensions to the brainstorming skill (4 tasks).</li>
+  <li>Phase-doc spike ending plus a consistency sweep (1 task).</li>
+</ul>

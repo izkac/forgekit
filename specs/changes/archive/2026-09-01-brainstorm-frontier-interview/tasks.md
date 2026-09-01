@@ -22,7 +22,7 @@
 
 ## 3. Consistency sweep
 
-- [ ] 3.1 Sweep `skills/forge/` (and `docs/`) for retired phrasing: no remaining
+- [x] 3.1 Sweep `skills/forge/` (and `docs/`) for retired phrasing: no remaining
       "one question at a time" / "one question per message" instructions tied to
       brainstorm. Verify: `grep -rin "question at a time\|one question per message" skills/forge`
       returns nothing.
