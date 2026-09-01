@@ -1,0 +1,12 @@
+{
+  "change": "brainstorm-hardening",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "brainstorm-gate: refuse without notes, refuse without heading, pass with ledger, waiver recorded",
+      "cmd": "node scripts/e2e/harness-portability.mjs brainstorm-gate",
+      "expect": "BRAINSTORM GATE GREEN",
+      "timeoutMs": 180000
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "change": "brainstorm-hardening",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-lifecycle: plan gate on Assumptions ledger",
+      "library": "packages/cli/src/set-phase.mjs (enforceBrainstormNotesGate)",
+      "runtimeOwner": "forge phase plan (CLI transition)",
+      "writes": "session.json (notesWaived); refusal exit before persist",
+      "reads": ".forge/sessions/<id>/brainstorm/notes.md; session.phaseHistory",
+      "uiConsumer": "CLI stderr refusal message; sessions.jsonl row (notesWaived)",
+      "evidence": "packages/cli/src/set-phase.test.mjs (gate tests); e2e brainstorm-gate step"
+    },
+    {
+      "capability": "session-analysis: brief stamp churn counters",
+      "library": "packages/cli/src/brief-cli.mjs (stamp)",
+      "runtimeOwner": "forge brief stamp (CLI)",
+      "writes": "session.json (briefStamps, briefRestampsAfterImplement)",
+      "reads": "session.phaseHistory; change dir brief.html",
+      "uiConsumer": "forge analyze totals/summary line",
+      "evidence": "packages/cli/src/brief.test.mjs (counter tests)"
+    },
+    {
+      "capability": "session-analysis: brainstorm signals in ledger + analyze",
+      "library": "packages/cli/src/ledger.mjs (digest row), packages/cli/src/analyze.mjs",
+      "runtimeOwner": "forge phase done|finish (appendSessionDigest); forge analyze (CLI)",
+      "writes": ".forge/sessions.jsonl rows (brainstorm, briefStamps fields)",
+      "reads": ".forge/sessions/<id>/brainstorm/notes.md, decisions.md; session.json",
+      "uiConsumer": "forge analyze output (per-session rows + aggregate line)",
+      "evidence": "packages/cli/src/ledger.test.mjs, analyze.test.mjs"
+    }
+  ]
+}
