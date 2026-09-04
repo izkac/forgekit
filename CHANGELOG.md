@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **prepack mirrors instead of copying.** Its directory clear is best-effort
+  (Windows EPERM falls back to overwrite-in-place), so a file DELETED from
+  `skills/` or `templates/` was copied over but never removed and shipped
+  forever. 0.3.57 carried two such orphans. Vendoring now prunes anything absent
+  from source and **refuses to pack** when a stale file cannot be removed,
+  naming the file and the command that clears it.
+
 ## 0.3.57 — 2026-09-04
 
 ### thorough-code-review — same review, roughly a third of the cost
