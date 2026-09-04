@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.58 — 2026-09-04
 
 - **prepack mirrors instead of copying.** Its directory clear is best-effort
   (Windows EPERM falls back to overwrite-in-place), so a file DELETED from
