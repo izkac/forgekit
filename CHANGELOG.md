@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.57 — 2026-09-04
 
 ### thorough-code-review — same review, roughly a third of the cost
 
