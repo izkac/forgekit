@@ -193,7 +193,7 @@ See the Forge skill’s [references/plan-routing.md](../references/plan-routing.
 | **plan** | Tracked-change propose; **`forge spine init` every change** (rows or `notApplicable`); rows → `forge e2e init` (steps are a plan deliverable); wiring + product-loop tasks when async | [plan-routing.md](../references/plan-routing.md) |
 | **implement** | Subagent per work unit (one `tasks.md` group by default; 1:1 for high-risk), TDD per task, tier 2 evidence; update spine rows; `forge defer` for deferred wiring | **`/forge:apply`** (OpenSpec) or `/forge:build` + `skills/subagent-driven-development` + `skills/test-driven-development` + [test-strategy](../references/test-strategy.md) |
 | **verify** | `combined` ceremony (small low-risk change) → one closer pass covers verify + review ([phases/close.md]). Otherwise: audit tier 2; tier 3; green `forge e2e run`; `forge integrity-check`; leftover sweep (`spec-verify.md` always on for specs; `openspec-verify.md` when `openspec-verify-change` is present for OpenSpec) | `skills/verification-before-completion` + `verify-evidence.md` + `spec-verify.md` / `openspec-verify.md` |
-| **review** | Covered by the closer when ceremony is `combined`. Otherwise: combined task reviewer (spec + quality) per unit, scoped to the diff range; final review (spine + executed e2e) | `skills/requesting-code-review` |
+| **review** | Covered by the closer when ceremony is `combined`. Otherwise: combined task reviewer (spec + quality) per group, scoped to the diff range, fed `forge review-precheck` facts (docs-only groups self-check); final review in **integration** mode (seams, spine, product loop — not a re-read of approved hunks; tier `standard`) or **full-diff** mode when pace skipped group reviewers (tier `capable`) | `skills/requesting-code-review` |
 | **finish** | Archive (+ ADR if the project uses that); `forge phase done` (integrity gate); cleanup | `/opsx:archive`, `forge cleanup` |
 
 **Standalone deep review (outside Forge):** for pre-merge audits with adversarial false-positive filtering, use the **thorough code review** skill — see [thorough-code-review.md](https://github.com/izkac/forgekit/blob/main/docs/thorough-code-review.md). Forge's `requesting-code-review` stays the per-task checkpoint during `/forge:build`.
@@ -312,6 +312,7 @@ forge checkpoint --group <name> [--tasks <ids>]
                                   # commit this group's work (opt-in; never pushes)
 forge checkpoint --dry-run        # what a checkpoint would commit
 forge checkpoint --range [--last] # diff range for a reviewer brief ({DIFF_RANGE})
+forge review-precheck [--json]    # machine-verified facts for a reviewer packet ({PRECHECK}); exit 1 on integrity problems
 forge finding add "<text>" --kind <bug|debt|tradeoff|idea|process> --severity <blocker|major|minor|note> [--change <slug>]
                                   # findings ledger (.forge/findings.jsonl); kind+severity required
 forge finding list|resolve|link|reopen
@@ -452,7 +453,7 @@ When `--tasks-total N` is set with **N ≥ 15** and resolved pace is still `bris
 ### Ceremony (session tail)
 
 Orthogonal to pace: on the way into implement, Forge resolves **`resolvedCeremony`**
-from the plan. **`combined`** — ≤5 tasks, single capability, no wired spine rows,
+from the plan. **`combined`** — ≤8 tasks, single capability, no wired spine rows,
 not high-risk — replaces the separate verify + review phases with **one closer
 subagent pass** (diff-read, evidence audit, one tier-3 run, READY/NOT READY);
 everything else is **`full`**, the existing tail. Measured motivation: on the

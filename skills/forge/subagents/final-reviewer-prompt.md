@@ -15,35 +15,52 @@ the capability specs. See [references/runtime-integrity.md](../references/runtim
 
 {TASK_SUMMARY}
 
-## Scope
+## Precheck (machine-verified — do not re-run)
 
-Session diff range: {DIFF_RANGE}   <!-- REQUIRED. `forge checkpoint --range` (no `--last`) → the whole session from `session.baseCommit`. No checkpoints: `git diff` against that base + the untracked files in `git status`. -->
+{PRECHECK}   <!-- REQUIRED. Unfilled or still `{PRECHECK}` → return `NEEDS_CONTEXT`; nothing below substitutes for it. Paste `forge review-precheck` output verbatim. It carries integrity status, per-task red→green pairing, guard allowances, changed files, recorded reviews, and your review mode. -->
 
-Files changed in this session:
+Everything in that block was computed by `forge` from the ledgers and git, and
+the verify phase has already run tier 3. **Do not re-run test suites, `forge
+spine|e2e|defer|integrity-check`, or ledger inspection** — re-running them
+finds nothing the block does not already say and is most of what a final review
+used to cost. Read it; judge the *reasons* (allowances, no-TDD declarations);
+treat a `FAIL`/`PROBLEMS` line as a finding.
 
-{CHANGED_FILES}
+## Scope and mode
 
-**The session diff is your scope.** Read it in full, plus every untracked file
-listed with it. If the range is empty or unfilled, return `NEEDS_CONTEXT` rather
-than reconstructing it by exploring the repository.
+Session diff range: {DIFF_RANGE}   <!-- REQUIRED. `forge checkpoint --range` (no `--last`) → the whole session from `session.baseCommit`. No checkpoints: `git diff` against that base + the untracked files in `git status`. The precheck above lists the changed files. -->
 
-Your two required sections below — the spec-to-runtime trace and product-loop
-acceptance — send you outside the diff on purpose: follow a capability to its
-production caller, read `spine.json` and `e2e.json`, open the file a spine row
-names. That is directed reading and the whole point of this review. If
-`.forge/sessions/<id>/openspec-verify.md` or `spec-verify.md` exists, read the
-Forge disposition (leftover files should already be in this diff). Specs
-sessions use `spec-verify.md`; OpenSpec sessions use `openspec-verify.md`.
-Everything else stays inside the diff: no directory sweeps, no grepping for
-related code, no reading modules this session never touched to see how the
-project generally works.
+If the range is empty or unfilled, return `NEEDS_CONTEXT` rather than
+reconstructing it by exploring the repository.
+
+The precheck names your mode:
+
+- **integration** — the units the precheck marks *independent* were already
+  read by an outside reviewer. **Do not re-review those hunks.** Units marked
+  self-check, and any unit the precheck lists as carrying a REJECTED verdict,
+  are yours to read in full. Then read the diff for what a per-group reader
+  cannot see: the seams (files touched by more than one
+  group, a contract one group changed and another consumes), the spec-to-runtime
+  trace, and the product loop. Re-open a hunk only when a seam or a spec
+  requirement sends you there.
+- **full-diff** — no dispatched reviewer has read the code (brisk/lite
+  self-checks only). You are the first outside reader: read the whole diff plus
+  every untracked file listed, then do the two required sections below.
+
+In both modes the required sections send you outside the diff on purpose:
+follow a capability to its production caller, read `spine.json` and `e2e.json`,
+open the file a spine row names. That is directed reading. Everything else
+stays inside the diff: no directory sweeps, no grepping for related code, no
+reading modules this session never touched to see how the project generally
+works. If `.forge/sessions/<id>/spec-verify.md` (specs) or
+`openspec-verify.md` (OpenSpec) exists, read the Forge disposition.
 
 ## Spec-to-runtime trace (required)
 
 For **each** requirement in the change's capability specs, name the
 **production caller** (worker job kind, HTTP endpoint, CLI command, scheduled
-job, …) that invokes the implementing code. Cross-check against `spine.json`
-(`forge spine check`) — every capability row must be wired, not library-only.
+job, …) that invokes the implementing code. Cross-check against the spine rows
+— every capability row must be wired, not library-only.
 
 - Library-only / no production caller → **`NOT READY`**
 - Stub handler / false success / enqueueable-but-unhandled kind → **`NOT READY`**
@@ -53,27 +70,37 @@ job, …) that invokes the implementing code. Cross-check against `spine.json`
 
 ## Product-loop acceptance (required — executed, skipped, or blocked)
 
-`forge e2e check` must be green **or** report a recorded skip (project disable or session `e2eSkip`). When run: `e2e.json` steps drive the **closed loop** (produce → consume → decision changes output) and `e2e-results.json` records a green, current run (steps hash matches). A single job slice (e.g. ingest→file) or a library-level E2E does **not** count as platform E2E. Read the steps — would they pass against a stubbed handler? If yes, they prove nothing.
+The precheck's integrity line already says whether `e2e.json` has a green,
+current run or a recorded skip. Your job is the part no command can do: read
+the steps. Would they pass against a stubbed handler? If yes, they prove
+nothing. When the precheck shows a weak recorded RED for the task that wrote
+the loop, one targeted mutation (neuter the handler, run the loop, restore) is
+worth its cost; a full re-run of green suites is not.
 
 - No green, current e2e run, no recorded skip, and no `BLOCKED` in `verify-evidence.md` → **`NOT READY`**
 - E2E steps assert no domain side effects (would pass on a stub) → **`NOT READY`**
 - `e2e.json` `notApplicable` without a reason no command could overcome → **`NOT READY`**
 - Recorded skip (project or session) with a reason → **not** `NOT READY` for missing E2E
 - `BLOCKED` present while the loop is still required (not skipped, not green) → **`NOT READY`** (honest, but not READY)
-- `BLOCKED` leftover while the loop is skipped or `e2e-results.json` is green and current → ignore for readiness
-- Unresolved deferrals in `forge defer list` → **`NOT READY`**
+- Unresolved deferrals (precheck integrity line) → **`NOT READY`**
 
 ## Attribution (first line of your report)
 
-Open with `Reviewer: <your model> (<this prompt's role>)` — e.g. `Reviewer: claude-opus-5 (task-reviewer)`. The coordinator saves your report verbatim and `forge score` reads it, so this line is how a dispatched review is told apart from one the coordinator wrote. Do not write it if you are not a dispatched reviewer.
-
-Write this line as if it decides. When the coordinator dispatched you with the description exactly `forge-review final <session-id>` — what `forge review-label final` prints — the host recorded it and `forge score` reads that record instead of your prose. Printing that label also wrote a dispatch stamp (`reviews/dispatches.json`, in the session's own directory, not the host's) — it records that a label was issued (unit, session, time, resolved model) and it survives pruning that would erase the host's own record. It does not record that a reviewer ran, which is why it ranks below the host's own record and is not a guaranteed stand-in for it: a stopped or below-substance dispatch whose transcript is later pruned can grade `recorded`/independent off the stamp where an intact host record would have said `self` — over-credit is this mechanism's disclosed error direction, not a promise the stamp matches what the host would have shown. Otherwise your wording usually decides — **but not always**: if this session labelled its *group* reviewers and not you, no `final` stamp exists either, Forge reads the missing `final` record as "no outside reader", your words are never consulted, and `forge phase done` refuses a high-risk change. Your wording decides only in the true no-record case — no host answer for `final` and no dispatch stamp for it. If you can see that has happened, say so in your report; it is a real finding about the session, not a detail.
-
-Only your opening lines and this attribution are scanned, so discuss the coordinator's self-checks freely in the body — that is your job. Just keep `self-check` / `self-audit` / `self-review` / `self-authored` out of this line and out of your opening two paragraphs, where they mark the report as the author's own. If you quote another review's `Reviewer:` header, put it in a fenced block or a `>` blockquote — an unquoted copy of someone else's attribution reads as yours.
+Open with `Reviewer: <your model> (final reviewer)` — only if you are a dispatched reviewer; a coordinator writing this file declares itself instead (phases/review.md). The coordinator saves your
+report verbatim and `forge score` reads that line. Keep `self-check` /
+`self-review` / `self-audit` / `self-authored` out of your opening two
+paragraphs — they mark a report as the coordinator's own. Quote another
+review's `Reviewer:` header only inside a fenced block or `>` blockquote. The
+reasoning behind labels and stamps is in
+[references/review-labels.md](../references/review-labels.md); you do not need
+it to review.
 
 ## Verdict
 
 - **READY** — every capability has a runtime owner, product loop evidenced, tests evidence real outcomes, no critical gaps
 - **NOT READY** — list blockers (prefer runtime-integrity and missing wiring first)
 
-Do not approve if tests were not run, **`test-evidence.md` is missing**, tasks remain unchecked, or any claimed capability is library-only / stubbed / false-succeeding. Task checkboxes at 100% do **not** override a broken spine.
+Do not approve if the precheck shows integrity problems, a task with failed or
+missing evidence, tasks remain unchecked, or any claimed capability is
+library-only / stubbed / false-succeeding. Task checkboxes at 100% do **not**
+override a broken spine.

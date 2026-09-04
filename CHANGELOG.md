@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+Review costs a quarter of a standard-pace session and, across nine recorded
+sessions, found no code defects — reviewers spent their requests re-running
+suites and forge checks the verify phase had already run. New
+`forge review-precheck [--json]` computes the machine-verifiable half once
+(integrity gates, per-task red→green pairing or no-TDD declaration, guard
+allowances, changed files, recorded reviews) and every reviewer packet now
+carries it as `{PRECHECK}` with an instruction not to re-run. The final
+reviewer gains a **mode**: `integration` when every group/task review on
+record was independent (review the change as a whole — seams, spec-to-runtime
+trace, product loop — not the approved hunks; `forge review-label final`
+defaults the tier to `standard` unless high-risk) or `full-diff` when pace
+skipped group reviewers (first outside reader, tier `capable`). Docs-only
+groups (all tasks docs-only `--no-tdd`) get a coordinator self-check instead
+of a dispatched reviewer. `COMBINED_TASKS` rises from 5 to 8 (combined
+ceremony and the plan-time exit ramp). Reviewer prompts drop the label/stamp
+essay in favour of a pointer to `references/review-labels.md`.
+`forge score` no longer applies the review-coverage cap to a `combined`
+session — the closer is its reviewer by design.
+
+Fix: `findRepoRoot` no longer climbs into the home directory — a stray
+`~/.forge` made every temp-dir `forge` command re-root itself in `~`, and
+`forge init` then retired the real `~/.agents/skills/forge` as a "leftover
+project copy". Three init tests also set `USERPROFILE` alongside `HOME` so
+they stop running against the real home on Windows.
+
 ## 0.3.56 — 2026-09-01
 
 The brainstorm Assumptions contract from 0.3.55 is now enforced: after a

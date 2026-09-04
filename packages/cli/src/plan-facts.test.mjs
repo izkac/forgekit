@@ -374,9 +374,9 @@ test('ceremony fallback: a small direct session combines; a risky slug never doe
   // reads the session's own declared facts.
   for (const [slug, tasksTotal, expected] of [
     ['fix-pagination-boundary', 2, 'combined'],
-    ['fix-pagination-boundary', 5, 'combined'],
+    ['fix-pagination-boundary', COMBINED_TASKS, 'combined'],
     ['rotate-webhook-secret', 2, 'full'],
-    ['fix-pagination-boundary', 6, 'full'],
+    ['fix-pagination-boundary', COMBINED_TASKS + 1, 'full'],
   ]) {
     const root = tmp('forge-ceremony-direct-');
     const sessionDir = path.join(root, '.forge', 'sessions', 's1');

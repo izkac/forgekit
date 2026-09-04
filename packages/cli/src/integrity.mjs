@@ -1032,7 +1032,7 @@ export function checkGuardedFiles({ cwd, sessionDir, session }) {
  * @param {string} sessionDir
  * @returns {string[]}
  */
-function completedTddTaskDirs(sessionDir) {
+export function completedTddTaskDirs(sessionDir) {
   const tasksDir = path.join(sessionDir, 'tasks');
   let entries;
   try {
@@ -1200,7 +1200,7 @@ function stampCommandKey(stamp) {
  *
  * @param {Array<{ expect: string, ok: boolean, exit: unknown, startedAtMs: number, line: number, cmd: string, args: string[] }>} stamps
  */
-function hasRedBeforeGreen(stamps) {
+export function hasRedBeforeGreen(stamps) {
   const reds = okRedStamps(stamps);
   const greens = okGreenStamps(stamps);
   if (reds.length === 0 || greens.length === 0) return false;
@@ -1289,7 +1289,7 @@ function describePairingGap(stamps) {
  * @param {string} evidenceFile
  * @returns {boolean}
  */
-function hasNoTddDeclaration(evidenceFile) {
+export function hasNoTddDeclaration(evidenceFile) {
   let body;
   try {
     body = fs.readFileSync(evidenceFile, 'utf8');

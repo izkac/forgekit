@@ -37,21 +37,27 @@ how things generally work. Undirected reading is most of what a review costs and
 almost none of what it finds, because the defects live in the lines that
 changed.
 
-## Forge evidence targets
+## Precheck (machine-verified — do not re-run)
 
-{TASK_EVIDENCE_TARGETS} <!-- coordinator: one entry per reviewed task, each naming task id, whether executed evidence is enabled, and `.forge/sessions/<session-id>/tasks/<task-id>/tdd-runs.jsonl` -->
+{PRECHECK}   <!-- REQUIRED. Unfilled or still `{PRECHECK}` → return `NEEDS_CONTEXT`; nothing below substitutes for it. Paste `forge review-precheck` output verbatim: integrity status, one entry per reviewed task (red→green pairing for identical argv, or the no-TDD declaration), guard allowances, changed files. -->
 
-Inspect every listed ledger. For each enabled behavior-changing task, require an ok expected RED before an ok GREEN for identical command argv. Plain `test-evidence.md` is supplemental only; it never substitutes for the executed pair. A valid `--no-tdd` declaration is acceptable only when that task changed no behavior.
+{TASK_EVIDENCE_TARGETS} <!-- coordinator: one entry per reviewed task — task id and whether executed evidence is enabled — so the reviewer knows which precheck rows are this unit's -->
 
-## Guard allowances open on this session
+`forge` already verified each ledger: an ok RED before an ok GREEN for
+identical command argv, or a `--no-tdd` declaration. **Do not re-run test
+suites or re-inspect ledgers**; the implementer's evidence and the verify
+phase's tier 3 are on record. What is left to you is judgment the command
+cannot exercise:
 
-{GUARD_ALLOWANCES}   <!-- coordinator: paste the contents of .forge/sessions/<id>/guard-allowances.json (path + reason + phase) verbatim, or "none" if the file doesn't exist — there is no `forge guard list` to generate this for you, and an unfilled placeholder here is worse than leaving it out -->
-
-Each allowance recorded a coordinator's decision to let an edit through the
-test-tamper guard. Judge whether the **reason** actually justifies changing
-that file — "needed to make the test pass" is not a reason, it is the guard
-firing correctly. A weak or missing reason is a review finding on its own,
-independent of whether the resulting code is otherwise fine.
+- A `FAIL` row in the precheck is a finding. Plain `test-evidence.md` is
+  supplemental only; it never substitutes for the executed pair.
+- A `--no-tdd` declaration is acceptable only when that task changed no
+  behavior — "docs-only" on a task that touched a handler is a finding.
+- Each guard allowance recorded a coordinator's decision to let an edit through
+  the test-tamper guard. Judge whether the **reason** justifies changing that
+  file, and whether it matches what the diff actually did to it — "needed to
+  make the test pass" is the guard firing correctly, and "existing tests
+  untouched" beside a diff that edits them is a finding on its own.
 
 **Read the actual code.** The summary above was written by the party under review — it is a map, not evidence. Read the diff range before any verdict; verify each spec requirement against what the code does, not what the summary says it does. Reading less than the whole diff is the one economy not open to you.
 
@@ -81,17 +87,13 @@ independent of whether the resulting code is otherwise fine.
 - Simplicity — no over-engineering
 - Surgical diff — no unrelated edits
 - Error handling — no silent failures
-- Tests — meaningful coverage for behaviour changes; tier-2 evidence present in one of three shapes: for a legacy/unflagged task, **`test-evidence.md`** with exit code `0` and pass summary; for a flagged behavior-changing task, an ok fail-stamp before an ok pass-stamp in **`tdd-runs.jsonl`** (behavior-change tasks); or **`test-evidence.md`** carrying a `--no-tdd` declaration (`<!-- forge:no-tdd-declared -->` plus a `- **No-TDD reason:**` line, no Command/Exit/Summary required) for a task with no applicable red→green cycle. Do **not** flag the third shape as missing evidence — but do read the reason: judge it the same way you judge a guard allowance (see above), and "docs-only" on a task that actually touched a handler or other behavior is a finding, not a pass. Evidence is **narrow** unless task required full workspace
+- Tests — meaningful coverage for behaviour changes; the tests added would fail on a no-op. Evidence shape is already verified in the precheck (ledger pair, legacy `test-evidence.md`, or `--no-tdd` declaration) — judge only the reasons, as above
 - Ecosystem — dependents updated if contracts changed
 - AGENTS.md coding guidelines
 
 ## Attribution (first line of your report)
 
-Open with `Reviewer: <your model> (<this prompt's role>)` — e.g. `Reviewer: claude-opus-5 (task-reviewer)`. The coordinator saves your report verbatim and `forge score` reads it, so this line is how a dispatched review is told apart from one the coordinator wrote. Do not write it if you are not a dispatched reviewer.
-
-Your **prose decides** here. Forge's host-evidence path is scoped to the *final* review only, so a group or task review like yours is classified from the words below, always — there is no fallback to fall back from.
-
-Only your opening lines and this attribution are scanned, so discuss the coordinator's self-checks freely in the body — that is your job. Just keep `self-check` / `self-audit` / `self-review` / `self-authored` out of this line and out of your opening two paragraphs, where they mark the report as the author's own. If you quote another review's `Reviewer:` header, put it in a fenced block or a `>` blockquote — an unquoted copy of someone else's attribution reads as yours.
+Open with `Reviewer: <your model> (task-reviewer)` — only if you are a dispatched reviewer; a coordinator self-check declares itself instead. The coordinator saves your report verbatim and `forge score` classifies it from that line and your opening two paragraphs — keep `self-check` / `self-audit` / `self-review` / `self-authored` out of them (they mark a report as the coordinator's own), and quote another review's `Reviewer:` header only inside a fenced block or `>` blockquote. Reasoning: [references/review-labels.md](../references/review-labels.md).
 
 ## Verdict
 

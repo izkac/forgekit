@@ -821,7 +821,14 @@ export function scoreSession(opts) {
   } catch {
     perTaskReview = null;
   }
-  const coverageCap = reviewCoverageCap({ census, perTaskReview, tasks: coverageTasks });
+  // A `combined` ceremony prescribes one closer and no group reviewers (now up
+  // to COMBINED_TASKS tasks) — capping it would punish the tail the resolver
+  // chose. The closer is the final reviewer and is graded by the final-review
+  // rules instead.
+  const coverageCap =
+    session?.resolvedCeremony === 'combined'
+      ? null
+      : reviewCoverageCap({ census, perTaskReview, tasks: coverageTasks });
   // `coverageCap.cap` is a CEILING, never a floor: this must only ever lower
   // the score, never raise it. Deleting `score > coverageCap.cap` here left
   // all tests green while promoting a 59/D incomplete session (already

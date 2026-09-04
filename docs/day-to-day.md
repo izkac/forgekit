@@ -73,7 +73,7 @@ produce a tracked change?"
 
 The work runs directly, no session, no ceremony. Use it freely for small
 things — Forge for a one-line change is waste, and the tooling agrees: even
-mid-Forge, a small plan (≤5 tasks, one capability, low-risk) triggers an
+mid-Forge, a small plan (≤8 tasks, one capability, low-risk) triggers an
 **exit ramp** where the agent offers to leave Forge before scaffolding specs.
 
 **Using Cursor, Codex, Copilot, Gemini, or OpenCode?** Pick that harness at

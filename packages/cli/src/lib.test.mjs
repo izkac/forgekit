@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -59,6 +60,25 @@ test('forge cleanup removes an undatable abandoned session', () => {
 
   assert.match(out, /"reason": "retention"/);
   assert.equal(fs.existsSync(sessionDir), false);
+});
+
+test('findRepoRoot never climbs into the home directory (a stray ~/.forge is not a project)', () => {
+  // A temp dir sits below the home dir on every platform; a `.forge` or `.git`
+  // in the home dir must not become the root of an unrelated temp project —
+  // `forge init` re-rooted there once and retired ~/.agents/skills/forge.
+  const home = tmp('forge-home-');
+  const nested = path.join(home, 'AppData', 'Local', 'Temp', 'proj', 'src');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.mkdirSync(path.join(home, '.forge'), { recursive: true });
+  const real = os.homedir;
+  os.homedir = () => home;
+  try {
+    assert.equal(findRepoRoot(nested), nested);
+    // Home itself as the start dir still resolves (dotfiles repo).
+    assert.equal(findRepoRoot(home), home);
+  } finally {
+    os.homedir = real;
+  }
 });
 
 test('findRepoRoot walks up to the nearest .forge, then .git, then falls back', () => {

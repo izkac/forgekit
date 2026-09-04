@@ -12,6 +12,30 @@ Read and follow [../skills/requesting-code-review/SKILL.md](../skills/requesting
 
 Otherwise dispatch the final reviewer using [../subagents/final-reviewer-prompt.md](../subagents/final-reviewer-prompt.md) (whole-session verdict; the reviewer applies the checklist from [code-reviewer.md](../skills/requesting-code-review/code-reviewer.md)).
 
+**Run the precheck first, and paste it into `{PRECHECK}` verbatim:**
+
+```bash
+forge review-precheck                   # exit 1 → fix the integrity problems before dispatching anyone
+```
+
+It verifies what a reviewer used to re-derive by hand — integrity gates, every
+task's red→green pairing or no-TDD declaration, guard allowances, changed
+files, and which reviews already exist — and names the **final review mode**:
+
+- **integration** — at least one group/task review on record was an
+  independent reviewer. The final reviewer does not re-read the hunks those
+  reviewers approved; it reads self-check units and any unit carrying a
+  REJECTED verdict in full, then the change as a whole (seams between groups,
+  spec-to-runtime trace, product loop). `forge review-label final` defaults
+  the tier to `standard` here unless the change is high-risk.
+- **full-diff** — no dispatched reviewer has read any code (brisk/lite
+  self-checks only), so the final reviewer is the first outside reader and
+  reads the whole diff at tier `capable`.
+
+Measured on brainstorm-hardening: the final reviewer spent most of its 29
+requests re-running four suites and nine forge commands over hunks three
+group reviewers had already passed. The precheck block replaces that.
+
 **Fill `{DIFF_RANGE}` before you dispatch.** Run `forge checkpoint --range`
 (without `--last`, so the base is `session.baseCommit` and the range covers the
 whole session) and paste its `reviewTarget`. Without checkpoints, give
@@ -93,7 +117,7 @@ wherever it sits, but `Reviewed by: coordinator` does not. A `self-check` in a
 floor.
 </HARD-GATE>
 
-**Model:** follow [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier capable` (or `standard`/`fast` when `models.bias` is `prefer-fast` and not high-risk; billing **`included`** by default). If `omitModel` is true, **omit** the Task `model` parameter entirely; otherwise pass `model` exactly. Do not use metered/API models unless the user explicitly requests them. Never pick a slug from the host’s available-models list.
+**Model:** follow [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier <tier the label command printed>` (`standard` in integration mode, `capable` in full-diff mode or when high-risk; `fast` when `models.bias` is `prefer-fast` and not high-risk; billing **`included`** by default). If `omitModel` is true, **omit** the Task `model` parameter entirely; otherwise pass `model` exactly. Do not use metered/API models unless the user explicitly requests them. Never pick a slug from the host’s available-models list.
 
 <HARD-GATE>
 Do NOT hand-pick a model slug for the final reviewer — not even "the most capable" from the host's model list. Resolver output only. On dispatch failure, re-resolve; do not substitute a slug yourself.

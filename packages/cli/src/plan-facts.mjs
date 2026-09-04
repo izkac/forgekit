@@ -123,8 +123,14 @@ export function collectPlanFacts(opts) {
  * micro-tasks (red, green, full-suite as separate ticks), so a ≤2 threshold
  * never fired once across eight trials. Task count is granularity, not size —
  * the size signals are capabilities and spine rows, and both still gate.
+ *
+ * 8, not 5 (2026-09-04): the integrity gates at `forge phase done` are
+ * mechanical and `forge review-precheck` now hands the closer every ledger,
+ * allowance and integrity fact pre-verified, so the closer's own reading is
+ * the diff and nothing else. A 6–8 task single-capability change is one
+ * diff-read; three tail phases for it re-establish context three times.
  */
-export const COMBINED_TASKS = 5;
+export const COMBINED_TASKS = 8;
 
 /**
  * Drop lines whose only risk mention is negated ("no persistence migration",

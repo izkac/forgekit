@@ -24,6 +24,7 @@
 import { loadSession, resolveSessionId, sessionAmbiguityMessage } from './lib.mjs';
 import { isReviewUnit, reviewLabel } from './review-label.mjs';
 import { resolveModel, TIERS } from './resolve-model.mjs';
+import { collectPrecheck } from './review-precheck.mjs';
 import { writeStamp } from './review-stamp.mjs';
 
 const args = process.argv.slice(2);
@@ -150,6 +151,29 @@ if (unit === 'final' && resolved.resolvedCeremony === 'combined') {
         'A capable-tier final reviewer is the full tail under another name. If that is a deliberate choice, re-run with --full-tail.\n',
     );
     process.exit(1);
+  }
+} else if (unit === 'final' && !tierExplicit) {
+  // INTEGRATION-MODE RAIL. When every recorded task/group review was an outside
+  // reader, the final reviewer re-reads nothing it approved — it reviews the
+  // change as a whole (seams, spec-to-runtime trace, product loop). Measured on
+  // brainstorm-hardening: the capable-tier final reviewer re-ran four suites
+  // and nine forge commands over hunks three group reviewers had already
+  // passed. That job is standard-tier work. High-risk, or a session where no
+  // dispatched reviewer has read the code (brisk/lite), stays capable. Unlike
+  // the combined rail this never refuses an explicit `--tier capable`.
+  // Never let the rail block the label: a corrupt review file or ledger is a
+  // finding for the reviewer, not a reason to refuse the dispatch record.
+  let pre = null;
+  try {
+    pre = collectPrecheck({ cwd: process.cwd(), sessionDir, session: resolved, quick: true });
+  } catch (err) {
+    process.stderr.write(`[forge] precheck unavailable (${err instanceof Error ? err.message : err}) — keeping tier capable.\n`);
+  }
+  if (pre && pre.finalReview.tier !== tier) {
+    tier = pre.finalReview.tier;
+    process.stderr.write(
+      `[forge] ${pre.finalReview.mode} mode: an independent group review is on record — final reviewer tier defaults to ${tier}. Pass --tier explicitly to change it.\n`,
+    );
   }
 }
 

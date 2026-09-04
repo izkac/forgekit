@@ -23,17 +23,18 @@ empty or unfilled, return `NEEDS_CONTEXT` — do not reconstruct scope by
 exploring the repository. Open a file outside the diff only when the diff or the
 spec excerpt sends you there; no directory sweeps, no grepping for related code.
 
-## Guard allowances
+## Precheck (machine-verified — do not re-run)
 
-{GUARD_ALLOWANCES}   <!-- coordinator: paste .forge/sessions/<id>/guard-allowances.json verbatim, or "none" -->
+{PRECHECK}   <!-- REQUIRED. Unfilled or still `{PRECHECK}` → return `NEEDS_CONTEXT`; nothing below substitutes for it. Paste `forge review-precheck` output verbatim: integrity, per-task red→green pairing or no-TDD declaration, guard allowances, changed files. -->
 
 ## Checks — all four, one pass
 
 1. **Spec:** every requirement in the excerpt is implemented in the diff;
    nothing important missing; no unrequested scope.
-2. **Evidence:** each behavior-change task's ledger shows an ok RED stamp before
-   an ok GREEN stamp for the same command; non-behavior tasks carry a `--no-tdd`
-   declaration whose reason holds up. Weak guard-allowance reasons are findings.
+2. **Evidence:** the precheck already verified each ledger pair; do not
+   re-inspect ledgers. Judge the reasons: a `--no-tdd` declaration must match a
+   task that changed no behavior, and a guard-allowance reason must match what
+   the diff did to that file. A `FAIL` row or a weak reason is a finding.
 3. **Tests:** run the narrowest command covering the touched workspace(s) once —
    {AFFECTED_TEST_COMMAND} — and report the command, exit code, and summary.
    This is the session's tier-3 run; there is no separate verify phase behind you.

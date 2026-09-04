@@ -49,6 +49,7 @@ const COMMANDS = {
   finding: { script: 'findings-cli.mjs', aliases: ['findings'] },
   metrics: { script: 'metrics-cli.mjs' },
   'review-label': { script: 'review-label-cli.mjs' },
+  'review-precheck': { script: 'review-precheck-cli.mjs', aliases: ['precheck'] },
   analyze: { script: 'analyze-cli.mjs', aliases: ['analyse'] },
 };
 
@@ -91,6 +92,8 @@ Commands:
   brief stamp|check|open  Operator brief (plain-language HTML, gates implement)
   finding add|list|resolve    Findings ledger — give an observation a home
   metrics collect         Harvest host transcripts → session metrics.json
+  review-label [<unit>]   Exact Task description for a reviewer dispatch (+ dispatch stamp)
+  review-precheck [--json] Machine-verified facts block for a reviewer packet (exit 1 on integrity problems)
   analyze [--json]        Coverage, per-model/phase totals, policy skip rate
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.

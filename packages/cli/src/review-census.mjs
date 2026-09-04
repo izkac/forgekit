@@ -122,7 +122,7 @@ import { readStamps } from './review-stamp.mjs';
 // Not a gate escape (the instruction is conditioned on not-high-risk, and the
 // gate's predicate is the same one), but it is the durable ledger recording the
 // opposite of what happened.
-const SELF_REVIEW_RE =
+export const SELF_REVIEW_RE =
   /APPROVED \(pace|SKIPPED \(pace|self[- ]review|self[- ]check|self[- ]audit|self[- ]authored|reviewed by the coordinator|reviewer[\s*_:—–-]*(?:the\s+)?(?:coordinator|author|myself)\b(?!-)/i;
 
 /**
@@ -157,7 +157,7 @@ const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
  * @param {string} body
  * @returns {string}
  */
-function attributionRegion(body) {
+export function attributionRegion(body) {
   const lines = body.split('\n');
   /** @type {string[]} */
   const kept = [];
@@ -231,7 +231,7 @@ function attributionRegion(body) {
 export const CENSUS_RULE = 5;
 
 /** A round that sent work back: proof the review was not a rubber stamp. */
-const REJECTION_RE = /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*)/i;
+export const REJECTION_RE = /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*)/i;
 
 /**
  * The unit a final-review dispatch carries: `forge-review final`.

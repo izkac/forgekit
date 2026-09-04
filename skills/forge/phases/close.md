@@ -55,10 +55,11 @@ review, it just fails the gate later.
 
    Dispatch [../subagents/closer-prompt.md](../subagents/closer-prompt.md) with
    the Task description exactly what the command printed. Fill every
-   placeholder: `{DIFF_RANGE}` from `forge checkpoint --range` (whole session;
+   placeholder: `{PRECHECK}` from `forge review-precheck` (verbatim; exit 1 means
+   fix integrity first), `{DIFF_RANGE}` from `forge checkpoint --range` (whole session;
    plus untracked files by name), `{TASK_EVIDENCE_TARGETS}` one entry per task,
    `{AFFECTED_TEST_COMMAND}` the narrowest command covering the touched
-   workspace(s), `{GUARD_ALLOWANCES}` pasted or "none". **Model:** resolve via
+   workspace(s) (the precheck carries the guard allowances). **Model:** resolve via
    `forge resolve-model --tier standard` and honor `omitModel`/`model` literally.
 
 4. **Record.** Save the closer's report to

@@ -179,3 +179,34 @@ test('existing refusals still hold: no active session, and an unknown option', (
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('integration mode: independent group reviews on record → final tier defaults to standard', () => {
+  // brainstorm-hardening measured a capable-tier final reviewer re-reading hunks
+  // three group reviewers had already approved. When every recorded review was
+  // an outside reader, the final review is whole-change work at standard tier.
+  const sessionId = '20260904T000000Z-integration-rail-abc123';
+  const { dir, sessionDir } = makeProject(sessionId);
+  try {
+    const g = path.join(sessionDir, 'tasks', 'group-01-a');
+    fs.mkdirSync(g, { recursive: true });
+    fs.writeFileSync(path.join(g, 'group-review.md'), 'Reviewer: sonnet (task-reviewer)\n\nVerdict: APPROVED\n');
+
+    const r1 = run(dir, ['final']);
+    assert.equal(r1.status, 0, r1.stderr);
+    assert.match(r1.stderr, /integration mode/i);
+    assert.equal(readStamps(sessionDir)[0].model.tier, 'standard');
+
+    // Explicit capable is honoured, never refused (unlike the combined rail).
+    const r2 = run(dir, ['final', '--tier', 'capable']);
+    assert.equal(r2.status, 0, r2.stderr);
+    assert.equal(readStamps(sessionDir)[1].model.tier, 'capable');
+
+    // A self-check group review is not an outside reader → capable stays.
+    fs.writeFileSync(path.join(g, 'group-review.md'), 'Reviewer: coordinator — APPROVED (pace self-check)\n');
+    const r3 = run(dir, ['final']);
+    assert.equal(r3.status, 0, r3.stderr);
+    assert.equal(readStamps(sessionDir)[2].model.tier, 'capable');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

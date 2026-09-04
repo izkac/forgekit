@@ -29,7 +29,9 @@ test('reviewer packet validates flagged tasks from the same executed ledger', ()
   const text = fs.readFileSync(packet('task-reviewer-prompt.md'), 'utf8');
   assert.match(text, /\{TASK_EVIDENCE_TARGETS\}/);
   assert.match(text, /one entry per reviewed task/i);
-  assert.match(text, /inspect every listed ledger/i);
+  // Ledger inspection moved into `forge review-precheck`; the reviewer judges
+  // reasons, it does not re-run suites or re-read ledgers.
+  assert.match(text, /do not re-run test\s+suites or re-inspect ledgers/i);
   assert.match(text, /plain .*test-evidence\.md.*supplemental/is);
 });
 
@@ -43,6 +45,10 @@ test('both reviewer packets scope the review to a required diff range', () => {
     assert.match(text, /\{DIFF_RANGE\}/, `${name} must carry a diff-range placeholder`);
     assert.match(text, /REQUIRED/, `${name} must mark the range required`);
     assert.match(text, /NEEDS_CONTEXT/, `${name} must refuse an unfilled range`);
+    // Every reviewer packet carries the machine-verified block so no reviewer
+    // pays to re-derive integrity, ledger pairing or allowances.
+    assert.match(text, /\{PRECHECK\}/, `${name} must carry the precheck placeholder`);
+    assert.match(text, /do not re-run/i, `${name} must tell the reviewer not to re-run verified checks`);
     assert.match(
       text,
       /do not (?:explore|substitute a survey|reconstruct)|no directory sweeps/i,
@@ -55,7 +61,7 @@ test('closer packet is a real final reviewer: evidence targets, tier-3 command, 
   const text = fs.readFileSync(packet('closer-prompt.md'), 'utf8');
   assert.match(text, /\{TASK_EVIDENCE_TARGETS\}/);
   assert.match(text, /\{AFFECTED_TEST_COMMAND\}/);
-  assert.match(text, /\{GUARD_ALLOWANCES\}/);
+  assert.doesNotMatch(text, /\{GUARD_ALLOWANCES\}/, 'allowances arrive inside {PRECHECK}');
   assert.match(text, /Reviewer: <your model> \(closer\)/);
   assert.match(text, /READY/);
 });

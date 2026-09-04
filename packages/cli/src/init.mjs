@@ -10,6 +10,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -613,7 +614,12 @@ export function initProject(selected, opts) {
   const copyOpts = { force: opts.force, cwd };
 
   const agentsSkillDest = path.join(cwd, '.agents', 'skills', 'forge');
-  if (fs.existsSync(agentsSkillDest) && readInstallStamp(agentsSkillDest)) {
+  // A project copy is retired; the global install at ~/.agents/skills/forge is
+  // never one, however the cwd came to be the home dir (dotfiles repo, stray
+  // ~/.forge re-rooting a temp dir). Same comparison install.mjs makes.
+  const globalSkill = path.join(opts.home ?? os.homedir(), '.agents', 'skills', 'forge');
+  const isGlobal = path.resolve(agentsSkillDest).toLowerCase() === path.resolve(globalSkill).toLowerCase();
+  if (!isGlobal && fs.existsSync(agentsSkillDest) && readInstallStamp(agentsSkillDest)) {
     fs.rmSync(agentsSkillDest, { recursive: true, force: true });
     report.agentsSkillRetired = {
       dest: '.agents/skills/forge',

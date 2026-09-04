@@ -97,7 +97,7 @@ scaffolded, `forge exit-check --tasks N --capabilities N --spine-rows N
 agent supplies the counts because nothing is readable from disk yet to read
 them from.
 
-- Exit 0 — the shape qualifies (≤5 tasks, single capability, no wired spine
+- Exit 0 — the shape qualifies (≤8 tasks, single capability, no wired spine
   rows, not high-risk) — offer to leave Forge.
 - Exit 1 — proceed to plan. Also the fail-closed result for a missing,
   non-numeric, negative, fractional, flag-shaped, or repeated count flag.
@@ -112,7 +112,7 @@ Either answer gets recorded on the session: accept with
 ## Ceremony (session tail) — orthogonal to pace
 
 On the way into implement, Forge also resolves **`resolvedCeremony`** from the
-plan: **`combined`** (≤5 tasks, single capability, no wired spine rows, not
+plan: **`combined`** (≤8 tasks, single capability, no wired spine rows, not
 high-risk → one closer pass replaces the separate verify + review phases; see
 `phases/close.md`) or **`full`** (the existing tail). Pace pinning does not
 override it — pinning `thorough` is a statement about review cadence, not a
@@ -137,6 +137,8 @@ Cadence for the task/group reviewer (name is historical — values cover more th
 - `per-group` — dispatch one reviewer when an OpenSpec **group** completes (`thorough`, `standard`). A group is a top-level `##` section in `openspec/changes/<name>/tasks.md` (all `- [ ]` items under that heading until the next `##`). Mid-group low-risk tasks get a pace self-check `task-review.md` only. If `tasks.md` has **no** section headings, treat the whole file as one group (review once when all tasks are done). High-risk tasks still get an **immediate** per-task review (hard floor).
 - `high-risk-only` — skip reviewer for low-risk tasks; still write a short self-check note in `task-review.md` (`APPROVED (pace: brisk/lite — self-check)`). No current preset uses this either.
 - `never` — same as high-risk-only after hard floor (`brisk`, `lite`; low-risk may self-check only).
+
+On every value: a **docs-only group** (every task carries a valid docs-only `--no-tdd` declaration) gets a coordinator self-check `group-review.md`, never a dispatched reviewer. Every reviewer packet carries `forge review-precheck` output, so reviewers judge reasons rather than re-run suites and ledgers.
 
 ### `review.final`
 

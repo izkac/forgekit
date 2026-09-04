@@ -758,7 +758,7 @@ test('forge init: a flagless re-init preserves a recorded custom plan.dir', () =
     const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
       cwd,
       encoding: 'utf8',
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, USERPROFILE: home },
     });
     assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
 
@@ -819,7 +819,7 @@ test('forge init: a flagless re-init keeps a recorded adr.enabled:false project 
     const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
       cwd,
       encoding: 'utf8',
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, USERPROFILE: home },
     });
     assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
 
@@ -856,7 +856,7 @@ test('forge init: a flagless re-init keeps a recorded adr.enabled:true project e
     const result = spawnSync(process.execPath, [FORGE_BIN, 'init', '--claude', '--force'], {
       cwd,
       encoding: 'utf8',
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, USERPROFILE: home },
     });
     assert.equal(result.status, 0, `forge init failed: ${result.stderr}`);
 
@@ -1060,6 +1060,20 @@ test('initProject does not touch a foreign skill when retiring a stamped forge c
     );
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('initProject never retires the global ~/.agents/skills/forge, even when cwd is the home dir', () => {
+  // A stray ~/.forge once re-rooted a temp project into the home dir and
+  // `forge init` deleted the real install as a "leftover project copy".
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-retire-home-'));
+  try {
+    const dest = plantAgentsForgeCopy(home, { stamped: true });
+    const report = initProject(['cursor'], { cwd: home, home, force: true, adr: false, planEngine: null });
+    assert.equal(fs.existsSync(path.join(dest, 'SKILL.md')), true, 'global install untouched');
+    assert.equal(report.agentsSkillRetired, undefined);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
