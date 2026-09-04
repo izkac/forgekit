@@ -1,6 +1,8 @@
 # Review lenses
 
-Load **only** the sections matching active lenses. Default invocation uses all sections.
+Load **only** the sections matching active lenses.
+
+**The default set is the four defect lenses: `security`, `correctness`, `errors`, `contracts`.** They find what breaks in production. The other five (`smells`, `architecture`, `performance`, `tests`, `maintainability`) yield mostly `minor` findings and are opt-in — a flag, `--all-lenses`, or `--preset deep`.
 
 **Ground first.** Before hand-reading for any lens, ingest the [signals pre-flight](signals-preflight.md) — typecheck, lint, and test output convert directly into grounded findings (especially for smells, contracts, tests, and errors).
 
@@ -28,7 +30,7 @@ Load **only** the sections matching active lenses. Default invocation uses all s
 
 ## smells
 
-**Pre-flight (before this checklist):** the dedupe scan is the smells-lens arm of the [signals pre-flight](signals-preflight.md). Read the project `dedupe` skill and run a **read-only** duplicate scan scoped to the review target. Emit `dup-###` tentative findings; include summary in report appendix. Do not edit code.
+**Pre-flight (before this checklist, and only when `--smells` was explicitly requested):** the dedupe scan is the smells-lens arm of the [signals pre-flight](signals-preflight.md). Read the project `dedupe` skill and run a **read-only** duplicate scan scoped to the review target. Emit `dup-###` tentative findings; include summary in report appendix. Do not edit code.
 
 Then apply:
 

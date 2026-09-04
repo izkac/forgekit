@@ -42,6 +42,11 @@
         ]
       }
     },
+    "preset": {
+      "type": "string",
+      "enum": ["quick", "standard", "deep"],
+      "description": "Dispatch preset: scout cap, skeptic budget, lowest severity that earns a skeptic, second-opinion cap."
+    },
     "parent_report": { "type": "string" },
     "summary": {
       "type": "object",
@@ -145,7 +150,8 @@
         "inline_verdicts": { "type": "integer", "minimum": 0 },
         "grounded_skips": { "type": "integer", "minimum": 0 },
         "carried_forward": { "type": "integer", "minimum": 0 },
-        "second_opinions": { "type": "integer", "minimum": 0 }
+        "second_opinions": { "type": "integer", "minimum": 0 },
+        "unverified": { "type": "integer", "minimum": 0 }
       }
     }
   },
@@ -183,6 +189,7 @@
             "false_positive",
             "downgraded",
             "needs_decision",
+            "unverified",
             "resolved",
             "still_open",
             "partially_fixed",

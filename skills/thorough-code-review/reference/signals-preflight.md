@@ -46,10 +46,10 @@ Ground the scout in real tool output **before** reading code by hand. Tool-confi
 
 - Read-only. The pre-flight never edits code.
 - Scope-bound. Run tools for the **workspaces in scope**, not the whole repo, unless the scope is repo-wide.
-- A passing tool is signal too — it lets the coverage pass mark a lens genuinely exercised.
+- **A passing tool closes its lens.** A green test run over the scope exercises the `tests` lens; a green typecheck plus a passing route-parity/contract check exercises `contracts`. Record them in the coverage ledger as `exercised by tool` and skip hand-scouting those lenses — the tool read the code more reliably than a second pass would. An explicitly requested lens (`--tests`) is still hand-scouted.
 - If a tool can't run (missing script, environment), record it `skipped` with a reason rather than omitting it.
 
 ## Notes
 
-- The **dedupe pre-flight** (smells lens) is the same pattern with the `dedupe` skill as the tool; keep emitting `dup-###` findings and the `dedupe_preflight` summary.
+- The **dedupe pre-flight** is the same pattern with the `dedupe` skill as the tool. It runs only when the user asked for `--smells` (or `--all-lenses` / `--preset deep`) — it is not part of a default run. When it runs, keep emitting `dup-###` findings and the `dedupe_preflight` summary.
 - Grounded findings at `critical`/`important` still go through Phase 2 — a failing test might be an intentional WIP. Below `important`, skip the skeptic: the tool output is the proof; the orchestrator just checks for intentional-WIP signals (commit message, TODO, user context) and records the verdict directly.

@@ -81,6 +81,30 @@ test('findRepoRoot never climbs into the home directory (a stray ~/.forge is not
   }
 });
 
+test('findRepoRoot stops at the temp root too — a harness home override must not expose the real one', () => {
+  // The home guard alone was not enough: every test here overrides HOME to
+  // isolate user config, so os.homedir() reported the fake home while the real
+  // one stayed a filesystem ancestor of the temp dir. The walk climbed past it,
+  // re-rooted in the real profile, and `forge init` deleted the global skill
+  // install as a "leftover project copy".
+  const fakeTemp = tmp('forge-temproot-');
+  const nested = path.join(fakeTemp, 'scratch-project', 'src');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.mkdirSync(path.join(fakeTemp, '.forge'), { recursive: true });
+  const realTmp = os.tmpdir;
+  os.tmpdir = () => fakeTemp;
+  try {
+    assert.equal(findRepoRoot(nested), nested, 'must not adopt the temp root as a project');
+    // A real project inside the temp dir is still found normally.
+    const proj = path.join(fakeTemp, 'scratch-project');
+    fs.mkdirSync(path.join(proj, '.forge'), { recursive: true });
+    assert.equal(findRepoRoot(nested), proj);
+  } finally {
+    os.tmpdir = realTmp;
+    fs.rmSync(fakeTemp, { recursive: true, force: true });
+  }
+});
+
 test('findRepoRoot walks up to the nearest .forge, then .git, then falls back', () => {
   const root = tmp('forge-root-');
   const nested = path.join(root, 'crates', 'helm-vfs', 'src');

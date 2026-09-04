@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### thorough-code-review — same review, roughly a third of the cost
+
+A default run dispatched up to 19 subagents (4 scouts, a coverage pass, 12
+skeptics, 3 second opinions) across nine lenses, and spent the same adversarial
+verification on a naming nit as on an auth bypass. Seven changes, all keeping
+the parts that make it good — grounding, adversarial skeptics, the second
+reader for a dismissed critical, carry-forward, JSON-first reports:
+
+- **Presets.** `review new --preset quick|standard|deep|auto` (default `auto`)
+  fixes the scout cap, skeptic budget, verification threshold and second-opinion
+  cap before the run, and **prints them** — prose caps were not being honored.
+  `auto` measures the diff: ≤300 changed lines → `quick`, else `standard`.
+  `deep` is the old full pipeline and is never automatic.
+- **Severity-routed verification.** New verdict `unverified`: findings below the
+  preset's threshold are reported with the scout's evidence in their own report
+  section, no dispatch. Validation refuses an `unverified` critical (every preset
+  verifies criticals), and `review export` counts them as open at their own
+  severity, so a CI gate never passes because verification was skipped.
+- **Defect lenses by default** — `security`, `correctness`, `errors`,
+  `contracts`. The five that yield mostly minors are opt-in via a flag,
+  `--all-lenses`, or `--preset deep`. The dedupe pre-flight now runs only on an
+  explicit `--smells`.
+- **Diff-first reading.** For diff scopes the unit is the changed hunk plus its
+  enclosing function; unchanged code in a touched file is out of scope unless a
+  checklist item sends the scout there.
+- **The coverage pass is gone.** Each scout returns its own ledger (what it
+  read, skipped, and which lenses came up empty) and `review merge` folds them:
+  a file any scout read is never reported skipped, and a zero-finding lens claim
+  dies once any scout files under that lens. Scout follow-ups are capped at 3 and
+  must be `important` or above.
+- **Cheaper skeptic pass.** Budget 12 → 6 at `standard`, `important` findings
+  batched by module, and a second opinion only for a **dismissed critical**
+  (was: any high-severity or high-confidence dismissal), capped at 2.
+- **Green tools close their lens.** A passing suite exercises `tests`; a green
+  typecheck plus route-parity exercises `contracts`. Neither is hand-scouted
+  unless the user asked for that lens.
+
+`stats` gains `unverified`; the report JSON gains `preset`.
+
+### Fixes
+
+- `findRepoRoot` no longer adopts the **temp root** as a project, alongside the
+  home guard added earlier. Every test that isolates user config overrides
+  `HOME`, so `os.homedir()` reported the fake home while the real one was still
+  an ancestor of the temp dir — the walk climbed past it, re-rooted in the real
+  profile, and `forge init` deleted `~/.agents/skills/forge` as a "leftover
+  project copy" on every full test run. `initProject` also refuses to retire the
+  global install outright.
+
+### Forge review pipeline
+
 Review costs a quarter of a standard-pace session and, across nine recorded
 sessions, found no code defects — reviewers spent their requests re-running
 suites and forge checks the verify phase had already run. New

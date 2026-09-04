@@ -1,6 +1,8 @@
 # Thorough code review
 
-Two-phase agent skill for **deep code review with false-positive filtering**. Use it when you want more than a quick pass — especially security, correctness, and smell checks before merge.
+Two-phase agent skill for **deep code review with false-positive filtering**. Use it when you want more than a quick pass — especially security and correctness checks before merge.
+
+Cost is governed by a **preset** (`quick` / `standard` / `deep`) that fixes the scout count, the skeptic budget, and how far down the severity ladder adversarial verification is bought. `review new` resolves the preset from the size of the diff and prints the caps.
 
 **Skill:** [`skills/thorough-code-review/SKILL.md`](../skills/thorough-code-review/SKILL.md)  
 **Install:** `forgekit install --skills thorough-code-review` (or `review install`)  
@@ -62,19 +64,21 @@ If you **don't** specify a scope, the agent **must ask** which applies:
 
 ## Review lenses
 
-Default: **all lenses**. Narrow with flags or plain language:
+Default: **the four defect lenses** — the ones that find what breaks in production. The other five yield mostly minor findings and are opt-in:
 
-| Flag | Focus |
-| ---- | ----- |
-| `--security` | AuthZ, injection, secrets, crypto |
-| `--correctness` | Logic, races, edge cases, idempotency |
-| `--smells` | Duplication, complexity, dead code |
-| `--architecture` | Boundaries, coupling, layering |
-| `--performance` | N+1, hot paths, allocations |
-| `--tests` | Coverage gaps, mock-heavy tests |
-| `--contracts` | OpenAPI drift, breaking API changes |
-| `--errors` | Silent failures, error propagation |
-| `--maintainability` | Readability, file size |
+| Flag | Focus | Default? |
+| ---- | ----- | -------- |
+| `--security` | AuthZ, injection, secrets, crypto | yes |
+| `--correctness` | Logic, races, edge cases, idempotency | yes |
+| `--errors` | Silent failures, error propagation | yes |
+| `--contracts` | OpenAPI drift, breaking API changes | yes |
+| `--smells` | Duplication, complexity, dead code | no |
+| `--architecture` | Boundaries, coupling, layering | no |
+| `--performance` | N+1, hot paths, allocations | no |
+| `--tests` | Coverage gaps, mock-heavy tests | no |
+| `--maintainability` | Readability, file size | no |
+
+`--all-lenses` or `--preset deep` runs all nine.
 
 Checklists live in [`skills/thorough-code-review/reference/lenses.md`](../skills/thorough-code-review/reference/lenses.md).
 
@@ -83,18 +87,29 @@ Checklists live in [`skills/thorough-code-review/reference/lenses.md`](../skills
 ## Workflow
 
 ```
-Scaffold (review new) → Resolve scope + lenses
+Scaffold (review new --preset auto) → prints the caps → Resolve scope + lenses
   → Carry-forward (review carryforward — inherit prior verdicts for unchanged files)
-  → Signals pre-flight (run grounding tools; seed grounded findings)
-  → [if smells] Dedupe pre-flight (read-only)
-  → Phase 1: Scout — tentative findings (parallel scouts write .reviews/<id>-tentative/*.json;
-              review merge dedupes + renumbers)
-  → Phase 1.5: Coverage pass — recall: what did the scout miss? (orchestrator-inline; ≤10 follow-ups)
-  → Phase 2: Skeptic — severity-routed + budgeted (~12 dispatches default: dedicated per critical;
-              batched by file for important/minor; inline verdicts for cheap minors; grounded
-              findings below important skip; ≤3 second skeptics for the dangerous quadrant)
+  → Signals pre-flight (run grounding tools; seed grounded findings; a green tool closes its lens)
+  → [only if --smells] Dedupe pre-flight (read-only)
+  → Phase 1: Scout — diff-first tentative findings + each scout's own coverage ledger
+              (parallel scouts write .reviews/<id>-tentative/*.json; review merge dedupes,
+              renumbers, and folds the ledgers — there is no separate coverage pass)
+  → Phase 2: Skeptic — severity-routed under the preset budget (dedicated per critical;
+              batched by module for important; findings below the threshold get verdict
+              `unverified` with the scout's evidence and no dispatch; grounded findings
+              below important skip; a second skeptic only for a dismissed critical)
   → Phase 3: Synthesis — edit JSON (incl. stats dispatch counters) → review render → review export
 ```
+
+### Presets
+
+| Preset | Lenses | Scouts | Skeptic budget | Verify from | Second opinions |
+| ------ | ------ | ------ | -------------- | ----------- | --------------- |
+| `quick` | defect (4) | 1 | 3 | `critical` | 0 |
+| `standard` | defect (4) | 2 | 6 | `important` | 2 |
+| `deep` | all 9 | 4 | 12 | `minor` | 3 |
+
+`--preset auto` (default) measures the diff: ≤300 changed lines → `quick`, more → `standard`, unmeasurable → `standard`. `deep` — the original full pipeline — is never automatic; ask for it by name.
 
 Orchestration commands: `review carryforward --parent <id> [--file <target>] [--dry-run]` (copies verdicted findings whose file is unchanged since the parent report's SHA) and `review merge --dir .reviews/<id>-tentative` (merge + dedupe + renumber parallel scout outputs). The report JSON accepts an optional `stats` object (scouts, skeptics_dedicated, skeptics_batched, inline_verdicts, grounded_skips, carried_forward, second_opinions) rendered as a "Pipeline stats" line.
 
@@ -108,21 +123,19 @@ Orchestration commands: `review carryforward --parent <id> [--file <target>] [--
 
 ### Phase 1 — Scout
 
-Discovers **tentative** issues only. Each finding needs `file:line`, a code citation, lens, severity guess, and confidence. Large scopes are **partitioned** across parallel scout subagents (capped at 4 — units grow instead), then merged and de-duplicated.
+Discovers **tentative** issues only. Each finding needs `file:line`, a code citation, lens, severity guess, and confidence. Diff scopes are read **diff-first**: the changed hunk plus its enclosing function, not the whole file. Large scopes are **partitioned** across parallel scout subagents (capped by the preset — units grow instead), then merged and de-duplicated.
 
-### Phase 1.5 — Coverage pass
-
-Balances the skeptic's precision with **recall**: which in-scope files got zero findings (clean or skipped?), which active lens produced nothing (real or not exercised?). Emits follow-up findings and a `coverage` ledger.
+Each scout also returns its own **coverage ledger** — what it read, what it skipped and why, which of its lenses came up empty. `review merge` folds the ledgers (a file any scout read is never reported skipped; a lens claim is dropped once any scout files under it). The scout that just read the code is the cheapest thing that can say what it did not read, so there is no separate recall pass.
 
 ### Phase 2 — Skeptic
 
-Skeptic subagents receive only their finding packet(s) — no chat history. Dispatch is **severity-routed and budgeted** (default cap ~12 dispatches per review, override with `--budget N` or "no budget"): `critical` findings get a dedicated skeptic each; `important` and `minor` findings sharing a file are batched into one skeptic (independent verdict per finding); `minor` findings with high scout confidence and a self-contained evidence packet are verdicted **inline by the orchestrator** (no subagent); tool-grounded findings below `important` skip the skeptic entirely (the tool output is the proof). Model tiers are chosen per role — the most capable (priciest) model is reserved for `critical` skeptics and second opinions; everything else runs on the default tier (resolve via `forge resolve-model --tier …` when Forge is installed). Each skeptic must:
+Skeptic subagents receive only their finding packet(s) — no chat history. Dispatch is **severity-routed and budgeted** by the preset (override with `--budget N` or "no budget"): `critical` findings get a dedicated skeptic each; `important` findings sharing a module are batched into one skeptic (independent verdict per finding); anything **below the preset's threshold** is reported with verdict `unverified` and the scout's evidence — surfaced for the reader, no subagent, no cost; tool-grounded findings below `important` skip the skeptic entirely (the tool output is the proof). Validation refuses an `unverified` critical, so routing can never bury the severity every preset verifies. Model tiers are chosen per role — the most capable (priciest) model is reserved for `critical` skeptics and second opinions; everything else runs on the default tier (resolve via `forge resolve-model --tier …` when Forge is installed). Each skeptic must:
 
 1. **Steelman** the claim (strongest interpretation).
 2. Trace call chains, tests, middleware, ADRs / accepted risks.
 3. Return a verdict: `confirmed` | `false_positive` | `downgraded` | `needs_decision`.
 
-**Risk-weighted:** a high-severity finding that one skeptic wants to dismiss (the *dangerous quadrant*) gets a **second independent skeptic** (capped at 3 per review, highest severity first) before it drops to the appendix; a disagreement routes to `needs_decision`. False positives go to the report **appendix**, not the main body.
+**Risk-weighted:** a **`critical`** that one skeptic wants to dismiss gets a **second independent skeptic** (capped by the preset) before it drops to the appendix; a disagreement routes to `needs_decision`. A dismissed `important` does not buy one — it lands in the appendix with the skeptic's reasoning. False positives go to the report **appendix**, not the main body.
 
 ### Phase 3 — Synthesis
 
@@ -139,12 +152,13 @@ The **JSON is the single source of truth**; the markdown is *generated* from it 
 
 ### Markdown (human-readable)
 
-1. **Executive summary** — scope, lenses, verdict counts, top 3 actions
+1. **Executive summary** — scope, lenses, preset, verdict counts, top 3 actions
 2. **Critical / Important / Minor** — only `confirmed` and `downgraded` findings
 3. **Needs decision** — architectural or policy items
-4. **Coverage ledger** — files reviewed/skipped, lenses with zero findings (from the recall pass)
-5. **Appendix A** — rejected false positives (with reasons)
-6. **Appendix B** — dedupe pre-flight summary (when smells ran)
+4. **Unverified findings** — below the preset's threshold: the scout's evidence, no skeptic verdict
+5. **Coverage ledger** — files reviewed/skipped, lenses with zero findings (folded from the scouts)
+6. **Appendix A** — rejected false positives (with reasons)
+7. **Appendix B** — dedupe pre-flight summary (when smells ran)
 
 Generated by `review render` — do not hand-edit the `.md`.
 
@@ -154,7 +168,7 @@ Template: [`skills/thorough-code-review/reference/report-template.md`](../skills
 
 Schema: [`skills/thorough-code-review/reference/report-schema.json`](../skills/thorough-code-review/reference/report-schema.json)
 
-Key fields: `review_id`, `kind` (`review` | `reverify`), `scope`, `lenses`, `summary`, `findings[]`, optional `parent_report`, optional `dedupe_preflight`, optional `stats`, optional `coverage`, optional `signals`.
+Key fields: `review_id`, `kind` (`review` | `reverify`), `scope`, `lenses`, `summary`, `findings[]`, optional `preset`, optional `parent_report`, optional `dedupe_preflight`, optional `stats`, optional `coverage`, optional `signals`.
 
 ---
 
@@ -163,7 +177,7 @@ Key fields: `review_id`, `kind` (`review` | `reverify`), `scope`, `lenses`, `sum
 After you patch code:
 
 1. Agent loads the prior `*-review.json` (or scaffolds with `review new <slug> --kind reverify --parent <id>`).
-2. Re-runs skeptics only on findings that were `confirmed` or `downgraded`.
+2. Re-runs skeptics only on findings that were `confirmed` or `downgraded` (`unverified` findings were never verified, so they are carried forward, not re-checked).
 3. Also scouts the **fix diff** for regressions a per-finding recheck would miss.
 4. Writes `*-reverify.md` + `*-reverify.json` with verdicts: `resolved` | `still_open` | `partially_fixed` | `regressed`.
 
@@ -173,7 +187,7 @@ After you patch code:
 
 | Command | Purpose |
 | ------- | ------- |
-| `review new <slug> --type <t>` | Scaffold a schema-valid report skeleton (id, timestamp, SHAs) |
+| `review new <slug> --type <t> [--preset p]` | Scaffold a schema-valid report skeleton (id, timestamp, SHAs, preset) and print the dispatch caps |
 | `review signals --type branch` | Plan the grounding tools for the scope's workspaces |
 | `review carryforward --parent <id>` | Inherit prior verdicts for unchanged files |
 | `review merge --dir .reviews/<id>-tentative` | Merge parallel scout tentative JSON |

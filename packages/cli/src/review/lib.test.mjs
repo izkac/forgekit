@@ -264,3 +264,112 @@ test('countByVerdict zero-fills every verdict bucket', () => {
   assert.equal(counts.confirmed, 0);
   assert.equal(counts.regressed, 0);
 });
+
+test('unverified is a real verdict below the threshold, but never for a critical', () => {
+  const base = (severity) => ({
+    review_id: 'r1',
+    kind: 'review',
+    created_at: '2026-06-05T16:00:00.000Z',
+    scope: { type: 'branch', description: 'b' },
+    lenses: ['security'],
+    preset: 'quick',
+    summary: { tentative_count: 1, unverified: 1 },
+    findings: [
+      {
+        id: 'F-001',
+        lens: 'security',
+        location: 'a.ts:1',
+        claim: 'c',
+        severity,
+        verdict: 'unverified',
+        verdict_reason: 'severity routing: below verify_from, no skeptic dispatched',
+      },
+    ],
+  });
+
+  assert.equal(validateReport(base('minor')).ok, true);
+  // `quick` verifies criticals only, so an important can legitimately land here.
+  assert.equal(validateReport(base('important')).ok, true);
+
+  const critical = validateReport(base('critical'));
+  assert.equal(critical.ok, false);
+  assert.match(critical.errors.join('\n'), /never valid for severity=critical/);
+});
+
+test('an unknown preset is refused at the schema and the skeleton', () => {
+  const report = {
+    review_id: 'r1',
+    kind: 'review',
+    created_at: '2026-06-05T16:00:00.000Z',
+    scope: { type: 'branch', description: 'b' },
+    lenses: ['security'],
+    preset: 'thorough',
+    summary: { tentative_count: 0 },
+    findings: [],
+  };
+  const result = validateReport(report);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /preset must be one of/);
+  assert.throws(
+    () => buildReviewSkeleton({ slug: 's', preset: 'thorough', now: new Date() }),
+    /unknown preset/,
+  );
+  const ok = buildReviewSkeleton({ slug: 's', preset: 'quick', now: new Date() });
+  assert.equal(ok.report.preset, 'quick');
+});
+
+test('renderMarkdown gives unverified findings their own section, not the appendix', () => {
+  const md = renderMarkdown({
+    review_id: 'r1',
+    kind: 'review',
+    created_at: '2026-06-05T16:00:00.000Z',
+    scope: { type: 'branch', description: 'b' },
+    lenses: ['security'],
+    preset: 'quick',
+    summary: { tentative_count: 2, confirmed: 1, unverified: 1 },
+    findings: [
+      {
+        id: 'F-001',
+        lens: 'security',
+        location: 'a.ts:1',
+        claim: 'real one',
+        severity: 'critical',
+        verdict: 'confirmed',
+        verdict_reason: 'traced',
+      },
+      {
+        id: 'F-002',
+        lens: 'security',
+        location: 'b.ts:9',
+        claim: 'nit',
+        severity: 'minor',
+        verdict: 'unverified',
+        verdict_reason: 'severity routing: no skeptic dispatched',
+      },
+    ],
+    stats: { scouts: 1, unverified: 1 },
+  });
+
+  assert.match(md, /\*\*Preset:\*\* quick/);
+  assert.match(md, /## Unverified findings/);
+  assert.match(md, /F-002: nit/);
+  assert.match(md, /\*\*Unverified:\*\* 1/);
+  // The confirmed critical stays in the main body; the unverified nit is not
+  // an appendix-A false positive.
+  assert.doesNotMatch(md, /Appendix A/);
+  const bodyIndex = md.indexOf('## Critical');
+  assert.ok(bodyIndex > 0 && bodyIndex < md.indexOf('## Unverified findings'));
+});
+
+test('countOpenAtOrAbove counts unverified findings as open at their own severity', () => {
+  // A gate must not pass merely because verification was skipped.
+  const report = {
+    findings: [
+      { severity: 'important', verdict: 'unverified' },
+      { severity: 'minor', verdict: 'unverified' },
+    ],
+  };
+  assert.equal(countOpenAtOrAbove(report, 'critical'), 0);
+  assert.equal(countOpenAtOrAbove(report, 'important'), 1);
+  assert.equal(countOpenAtOrAbove(report, 'minor'), 2);
+});

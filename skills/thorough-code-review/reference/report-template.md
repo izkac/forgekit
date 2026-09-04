@@ -14,6 +14,7 @@ Path: `.reviews/<timestamp>-<scope-slug>-review.md` (or `-reverify.md` for fix v
 **Created:** {ISO_TIMESTAMP}
 **Scope:** {SCOPE_TYPE} — {SCOPE_DETAIL}
 **Lenses:** {LENS_LIST}
+**Preset:** {quick | standard | deep}
 **Parent report:** {PARENT_REVIEW_ID or —}
 
 ## Executive summary
@@ -26,6 +27,7 @@ Path: `.reviews/<timestamp>-<scope-slug>-review.md` (or `-reverify.md` for fix v
 | ------- | ----- |
 | Confirmed | |
 | Downgraded | |
+| Unverified | |
 | False positive | |
 | Needs decision | |
 | Resolved | |
@@ -51,7 +53,7 @@ Path: `.reviews/<timestamp>-<scope-slug>-review.md` (or `-reverify.md` for fix v
 - **Verdict:** confirmed
 - **Claim:** ...
 - **Reason:** ...
-- **Second skeptic:** {only for dangerous-quadrant findings} verdict — reason
+- **Second skeptic:** {only when a critical was dismissed} verdict — reason
 
 {Repeat per finding}
 
@@ -75,10 +77,19 @@ Path: `.reviews/<timestamp>-<scope-slug>-review.md` (or `-reverify.md` for fix v
 
 ---
 
+## Unverified findings
+
+{Findings below the preset's `verify_from` threshold: reported with the scout's
+evidence, no skeptic verdict. Surfaced so the reader can judge them, never
+counted as verified. Never a `critical`. Omitted when there are none.}
+
+---
+
 ## Coverage ledger
 
-{From the recall pass — files reviewed/skipped and active lenses that produced
-no findings, each with a one-line reason. Omitted when no `coverage` object.}
+{Folded from the scouts' own ledgers by `review merge` — files reviewed/skipped
+and active lenses that produced no findings, each with a one-line reason.
+Omitted when no `coverage` object.}
 
 ---
 
@@ -104,7 +115,7 @@ no findings, each with a one-line reason. Omitted when no `coverage` object.}
 ## Appendix C — Method
 
 - Phase 1: Scout pass ({N} tentative findings)
-- Phase 2: Adversarial skeptic verification (severity-routed, budgeted)
+- Phase 2: Adversarial skeptic verification (severity-routed, budgeted; below-threshold findings reported unverified)
 - {If reverify: Re-verification against parent report {PARENT_ID}}
 ```
 
@@ -112,4 +123,4 @@ no findings, each with a one-line reason. Omitted when no `coverage` object.}
 
 Author the `.json` (the source of truth), then `review render` to (re)generate this markdown and `review export` to validate before handing off in CI contexts.
 
-Main report body includes only `confirmed` and `downgraded` findings (initial review) or `still_open`, `partially_fixed`, `regressed` (reverify). Render places `false_positive` in Appendix A automatically.
+Main report body includes only `confirmed` and `downgraded` findings (initial review) or `still_open`, `partially_fixed`, `regressed` (reverify). Render places `unverified` findings in their own section and `false_positive` in Appendix A automatically.

@@ -11,6 +11,7 @@ import {
   dedupeFindings,
   renumberFindings,
   runMerge,
+  mergeCoverage,
 } from './merge-tentative.mjs';
 
 function tmp(prefix) {
@@ -357,6 +358,84 @@ test('runMerge exits 1 without --dir, on a missing dir, and on an empty dir', ()
     const empty = runMerge({ dir });
     assert.equal(empty.exitCode, 1);
     assert.ok(/no input/i.test(empty.message));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('mergeCoverage folds per-scout ledgers: a file any scout read is not skipped', () => {
+  const merged = mergeCoverage(
+    [
+      {
+        files_reviewed: ['src/a.ts'],
+        files_skipped: ['src/b.ts', 'src/c.ts'],
+        lenses_without_findings: [
+          { lens: 'errors', reason: 'no catch blocks touched' },
+          { lens: 'contracts', reason: 'no route changes' },
+        ],
+      },
+      {
+        files_reviewed: ['src/b.ts'],
+        files_skipped: ['src/c.ts'],
+        lenses_without_findings: [{ lens: 'contracts', reason: 'none in this partition' }],
+      },
+    ],
+    new Set(['errors']),
+  );
+
+  assert.deepEqual(merged.files_reviewed, ['src/a.ts', 'src/b.ts']);
+  // b.ts was skipped by one scout and read by the other — reading settles it.
+  assert.deepEqual(merged.files_skipped, ['src/c.ts']);
+  // The `errors` claim dies the moment any scout files an errors finding.
+  assert.deepEqual(merged.lenses_without_findings, [
+    { lens: 'contracts', reason: 'no route changes' },
+  ]);
+});
+
+test('mergeCoverage returns null when no scout supplied a ledger', () => {
+  assert.equal(mergeCoverage([], new Set()), null);
+  assert.equal(mergeCoverage([null, undefined], new Set()), null);
+});
+
+test('runMerge writes the folded coverage ledger beside the findings', () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'tmp-merge-coverage-'));
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'scout-a.json'),
+      JSON.stringify({
+        findings: [
+          {
+            id: 'F-001',
+            lens: 'security',
+            location: 'src/a.ts:10',
+            claim: 'x',
+            tentative_severity: 'critical',
+            confidence: 'high',
+          },
+        ],
+        coverage: { files_reviewed: ['src/a.ts'], files_skipped: ['src/z.ts'] },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(dir, 'scout-b.json'),
+      JSON.stringify({
+        findings: [],
+        coverage: {
+          files_reviewed: ['src/b.ts'],
+          lenses_without_findings: [{ lens: 'performance', reason: 'no loops added' }],
+        },
+      }),
+    );
+
+    const result = runMerge({ dir });
+    assert.equal(result.exitCode, 0, result.message);
+    assert.match(result.message, /coverage: 2 file\(s\) reviewed, 1 skipped, 1 lens/);
+
+    const merged = JSON.parse(fs.readFileSync(path.join(dir, 'merged.json'), 'utf8'));
+    assert.deepEqual(merged.coverage.files_reviewed, ['src/a.ts', 'src/b.ts']);
+    assert.deepEqual(merged.coverage.lenses_without_findings, [
+      { lens: 'performance', reason: 'no loops added' },
+    ]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

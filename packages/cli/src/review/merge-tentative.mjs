@@ -21,6 +21,13 @@
  * (location file, first line number ascending, original id) and written to
  * `<dir>/merged.json` as `{ findings: [...] }`.
  *
+ * Each shard may also carry its own `coverage` ledger (the scout records what
+ * it read, skipped, and which of its lenses came up empty — there is no
+ * separate coverage pass). Ledgers are merged into `merged.json`: files are
+ * unioned, a file any scout deep-read is never reported skipped, and a
+ * zero-finding lens claim is dropped once any shard actually files under that
+ * lens.
+ *
  * A malformed input file (invalid JSON, or no `findings` array) exits 1
  * naming the offending file, and merged.json is NOT written.
  *
@@ -199,6 +206,55 @@ export function renumberFindings(findings) {
 }
 
 /**
+ * Fold per-scout coverage ledgers into one. `lensesWithFindings` comes from the
+ * merged findings, so a lens one scout called empty is dropped the moment
+ * another scout files under it — the claim is about the scope, not the shard.
+ *
+ * @param {Array<Record<string, unknown>>} ledgers
+ * @param {Set<string>} lensesWithFindings
+ * @returns {{ files_reviewed: string[], files_skipped: string[], lenses_without_findings: Array<{lens: string, reason: string}> } | null}
+ */
+export function mergeCoverage(ledgers, lensesWithFindings) {
+  const present = ledgers.filter((l) => l && typeof l === 'object' && !Array.isArray(l));
+  if (present.length === 0) return null;
+
+  /** @param {Record<string, unknown>} ledger @param {string} key */
+  const strings = (ledger, key) =>
+    Array.isArray(ledger[key]) ? ledger[key].filter((x) => typeof x === 'string') : [];
+
+  const reviewed = new Set();
+  const skipped = new Set();
+  /** @type {Map<string, string>} */
+  const emptyLenses = new Map();
+
+  for (const ledger of present) {
+    for (const f of strings(ledger, 'files_reviewed')) reviewed.add(f);
+    for (const f of strings(ledger, 'files_skipped')) skipped.add(f);
+    const entries = Array.isArray(ledger.lenses_without_findings)
+      ? ledger.lenses_without_findings
+      : [];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+      const { lens, reason } = /** @type {{lens?: unknown, reason?: unknown}} */ (entry);
+      if (typeof lens !== 'string' || typeof reason !== 'string') continue;
+      if (!emptyLenses.has(lens)) emptyLenses.set(lens, reason);
+    }
+  }
+
+  // One scout deep-reading a file settles it for the whole review.
+  for (const f of reviewed) skipped.delete(f);
+
+  return {
+    files_reviewed: [...reviewed].sort(),
+    files_skipped: [...skipped].sort(),
+    lenses_without_findings: [...emptyLenses.entries()]
+      .filter(([lens]) => !lensesWithFindings.has(lens))
+      .map(([lens, reason]) => ({ lens, reason }))
+      .sort((a, b) => a.lens.localeCompare(b.lens)),
+  };
+}
+
+/**
  * @param {{ dir?: string | null }} opts
  * @param {string} [cwd]
  * @returns {{ exitCode: number; message: string }}
@@ -223,6 +279,8 @@ export function runMerge(opts, cwd = process.cwd()) {
 
   /** @type {Array<Record<string, unknown>>} */
   const allFindings = [];
+  /** @type {Array<Record<string, unknown>>} */
+  const ledgers = [];
   const lines = [];
   for (const name of inputNames) {
     const full = path.join(dir, name);
@@ -239,18 +297,32 @@ export function runMerge(opts, cwd = process.cwd()) {
       return { exitCode: 1, message: `no findings array in ${full}` };
     }
     allFindings.push(...parsed.findings);
+    if (parsed.coverage) ledgers.push(parsed.coverage);
     lines.push(`${name}: ${parsed.findings.length} findings`);
   }
 
   const { survivors, collapsed } = dedupeFindings(allFindings);
   const merged = renumberFindings(survivors);
 
+  const coverage = mergeCoverage(
+    ledgers,
+    new Set(merged.map((f) => /** @type {string} */ (f.lens)).filter(Boolean)),
+  );
+
   const outPath = path.join(dir, 'merged.json');
-  fs.writeFileSync(outPath, `${JSON.stringify({ findings: merged }, null, 2)}\n`, 'utf8');
+  const payload = coverage ? { findings: merged, coverage } : { findings: merged };
+  fs.writeFileSync(outPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 
   lines.push('');
   lines.push(`duplicates collapsed: ${collapsed}`);
   lines.push(`final: ${merged.length} findings`);
+  if (coverage) {
+    lines.push(
+      `coverage: ${coverage.files_reviewed.length} file(s) reviewed, ` +
+        `${coverage.files_skipped.length} skipped, ` +
+        `${coverage.lenses_without_findings.length} lens(es) with no findings`,
+    );
+  }
   lines.push(`wrote: ${outPath}`);
   return { exitCode: 0, message: lines.join('\n') };
 }
@@ -260,6 +332,7 @@ function printHelp() {
 
 Merge tentative scout findings from every *.json file in the directory
 (except merged.json) into a deduplicated, renumbered <dir>/merged.json.
+Per-scout coverage ledgers are folded into the same file.
 
 Options:
   --dir <path>  Directory of scout tentative JSON files (required),

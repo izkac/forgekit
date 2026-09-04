@@ -21,13 +21,34 @@ function canon(p) {
   return process.platform === 'win32' ? real.toLowerCase() : real;
 }
 
-/** `null` when the platform cannot name a home dir (no HOME/USERPROFILE, no passwd entry). */
-function resolvedHome() {
-  try {
-    return canon(path.resolve(os.homedir()));
-  } catch {
-    return null;
+/**
+ * Directories the walk must never adopt as a project root, in comparable form.
+ *
+ * The **home** dir: a stray `~/.forge` — one `forge new` from a bare shell
+ * creates it — otherwise makes every directory under the profile re-root
+ * itself there.
+ *
+ * The **temp** dir: scratch projects live under it, and `os.homedir()` alone
+ * does not protect them. A harness that overrides `HOME`/`USERPROFILE` (every
+ * test in this repo that isolates user config does) makes `os.homedir()` report
+ * the fake home while the real one is still a filesystem ancestor of the temp
+ * dir — so the walk climbed past it into the real profile. Measured
+ * 2026-09-04: the suite re-rooted into the real home and `forge init` deleted
+ * `~/.agents/skills/forge` as a "leftover project copy". A project inside the
+ * temp dir is still found normally; only the temp root itself is off limits.
+ *
+ * @returns {string[]}
+ */
+function walkBoundaries() {
+  const out = [];
+  for (const fn of [os.homedir, os.tmpdir]) {
+    try {
+      out.push(canon(path.resolve(fn())));
+    } catch {
+      // A platform that cannot name one still gets the other.
+    }
   }
+  return out;
 }
 
 /**
@@ -44,16 +65,14 @@ function resolvedHome() {
  */
 export function findRepoRoot(start = process.cwd()) {
   let dir = path.resolve(start);
-  // The walk never climbs into the home directory (or above it): a stray
-  // `~/.forge` — one `forge new` run from a bare shell is enough to create it
-  // — otherwise makes every temp-dir `forge` invocation re-root itself in the
-  // home dir. Measured 2026-09-04: `forge init` under the test suite retired
-  // `~/.agents/skills/forge` as a "leftover project copy". Home itself as the
-  // start dir is still allowed, so a dotfiles repo keeps working.
-  const home = resolvedHome();
+  // The walk stops before the home and temp roots (see walkBoundaries).
+  // Either as the START dir is still allowed, so a dotfiles repo at $HOME
+  // keeps working.
+  const boundaries = walkBoundaries();
   const startDir = canon(dir);
   for (;;) {
-    if (home !== null && canon(dir) === home && canon(dir) !== startDir) return path.resolve(start);
+    const here = canon(dir);
+    if (here !== startDir && boundaries.includes(here)) return path.resolve(start);
     if (fs.existsSync(path.join(dir, '.forge'))) return dir;
     if (fs.existsSync(path.join(dir, '.git'))) return dir;
     const parent = path.dirname(dir);

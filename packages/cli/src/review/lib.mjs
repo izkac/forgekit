@@ -27,6 +27,54 @@ export const LENSES = [
   'maintainability',
 ];
 
+/**
+ * The **defect** lenses — the default set. These find things that break in
+ * production; the other five (smells, architecture, performance, tests,
+ * maintainability) produce mostly `minor` findings, which is where a review's
+ * cost went without changing what a maintainer did next. They stay one flag
+ * away (`--lenses …`, `--all-lenses`, or the `deep` preset).
+ */
+export const DEFAULT_LENSES = ['security', 'correctness', 'errors', 'contracts'];
+
+export const PRESET_NAMES = ['quick', 'standard', 'deep'];
+
+/**
+ * Dispatch policy per preset. The orchestrator reads these numbers off
+ * `review new`'s output instead of remembering prose, which is what kept the
+ * budget from being honored.
+ *
+ * `verify_from` is the LOWEST severity that earns a skeptic dispatch;
+ * everything below it is reported with verdict `unverified` and the scout's
+ * own evidence. `scouts` caps parallel scout subagents; `skeptic_budget` caps
+ * all skeptic dispatches (dedicated + batched + second opinions).
+ */
+export const PRESETS = Object.freeze({
+  quick: Object.freeze({
+    lenses: DEFAULT_LENSES,
+    scouts: 1,
+    skeptic_budget: 3,
+    verify_from: 'critical',
+    second_opinions: 0,
+  }),
+  standard: Object.freeze({
+    lenses: DEFAULT_LENSES,
+    scouts: 2,
+    skeptic_budget: 6,
+    verify_from: 'important',
+    second_opinions: 2,
+  }),
+  deep: Object.freeze({
+    lenses: LENSES,
+    scouts: 4,
+    skeptic_budget: 12,
+    verify_from: 'minor',
+    second_opinions: 3,
+  }),
+});
+
+/** Changed lines at or below which `--preset auto` resolves to `quick`. */
+export const QUICK_LINE_BUDGET = 300;
+
 export const SCOPE_TYPES = ['uncommitted', 'branch', 'paths', 'commit_range', 'file'];
 
 export const SEVERITIES = ['critical', 'important', 'minor'];
@@ -34,14 +82,35 @@ export const SEVERITIES = ['critical', 'important', 'minor'];
 /** Severity ordering, high → low, for graded `--fail-on` gates. */
 export const SEVERITY_RANK = { critical: 3, important: 2, minor: 1 };
 
-export const INITIAL_VERDICTS = ['confirmed', 'false_positive', 'downgraded', 'needs_decision'];
+/**
+ * `unverified` is the severity-routing verdict: a finding below the run's
+ * verification threshold (`PRESETS[preset].verify_from`) that the scout raised
+ * and no skeptic was paid to disprove. It is reported with the scout's evidence
+ * in its own section, never silently dropped — and validation refuses it on a
+ * `critical`, which every preset verifies, so routing can never bury the one
+ * severity that always bites.
+ */
+export const INITIAL_VERDICTS = [
+  'confirmed',
+  'false_positive',
+  'downgraded',
+  'needs_decision',
+  'unverified',
+];
 
 export const REVERIFY_VERDICTS = ['resolved', 'still_open', 'partially_fixed', 'regressed'];
 
 export const ALL_VERDICTS = [...INITIAL_VERDICTS, ...REVERIFY_VERDICTS];
 
 /** Verdicts that count as an unresolved, still-actionable issue. */
-export const OPEN_VERDICTS = ['confirmed', 'downgraded', 'still_open', 'partially_fixed', 'regressed'];
+export const OPEN_VERDICTS = [
+  'confirmed',
+  'downgraded',
+  'unverified',
+  'still_open',
+  'partially_fixed',
+  'regressed',
+];
 
 export const CONFIDENCES = ['low', 'medium', 'high'];
 
@@ -54,6 +123,7 @@ export const STATS_KEYS = [
   'grounded_skips',
   'carried_forward',
   'second_opinions',
+  'unverified',
 ];
 
 const LENS_SET = new Set(LENSES);
@@ -64,6 +134,7 @@ const REVERIFY_VERDICT_SET = new Set(REVERIFY_VERDICTS);
 const ALL_VERDICT_SET = new Set(ALL_VERDICTS);
 const CONFIDENCE_SET = new Set(CONFIDENCES);
 const STATS_KEY_SET = new Set(STATS_KEYS);
+const PRESET_NAME_SET = new Set(PRESET_NAMES);
 
 const FINDING_ID = /^(F|dup)-[0-9]{3}$/;
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
@@ -104,6 +175,10 @@ export function validateReport(report) {
     errors.push('lenses must be a non-empty array');
   } else if (r.lenses.some((l) => typeof l !== 'string' || !LENS_SET.has(l))) {
     errors.push(`lenses entries must be one of: ${LENSES.join(', ')}`);
+  }
+
+  if (r.preset !== undefined && (typeof r.preset !== 'string' || !PRESET_NAME_SET.has(r.preset))) {
+    errors.push(`preset must be one of: ${PRESET_NAMES.join(', ')}`);
   }
 
   if (r.parent_report !== undefined && typeof r.parent_report !== 'string') {
@@ -248,6 +323,15 @@ function validateFinding(finding, index, errors, kind) {
   }
   if (f.verdict === 'downgraded' && typeof f.original_severity !== 'string') {
     errors.push(`${prefix}.original_severity is required when verdict=downgraded`);
+  }
+  // THE ONE RULE THAT KEEPS SEVERITY ROUTING HONEST. Skipping the skeptic is a
+  // cost decision about lower-severity claims; every preset verifies criticals,
+  // so an `unverified` critical is not a cheaper review — it is an unexamined
+  // severe claim wearing a verdict.
+  if (f.verdict === 'unverified' && f.severity === 'critical') {
+    errors.push(
+      `${prefix}.verdict=unverified is never valid for severity=critical — every preset verifies criticals`,
+    );
   }
   if (f.second_opinion !== undefined) {
     validateSecondOpinion(f.second_opinion, `${prefix}.second_opinion`, errors);
@@ -521,6 +605,7 @@ export function formatSummary(report) {
     `lenses: ${(/** @type {string[]} */ (report.lenses)).join(', ')}`,
     `findings: ${(/** @type {unknown[]} */ (report.findings)).length}`,
     `confirmed: ${verdicts.confirmed}`,
+    `unverified: ${verdicts.unverified}`,
     `false_positive: ${verdicts.false_positive}`,
     `needs_decision: ${verdicts.needs_decision}`,
     `open_critical: ${countOpenCritical(report)}`,
@@ -568,6 +653,7 @@ export function slugify(input) {
  *   lenses?: string[],
  *   paths?: string[],
  *   parentReport?: string,
+ *   preset?: ('quick'|'standard'|'deep'),
  *   baseSha?: string,
  *   headSha?: string,
  *   now: Date,
@@ -583,6 +669,7 @@ export function buildReviewSkeleton(opts) {
     lenses = LENSES,
     paths,
     parentReport,
+    preset,
     baseSha,
     headSha,
     now,
@@ -596,6 +683,9 @@ export function buildReviewSkeleton(opts) {
   }
   if (kind === 'reverify' && !parentReport) {
     throw new Error('reverify skeletons require parentReport');
+  }
+  if (preset !== undefined && !PRESET_NAME_SET.has(preset)) {
+    throw new Error(`unknown preset: ${preset} (expected ${PRESET_NAMES.join('|')})`);
   }
   const cleanSlug = slugify(slug);
   const stamp = compactStamp(now);
@@ -619,6 +709,7 @@ export function buildReviewSkeleton(opts) {
     findings: [],
   };
   if (parentReport) report.parent_report = parentReport;
+  if (preset) report.preset = preset;
 
   return { reviewId, fileBase, report };
 }
@@ -669,6 +760,7 @@ export function renderMarkdown(report) {
   out.push(`**Created:** ${report.created_at}`);
   out.push(`**Scope:** ${scope.type ?? '—'} — ${scope.description ?? '—'}`);
   out.push(`**Lenses:** ${lenses.join(', ')}`);
+  if (report.preset) out.push(`**Preset:** ${report.preset}`);
   out.push(`**Parent report:** ${report.parent_report ?? '—'}`);
   out.push('');
 
@@ -684,6 +776,7 @@ export function renderMarkdown(report) {
   const verdictLabels = {
     confirmed: 'Confirmed',
     downgraded: 'Downgraded',
+    unverified: 'Unverified',
     false_positive: 'False positive',
     needs_decision: 'Needs decision',
     resolved: 'Resolved',
@@ -728,6 +821,21 @@ export function renderMarkdown(report) {
     for (const f of needsDecision) out.push(...renderFinding(f));
   }
 
+  const unverified = findings.filter((f) => f.verdict === 'unverified');
+  if (unverified.length > 0) {
+    out.push('---');
+    out.push('');
+    out.push('## Unverified findings');
+    out.push('');
+    out.push(
+      '_Reported as the scout found them. Severity routing spends adversarial verification on the ' +
+        'severities the preset names, so these carry no skeptic verdict — read the evidence and ' +
+        'judge them yourself._',
+    );
+    out.push('');
+    for (const f of unverified) out.push(...renderFinding(f));
+  }
+
   const coverage = /** @type {Record<string, unknown> | undefined} */ (report.coverage);
   if (coverage) {
     out.push('---');
@@ -759,6 +867,7 @@ export function renderMarkdown(report) {
       grounded_skips: 'Grounded skips',
       carried_forward: 'Carried forward',
       second_opinions: 'Second opinions',
+      unverified: 'Unverified',
     };
     out.push(
       Object.entries(statLabels)
@@ -803,7 +912,9 @@ export function renderMarkdown(report) {
   out.push('## Appendix C — Method');
   out.push('');
   out.push(`- Phase 1: Scout pass (${summary.tentative_count ?? 0} tentative findings)`);
-  out.push('- Phase 2: Adversarial skeptic verification (severity-routed, budgeted)');
+  out.push(
+    '- Phase 2: Adversarial skeptic verification (severity-routed, budgeted; below-threshold findings reported unverified)',
+  );
   if (kind === 'reverify') {
     out.push(`- Re-verification against parent report ${report.parent_report}`);
   }

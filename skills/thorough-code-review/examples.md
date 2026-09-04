@@ -1,26 +1,32 @@
 # Thorough code review — examples
 
-## 1. Full review (all lenses, branch diff)
+## 1. Default review (branch diff, auto preset)
 
 **User:** "Review my branch before I open a PR."
 
 **Agent:**
 
 1. Ask scope → user picks "Branch vs main".
-2. Scaffold: `review new mercury-vat --type branch` (captures id, timestamp, base/head SHAs).
-3. Signals pre-flight: `review signals --type branch` → run the listed typecheck/test commands; 1 grounded finding from a failing test.
-4. All lenses active; dedupe pre-flight (smells).
-5. Scout → 8 tentative findings (small scope, single pass).
-6. Coverage pass → confirms `performance` lens clean (no loops/queries added); records ledger.
-7. Eight parallel skeptic subagents; one Critical `false_positive` triggers a second skeptic (agrees).
-8. Fill JSON → `review render` → `review export`.
+2. Scaffold: `review new mercury-vat --type branch` → prints `preset: quick (180 changed line(s) <= 300)` and the caps: 1 scout, 3 skeptic dispatches, verify from `critical`, 0 second opinions.
+3. Signals pre-flight: `review signals --type branch` → run the listed typecheck/test commands; 1 grounded finding from a failing test; green suite closes the `tests` lens.
+4. Four defect lenses active (`security`, `correctness`, `errors`, `contracts`) — no dedupe pre-flight, `smells` is off by default.
+5. Scout reads the diff hunks plus enclosing functions → 8 tentative findings and its own coverage ledger.
+6. Severity routing under `quick` (verify from `critical`): 1 critical → dedicated skeptic. The 2 important and 5 minor findings are below the threshold → verdict `unverified` with the scout's evidence, no dispatches. One skeptic ran; the budget of 3 was not touched.
+7. Fill JSON → `review render` → `review export`.
 
 **Excerpt — executive summary (`summary.headline`):**
 
 ```markdown
-Reviewed 4 files on `feature/vat` vs `main`. 8 tentative → 3 confirmed, 2 downgraded,
-3 false positives. No open critical. Top action: add test for zero-rate edge case.
+Reviewed 4 files on `feature/vat` vs `main`. 8 tentative → 1 confirmed,
+7 unverified (2 important, 5 minor). No open critical. Top action: add test for
+zero-rate edge case. Re-run with --preset standard to verify the importants.
 ```
+
+## 1b. Deep audit (all nine lenses)
+
+**User:** "Do a full audit of the checkout service before we launch."
+
+**Agent:** `review new checkout-audit --type paths --paths services/checkout --preset deep` → all nine lenses, up to 4 scouts, 12 skeptic dispatches, every severity verified, 3 second opinions. This is the old default pipeline, now bought explicitly.
 
 ## 2. Security-only narrow review
 
@@ -31,7 +37,7 @@ Reviewed 4 files on `feature/vat` vs `main`. 8 tentative → 3 confirmed, 2 down
 1. Scope: single path (no ask needed — explicit).
 2. Lenses: `security` only — skip dedupe pre-flight.
 3. Scout with security checklist + project accepted-risks digest (if any).
-4. Severity-routed skeptic dispatch (dedicated for critical, batched/inline otherwise; within budget).
+4. Severity-routed dispatch: dedicated skeptic per critical, batched by module for important, minors reported `unverified` — all within the preset budget.
 5. Report: `.reviews/20260605T162000Z-persona-profile-security-review.json`
 
 ## 3. Fix verification after patches
@@ -102,7 +108,7 @@ review export --out ./ci-artifacts/review
 
 ## 6. Dedupe pre-flight example
 
-**Scope:** `services/*/src/middleware/idempotency.ts` (smells in "all" review)
+**Scope:** `services/*/src/middleware/idempotency.ts` (explicit `--smells`, or `--preset deep`)
 
 **Pre-flight dup-001:** Same idempotency middleware copied in cdp, mercury, persona.
 
@@ -130,4 +136,4 @@ review signals --paths services/persona
 
 **Skeptic 1 verdict:** `false_positive` ("CLM binds actor server-side").
 
-→ Dangerous quadrant (critical + high-confidence dismissed). A **second independent skeptic** is dispatched blind. It also returns `false_positive`, citing ADR-0048 and the signed-JWT actor binding. `second_opinion.agrees: true` → finding stays in Appendix A, now with two concurring dismissals. Had they disagreed, it would route to `needs_decision`.
+→ A dismissed `critical` — the one case that buys a second opinion. A **second independent skeptic** is dispatched blind. It also returns `false_positive`, citing ADR-0048 and the signed-JWT actor binding. `second_opinion.agrees: true` → finding stays in Appendix A, now with two concurring dismissals. Had they disagreed, it would route to `needs_decision`.
