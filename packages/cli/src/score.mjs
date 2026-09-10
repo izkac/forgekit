@@ -29,7 +29,7 @@ import { isHighRiskText, resolveEffectivePreferences } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
-import { appendDeferralLedger, appendSessionDigest } from './ledger.mjs';
+import { appendDeferralLedger, appendKnownFalseLedger, appendSessionDigest } from './ledger.mjs';
 
 /** Keep in sync with set-phase.mjs TASK_COUNT_ESCALATION_THRESHOLD. */
 const TASK_COUNT_ESCALATION_THRESHOLD = 15;
@@ -1057,5 +1057,6 @@ export function writeSessionScorecard(opts) {
   // any unresolved deferrals have to leave the session while it still exists.
   appendSessionDigest({ cwd: opts.cwd, sessionDir: opts.sessionDir, session: opts.session, card });
   appendDeferralLedger({ cwd: opts.cwd, sessionDir: opts.sessionDir, session: opts.session });
+  appendKnownFalseLedger({ cwd: opts.cwd, sessionDir: opts.sessionDir, session: opts.session });
   return { card, jsonPath, mdPath };
 }

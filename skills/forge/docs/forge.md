@@ -229,6 +229,7 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
   active.json                         ← current session (gitignored)
   models.local.json                   ← optional billing overlay
   preferences.local.json              ← optional pace overlay
+  known-false.jsonl                   ← refutations carried out of finished sessions (forge refute list --all)
   sessions/
     2026-06-05T143022Z-my-feature-a3f9b2/
       session.json                    ← phase, planType, openspecChange, pace,
@@ -330,8 +331,9 @@ forge evidence --tier3 -- <cmd>   # execute the tier-3 run; stamp <session>/veri
 forge evidence --task … --command "<cmd>" --exit 0 --summary "<text>"
                                   # transcribed (legacy) — warns; file and precheck say UNVERIFIED
 forge refute add --task <nn>-<slug> --claim "<believed>" --actual "<evidence showed>" [--source reviewer|gate|e2e|tier3|tdd|operator]
-forge refute list [--task <id>] [--md|--json]
-                                  # known-false ledger (session); --md is the {KNOWN_FALSE} brief block
+forge refute list [--task <id>] [--all] [--md|--json]
+                                  # known-false ledger (session); --md is the {KNOWN_FALSE} brief block;
+                                  # --all adds entries carried from finished sessions (.forge/known-false.jsonl)
 forge --version                   # forge <version> — which installed copy is answering
 forge resolve-model --tier <fast|standard|capable>
                                   # JSON model resolution (included billing by default)

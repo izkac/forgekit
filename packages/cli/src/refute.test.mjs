@@ -37,3 +37,21 @@ test('parseArgs reads add/list flags', () => {
   assert.deepEqual([o.sub, o.task, o.claim, o.actual, o.source], ['add', '01-a', 'c', 'a', 'e2e']);
   assert.throws(() => parseArgs(['list', '--bogus']), /unknown argument/);
 });
+
+test('listRefutations with forgeDir merges carried project entries from other sessions', () => {
+  const root = fs.mkdtempSync(path.join(tmpdir(), 'forge-refute-all-'));
+  const forgeDir = path.join(root, '.forge');
+  const sessionDir = path.join(forgeDir, 'sessions', 's2');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  addRefutation(sessionDir, { task: '01-a', claim: 'local', actual: 'x' }, NOW);
+  const carried = [
+    { sessionId: 's1', change: 'add-billing', id: 'KF1', task: '03-c', claim: 'old', actual: 'y', source: 'gate' },
+    { sessionId: 's2', change: 'this-one', id: 'KF9', task: '01-a', claim: 'dup of local', actual: 'z', source: 'gate' },
+  ];
+  fs.writeFileSync(path.join(forgeDir, 'known-false.jsonl'), `${carried.map((c) => JSON.stringify(c)).join('\n')}\n`);
+  assert.equal(listRefutations(sessionDir).length, 1);
+  const all = listRefutations(sessionDir, { forgeDir });
+  assert.deepEqual(all.map((r) => r.claim), ['local', 'old']);
+  assert.match(renderKnownFalseMd(all), /KF1 \[gate, 03-c\] \(from add-billing\): old/);
+  assert.equal(parseArgs(['list', '--all']).all, true);
+});

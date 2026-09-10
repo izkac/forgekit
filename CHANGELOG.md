@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.60 — 2026-09-10
+
+- **Refutations outlive the session.** `forge score --write` (phase done) now
+  carries the session's `known-false.jsonl` into `.forge/known-false.jsonl`,
+  append-with-replace per session like the deferral ledger, so a wrong prior
+  one change paid to refute survives session cleanup. `forge refute list --all`
+  lists the carried entries alongside the session's own, each naming the change
+  it was learned in; the skill tells the coordinator to read it at
+  brainstorm/plan.
+
 ## 0.3.59 — 2026-09-10
 
 ### Evidence is executed, refutations are remembered, resume knows what is proven

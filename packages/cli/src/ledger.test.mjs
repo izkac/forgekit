@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   appendDeferralLedger,
+  appendKnownFalseLedger,
   appendSessionDigest,
   compactMetrics,
   readLedger,
@@ -851,4 +852,22 @@ test('brainstorm signal: parser degrades to null/zero without throwing when the 
   assert.equal(entry.brainstorm.adrCandidates, 0);
   assert.equal(entry.briefStamps, null);
   assert.equal(entry.briefRestampsAfterImplement, null);
+});
+
+test('refutations are promoted to .forge/known-false.jsonl and replaced per session', () => {
+  const root = tmp('forge-kf-');
+  const { sessionDir, session } = makeSession(root, 's1');
+  fs.writeFileSync(
+    path.join(sessionDir, 'known-false.jsonl'),
+    `${JSON.stringify({ id: 'KF1', task: '01-model', claim: 'c', actual: 'a', source: 'reviewer', at: 'then' })}\n`,
+  );
+  assert.equal(appendKnownFalseLedger({ cwd: root, sessionDir, session }), 1);
+  assert.equal(appendKnownFalseLedger({ cwd: root, sessionDir, session }), 1);
+  const rows = readLedger(path.join(root, '.forge', 'known-false.jsonl'));
+  assert.equal(rows.length, 1, 'replace-by-session, not duplicate');
+  assert.equal(rows[0].sessionId, 's1');
+  assert.equal(rows[0].change, 'add-billing');
+  assert.equal(rows[0].claim, 'c');
+  const empty = makeSession(root, 's2');
+  assert.equal(appendKnownFalseLedger({ cwd: root, sessionDir: empty.sessionDir, session: empty.session }), 0);
 });

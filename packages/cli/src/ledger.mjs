@@ -10,6 +10,7 @@
  *
  *   .forge/sessions.jsonl    one digest line per finished session
  *   .forge/deferrals.jsonl   unresolved deferrals, with the session that owed them
+ *   .forge/known-false.jsonl refuted claims, with the session that learned them
  *
  * Both are append-with-replace (keyed by sessionId), tolerant of corrupt
  * lines, and never throw — a ledger must not block a phase transition.
@@ -22,6 +23,12 @@ import { reviewCensus } from './review-census.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { sessionHealth } from './health.mjs';
+import { readRefutations } from './refute.mjs';
+
+/** @param {string} forgeDir */
+export function projectKnownFalsePath(forgeDir) {
+  return path.join(forgeDir, 'known-false.jsonl');
+}
 
 /**
  * @param {string} file
@@ -382,6 +389,40 @@ export function appendSessionDigest(opts) {
       path.join(forgeDirOf(opts, sessionDir), 'sessions.jsonl'),
       [entry],
       (e) => e.sessionId === entry.sessionId,
+    );
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Refuted claims, promoted out of the session before it is deleted. A
+ * refutation is negative memory for the *project* — the wrong prior a
+ * reviewer or gate contradicted in this change is the same wrong prior the
+ * next change's brainstorm would start from. `forge refute list --all` reads
+ * this back.
+ *
+ * @param {{ cwd?: string, sessionDir: string, session: Record<string, any> }} opts
+ */
+export function appendKnownFalseLedger(opts) {
+  const { sessionDir, session } = opts;
+  try {
+    const lines = readRefutations(sessionDir).map((r) => ({
+      sessionId: session.id ?? null,
+      slug: session.slug ?? null,
+      change: session.openspecChange ?? null,
+      id: r.id ?? null,
+      task: r.task ?? null,
+      claim: r.claim ?? null,
+      actual: r.actual ?? null,
+      source: r.source ?? null,
+      at: r.at ?? null,
+      carriedAt: new Date().toISOString(),
+    }));
+    return appendLines(
+      projectKnownFalsePath(forgeDirOf(opts, sessionDir)),
+      lines,
+      (e) => e.sessionId === (session.id ?? null),
     );
   } catch {
     return 0;
