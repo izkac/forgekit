@@ -134,7 +134,7 @@ test('writes the canonical template into the active session task dir', () => {
         '- **Exit code:** 0',
         '- **Summary:** 6/6 pass',
         '- **Run at:** 2026-06-05T15:04:22.000Z',
-        '- **Recorded by:** implementer subagent (coordinator transcript)',
+        '- **Recorded by:** implementer subagent (coordinator transcript — exit code supplied by caller, UNVERIFIED)',
         '',
       ].join('\n'),
     );
@@ -615,4 +615,74 @@ test('flagged task accepts no-TDD declarations and supplemental evidence after a
   const supplemental = runRecordEvidence(makeOpts({ task: 'behavior', session: 's1', forgeDir }), dir, FIXED_NOW);
   assert.equal(supplemental.exitCode, 0, supplemental.message);
   assert.equal(fs.existsSync(evidencePath(forgeDir, 's1', 'behavior')), true);
+});
+
+// ---------------------------------------------------------------------------
+// executed mode — the tool observes the exit code, the caller does not supply it
+// ---------------------------------------------------------------------------
+
+test('parseArgs: everything after -- is the command to execute', () => {
+  const opts = parseArgs(['--task', '01-foo', '--', 'node', '-e', '--task']);
+  assert.equal(opts.task, '01-foo');
+  assert.deepEqual(opts.cmdArgv, ['node', '-e', '--task']);
+});
+
+test('executed mode records the observed exit code and an output tail', () => {
+  const dir = tmp('forge-exec-');
+  const forgeDir = makeForgeFixture(dir, 'sess-x');
+  const result = runRecordEvidence(
+    makeOpts({ command: null, exit: null, summary: null, cmdArgv: [process.execPath, '-e', "console.log('7/7 pass')"] }),
+    dir,
+    FIXED_NOW,
+  );
+  assert.equal(result.exitCode, 0, result.message);
+  const body = fs.readFileSync(evidencePath(forgeDir, 'sess-x', '03-record-evidence'), 'utf8');
+  assert.match(body, /\*\*Exit code:\*\* 0/);
+  assert.match(body, /forge evidence \(executed/);
+  assert.match(body, /7\/7 pass/);
+});
+
+test('executed mode refuses a failing command without --allow-fail and writes nothing', () => {
+  const dir = tmp('forge-exec-fail-');
+  const forgeDir = makeForgeFixture(dir, 'sess-y');
+  const result = runRecordEvidence(
+    makeOpts({ command: null, exit: null, summary: null, cmdArgv: [process.execPath, '-e', 'process.exit(3)'] }),
+    dir,
+    FIXED_NOW,
+  );
+  assert.equal(result.exitCode, 1);
+  assert.match(result.message, /exit code 3/);
+  assert.equal(fs.existsSync(evidencePath(forgeDir, 'sess-y', '03-record-evidence')), false);
+});
+
+test('executed mode rejects a transcribed --exit alongside --', () => {
+  const dir = tmp('forge-exec-mix-');
+  makeForgeFixture(dir, 'sess-z');
+  const result = runRecordEvidence(makeOpts({ cmdArgv: [process.execPath, '-e', '0'] }), dir, FIXED_NOW);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.message, /transcribed path/);
+});
+
+test('--tier3 stamps verify-runs.jsonl with the observed exit and exits non-zero on red', () => {
+  const dir = tmp('forge-tier3-');
+  const forgeDir = makeForgeFixture(dir, 'sess-t');
+  const green = runRecordEvidence(
+    makeOpts({ task: null, command: null, exit: null, summary: null, tier3: true, cmdArgv: [process.execPath, '-e', "console.log('142/142')"] }),
+    dir,
+    FIXED_NOW,
+  );
+  assert.equal(green.exitCode, 0, green.message);
+  const red = runRecordEvidence(
+    makeOpts({ task: null, command: null, exit: null, summary: null, tier3: true, cmdArgv: [process.execPath, '-e', 'process.exit(1)'] }),
+    dir,
+    FIXED_NOW,
+  );
+  assert.equal(red.exitCode, 1);
+  const lines = fs
+    .readFileSync(path.join(forgeDir, 'sessions', 'sess-t', 'verify-runs.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map((l) => [l.exit, l.ok]), [[0, true], [1, false]]);
+  assert.match(lines[0].tail, /142\/142/);
 });

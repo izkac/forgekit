@@ -28,6 +28,7 @@ const COMMANDS = {
   'enforce-model': { script: 'enforce-model.mjs' },
   doctor: { script: 'doctor.mjs' },
   evidence: { script: 'record-evidence.mjs' },
+  refute: { script: 'refute.mjs', aliases: ['known-false'] },
   reminder: { script: 'session-reminder.mjs' },
   overlay: { script: 'vendor-openspec-overlays.mjs', aliases: ['overlays'] },
   install: { script: 'install.mjs', prependArgs: ['--skills', 'forge'] },
@@ -70,7 +71,8 @@ Commands:
   resolve-model --tier …  Resolve subagent model JSON
   enforce-model           PreToolUse hook body: hold dispatches to models.local.json
   doctor                  Plan-engine readiness (OpenSpec or specs)
-  evidence                Stamp tier-2 test-evidence.md
+  evidence --task <nn-slug> -- <cmd>  Execute + record tier-2 test-evidence.md (--tier3: stamp verify-runs.jsonl)
+  refute add|list         Known-false ledger: refuted claims the next brief must carry
   reminder                Session reminder (for hooks)
   overlay                 Re-apply OpenSpec vendor overlays in this project
   install                 Alias → forgekit install --skills forge

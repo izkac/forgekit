@@ -21,6 +21,7 @@ import { resolveEffectivePreferences } from './preferences.mjs';
 import { sessionHealth } from './health.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
 import { e2eSkipState } from './integrity.mjs';
+import { provenFacts, provenLine } from './proven.mjs';
 
 function getActiveSessionInfo() {
   // Resolved the same way `forge phase` resolves it, and reported the same way:
@@ -117,6 +118,13 @@ export function buildForgeMessage(info) {
     const health = sessionHealth({ cwd: REPO_ROOT, sessionDir: info.dir, session });
     if (health.state === 'red' || health.state === 'stale') {
       lines.push(`Health: ${health.line}`);
+    }
+    // The hand-off label: established facts come from executed artifacts,
+    // never from the prose a previous context wrote about them.
+    try {
+      lines.push(provenLine(provenFacts({ cwd: REPO_ROOT, sessionDir: info.dir, session })));
+    } catch {
+      /* advisory */
     }
   }
   if (needsOpenSpecPlan(session)) {

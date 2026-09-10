@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.59 — 2026-09-10
+
+### Evidence is executed, refutations are remembered, resume knows what is proven
+
+Three changes borrowed from the "model proposes, deterministic tool decides"
+stance of binary-verification tooling (reverify), applied to Forge's own
+verification surface. Nothing unverified gets to look verified.
+
+- **`forge evidence` executes.** `forge evidence --task <id> [--no-tdd …] -- <cmd>`
+  spawns the command itself (argv array, no shell) and records the exit code it
+  observed plus the last lines of output. The transcribed shape
+  (`--command --exit --summary`) still works but warns, its `Recorded by:` line
+  says `UNVERIFIED`, and `forge review-precheck` labels it
+  `transcribed test-evidence.md (exit code UNVERIFIED)`. An exit code typed by
+  the coordinator was always a claim; now the file says so.
+- **Tier 3 is stamped, not narrated.** `forge evidence --tier3 -- <cmd>` runs
+  the full-workspace suite and appends the observed result to
+  `<session>/verify-runs.jsonl`, printing a receipt block for
+  `verify-evidence.md`. Verify docs route the tier-3 run through it.
+- **Known-false ledger.** `forge refute add --task <id> --claim "…" --actual "…"
+  [--source reviewer|gate|e2e|tier3|tdd|operator]` records a claim a reviewer,
+  gate, or executed run contradicted, in `<session>/known-false.jsonl`;
+  `forge refute list [--task] --md` renders the block. The implementer brief
+  gains a `{KNOWN_FALSE}` section and the fix loop records refutations on every
+  REJECT before re-dispatching — a fresh implementer, or a fresh context after
+  compaction, can no longer re-propose an assumption already shown wrong.
+- **`forge status` → `proven`.** Executed facts only (per-task evidence shape,
+  last tier-3 stamp, e2e gate state, refutation count) followed by the
+  model-authored files by name (`tasks.md` checkboxes, review verdicts,
+  verify prose, briefs, brainstorm notes). The session reminder prints one
+  `Proven (executed): …` line on every resume, and the skill's guardrails say
+  it outright: what a previous context wrote stays UNVERIFIED until a gate
+  re-checks it.
+
 ## 0.3.58 — 2026-09-04
 
 - **prepack mirrors instead of copying.** Its directory clear is best-effort

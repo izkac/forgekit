@@ -35,9 +35,11 @@ spec excerpt sends you there; no directory sweeps, no grepping for related code.
    re-inspect ledgers. Judge the reasons: a `--no-tdd` declaration must match a
    task that changed no behavior, and a guard-allowance reason must match what
    the diff did to that file. A `FAIL` row or a weak reason is a finding.
-3. **Tests:** run the narrowest command covering the touched workspace(s) once —
-   {AFFECTED_TEST_COMMAND} — and report the command, exit code, and summary.
-   This is the session's tier-3 run; there is no separate verify phase behind you.
+3. **Tests:** run the narrowest command covering the touched workspace(s) once,
+   through the CLI so the exit code is observed rather than reported —
+   `forge evidence --tier3 --session {SESSION_ID} -- {AFFECTED_TEST_COMMAND}` —
+   and paste the receipt it prints (command, exit code, run time). This is the
+   session's tier-3 run; there is no separate verify phase behind you.
 4. **Integrity:** no stub-with-success in the diff; new library code names its
    production caller; tests would fail on a no-op.
 

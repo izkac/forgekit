@@ -2,7 +2,7 @@
 
 Each implement task records **tier 2** proof that subagents ran tests. See [test-strategy.md](./test-strategy.md) for all three tiers.
 
-The **coordinator** records this file after the implementer reports — use `forge evidence --task <nn>-<slug> --command "<cmd>" --exit <code> --summary "<text>"` (machine timestamp; refuses non-zero exit without `--allow-fail`) rather than hand-writing it. Verify **audits** these files — it does **not** re-run the same tier 2 commands. Verify runs **tier 3** (full workspace) once separately; see [../phases/verify.md](../phases/verify.md).
+For behaviour tasks the evidence is the implementer's executed `forge tdd run` stamps (`tdd-runs.jsonl`); this file covers the rest. The **coordinator** records it — **executed**: `forge evidence --task <nn>-<slug> [--no-tdd --reason "…"] -- <cmd> [args…]` runs the command itself and captures the exit code and output tail (refuses non-zero exit without `--allow-fail`). The transcribed form `--command "<cmd>" --exit <code> --summary "<text>"` still works but warns, and the file says `UNVERIFIED` in its `Recorded by:` line — the exit code was the caller's word. Never hand-write the file. Verify **audits** these files — it does **not** re-run the same tier 2 commands. Verify runs **tier 3** (full workspace) once separately; see [../phases/verify.md](../phases/verify.md).
 
 ## Path
 
@@ -18,7 +18,11 @@ The **coordinator** records this file after the implementer reports — use `for
 - **Exit code:** 0
 - **Summary:** 3/3 pass (or paste last ~20 lines of output)
 - **Run at:** 2026-06-05T15:04:22Z
-- **Recorded by:** implementer subagent (coordinator transcript)
+- **Recorded by:** forge evidence (executed — exit code and output captured from the process)
+
+```text
+<last ~20 lines of output>
+```
 ```
 
 ## Rules

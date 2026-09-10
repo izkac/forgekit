@@ -43,6 +43,15 @@ quietly re-scoping it.
 
 {SPEC_EXCERPT}
 
+## Known false (refuted in earlier rounds — do not re-propose)
+
+{KNOWN_FALSE}
+
+<!-- coordinator: paste `forge refute list --task <task-id> --md` for each task in
+     this unit, or `none recorded`. Each line is a claim a reviewer, gate, or
+     executed run already contradicted, with what the evidence showed instead.
+     An implementer that re-asserts one of these is repeating a refuted guess. -->
+
 ## Forge constraints
 
 - Read and follow [references/tdd-core.md](./references/tdd-core.md) before any production code (full TDD skill only if stuck).

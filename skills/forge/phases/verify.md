@@ -31,12 +31,20 @@ After tier 2 audit passes, honor `verify.tier3` from [../references/pace.md](../
 | `audit-tier2-only` | Do **not** run the suite; record deferral to push/CI in `verify-evidence.md` |
 
 ```bash
-npm test (affected package/workspace)
+forge evidence --tier3 -- npm test [-- --workspace <affected>]   # one per affected workspace
 ```
+
+**Run it through `forge evidence --tier3`, not bare.** The CLI executes the
+command and stamps the observed exit code and output tail into
+`.forge/sessions/<id>/verify-runs.jsonl`; it prints a receipt block to paste.
+A tier-3 exit code you typed into `verify-evidence.md` yourself is a claim —
+`forge status` reports `tier3 not stamped` until a stamp exists, and the final
+reviewer reads that. (The command after `--` is spawned as an argv array, no
+shell; on Windows name the `.cmd` shim or run through `node`.)
 
 When contracts changed and tier3 is not `audit-tier2-only`, also run tests in downstream consumer workspaces (project ecosystem-impact policy).
 
-Save to `.forge/sessions/<id>/verify-evidence.md`:
+Save to `.forge/sessions/<id>/verify-evidence.md`, pasting the receipt:
 
 ```markdown
 # Verify evidence — tier 3
@@ -44,11 +52,11 @@ Save to `.forge/sessions/<id>/verify-evidence.md`:
 - **Workspaces:** your-workspace, …
 - **Command:** `npm test -- path/to/scoped.test.ts`
 - **Exit code:** 0
-- **Summary:** 142/142 pass (or paste last ~30 lines)
 - **Run at:** 2026-06-07T12:00:00Z
+- **Recorded by:** forge evidence (executed — …) → `verify-runs.jsonl`
 ```
 
-Cite this file when claiming the implementation passes. Exit code must be `0` before leaving verify.
+Cite this file when claiming the implementation passes. Exit code must be `0` before leaving verify. A red tier 3 refutes something: before fixing, record it — `forge refute add --task <task-id> --claim "…" --actual "…" --source tier3` — so the fix-round brief carries it.
 
 ### 2b. Strict typecheck — enforced at the gate, not here
 

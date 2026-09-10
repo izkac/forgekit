@@ -70,9 +70,12 @@ review, it just fails the gate later.
    `forge score` classifies this file from its opening lines, and a review
    with no attribution is graded from silence. All four combined trials in
    cohort 5 were missing it. Below that line, save the report verbatim. Write
-   `.forge/sessions/<id>/verify-evidence.md` naming the closer's tier-3 command,
-   exit code, and summary (that run *is* the session's tier 3 — do not re-run
-   it), or `BLOCKED: <reason>` if it could not run.
+   `.forge/sessions/<id>/verify-evidence.md` with the closer's tier-3 receipt
+   (the closer ran it through `forge evidence --tier3`, so the observed exit
+   code is stamped in `verify-runs.jsonl`; that run *is* the session's tier 3 —
+   do not re-run it), or `BLOCKED: <reason>` if it could not run. If
+   `forge status` still says `tier3 not stamped`, the closer reported a run it
+   did not make through the CLI — treat its exit code as UNVERIFIED.
 
    ```bash
    forge phase review

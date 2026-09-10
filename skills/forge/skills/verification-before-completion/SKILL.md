@@ -18,7 +18,7 @@ Three tiers: [test-strategy.md](../../references/test-strategy.md).
 **During verify:**
 
 1. **Audit** tier 2 evidence per task — exit code, pass summary, reviewer approvals. Do **not** re-run tier 2 commands.
-2. **Run tier 3 once** — fresh full workspace test per affected workspace (plus consumer workspaces if contracts changed). Save to `verify-evidence.md`.
+2. **Run tier 3 once, through the CLI** — `forge evidence --tier3 -- <test cmd>` per affected workspace (plus consumer workspaces if contracts changed). The CLI executes it and stamps `verify-runs.jsonl`; paste the receipt into `verify-evidence.md`. A red run refutes a belief — `forge refute add … --source tier3` before fixing.
 3. **Runtime wiring audit** — for each capability requirement, name the production caller. Library-only / stub / false success → incomplete. See [runtime-integrity.md](../../references/runtime-integrity.md).
 4. **E2E — run, skip, or BLOCKED** — run `forge e2e run` for a green product loop, **or** honor a project/session skip (`forge e2e disable` / `forge e2e skip`) without writing `BLOCKED`, **or** write an explicit `BLOCKED` list only when the required loop could not run. A missing recorded harness is not a skip. Known debt uses `## Known debt`, not `BLOCKED`.
 

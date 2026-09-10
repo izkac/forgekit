@@ -240,7 +240,9 @@ Cursor, Claude Code, and Codex without requiring a chat ID.
         notes.md
         decisions.md
       plan.md                         ← legacy throwaway plans only (deprecated)
-      verify-evidence.md              ← tier 3 + loop narrative (or BLOCKED)
+      verify-evidence.md              ← tier 3 + loop narrative (or BLOCKED) — model-authored
+      verify-runs.jsonl               ← executed tier-3 stamps (forge evidence --tier3)
+      known-false.jsonl               ← refuted claims (forge refute) → {KNOWN_FALSE} in briefs
       spec-verify.md                  ← specs leftover sweep (always on for planType: specs)
       openspec-verify.md              ← OpenSpec leftover sweep (when skill present)
       e2e-results.json                ← forge e2e run results (steps hash + per-step outcomes)
@@ -322,8 +324,14 @@ forge fleet report [--json]       # cross-project trend from the durable ledgers
 forge e2e run --repeat 5 [--record-baseline]
                                   # measure harness flakiness; write e2e.baseline
 forge cleanup [--dry-run]         # prune sessions >14 days or finished
-forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<text>"
-                                  # stamp tier-2 test-evidence.md
+forge evidence --task <nn>-<slug> [--no-tdd --reason "…"] -- <cmd> [args…]
+                                  # EXECUTE the command; record tier-2 test-evidence.md with the observed exit
+forge evidence --tier3 -- <cmd>   # execute the tier-3 run; stamp <session>/verify-runs.jsonl
+forge evidence --task … --command "<cmd>" --exit 0 --summary "<text>"
+                                  # transcribed (legacy) — warns; file and precheck say UNVERIFIED
+forge refute add --task <nn>-<slug> --claim "<believed>" --actual "<evidence showed>" [--source reviewer|gate|e2e|tier3|tdd|operator]
+forge refute list [--task <id>] [--md|--json]
+                                  # known-false ledger (session); --md is the {KNOWN_FALSE} brief block
 forge --version                   # forge <version> — which installed copy is answering
 forge resolve-model --tier <fast|standard|capable>
                                   # JSON model resolution (included billing by default)
@@ -683,7 +691,8 @@ forge models metered                  # WRITE .forge/models.local.json
 Guardrails in every subagent brief (honor the **project’s** agent docs too):
 
 - No autonomous `git commit` / push unless the user asks — subagents never commit at all
-- Implementer runs tier 1 (scoped) + tier 2 (narrow) tests; coordinator saves `tasks/<nn>-<slug>/test-evidence.md` before marking task done
+- Implementer runs tier 1 (scoped) + tier 2 (narrow) tests through `forge tdd run` (executed stamps); for non-TDD tasks the coordinator records `tasks/<nn>-<slug>/test-evidence.md` with `forge evidence … -- <cmd>` (executed) before marking task done
+- `forge status` → `proven` separates executed facts (stamps, runs, e2e/gate results) from model-authored files (checkboxes, review verdicts, verify prose); on resume only the former is established
 - Trace downstream consumers when contracts change
 
 Prompt templates: [subagents/](../subagents/)

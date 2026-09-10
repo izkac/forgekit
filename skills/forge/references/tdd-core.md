@@ -44,6 +44,7 @@ changed) is not "just run `forge evidence` instead" — declare it:
 
 ```bash
 forge evidence --task <nn-slug> --no-tdd --reason "<why no test cycle applies>"
+forge evidence --task <nn-slug> --no-tdd --reason "<why>" -- <lint cmd>   # if a command still ran, let forge run it
 ```
 
 `--no-tdd` writes a durable, reviewer-visible marker that exempts this task

@@ -122,7 +122,7 @@ the subagent ramp-up once per task, and that ramp-up — not review verdicts —
 where Forge's input tokens go.
 
 1. Extract full task text + file paths + relevant **capability** spec sections (not only the task checkbox line) for every task in the unit.
-2. Write the unit's brief using [../subagents/implementer-prompt.md](../subagents/implementer-prompt.md) — `.forge/sessions/<id>/tasks/<nn>-<slug>/brief.md` for a single-task unit, `.forge/sessions/<id>/tasks/group-<nn>-<slug>/brief.md` for a multi-task one. Fill `{SESSION_ID}` with the current session id, `{TASK_LIST}` with one block per task (full text, in order, each naming its own task id), and `{TASK_IDS}` with those ids; never leave a target for the implementer to infer from `.forge/active.json`.
+2. Write the unit's brief using [../subagents/implementer-prompt.md](../subagents/implementer-prompt.md) — `.forge/sessions/<id>/tasks/<nn>-<slug>/brief.md` for a single-task unit, `.forge/sessions/<id>/tasks/group-<nn>-<slug>/brief.md` for a multi-task one. Fill `{SESSION_ID}` with the current session id, `{TASK_LIST}` with one block per task (full text, in order, each naming its own task id), and `{TASK_IDS}` with those ids; never leave a target for the implementer to infer from `.forge/active.json`. Fill `{KNOWN_FALSE}` from `forge refute list --task <task-id> --md` (or `none recorded`) — a re-dispatch that omits the refutations from the last round is how the same wrong assumption gets implemented twice.
 3. Dispatch **implementer** subagent — brief includes [../references/tdd-core.md](../references/tdd-core.md). **Model:** follow [../references/model-selection.md](../references/model-selection.md) — resolve via `forge resolve-model --tier <fast|standard|capable>` (billing defaults to **`included`**). Use `fast` when the whole unit is mechanical (1–2 files, complete spec); `standard` for multi-file integration; escalate one capability tier (still `included`) when re-dispatching after `BLOCKED`. Judge the tier from the unit, not from its easiest task. If `omitModel` is true, **omit** the Task `model` parameter entirely (never pass a host-list slug); otherwise pass `model` exactly.
 4. **Reviewer** (unless pace skips it):
    - **`always` / high-risk hard floor:** dispatch [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md) for this unit → `task-review.md` (one pass covering every task in it; `group-review.md` if the unit is a whole group).
@@ -132,6 +132,11 @@ where Forge's input tokens go.
    - `{DIFF_RANGE}` is **required** — the reviewer returns `NEEDS_CONTEXT` without it and you pay for the dispatch twice. Get it from `forge checkpoint --range --last` (`reviewTarget`), which also names the untracked files a diff hides.
    - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{TASK_EVIDENCE_TARGETS}` with one entry per reviewed task (task id, executed-evidence gate state, and exact session/task ledger path), plus `{DIFF_RANGE}`, `{CAPABILITY_SPEC_EXCERPT}`, and `{PRECHECK}` (`forge review-precheck` output — it carries the guard allowances) — read actual code, not the implementer's summary. **Model:** [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Honor `omitModel` / `model` literally. Do **not** skip high-risk tasks.
 5. Fix loop until the reviewer approves (max `review.maxRounds` from pace; then escalate to the human). For group reviews, fix any rejected task in the group before continuing to the next group.
+   **On REJECT, record what was refuted before re-dispatching:** for each concrete wrong assumption the review contradicted (a claimed behaviour, a data shape, a contract), run
+   ```bash
+   forge refute add --task <task-id> --claim "<what the implementer believed>" --actual "<what the review/evidence showed>" --source reviewer
+   ```
+   A rejection in prose is not negative memory — the fix-round brief carries `{KNOWN_FALSE}` from this ledger, and a fresh implementer (or a fresh context after compaction) cannot re-propose a claim it can see was already refuted. Same for a red `forge gate check` / `forge e2e run` (`--source gate|e2e`).
 6. **Tier-2 evidence — two paths, know which one this task takes:**
    - **Behavior-change tasks (TDD applies):** evidence comes from
      `forge tdd run --session <id> --task <task-id>` stamps the implementer
@@ -151,9 +156,13 @@ where Forge's input tokens go.
      the pairing gate knows this task has no red→green cycle to demand:
      ```bash
      forge evidence --task <nn>-<slug> --no-tdd --reason "<why no test cycle applies>"
-     # or, with a command that still ran (e.g. a lint pass):
-     forge evidence --task <nn>-<slug> --command "<cmd>" --exit 0 --summary "<pass summary>" --no-tdd --reason "<why>"
+     # or, with a command that still ran (e.g. a lint pass) — let forge run it:
+     forge evidence --task <nn>-<slug> --no-tdd --reason "<why>" -- <lint cmd> [args…]
      ```
+     Everything after `--` is executed by the CLI and the exit code is captured,
+     not transcribed. The old `--command "<cmd>" --exit 0 --summary` shape still
+     works but warns and is labelled `UNVERIFIED` in the file and in
+     `forge review-precheck` — an exit code typed by the coordinator is a claim.
      `--no-tdd` writes a durable, reviewer-visible marker that exempts the
      task from the pairing gate; evidence recorded without it does **not**
      exempt anything. A completed task with neither a red→green stamp pair

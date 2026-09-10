@@ -19,6 +19,7 @@ import { resolveEffectivePreferences } from './preferences.mjs';
 import { sessionHealth } from './health.mjs';
 import { KINDS, openFindings, staleOpenBugs } from './findings.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
+import { provenFacts } from './proven.mjs';
 
 const args = process.argv.slice(2);
 let sessionId = null;
@@ -101,6 +102,9 @@ process.stdout.write(
       // Verdict first: a status dump that never says "this session is red and
       // nobody has touched it since yesterday" makes the operator derive it.
       health,
+      // Executed facts only, then the model-authored files by name — so a
+      // resume reads what a tool proved apart from what an agent wrote.
+      proven: provenFacts({ cwd: REPO_ROOT, sessionDir: dir, session }),
       openFindings: {
         count: openBugs.length,
         byKind: findingsByKind,

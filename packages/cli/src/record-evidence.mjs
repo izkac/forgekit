@@ -9,7 +9,15 @@
  * is passed.
  *
  * Usage:
- *   forge record-evidence --task <nn-slug> --command <cmd> --exit <code> --summary <text> [options]
+ *   forge evidence --task <nn-slug> [options] -- <cmd> [args…]        # executed (preferred)
+ *   forge evidence --tier3 [options] -- <cmd> [args…]                 # tier-3 stamp → verify-runs.jsonl
+ *   forge evidence --task <nn-slug> --command <cmd> --exit <code> --summary <text> [options]
+ *                                                                     # transcribed (legacy; warns)
+ *
+ * Executed mode: everything after `--` is spawned (argv array, no shell) and
+ * the exit code + output tail are captured from the process — the model
+ * proposes the command, the tool decides the verdict. Transcribed mode takes
+ * the exit code on the caller's word and says so in the file.
  *
  * Options:
  *   --task <nn-slug>    Task directory name, e.g. 03-record-evidence (required)
@@ -27,16 +35,25 @@
  *   --reason <text>     Why no test cycle applies (required with --no-tdd)
  *   --tier <label>      Tier label (default: "2 (task-scoped — not full workspace unless noted)")
  *   --session <id>      Session id (default: sessionId from .forge/active.json)
- *   --allow-fail        Write evidence even when --exit is non-zero
+ *   --allow-fail        Write evidence even when the exit code is non-zero
+ *   --tier3             Executed mode only: stamp a tier-3 run into
+ *                        <session>/verify-runs.jsonl instead of a task file
  *   --forge-dir <path>  Forge root directory (default: .forge under cwd)
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { unfinishedSessions } from './lib.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
+export const TIER3_LABEL = '3 (full workspace)';
+
+/** `Recorded by:` values — readers key on the executed one to tell a captured exit code from a claimed one. */
+export const RECORDED_BY_EXECUTED = 'forge evidence (executed — exit code and output captured from the process)';
+export const RECORDED_BY_TRANSCRIBED = 'implementer subagent (coordinator transcript — exit code supplied by caller, UNVERIFIED)';
+const TAIL_LINES = 20;
 
 // `checkTddEvidence` (integrity.mjs) reads a task's test-evidence.md for
 // this literal token to decide whether the task is exempt from the
@@ -74,12 +91,20 @@ export function parseArgs(argv) {
     forgeDir: null,
     noTdd: false,
     reason: null,
+    tier3: false,
+    /** @type {string[]} everything after `--`: the command to execute */
+    cmdArgv: [],
     help: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === '--task') opts.task = argv[++i];
+    if (arg === '--') {
+      opts.cmdArgv = argv.slice(i + 1);
+      break;
+    }
+    if (arg === '--tier3') opts.tier3 = true;
+    else if (arg === '--task') opts.task = argv[++i];
     else if (arg === '--command') opts.command = argv[++i];
     else if (arg === '--exit') opts.exit = argv[++i];
     else if (arg === '--summary') opts.summary = argv[++i];
@@ -104,7 +129,7 @@ export function parseArgs(argv) {
  * takes. `noTddReason`, when non-null, prepends the durable `NO_TDD_MARKER`
  * line `checkTddEvidence` reads back, plus the reviewer-visible reason text.
  *
- * @param {{ task: string, tier: string, command?: string | null, exit?: number | null, summary?: string | null, runAt: string, noTddReason?: string | null }} fields
+ * @param {{ task: string, tier: string, command?: string | null, exit?: number | null, summary?: string | null, runAt: string, noTddReason?: string | null, recordedBy?: string, outputTail?: string | null }} fields
  * @returns {string}
  */
 export function buildEvidence({
@@ -117,6 +142,8 @@ export function buildEvidence({
   session,
   sessionFrom,
   noTddReason,
+  recordedBy = RECORDED_BY_TRANSCRIBED,
+  outputTail = null,
 }) {
   return [
     `# Test evidence — Task ${task}`,
@@ -132,9 +159,31 @@ export function buildEvidence({
     ...(exit != null ? [`- **Exit code:** ${exit}`] : []),
     ...(summary != null ? [`- **Summary:** ${summary}`] : []),
     `- **Run at:** ${runAt}`,
-    '- **Recorded by:** implementer subagent (coordinator transcript)',
+    `- **Recorded by:** ${recordedBy}`,
+    ...(outputTail ? ['', '```text', outputTail, '```'] : []),
     '',
   ].join('\n');
+}
+
+/**
+ * Run the command the caller named and report what actually happened. argv
+ * array, no shell — same reasoning as `tdd-run.mjs`. Output is streamed back
+ * to the terminal after the run and its last lines kept for the evidence file.
+ *
+ * @param {string[]} cmdArgv
+ * @param {string} cwd
+ * @returns {{ command: string, exit: number | null, tail: string, error: string | null }}
+ */
+export function executeCommand(cmdArgv, cwd) {
+  const [cmd, ...args] = cmdArgv;
+  const command = cmdArgv.join(' ');
+  const res = spawnSync(cmd, args, { cwd, shell: false, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (res.error) return { command, exit: null, tail: '', error: res.error.message };
+  const out = `${res.stdout ?? ''}${res.stderr ?? ''}`;
+  process.stdout.write(out);
+  const lines = out.split(/\r?\n/).filter((l) => l.trim() !== '');
+  const tail = lines.slice(-TAIL_LINES).join('\n').slice(-4000);
+  return { command, exit: res.status, tail, error: null };
 }
 
 /**
@@ -202,7 +251,17 @@ function resolveSessionId(session, forgeDir) {
  * @returns {{ exitCode: number; message: string }}
  */
 export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Date()) {
-  if (!opts.task) {
+  const executed = Array.isArray(opts.cmdArgv) && opts.cmdArgv.length > 0;
+  if (executed && (opts.command != null || opts.exit != null || opts.summary != null)) {
+    return {
+      exitCode: 1,
+      message: '`-- <cmd>` executes the command itself — do not also pass --command/--exit/--summary (those are the transcribed path).',
+    };
+  }
+  if (opts.tier3 && !executed) {
+    return { exitCode: 1, message: '--tier3 stamps an executed run: pass the command after `--`.' };
+  }
+  if (!opts.task && !opts.tier3) {
     return { exitCode: 1, message: '--task is required' };
   }
 
@@ -245,10 +304,10 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
   // are required, same as the non-declaring path — a partial trio is not
   // useful evidence either way.
   const anyCommandFieldGiven = opts.command != null || opts.exit != null || opts.summary != null;
-  if (!opts.noTdd || anyCommandFieldGiven) {
+  if (!executed && (!opts.noTdd || anyCommandFieldGiven)) {
     for (const field of ['command', 'exit', 'summary']) {
       if (!opts[field]) {
-        return { exitCode: 1, message: `--${field} is required` };
+        return { exitCode: 1, message: `--${field} is required (or execute the command: forge evidence --task <nn-slug> -- <cmd>)` };
       }
     }
   }
@@ -282,6 +341,36 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     return { exitCode: 1, message: `Session dir not found: ${sessionDir} (session ${sessionId})` };
   }
 
+  if (opts.tier3) {
+    // Tier 3 is one fresh full-workspace run at verify. Its stamp is a ledger
+    // line, not a task file: verify-evidence.md stays the coordinator's prose
+    // and this is the executed fact it must cite.
+    const startedAt = now().toISOString();
+    const t0 = Date.now();
+    const run = executeCommand(opts.cmdArgv, cwd);
+    const stamp = {
+      command: run.command,
+      exit: run.exit,
+      ok: run.exit === 0,
+      startedAt,
+      durationMs: Date.now() - t0,
+      tail: run.tail,
+      ...(run.error ? { error: run.error } : {}),
+    };
+    const ledger = path.join(sessionDir, 'verify-runs.jsonl');
+    fs.appendFileSync(ledger, `${JSON.stringify(stamp)}\n`, 'utf8');
+    const receipt = [
+      `- **Command:** \`${run.command}\``,
+      `- **Exit code:** ${run.exit ?? `spawn failed: ${run.error}`}`,
+      `- **Run at:** ${startedAt}`,
+      `- **Recorded by:** ${RECORDED_BY_EXECUTED} → \`verify-runs.jsonl\``,
+    ].join('\n');
+    return {
+      exitCode: stamp.ok ? 0 : 1,
+      message: `stamped: ${ledger} (exit ${run.exit ?? 'null'})\n\nPaste into verify-evidence.md:\n${receipt}`,
+    };
+  }
+
   let session = {};
   try {
     session = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
@@ -297,6 +386,25 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
         `Have the implementer run forge tdd run --session ${sessionId} --task ${opts.task} during the real RED→GREEN cycle; ` +
         'do not reconstruct stamps retroactively. Use --no-tdd --reason only when no behavior changed.',
     };
+  }
+
+  let command = opts.command;
+  let summary = opts.summary;
+  let outputTail = null;
+  if (executed) {
+    const run = executeCommand(opts.cmdArgv, cwd);
+    if (run.error) {
+      return { exitCode: 1, message: `failed to execute ${opts.cmdArgv[0]}: ${run.error} (nothing recorded)` };
+    }
+    command = run.command;
+    testExit = run.exit;
+    outputTail = run.tail;
+    summary = `exit ${run.exit} — captured by forge evidence; output tail below`;
+  } else if (!opts.noTdd || anyCommandFieldGiven) {
+    process.stderr.write(
+      '[forge] Warning: transcribed evidence — the exit code was supplied by the caller, not observed. ' +
+        `Prefer: forge evidence --task ${opts.task} -- <cmd>\n`,
+    );
   }
 
   if (testExit !== null && testExit !== 0 && !opts.allowFail) {
@@ -349,25 +457,32 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
           ? 'resolved from .forge/active.json while several sessions were open'
           : null,
       tier: opts.tier ?? DEFAULT_TIER,
-      command: opts.command,
+      command,
       exit: testExit,
-      summary: opts.summary,
+      summary,
       runAt: now().toISOString(),
       noTddReason: opts.noTdd ? opts.reason : null,
+      recordedBy: executed ? RECORDED_BY_EXECUTED : RECORDED_BY_TRANSCRIBED,
+      outputTail,
     }),
     'utf8',
   );
 
-  return { exitCode: 0, message: `wrote: ${filePath}` };
+  return { exitCode: 0, message: `wrote: ${filePath}${executed ? ` (executed, exit ${testExit})` : ''}` };
 }
 
 function printHelp() {
-  console.log(`Usage: forge record-evidence --task <nn-slug> --command <cmd> --exit <code> --summary <text> [options]
+  console.log(`Usage:
+  forge evidence --task <nn-slug> [options] -- <cmd> [args…]     executed: runs the command, captures exit + output
+  forge evidence --tier3 [options] -- <cmd> [args…]              executed tier-3 stamp → <session>/verify-runs.jsonl
+  forge evidence --task <nn-slug> --command <cmd> --exit <code> --summary <text> [options]
+                                                                 transcribed (legacy): exit code on the caller's word; warns
 
 Record tier-2 test evidence for a Forge implement task at
 .forge/sessions/<session-id>/tasks/<task>/test-evidence.md (latest run wins).
 
 Options:
+  --tier3             With \`-- <cmd>\`: stamp a tier-3 run instead of a task file
   --task <nn-slug>    Task directory name, e.g. 03-record-evidence (required)
   --command <cmd>     Test command that was run (required unless --no-tdd is
                        given with no command details at all)

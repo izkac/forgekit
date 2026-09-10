@@ -25,7 +25,7 @@ import {
   runIntegrityChecks,
 } from './integrity.mjs';
 import { loadAllowances } from './guard.mjs';
-import { NO_TDD_REASON_LABEL } from './record-evidence.mjs';
+import { NO_TDD_REASON_LABEL, RECORDED_BY_EXECUTED } from './record-evidence.mjs';
 import { REJECTION_RE, SELF_REVIEW_RE, attributionRegion } from './review-census.mjs';
 import { collectPlanFacts } from './plan-facts.mjs';
 import { isHighRiskText } from './preferences.mjs';
@@ -47,7 +47,7 @@ function readOrNull(file) {
  * @param {boolean} ledgerRequired  session.features.tddEvidence — a task without a ledger or a no-TDD declaration is a gate problem
  * @returns {Array<{ task: string, evidence: 'tdd' | 'no-tdd' | 'test-evidence' | 'missing', ok: boolean, detail: string }>}
  */
-function taskFacts(sessionDir, ledgerRequired) {
+export function taskFacts(sessionDir, ledgerRequired) {
   const tasksDir = path.join(sessionDir, 'tasks');
   return completedTddTaskDirs(sessionDir).map((task) => {
     const dir = path.join(tasksDir, task);
@@ -76,14 +76,18 @@ function taskFacts(sessionDir, ledgerRequired) {
     if (ledgerRequired) {
       return { task, evidence: 'test-evidence', ok: false, detail: 'tdd-runs.jsonl missing (tddEvidence is on) — the integrity gate refuses this' };
     }
-    // Legacy shape: `forge evidence` wrote Command/Exit/Summary. Same field score.mjs reads.
+    // `forge evidence` wrote Command/Exit/Summary. Same field score.mjs reads.
+    // Executed mode captured the exit code from the process; the transcribed
+    // shape took it on the caller's word — say which, so a reviewer knows
+    // whether the number was observed or claimed.
     const exit = /\*\*Exit code:\*\*\s*(\d+)/.exec(evidenceBody);
     const ok = exit ? exit[1] === '0' : false;
+    const shape = evidenceBody.includes(RECORDED_BY_EXECUTED) ? 'executed test-evidence.md' : 'transcribed test-evidence.md (exit code UNVERIFIED)';
     return {
       task,
       evidence: 'test-evidence',
       ok,
-      detail: exit ? `legacy test-evidence.md, exit ${exit[1]} (no ledger)` : 'legacy test-evidence.md without an exit code',
+      detail: exit ? `${shape}, exit ${exit[1]} (no ledger)` : `${shape} without an exit code`,
     };
   });
 }
