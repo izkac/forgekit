@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { resolveTemplatesRoot } from './init.mjs';
 
@@ -26,7 +26,7 @@ const {
   resolveFromCmdShim,
   resolveForgeMjs,
   resolveForgeInvocation,
-} = await import(CLAUDE_HELPER);
+} = await import(pathToFileURL(CLAUDE_HELPER).href);
 
 function tmp(prefix) {
   return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
