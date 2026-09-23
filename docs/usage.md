@@ -69,6 +69,38 @@ forgekit update
 not have to run `npm i -g` by hand. A git checkout of this repo skips the
 npm step.
 
+### Trust boundary: what Forge will run
+
+`@izkac/forgekit` is a workflow CLI that **runs commands the caller names**,
+under **the caller's account**, with **no shell and no allowlist**. Read this
+before you install it or wire a project.
+
+**What the CLI will run.** `forge evidence -- <cmd> [args…]` and
+`forge tdd run -- <cmd> [args…]` take everything after `--` as an argv array
+and spawn it with `shell: false`. There is no `/bin/sh` or `cmd.exe` in the
+middle — and also no command allowlist and no "are you sure?" prompt. The
+tokens are executed as given. The transcribed form of `forge evidence`
+(`--command --exit --summary`) does not spawn; the executed form does.
+
+**Whose privileges.** The same user (or CI job) that invoked `forge`. A
+global `npm i -g` install does not raise privileges; it also does not drop
+them. The child sees your environment, your files, your credentials.
+
+**What installers should assume.** Installing the public package and running
+`forge init` copies hooks that spawn `forge` from the agent host (Claude
+Code SessionStart / PreToolUse / Stop, Cursor sessionStart). Agent tool
+paths can therefore reach `forge`, and `forge` can therefore reach whatever
+command the session passes to `evidence` or `tdd run`. That is the product:
+evidence is a product of execution, not of the model narrating an exit code.
+
+**How to think about agent compromise.** A confused, prompt-injected, or
+compromised agent session that can call `forge` is equivalent to that agent
+having a shell as you. Do not run Forge-wired agents against secrets,
+production credentials, or hosts you would not type commands on yourself.
+Removing the global package and deleting the project hooks (`.claude/hooks`,
+`.cursor/hooks`, and the matching entries in `settings.json` / `hooks.json`)
+removes this surface. There is no in-CLI confirmation gate today.
+
 ---
 
 ## 2. Wire each project once
@@ -114,7 +146,9 @@ your-project/
   .claude/commands/      # same for Claude Code
 ```
 
-Hooks call `forge` on PATH. `forge init --claude` merges the generated hooks
+Hooks resolve `forge.mjs` and spawn `node <forge.mjs> …` (`shell: false` on
+every platform, including Windows — they do not run `forge.cmd` through
+cmd.exe). `forge init --claude` merges the generated hooks
 snippet straight into `.claude/settings.json` for you (checking
 `.claude/settings.local.json` too, so an already-wired project is never
 double-registered) — the old "merge it by hand" step is now a fallback for

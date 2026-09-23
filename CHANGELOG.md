@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Trust boundary is documented.** README, the npm package README, and
+  `docs/usage.md` now say out loud that `forge evidence -- <cmd>` and
+  `forge tdd run -- <cmd>` execute caller-chosen argv as the invoking user
+  (`shell: false`, no allowlist), and that `forge init` hooks invoke `forge`
+  from the agent host — RCE-by-design if the agent session is compromised.
+
 ## 0.3.61 — 2026-09-23
 
 - **Reviews run per group, never per task.** The high-risk hard floor no longer

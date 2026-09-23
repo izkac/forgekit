@@ -50,6 +50,28 @@ forge init --cursor --claude --adr
 
 One-shot without a global install: `npx @izkac/forgekit install …` (same bins via `npx forge` / `npx review` after the package is on PATH, or keep the global install).
 
+### Trust boundary: what the CLI will run
+
+`forge evidence -- <cmd>` and `forge tdd run -- <cmd>` **execute the argv
+after `--` as you**. Spawn is `shell: false` (no `/bin/sh`, no `cmd.exe`) but
+there is **no allowlist and no confirmation gate**. The child runs with the
+same privileges as the user (or CI job) that invoked `forge`.
+
+Project hooks installed by `forge init` also spawn `forge` from the agent
+host (Claude Code, Cursor). An agent that can call tools can therefore call
+`forge`, and `forge` will run whatever command it was given.
+
+This is **intentional** — evidence has to be a product of execution — and it
+is **RCE-by-design** if the agent session is confused or compromised. The
+package is public (`@izkac/forgekit` on npm). Installing it, and wiring
+hooks, means: treat a prompt-injected agent the same way you would treat a
+compromised terminal on that machine. Do not point a Forge-wired agent at
+secrets, production credentials, or hosts you would not type commands on
+yourself.
+
+Full write-up for installers and operators: **[Trust boundary](docs/usage.md#trust-boundary-what-forge-will-run)**
+in the install guide.
+
 Aliases (single-skill shortcuts):
 
 ```bash
