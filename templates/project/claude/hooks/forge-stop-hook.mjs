@@ -16,6 +16,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveForgeInvocation } from './resolve-forge.mjs';
 
 const FAST_EXIT_PHASES = new Set(['triage', 'brainstorm', 'plan', 'done', 'skipped']);
 
@@ -35,26 +36,6 @@ function readStdin() {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
-}
-
-/**
- * Command to run `forge`, as `{ cmd, baseArgs, shell }`. Defaults to `forge`
- * on PATH (quoted+shelled on win32, where `forge` is a `.cmd` shim — same
- * reasoning as the sibling PreToolUse/UserPromptSubmit hook templates).
- * `FORGE_STOP_HOOK_FORGE_CMD` overrides this for tests, e.g. `"node"
- * "<repo>/packages/cli/bin/forge.mjs"` — space-quoted tokens so an
- * interpreter or script path containing spaces still splits correctly.
- */
-function resolveForgeInvocation() {
-  const override = process.env.FORGE_STOP_HOOK_FORGE_CMD;
-  if (typeof override === 'string' && override.trim()) {
-    const tokens = override.match(/"[^"]*"|'[^']*'|\S+/g) || [];
-    const parts = tokens.map((t) =>
-      t.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'),
-    );
-    return { cmd: parts[0], baseArgs: parts.slice(1), shell: false };
-  }
-  return { cmd: 'forge', baseArgs: [], shell: process.platform === 'win32' };
 }
 
 async function main() {
@@ -119,12 +100,15 @@ async function main() {
   if (!claimState) process.exit(0);
 
   // --- Claim-state only: spawn `forge integrity-check`. ---
-  const { cmd, baseArgs, shell } = resolveForgeInvocation();
-  const sessionArg = shell ? `"${sessionId.replaceAll('"', '""')}"` : sessionId;
-  const r = spawnSync(cmd, [...baseArgs, 'integrity-check', '--session', sessionArg], {
+  // `node` + `forge.mjs` (shell: false) on every platform — see resolve-forge.mjs.
+  // FORGE_STOP_HOOK_FORGE_CMD still overrides for tests (quoted tokens).
+  const { cmd, baseArgs } = resolveForgeInvocation({
+    override: process.env.FORGE_STOP_HOOK_FORGE_CMD,
+  });
+  const r = spawnSync(cmd, [...baseArgs, 'integrity-check', '--session', sessionId], {
     encoding: 'utf8',
     cwd: REPO_ROOT,
-    shell,
+    shell: false,
   });
 
   if (r.status === 0) {

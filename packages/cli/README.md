@@ -72,6 +72,16 @@ forge init --claude --cursor      # slash commands, rules, hooks, .forge/
 
 The agent triages, brainstorms with you, plans a tracked change, writes the operator brief for your approval, then implements task-by-task with TDD and per-task review — refusing to call itself done until the gates are green.
 
+### Trust boundary
+
+`forge evidence -- <cmd>` and `forge tdd run -- <cmd>` spawn the caller-chosen
+argv under **your** privileges (`shell: false`, no allowlist, no confirmation).
+`forge init` hooks also invoke `forge` from the agent host. A confused or
+compromised agent session can therefore run arbitrary programs as you — that
+is RCE-by-design for this public package, not a defect. Read the
+**[trust-boundary section](https://github.com/izkac/forgekit/blob/main/docs/usage.md#trust-boundary-what-forge-will-run)**
+before you install.
+
 ## Docs
 
 - **[How to use Forgekit](https://github.com/izkac/forgekit/blob/main/docs/usage.md)** — full tutorial: install, project wiring, worked examples, integrity gates, fleet, cheat sheet

@@ -5,13 +5,15 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { resolveForgeInvocation } from './resolve-forge.mjs';
 
 const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-const r = spawnSync('forge', ['reminder', '--format', 'claude-session-start'], {
+const { cmd, baseArgs } = resolveForgeInvocation();
+const r = spawnSync(cmd, [...baseArgs, 'reminder', '--format', 'claude-session-start'], {
   encoding: 'utf8',
   cwd: REPO_ROOT,
-  shell: true,
+  shell: false,
 });
 
 if (r.status === 0 && r.stdout.trim()) {

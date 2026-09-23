@@ -13,6 +13,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { resolveForgeInvocation } from './resolve-forge.mjs';
 
 const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const GUARDED_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit']);
@@ -77,17 +78,14 @@ if (typeof filePath !== 'string' || filePath.length === 0) {
   warnAndAllow(`${toolName} tool_input carried no usable file path`);
 }
 
-// `forge` is a `.cmd` shim on win32, so it can only be found via the shell —
-// but shell:true joins argv into an unquoted command string, so the path
-// must be quoted by hand there. Everywhere else, shell:false passes argv
-// straight to execve, so `filePath` reaches `forge` untouched regardless of
-// spaces or shell metacharacters.
-const useShell = process.platform === 'win32';
-const fileArg = useShell ? `"${filePath.replaceAll('"', '""')}"` : filePath;
-const r = spawnSync('forge', ['guard', 'check', '--file', fileArg, '--json'], {
+// `node` + `forge.mjs` (shell: false) on every platform, including Windows
+// where `forge` is a `.cmd` shim. argv is never joined into a cmd.exe string,
+// so `filePath` reaches `forge` untouched regardless of spaces or metacharacters.
+const { cmd, baseArgs } = resolveForgeInvocation();
+const r = spawnSync(cmd, [...baseArgs, 'guard', 'check', '--file', filePath, '--json'], {
   encoding: 'utf8',
   cwd: REPO_ROOT,
-  shell: useShell,
+  shell: false,
 });
 
 if (r.status === 0) process.exit(0);

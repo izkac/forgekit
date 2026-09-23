@@ -135,6 +135,19 @@ test('warnIfDoctorFails writes to stderr', () => {
   assert.match(err.text(), /install/i);
 });
 
+test('checkHookWiring: resolve-forge.mjs helper is not a hook and does not fail wiring', () => {
+  const cwd = makeTempProject();
+  try {
+    writeHookFiles(cwd, ['.claude', 'hooks'], ['resolve-forge.mjs']);
+    const result = checkHookWiring({ cwd });
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, true);
+    assert.deepEqual(result.surfaces, []);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('checkHookWiring: no hooks dirs on disk -> ok with skipped true', () => {
   const cwd = makeTempProject();
   try {

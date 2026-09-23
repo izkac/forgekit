@@ -7,6 +7,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveForgeInvocation } from './resolve-forge.mjs';
 
 const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const ACTIVE_FILE = path.join(REPO_ROOT, '.forge', 'active.json');
@@ -66,17 +67,14 @@ if (!fs.existsSync(ACTIVE_FILE)) {
   process.exit(0);
 }
 
-// `forge` is a `.cmd` shim on win32, so it can only be found via the shell —
-// but shell:true joins argv into an unquoted command string, so the prompt
-// must be quoted by hand there. Everywhere else, shell:false passes argv
-// straight to execve, so `prompt` reaches `forge` untouched regardless of
-// shell metacharacters.
-const useShell = process.platform === 'win32';
-const promptArg = useShell ? `"${prompt.replaceAll('"', '""')}"` : prompt;
-const r = spawnSync('forge', ['reminder', '--format', 'plain', '--prompt', promptArg], {
+// `node` + `forge.mjs` (shell: false) on every platform, including Windows
+// where `forge` is a `.cmd` shim. argv is never joined into a cmd.exe string,
+// so `prompt` reaches `forge` untouched regardless of shell metacharacters.
+const { cmd, baseArgs } = resolveForgeInvocation();
+const r = spawnSync(cmd, [...baseArgs, 'reminder', '--format', 'plain', '--prompt', prompt], {
   encoding: 'utf8',
   cwd: REPO_ROOT,
-  shell: useShell,
+  shell: false,
 });
 
 if (r.status === 0 && r.stdout.trim()) {
