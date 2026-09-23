@@ -10,6 +10,8 @@
 - **Windows hooks no longer need `shell: true`.** Hook templates resolve
   `forge.mjs` and spawn `node <forge.mjs> …` with `shell: false` on every
   platform, so `forge.cmd` is never run through cmd.exe.
+- **Dependabot.** `.github/dependabot.yml` enables weekly npm and
+  GitHub Actions updates so vulnerability alerts can auto-file PRs.
 
 ## 0.3.61 — 2026-09-23
 
