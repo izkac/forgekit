@@ -7,6 +7,9 @@
   `forge tdd run -- <cmd>` execute caller-chosen argv as the invoking user
   (`shell: false`, no allowlist), and that `forge init` hooks invoke `forge`
   from the agent host — RCE-by-design if the agent session is compromised.
+- **Windows hooks no longer need `shell: true`.** Hook templates resolve
+  `forge.mjs` and spawn `node <forge.mjs> …` with `shell: false` on every
+  platform, so `forge.cmd` is never run through cmd.exe.
 
 ## 0.3.61 — 2026-09-23
 

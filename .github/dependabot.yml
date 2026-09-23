@@ -1,0 +1,16 @@
+# Dependabot version updates + security-update PRs for this npm monorepo
+# and the GitHub Actions pinned in .github/workflows/.
+# https://docs.github.com/en/code-security/dependabot
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
