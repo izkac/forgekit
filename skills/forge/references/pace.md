@@ -34,15 +34,16 @@ At session start: `Using Forge for this work. Pace: auto → brisk (…)` (use
 | **models.bias** | default | default | prefer-fast | prefer-fast |
 | **brainstorm.depth** | full | full | short (≤2 rounds) | minimal |
 
-\*Hard floor: money / auth / shared contracts / migrations / secrets **always**
-get a per-task review (and final review if the session touched high-risk work),
-even under `lite` / `brisk` / mid-group `standard`. Match the **task line**,
-not the change name — hmac or migrate in the slug does not make fixture or
-docs tasks 1:1.
+\*Hard floor: a `tasks.md` group holding a money / auth / shared contracts /
+migrations / secrets **task line** always gets a dispatched reviewer at group
+close (never a self-check), and the final review, even under `lite` / `brisk`.
+Reviews land on group boundaries at most — never after a single task inside a
+group, high-risk included. Match the **task line**, not the change name —
+hmac or migrate in the slug does not make fixture or docs tasks high-risk.
 
 **`thorough` vs `standard`:** identical cadence — both review once per
-**`tasks.md` group** (top-level `##` section), except high-risk
-tasks which still get an immediate per-task review — and identical review
+**`tasks.md` group** (top-level `##` section), high-risk tasks included —
+and identical review
 `depth` (`full`). They differ only in `maxRounds`: thorough allows 3
 fix→re-review rounds before escalating remaining findings to the human,
 standard allows 2.
@@ -51,7 +52,7 @@ standard allows 2.
 
 ## Auto signals (stricter wins)
 
-1. money, payment, stripe, billing, auth, oauth, hmac, secret, migration, contract, gdpr → **standard**, and never `brisk`/`lite`. Risk is a property of a *task*: the per-task hard floor below already reviews every high-risk task on every pace, so escalating the whole session to `thorough` only bought per-task reviewers for the low-risk work beside it. Pin with `forge prefs thorough` when you want the old behavior.
+1. money, payment, stripe, billing, auth, oauth, hmac, secret, migration, contract, gdpr → **standard**, and never `brisk`/`lite`. Risk is a property of a *task*: the hard floor already forces a dispatched reviewer on every group holding a high-risk task, on every pace, so escalating the whole session to `thorough` buys nothing. Pin with `forge prefs thorough` when you want the old behavior.
 2. ecosystem, cross-workspace, multi-file, openapi, public API, shared package, **worker**, **job queue**, **pipeline**, **etl**, **service(s)**, **platform**, **orchestration**, **openspec**, **forge:apply**, **harmonization** → **standard**
 3. docs, readme, rename, typo, scaffold, wording, comment, changelog → **lite**
 4. fix, tweak, button, toolbar, style, padding, alignment, copy, label (explicitly small) → **brisk**
@@ -134,9 +135,9 @@ specs beat narrow tasks, E2E-or-BLOCKED before done. Defaults:
 Cadence for the task/group reviewer (name is historical — values cover more than “per task”):
 
 - `always` — dispatch task reviewer after **every** implementer. No current preset uses this; pin it with `forge prefs -- --set review.perTask=always` for the old thorough behavior.
-- `per-group` — dispatch one reviewer when an OpenSpec **group** completes (`thorough`, `standard`). A group is a top-level `##` section in `openspec/changes/<name>/tasks.md` (all `- [ ]` items under that heading until the next `##`). Mid-group low-risk tasks get a pace self-check `task-review.md` only. If `tasks.md` has **no** section headings, treat the whole file as one group (review once when all tasks are done). High-risk tasks still get an **immediate** per-task review (hard floor).
-- `high-risk-only` — skip reviewer for low-risk tasks; still write a short self-check note in `task-review.md` (`APPROVED (pace: brisk/lite — self-check)`). No current preset uses this either.
-- `never` — same as high-risk-only after hard floor (`brisk`, `lite`; low-risk may self-check only).
+- `per-group` — dispatch one reviewer when an OpenSpec **group** completes (`thorough`, `standard`). A group is a top-level `##` section in `openspec/changes/<name>/tasks.md` (all `- [ ]` items under that heading until the next `##`). Mid-group tasks get **no** review and no review file — high-risk included. If `tasks.md` has **no** section headings, treat the whole file as one group (review once when all tasks are done).
+- `high-risk-only` — at group close, dispatch a reviewer only when the group holds a high-risk task line; otherwise write a coordinator self-check `group-review.md` (`Reviewer: coordinator — APPROVED (pace self-check)`). No current preset uses this either.
+- `never` — same as high-risk-only after hard floor (`brisk`, `lite`).
 
 On every value: a **docs-only group** (every task carries a valid docs-only `--no-tdd` declaration) gets a coordinator self-check `group-review.md`, never a dispatched reviewer. Every reviewer packet carries `forge review-precheck` output, so reviewers judge reasons rather than re-run suites and ledgers.
 

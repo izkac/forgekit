@@ -6,7 +6,7 @@ Prefer **`/forge:apply`** over bare `/opsx:apply` — same OpenSpec CLI steps pl
    Per pending `##` group in tasks.md (not per checkbox):
    - Show which group is being worked on
    - Dispatch one **implementer** for the group (tasks in order). Split 1:1 only when that task's own line is money/auth/contracts/migrations/secrets
-   - At group close: one **task reviewer**. Mid-group low-risk: coordinator self-check. Immediate review only for the high-risk task line — not because the change name matched
+   - At group close: one **task reviewer**. Mid-group: nothing, high-risk included — reviews never run per task. A group holding a high-risk task line always gets a dispatched reviewer — not because the change name matched
    - Keep changes minimal and focused
    - Mark each task complete in the tasks file: `- [ ]` → `- [x]` (Forge fleet/status derive progress from these checkboxes)
    - Continue to the next group

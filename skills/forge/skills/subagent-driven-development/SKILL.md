@@ -17,7 +17,7 @@ Use when you have an implementation plan with mostly independent tasks and you'r
 
 ## Pace
 
-Honor [../../references/pace.md](../../references/pace.md) (`forge prefs` / session `resolvedPace`). Reviewers may be deferred to **`tasks.md` group** boundaries under `standard` (`per-group`), or skipped for low-risk work under `brisk`/`lite`; **never** skip review for a task whose **own line** is money/auth/contracts/migrations (immediate per-task review). A high-risk change name does not make every task 1:1. Tier-2 test evidence stays mandatory for behavior changes on every task.
+Honor [../../references/pace.md](../../references/pace.md) (`forge prefs` / session `resolvedPace`). Reviews land on **`tasks.md` group** boundaries at most — never after one task inside a group, high-risk included. Under `brisk`/`lite` a low-risk group gets a self-check; a group holding a task whose **own line** is money/auth/contracts/migrations always gets a dispatched reviewer at group close. A high-risk change name does not make every task 1:1. Tier-2 test evidence stays mandatory for behavior changes on every task.
 
 ## Per-unit loop
 
@@ -25,9 +25,9 @@ Honor [../../references/pace.md](../../references/pace.md) (`forge prefs` / sess
 2. Dispatch **implementer** for the unit — [../../subagents/implementer-prompt.md](../../subagents/implementer-prompt.md), listing every task in the unit in order. Answer any questions it asks before letting it proceed.
 3. Dispatch **reviewer** when pace requires it — [../../subagents/task-reviewer-prompt.md](../../subagents/task-reviewer-prompt.md) (spec compliance gates quality), covering every task in the unit in one pass:
    - `always` → after this unit
-   - `per-group` → after the last unit in the current `##` group (or immediately if high-risk); mid-group low-risk → self-check only
-   - `high-risk-only` / `never` → only high-risk (hard floor)
-   If skipped, write a pace self-check `task-review.md`. Group reviews write `group-review.md` covering every task in the section.
+   - `per-group` → after the last unit in the current `##` group; mid-group → nothing (no review, no file), high-risk included
+   - `high-risk-only` / `never` → at group close, only when the group holds a high-risk task line (hard floor)
+   A skipped group-close review writes a pace self-check `group-review.md`. Group reviews write `group-review.md` covering every task in the section.
 4. Reviewer REJECTED → same implementer fixes → re-review. Repeat until APPROVED (cap at `review.maxRounds`). Never skip the re-review when a reviewer was dispatched.
 5. Save test evidence; mark each task in the unit complete.
 6. After all units: proceed to verify/review phases (leftover sweep: specs always → `spec-verify.md`; OpenSpec when available → `openspec-verify.md`; then final reviewer subject to pace).
@@ -47,7 +47,7 @@ order, keeping its context warm across them.
 **Split a group into smaller units when any of these is true:**
 
 - **A task is high-risk** — money, auth, shared contracts, migrations, secrets.
-  Those keep 1:1 dispatch, always, with their own review. Match that **task
+  Those keep 1:1 implementer dispatch, always; they are reviewed with their group. Match that **task
   line**, not the change slug. Not negotiable, and not a judgment call about
   how risky the rest of the change looks.
 - **The group exceeds 4 tasks.** Split into units of at most 4. A long unit puts

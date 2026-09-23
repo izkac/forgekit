@@ -34,6 +34,16 @@ turn-end only when the active Forge session claims completion while
 - WHEN the Stop hook runs
 - THEN it exits 0 and never blocks
 
+#### Scenario: Nudges an unfinished session after an approved final review
+
+- GIVEN an active session in verify/review/finish with a green
+  `forge integrity-check`
+- AND `reviews/final-review.md` exists and its head does not say
+  `NOT READY` or `REJECTED`
+- WHEN the Stop hook runs
+- THEN it emits `{"decision":"block","reason":…}` naming `forge phase done`
+  and the `--allow-incomplete` path for human-only leftovers
+
 #### Scenario: Loop protection
 
 - GIVEN hook input with `stop_hook_active: true`

@@ -23,13 +23,15 @@ On test failures or unexpected behavior, use [../skills/systematic-debugging/SKI
 
 | `review.perTask` | When to dispatch reviewer |
 | ---------------- | ------------------------- |
-| `always` | After every unit (`thorough`) |
-| `per-group` | When the unit closes a `tasks.md` group (`##` section — OpenSpec or specs engine), or immediately when **that unit's task line** is high-risk (`standard`) |
-| `high-risk-only` / `never` | Only when hard-floor high-risk |
+| `always` | After every unit (explicit override only — no preset uses it) |
+| `per-group` | When the unit closes a `tasks.md` group (`##` section — OpenSpec or specs engine) (`thorough`, `standard`) |
+| `high-risk-only` / `never` | At group close, only when the group holds a hard-floor high-risk task line |
 
-A high-risk task is its own unit and gets its own reviewer, on every pace — that
-floor is what lets the rest of a change ride in larger, cheaper units. Match the
-**task line**, not the change name or slug.
+**Reviews land on group boundaries at most — never after a single task inside a
+group, high-risk included.** A high-risk task line (match the **task line**, not
+the change name or slug) means its group's reviewer is always dispatched — never
+a self-check — on every pace, at `--tier capable`. It does not buy an extra
+reviewer mid-group.
 
 **Review labels — the rules; the reasoning is in [../references/review-labels.md](../references/review-labels.md).**
 
@@ -67,7 +69,7 @@ even when the session has full host evidence including that group's own dispatch
 An unrecognised phrasing is scored as an outside reader you never had, and lands
 permanently in `sessions.jsonl` and the fleet totals.
 
-When skipping the reviewer, still write `task-review.md` with `Reviewer: coordinator — APPROVED (pace self-check)` and keep tier-2 evidence mandatory for behavior changes. For `per-group` reviews, cover all tasks in that section in one reviewer pass; save as `group-review.md` next to the group’s tasks (or under `.forge/sessions/<id>/tasks/group-<nn>-<slug>/group-review.md`). Prefer `--tier fast` when `models.bias` is `prefer-fast` and the task is mechanical. Cap fix→re-review loops at `review.maxRounds`.
+Mid-group units get no review and no review file. When pace skips the reviewer at a group close, write `group-review.md` with `Reviewer: coordinator — APPROVED (pace self-check)`; tier-2 evidence stays mandatory for behavior changes. For `per-group` reviews, cover all tasks in that section in one reviewer pass; save as `group-review.md` next to the group’s tasks (or under `.forge/sessions/<id>/tasks/group-<nn>-<slug>/group-review.md`). Prefer `--tier fast` when `models.bias` is `prefer-fast` and the task is mechanical. Cap fix→re-review loops at `review.maxRounds`.
 
 ## Plan source
 
@@ -125,8 +127,9 @@ where Forge's input tokens go.
 2. Write the unit's brief using [../subagents/implementer-prompt.md](../subagents/implementer-prompt.md) — `.forge/sessions/<id>/tasks/<nn>-<slug>/brief.md` for a single-task unit, `.forge/sessions/<id>/tasks/group-<nn>-<slug>/brief.md` for a multi-task one. Fill `{SESSION_ID}` with the current session id, `{TASK_LIST}` with one block per task (full text, in order, each naming its own task id), and `{TASK_IDS}` with those ids; never leave a target for the implementer to infer from `.forge/active.json`. Fill `{KNOWN_FALSE}` from `forge refute list --task <task-id> --md` (or `none recorded`) — a re-dispatch that omits the refutations from the last round is how the same wrong assumption gets implemented twice.
 3. Dispatch **implementer** subagent — brief includes [../references/tdd-core.md](../references/tdd-core.md). **Model:** follow [../references/model-selection.md](../references/model-selection.md) — resolve via `forge resolve-model --tier <fast|standard|capable>` (billing defaults to **`included`**). Use `fast` when the whole unit is mechanical (1–2 files, complete spec); `standard` for multi-file integration; escalate one capability tier (still `included`) when re-dispatching after `BLOCKED`. Judge the tier from the unit, not from its easiest task. If `omitModel` is true, **omit** the Task `model` parameter entirely (never pass a host-list slug); otherwise pass `model` exactly.
 4. **Reviewer** (unless pace skips it):
-   - **`always` / high-risk hard floor:** dispatch [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md) for this unit → `task-review.md` (one pass covering every task in it; `group-review.md` if the unit is a whole group).
-   - **`per-group` at group boundary:** dispatch one reviewer covering **all tasks in the just-finished `tasks.md` group** → `group-review.md` (include each task id + paths). Mid-group low-risk units: self-check `task-review.md` only.
+   - **Mid-group unit (any pace but `always`, high-risk included):** no reviewer, no review file — continue to the next unit.
+   - **Group boundary:** dispatch [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md) once, covering **all tasks in the just-finished `tasks.md` group** → `group-review.md` (include each task id + paths). Under `brisk`/`lite` only when the group holds a high-risk task line; otherwise a self-check `group-review.md`.
+   - **`always` (explicit override):** dispatch after every unit → `task-review.md`.
    - **Docs-only groups get no dispatched reviewer, on every pace.** A group whose every task carries a valid docs-only `--no-tdd` declaration (instruction text, README, changelog — no handler, no test, no harness step) is reviewed by a coordinator self-check `group-review.md` (`Reviewer: coordinator — APPROVED (pace self-check)`). Measured: a full sonnet reviewer on a docs group read every line and found nothing. A group with even one behavior task, or any high-risk task, still gets its reviewer.
    - `{PRECHECK}` is **required** — run `forge review-precheck` and paste its output verbatim. It verifies every ledger pair, no-TDD declaration, allowance and integrity gate so the reviewer judges reasons instead of re-running suites; an exit 1 means fix the integrity problems before paying for a reviewer.
    - `{DIFF_RANGE}` is **required** — the reviewer returns `NEEDS_CONTEXT` without it and you pay for the dispatch twice. Get it from `forge checkpoint --range --last` (`reviewTarget`), which also names the untracked files a diff hides.
@@ -206,7 +209,7 @@ where Forge's input tokens go.
    1 re-reads all previous tasks' diffs.
 9. Repeat.
 
-**Unit sizing:** the rules live in [subagent-driven-development](../skills/subagent-driven-development/SKILL.md#work-units-what-one-implementer-dispatch-covers). One group per dispatch by default; at most 4 tasks; split when a later task needs an earlier one's *review* verdict or when the tasks share no files or spec. **Never put a money/auth/contract/migration task in a multi-task unit** — those keep 1:1 dispatch with their own review, whatever the pace says.
+**Unit sizing:** the rules live in [subagent-driven-development](../skills/subagent-driven-development/SKILL.md#work-units-what-one-implementer-dispatch-covers). One group per dispatch by default; at most 4 tasks; split when a later task needs an earlier one's *review* verdict or when the tasks share no files or spec. **Never put a money/auth/contract/migration task in a multi-task unit** — those keep a 1:1 implementer dispatch, whatever the pace says. Their review is still the group's review at group close.
 
 ```bash
 forge phase implement --tasks-complete <N> --subagents <total dispatched so far>

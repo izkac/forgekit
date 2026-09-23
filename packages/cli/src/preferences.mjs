@@ -174,7 +174,7 @@ export function suggestPaceFromSignals(signalText = '') {
     return {
       pace: 'standard',
       reason:
-        'high-risk signals (money/auth/contracts/migrations/secrets) — session stays standard; only matching task lines get an immediate review',
+        'high-risk signals (money/auth/contracts/migrations/secrets) — session stays standard; groups holding matching task lines always get a dispatched reviewer',
     };
   }
   if (STANDARD_RE.test(text)) {
@@ -354,6 +354,11 @@ function isTaskLineText(text) {
 /**
  * Whether to dispatch a reviewer *now* (after the current task / group boundary).
  *
+ * Reviews land on group boundaries at most — never after one task inside a
+ * group. High risk does not buy an immediate per-task reviewer; it forces a
+ * dispatched reviewer at group close on paces that would otherwise skip it
+ * (`never` / `high-risk-only`). Only an explicit `always` reviews every unit.
+ *
  * @param {Record<string, unknown>} effective
  * @param {{
  *   highRisk?: boolean,
@@ -371,13 +376,9 @@ export function shouldRunPerTaskReview(effective, ctx = {}) {
   const highRisk = Boolean(ctx.highRisk) || fromTaskLine;
   const perTask = effective.review?.perTask;
   if (perTask === 'always') return true;
-  if (perTask === 'per-group') {
-    // Hard floor: money/auth/contracts/… still get an immediate per-task review.
-    if (highRisk) return true;
-    return Boolean(ctx.groupComplete);
-  }
-  if (perTask === 'high-risk-only') return highRisk;
-  if (perTask === 'never') return highRisk; // hard floor
+  if (!ctx.groupComplete) return false;
+  // Hard floor: a group holding money/auth/contracts/… is reviewed at its close.
+  if (perTask === 'high-risk-only' || perTask === 'never') return highRisk;
   return true;
 }
 

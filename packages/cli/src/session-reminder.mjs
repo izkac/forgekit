@@ -12,6 +12,7 @@ import { FORGE_DIR, loadSession, resolveSessionId, REPO_ROOT } from './lib.mjs';
 import {
   drainInbox,
   flushPendingSessions,
+  isTerminalPhase,
   liveOverlaps,
   queueMessage,
   sessionDirFor,
@@ -33,6 +34,9 @@ function getActiveSessionInfo() {
   if (!resolved.id) return null;
   try {
     const { dir, session } = loadSession(resolved.id);
+    // A finished session is not work to resume — announcing it with "Resume:"
+    // sends the next conversation back into a session that is already over.
+    if (isTerminalPhase(session.phase)) return null;
     healSessionProgress({ cwd: REPO_ROOT, sessionDir: dir, session });
     return { active: { sessionId: resolved.id }, dir, session, resolved };
   } catch {
@@ -133,7 +137,7 @@ export function buildForgeMessage(info) {
   lines.push(RUNTIME_INTEGRITY_REMINDER);
   lines.push('Resume: invoke the forge skill for the current phase.');
   lines.push(
-    'Honor pace: standard/thorough = one review per tasks.md ## group. Immediate review only when that task line is money/auth/contracts/migrations/secrets — not the change name. See forge references/pace.md.',
+    'Honor pace: at most one review per tasks.md ## group — never per task, high-risk included. A group with a money/auth/contracts/migrations/secrets task line always gets a dispatched reviewer. See forge references/pace.md.',
   );
   lines.push('Skip Forge for this task only: /forge:skip');
   lines.push('Guide: Forge skill + docs/forge.md (under the installed forge skill)');

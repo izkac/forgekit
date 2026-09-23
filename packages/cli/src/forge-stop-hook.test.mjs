@@ -176,6 +176,32 @@ test('claim-state via phase (verify) with green integrity-check: exit 0, empty s
   assert.equal(r.stdout, '');
 });
 
+function writeFinalReview(sessionDir, body) {
+  fs.mkdirSync(path.join(sessionDir, 'reviews'), { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'reviews', 'final-review.md'), body, 'utf8');
+}
+
+test('approved final review but no `forge phase done`: blocks and names the finish steps', () => {
+  const { root, sessionDir } = makeProject({ phase: 'review' });
+  writeFinalReview(sessionDir, 'Reviewer: claude-opus-5 (final reviewer)\n\n**APPROVED.** Ready to ship.\n');
+  const fake = writeFakeForge(root, { exitCode: 0, problems: [] });
+  const r = runHook(root, {}, { env: { FORGE_STOP_HOOK_FORGE_CMD: fakeForgeCmd(fake) } });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /forge phase done/);
+  assert.match(out.reason, /--allow-incomplete/);
+});
+
+test('final review NOT READY: no finish nudge — the fix round is the work', () => {
+  const { root, sessionDir } = makeProject({ phase: 'review' });
+  writeFinalReview(sessionDir, 'Reviewer: claude-opus-5 (final reviewer)\n\nAssessment: **NOT READY**.\n');
+  const fake = writeFakeForge(root, { exitCode: 0, problems: [] });
+  const r = runHook(root, {}, { env: { FORGE_STOP_HOOK_FORGE_CMD: fakeForgeCmd(fake) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '');
+});
+
 test('stop_hook_active: true short-circuits before claim-state, even when red: exit 0, empty stdout, no spawn', () => {
   const { root } = makeProject({ phase: 'review' });
   const sentinel = path.join(root, 'SPAWNED');

@@ -1,6 +1,20 @@
 # Finish phase
 
-Before marking done, integrity must pass (or the user must approve an incomplete finish):
+**Finish in the same turn as an approved final review.** Do not end the turn on a
+summary with the session still in `review` — that is how sessions stall: the next
+message is a new question, and nothing ever runs `forge phase done`. Archiving is
+part of the approved plan, not a new decision — do it without pausing to ask.
+
+**Only human/manual tasks left** (hardware check, a sign-off, a deploy the user
+runs)? Do not leave the session open waiting for them:
+
+```bash
+forge phase done --allow-incomplete "4.2 needs a manual USB plug-in test"
+```
+
+and tell the user exactly what is left for them.
+
+Before marking done, integrity must pass (or record an honest `--allow-incomplete` reason, as above):
 
 ```bash
 forge integrity-check    # spine + deferrals + executed e2e (green, current) / BLOCKED
@@ -24,7 +38,7 @@ questions in that file for platform/async work (L3). See [usage.md](../../../doc
 ## OpenSpec path (`planType: openspec`)
 
 1. Confirm all tasks complete in `tasks.md`.
-2. User runs or approves `/opsx:archive` / `openspec archive`. Enforced: the
+2. Run `openspec archive` (`/opsx:archive`) — no separate approval. Enforced: the
    `forge phase done` below refuses while the change is still live, unless you
    pass `--archive-waived "<reason>"`.
 3. **ADR follow-up (optional):** if `.forge/config.json` has `adr.enabled: true`
@@ -40,7 +54,7 @@ forge cleanup
 ## Specs path (`planType: specs`)
 
 1. Confirm all tasks complete in `<plan.dir>/changes/<name>/tasks.md`.
-2. **Archive** (with user approval) — prefer the CLI (merges delta specs into
+2. **Archive** (no separate approval) — prefer the CLI (merges delta specs into
    `<plan.dir>/specs/` first, matching OpenSpec archive behavior):
 
    ```bash

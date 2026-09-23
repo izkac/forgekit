@@ -42,7 +42,7 @@ forge doctor                        # plan-engine readiness (OpenSpec CLI or spe
 ```
 
 Honor [references/pace.md](./references/pace.md) in implement / verify / review.
-Hard floor: money/auth/contracts/migrations always get per-task review (even under `standard` mid-group / `brisk` / `lite`).
+Reviews land on `tasks.md` group boundaries at most — never per task. Hard floor: a group holding a money/auth/contracts/migrations task line always gets a dispatched reviewer at group close (even under `brisk` / `lite`).
 Local overlays: [docs/forge.md](./docs/forge.md) § Checkout-local overrides.
 
 ## Bundled skills

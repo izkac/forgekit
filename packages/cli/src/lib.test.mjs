@@ -579,6 +579,16 @@ test('status and the session-start reminder report ambiguity instead of assertin
   assert.match(out, /2 sessions are unfinished/, 'the line the agent believes must say so');
   assert.match(out, /one review per tasks\.md ## group/);
 
+  // A finished session the pointer still names is not announced as resumable.
+  for (const id of ['sess-a', 'sess-b']) {
+    const f = path.join(root, '.forge', 'sessions', id, 'session.json');
+    fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), phase: 'done' }));
+  }
+  const done = execFileSync(process.execPath, [reminder], { cwd: root, encoding: 'utf8' });
+  assert.doesNotMatch(done, /Active Forge session|Resume:/);
+  plant('sess-a', 'billing');
+  plant('sess-b', 'search');
+
   // With one session open there is nothing to report, and neither should.
   fs.rmSync(path.join(root, '.forge', 'sessions', 'sess-b'), { recursive: true });
   const single = JSON.parse(

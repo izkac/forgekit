@@ -3,7 +3,8 @@
  * Stop: the turn-end completion backstop. Blocks the turn from ending only
  * when the active Forge session claims completion (phase in
  * verify/review/finish, or implement with tasksComplete >= tasksTotal) while
- * `forge integrity-check` still fails.
+ * `forge integrity-check` still fails — or when integrity is green and an
+ * approved final review exists but `forge phase done` never ran.
  *
  * Design D-stop-gate: everything up to the claim-state test is plain
  * `node:fs` — no child process. A child (`forge integrity-check`) is spawned
@@ -126,7 +127,29 @@ async function main() {
     shell,
   });
 
-  if (r.status === 0) process.exit(0);
+  if (r.status === 0) {
+    // Integrity is green, but an approved final review with no `forge phase
+    // done` is the stall: the turn ends on a summary and the session sits in
+    // review forever. Nudge once per turn (stop_hook_active stops the loop).
+    let finalReview = null;
+    try {
+      finalReview = fs.readFileSync(
+        path.join(REPO_ROOT, '.forge', 'sessions', sessionId, 'reviews', 'final-review.md'),
+        'utf8',
+      );
+    } catch {
+      process.exit(0);
+    }
+    const head = finalReview.split(/\r?\n/).slice(0, 20).join('\n');
+    if (/\b(NOT READY|REJECTED)\b/.test(head)) process.exit(0);
+    const reason =
+      `Forge session ${sessionId} has an approved final review but was never finished.\n` +
+      'Finish now (phases/finish.md): archive the change, then `forge phase done` and `forge cleanup`.\n' +
+      'If only human/manual tasks remain, run `forge phase done --allow-incomplete "<what is left>"` ' +
+      'and tell the user what they still need to do.';
+    process.stdout.write(`${JSON.stringify({ decision: 'block', reason })}\n`);
+    process.exit(0);
+  }
 
   const out = JSON.parse(r.stdout);
   const problems = Array.isArray(out.problems) ? out.problems : [];

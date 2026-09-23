@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.61 — 2026-09-23
+
+- **Reviews run per group, never per task.** The high-risk hard floor no longer
+  buys an immediate per-task reviewer: a `tasks.md` group holding a
+  money/auth/contracts/migrations task line gets a dispatched reviewer at group
+  close (never a self-check), on every pace. Mid-group units get no review and
+  no self-check file. `shouldRunPerTaskReview` returns false mid-group unless
+  `review.perTask=always` is set explicitly.
+- **Sessions finish instead of stalling in review.** `finish.md` now says to
+  finish in the same turn as an approved final review, archive without a
+  separate approval pause, and use `forge phase done --allow-incomplete` when
+  only human tasks remain. The Stop hook blocks once when an approved
+  `final-review.md` exists but `forge phase done` never ran. The session-start
+  reminder no longer announces a `done` session as one to resume.
+
 ## 0.3.60 — 2026-09-10
 
 - **Refutations outlive the session.** `forge score --write` (phase done) now

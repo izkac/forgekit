@@ -428,7 +428,7 @@ never overridden.
 | `thorough` | Review once per **OpenSpec group**, same cadence as `standard`, with more fix→re-review rounds before escalating; full-workspace tier 3 |
 | `standard` | Review once per **OpenSpec group**; full-workspace tier 3 |
 | `brisk` | Review high-risk tasks only; affected-workspace tier 3 (final review still runs) |
-| `lite` | Skip per-task review for low-risk (final review still runs); audit tier-2 only at verify |
+| `lite` | Skip group review for low-risk groups (final review still runs); audit tier-2 only at verify |
 
 ### Effort matrix (exact knobs)
 
@@ -444,9 +444,9 @@ Defaults from `packages/cli/src/preferences.defaults.json`:
 | **models.bias** | default | default | prefer-fast | prefer-fast |
 | **brainstorm.depth** | full | full | short (≤2 rounds) | minimal |
 
-\*Hard floor: money / auth / contracts / migrations / secrets still get per-task review (and final if the session touched high-risk), even under `brisk` / `lite` / mid-group `standard`.
+\*Hard floor: a group holding a money / auth / contracts / migrations / secrets task line always gets a dispatched reviewer at group close (and the final review), even under `brisk` / `lite`. Reviews never run per task inside a group.
 
-**`thorough` vs `standard`:** identical cadence — both review once per OpenSpec `tasks.md` group (`##` section), except high-risk tasks which still get an immediate per-task review — and identical review `depth` (`full`). They differ only in `maxRounds`: thorough allows 3 fix→re-review rounds before escalating remaining findings to the human, standard allows 2.
+**`thorough` vs `standard`:** identical cadence — both review once per OpenSpec `tasks.md` group (`##` section), high-risk tasks included — and identical review `depth` (`full`). They differ only in `maxRounds`: thorough allows 3 fix→re-review rounds before escalating remaining findings to the human, standard allows 2.
 
 **`auto`** is not a preset — it resolves from signals at session start, then may re-resolve at plan time and via task-count escalation (below); not a separate knob matrix:
 

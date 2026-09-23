@@ -84,11 +84,12 @@ test('expandPace standard uses per-group review', () => {
   assert.equal(expanded.verify.tier3, 'full-workspace');
 });
 
-test('per-group: review only at group boundary unless high-risk', () => {
+test('per-group: review only at group boundary, high-risk included', () => {
   const expanded = expandPace({ pace: 'standard' });
   assert.equal(shouldRunPerTaskReview(expanded, { highRisk: false, groupComplete: false }), false);
   assert.equal(shouldRunPerTaskReview(expanded, { highRisk: false, groupComplete: true }), true);
-  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true, groupComplete: false }), true);
+  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true, groupComplete: false }), false);
+  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true, groupComplete: true }), true);
 });
 
 test('expandPace thorough uses per-group cadence, deeper rounds', () => {
@@ -144,10 +145,11 @@ test('session preferencesOverride wins without rewriting local', () => {
   assert.equal(fs.readFileSync(path.join(forgeDir, 'preferences.local.json'), 'utf8'), before);
 });
 
-test('hard floor: shouldRunPerTaskReview forces an immediate per-task review under lite on high risk', () => {
+test('hard floor: under lite a high-risk group is reviewed at its close, never mid-group', () => {
   const expanded = expandPace({ pace: 'lite' });
-  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true }), true);
-  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: false }), false);
+  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true, groupComplete: true }), true);
+  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: true, groupComplete: false }), false);
+  assert.equal(shouldRunPerTaskReview(expanded, { highRisk: false, groupComplete: true }), false);
 });
 
 // lite.review.final is now unconditionally "always" (D3), and after this
@@ -262,41 +264,35 @@ test('standard and thorough: identical cadence, differing maxRounds', () => {
   );
 });
 
-test('high-risk floor: a task touching payment logic gets an immediate per-task review under lite', () => {
+test('high-risk floor: a group holding payment logic is reviewed at its close under lite, not mid-group', () => {
   const expanded = expandPace({ pace: 'lite' });
   // Sanity: lite's ordinary cadence does not review every task.
   assert.equal(expanded.review.perTask, 'never');
-  // The hard floor still fires immediately — not deferred to a group boundary —
-  // for a task whose own text reads as high-risk (money/auth/contracts/etc.).
-  assert.equal(
-    shouldRunPerTaskReview(expanded, {
-      signalText: 'wire the stripe payment refund flow',
-      groupComplete: false,
-    }),
-    true,
-  );
+  const signalText = 'wire the stripe payment refund flow';
+  assert.equal(shouldRunPerTaskReview(expanded, { signalText, groupComplete: true }), true);
+  assert.equal(shouldRunPerTaskReview(expanded, { signalText, groupComplete: false }), false);
 });
 
-test('high-risk floor: a kebab slug is not a task line — migrate in the change name does not review every task', () => {
-  const expanded = expandPace({ pace: 'standard' });
+test('high-risk floor: a kebab slug is not a task line — migrate in the change name does not trigger it', () => {
+  const expanded = expandPace({ pace: 'lite' });
   assert.equal(
     shouldRunPerTaskReview(expanded, {
       signalText: 'shared-migrate-valicon-platform-http',
-      groupComplete: false,
+      groupComplete: true,
     }),
     false,
   );
   assert.equal(
     shouldRunPerTaskReview(expanded, {
       signalText: 'Add HMAC canonicalization for the request body',
-      groupComplete: false,
+      groupComplete: true,
     }),
     true,
   );
   assert.equal(
     shouldRunPerTaskReview(expanded, {
       signalText: 'Retarget Mercury fixture paths to consumer-owned vectors',
-      groupComplete: false,
+      groupComplete: true,
     }),
     false,
   );

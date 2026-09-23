@@ -269,8 +269,8 @@ export function suggestPaceFromPlan(facts) {
   }
   if (facts.highRisk) {
     // Deliberately `standard`, not `thorough`. Risk is a property of a *task*,
-    // and the per-task hard floor (`shouldReviewTask`) already dispatches an
-    // immediate reviewer for every task that carries it, on every pace. Setting
+    // and the hard floor already forces a dispatched reviewer on every group
+    // holding such a task, on every pace. Setting
     // the session to `thorough` on top of that bought nothing for the risky
     // tasks and a full per-task reviewer for every low-risk task sharing the
     // change — one mention of "refund" in a proposal doubled the reviewer count
@@ -280,7 +280,7 @@ export function suggestPaceFromPlan(facts) {
     return {
       pace: 'standard',
       reason:
-        'plan touches money/auth/contracts/migrations — session stays standard; only matching task lines get an immediate review',
+        'plan touches money/auth/contracts/migrations — session stays standard; groups holding matching task lines always get a dispatched reviewer',
     };
   }
   if (facts.tasks >= STANDARD_TASKS) {
