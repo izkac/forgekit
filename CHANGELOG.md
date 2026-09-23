@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.62 — 2026-09-23
 
 - **Trust boundary is documented.** README, the npm package README, and
   `docs/usage.md` now say out loud that `forge evidence -- <cmd>` and
