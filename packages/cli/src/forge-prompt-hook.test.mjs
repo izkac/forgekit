@@ -1,8 +1,8 @@
 /**
  * `templates/project/claude/hooks/forge-prompt-hook.mjs` — UserPromptSubmit
- * hook that relays the raw user prompt to `forge` via spawnSync. With
- * shell:true, Node joins argv into an unquoted command string, so any shell
- * metacharacter in the prompt is interpreted rather than passed through
+ * hook that relays the raw user prompt to `forge` via spawnSync. Hooks
+ * spawn `node` + `forge.mjs` with `shell: false` on every platform, so a
+ * shell metacharacter in the prompt is an argv element, not a command
  * (finding F79).
  *
  * These tests prove: (1) the injection is closed — shell metacharacters in
@@ -10,14 +10,6 @@
  * unchanged, including metacharacters and quotes; (3) the template and
  * `.claude/hooks` copies stay identical; (4) the hook fires on `/forge` and
  * "use Forge", not on a plain work request.
- *
- * The win32 branch (where `forge` is a `.cmd` shim and needs a shell) is
- * NOT exercised here: forcing `process.platform` to `'win32'` also flips
- * Node's own internal shell selection for `shell: true` to `cmd.exe`, which
- * does not exist on this host, so `spawnSync` fails at the OS level before
- * the hook's quoting logic ever runs — a false pass, not a real one. This
- * matches `forge-test-guard.test.mjs` (the precedent this fix mirrors),
- * which does not attempt to test that branch either.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,7 +22,6 @@ import { resolveTemplatesRoot } from './init.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SRC, '..', '..', '..');
-const POSIX_ONLY = { skip: process.platform === 'win32' };
 
 const HOOK_NAMES = ['forge-prompt-hook.mjs'];
 const TEMPLATE_HOOKS = Object.fromEntries(
@@ -125,7 +116,7 @@ function runHook(hookPath, root, opts) {
 for (const name of HOOK_NAMES) {
   const HOOK = TEMPLATE_HOOKS[name];
 
-  test(`${name}: never executes shell metacharacters embedded in the prompt (command injection)`, POSIX_ONLY, () => {
+  test(`${name}: never executes shell metacharacters embedded in the prompt (command injection)`, () => {
     // A stub `forge` on PATH keeps `forge reminder` deterministic (exit
     // 0 always) so the run reaches the prompt-carrying site.
     const root = makeProject();
@@ -139,7 +130,7 @@ for (const name of HOOK_NAMES) {
     assert.ok(!fs.existsSync(marker), 'prompt text must never reach a shell as a command');
   });
 
-  test(`${name}: relays a prompt with shell metacharacters to forge byte-for-byte unchanged at every prompt-bearing spawn site`, POSIX_ONLY, () => {
+  test(`${name}: relays a prompt with shell metacharacters to forge byte-for-byte unchanged at every prompt-bearing spawn site`, () => {
     const root = makeProject();
     const stubDir = tmp('hook-injection-stub-');
     const logFile = path.join(stubDir, 'calls.jsonl');
@@ -194,7 +185,7 @@ test('prompt hook matcher stays in sync with isForgeInvocation', () => {
   assert.ok(cliSrc.includes(needle), 'triage-prompt.mjs missing the use-Forge matcher');
 });
 
-test('prompt hook fires on natural-language use Forge', POSIX_ONLY, () => {
+test('prompt hook fires on natural-language use Forge', () => {
   const root = makeProject();
   const stubDir = tmp('hook-use-forge-stub-');
   const logFile = path.join(stubDir, 'calls.jsonl');
@@ -212,7 +203,7 @@ test('prompt hook fires on natural-language use Forge', POSIX_ONLY, () => {
   );
 });
 
-test('prompt hook stays silent on a plain work request', POSIX_ONLY, () => {
+test('prompt hook stays silent on a plain work request', () => {
   const root = makeProject();
   const stubDir = tmp('hook-plain-stub-');
   const logFile = path.join(stubDir, 'calls.jsonl');

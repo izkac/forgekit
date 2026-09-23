@@ -8,12 +8,10 @@
  * (task 5.2, not implemented here) and read by reviewers.
  *
  * `shell: false`: the command is spawned as an argv array straight to
- * execve, never through a shell string — this repo just fixed a
- * shell-injection defect in `templates/project/claude/hooks/forge-test-guard.mjs`
- * that came from building a shell command string by hand. There is no
- * Windows shim to work around here (unlike that hook's `forge`, which is a
- * `.cmd` on win32): the command under test is whatever the caller names,
- * spawned directly.
+ * execve, never through a shell string — same posture as the shipped hooks,
+ * which invoke `forge` via `node` + `forge.mjs` so they never need
+ * `shell: true` for the Windows `.cmd` shim. The command under test is
+ * whatever the caller names, spawned directly.
  *
  * Not gate-class: it records evidence, it does not weaken a gate. Session
  * resolution follows the non-strict pattern (`resolveSessionOrExit`, `strict:

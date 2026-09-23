@@ -11,6 +11,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { resolveForgeInvocation } from './resolve-forge.mjs';
 
 const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -31,11 +32,12 @@ function readStdin() {
 const raw = await readStdin();
 if (!raw) process.exit(0);
 
-const r = spawnSync('forge', ['enforce-model'], {
+const { cmd, baseArgs } = resolveForgeInvocation();
+const r = spawnSync(cmd, [...baseArgs, 'enforce-model'], {
   input: raw,
   encoding: 'utf8',
   cwd: REPO_ROOT,
-  shell: true,
+  shell: false,
 });
 
 if (r.status === 0 && r.stdout && r.stdout.trim()) {

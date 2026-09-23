@@ -73,7 +73,14 @@ Existing groups in `settings.json` are never reordered. Forge-owned retired hook
 *(unchanged)*
 
 ### Requirement: Hooks never pass untrusted text through a shell
-The remaining prompt-bearing hook is `forge-prompt-hook.mjs`. The retired `forge-triage-hook.mjs` is no longer in the shipped set.
+The remaining prompt-bearing hook is `forge-prompt-hook.mjs`. The retired `forge-triage-hook.mjs` is no longer in the shipped set. Shipped hooks SHALL invoke `forge` as `node` + `forge.mjs` (argv array, `shell: false`) on every platform, including Windows — they SHALL NOT run `forge.cmd` through `cmd.exe`.
+
+#### Scenario: Windows hooks spawn forge without a shell
+
+- **GIVEN** a shipped hook template under `templates/project/claude/hooks/` or `templates/project/cursor/hooks/`
+- **WHEN** it needs to run `forge`
+- **THEN** it resolves `forge.mjs` and spawns `node <forge.mjs> …` with `shell: false`
+- **AND** no hook template sets `shell: true` (or `shell: process.platform === 'win32'`) on that `forge` spawn
 
 #### Scenario: The shipped hook and the project copy stay identical
 

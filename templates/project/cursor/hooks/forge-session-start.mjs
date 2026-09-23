@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveForgeInvocation } from './resolve-forge.mjs';
 
 function gitRoot() {
   const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
@@ -21,10 +22,11 @@ if (!root) process.exit(0);
 
 if (!fs.existsSync(path.join(root, '.forge', 'active.json'))) process.exit(0);
 
-const reminder = spawnSync('forge', ['reminder', '--format', 'cursor'], {
+const { cmd, baseArgs } = resolveForgeInvocation();
+const reminder = spawnSync(cmd, [...baseArgs, 'reminder', '--format', 'cursor'], {
   cwd: root,
   encoding: 'utf8',
-  shell: process.platform === 'win32',
+  shell: false,
   stdio: ['ignore', 'inherit', 'ignore'],
 });
 process.exit(reminder.status === 0 ? 0 : 0);

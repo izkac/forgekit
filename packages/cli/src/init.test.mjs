@@ -126,7 +126,8 @@ test('claude init ships the model-policy hook and registers it in the snippet', 
 
     const hook = path.join(cwd, '.claude', 'hooks', 'forge-model-hook.mjs');
     assert.ok(fs.existsSync(hook), 'hook body copied into the project');
-    assert.match(fs.readFileSync(hook, 'utf8'), /forge['"],\s*\['enforce-model'\]/);
+    assert.match(fs.readFileSync(hook, 'utf8'), /resolveForgeInvocation/);
+    assert.match(fs.readFileSync(hook, 'utf8'), /enforce-model/);
 
     const snippet = JSON.parse(
       fs.readFileSync(path.join(cwd, '.claude', 'forge-hooks.snippet.json'), 'utf8'),
@@ -146,7 +147,8 @@ test('claude init ships the test-guard hook and registers it in the snippet', ()
 
     const hook = path.join(cwd, '.claude', 'hooks', 'forge-test-guard.mjs');
     assert.ok(fs.existsSync(hook), 'hook body copied into the project');
-    assert.match(fs.readFileSync(hook, 'utf8'), /forge['"],\s*\['guard',\s*'check'/);
+    assert.match(fs.readFileSync(hook, 'utf8'), /resolveForgeInvocation/);
+    assert.match(fs.readFileSync(hook, 'utf8'), /'guard',\s*'check'/);
 
     const snippet = JSON.parse(
       fs.readFileSync(path.join(cwd, '.claude', 'forge-hooks.snippet.json'), 'utf8'),
@@ -190,6 +192,10 @@ test('claude init ships the stop-hook and registers a Stop entry in the snippet'
     const hook = path.join(cwd, '.claude', 'hooks', 'forge-stop-hook.mjs');
     assert.ok(fs.existsSync(hook), 'hook body copied into the project');
     assert.match(fs.readFileSync(hook, 'utf8'), /'integrity-check'/);
+    assert.ok(
+      fs.existsSync(path.join(cwd, '.claude', 'hooks', 'resolve-forge.mjs')),
+      'shared node+forge.mjs helper is copied so hooks never need shell:true',
+    );
 
     const snippet = JSON.parse(
       fs.readFileSync(path.join(cwd, '.claude', 'forge-hooks.snippet.json'), 'utf8'),
@@ -264,6 +270,10 @@ test('cursor init creates .cursor/hooks.json with forge sessionStart', () => {
     assert.ok(
       cmds.some((c) => String(c).includes('forge-session-start')),
       'sessionStart runs forge-session-start',
+    );
+    assert.ok(
+      fs.existsSync(path.join(cwd, '.cursor', 'hooks', 'resolve-forge.mjs')),
+      'shared node+forge.mjs helper is copied so hooks never need shell:true',
     );
     assert.ok(fs.existsSync(path.join(cwd, '.cursor', 'forge-hooks.snippet.json')));
   } finally {
