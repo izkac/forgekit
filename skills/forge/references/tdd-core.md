@@ -27,6 +27,9 @@ CLI itself, not by you reporting a command and exit code for the coordinator
 to write down:
 
 ```bash
+# Operator opt-in first (once per checkout or CI job) — see docs/usage.md#trust-boundary-what-forge-will-run
+#   FORGEKIT_ALLOW_EXEC=1
+#   or: forge prefs -- --set exec.allowCallerCommands=true
 forge tdd run --task <nn-slug> --expect fail -- <tier-2 cmd>   # RED, before you write production code
 # … write the simplest code that passes …
 forge tdd run --task <nn-slug> --expect pass -- <tier-2 cmd>   # GREEN, once it's green

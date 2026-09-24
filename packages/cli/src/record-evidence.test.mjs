@@ -631,7 +631,14 @@ test('executed mode records the observed exit code and an output tail', () => {
   const dir = tmp('forge-exec-');
   const forgeDir = makeForgeFixture(dir, 'sess-x');
   const result = runRecordEvidence(
-    makeOpts({ command: null, exit: null, summary: null, cmdArgv: [process.execPath, '-e', "console.log('7/7 pass')"] }),
+    makeOpts({
+      command: null,
+      exit: null,
+      summary: null,
+      cmdArgv: [process.execPath, '-e', "console.log('7/7 pass')"],
+      env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1' },
+      confirm: false,
+    }),
     dir,
     FIXED_NOW,
   );
@@ -646,7 +653,14 @@ test('executed mode refuses a failing command without --allow-fail and writes no
   const dir = tmp('forge-exec-fail-');
   const forgeDir = makeForgeFixture(dir, 'sess-y');
   const result = runRecordEvidence(
-    makeOpts({ command: null, exit: null, summary: null, cmdArgv: [process.execPath, '-e', 'process.exit(3)'] }),
+    makeOpts({
+      command: null,
+      exit: null,
+      summary: null,
+      cmdArgv: [process.execPath, '-e', 'process.exit(3)'],
+      env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1' },
+      confirm: false,
+    }),
     dir,
     FIXED_NOW,
   );
@@ -658,7 +672,11 @@ test('executed mode refuses a failing command without --allow-fail and writes no
 test('executed mode rejects a transcribed --exit alongside --', () => {
   const dir = tmp('forge-exec-mix-');
   makeForgeFixture(dir, 'sess-z');
-  const result = runRecordEvidence(makeOpts({ cmdArgv: [process.execPath, '-e', '0'] }), dir, FIXED_NOW);
+  const result = runRecordEvidence(
+    makeOpts({ cmdArgv: [process.execPath, '-e', '0'], env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1' }, confirm: false }),
+    dir,
+    FIXED_NOW,
+  );
   assert.equal(result.exitCode, 1);
   assert.match(result.message, /transcribed path/);
 });
@@ -667,13 +685,31 @@ test('--tier3 stamps verify-runs.jsonl with the observed exit and exits non-zero
   const dir = tmp('forge-tier3-');
   const forgeDir = makeForgeFixture(dir, 'sess-t');
   const green = runRecordEvidence(
-    makeOpts({ task: null, command: null, exit: null, summary: null, tier3: true, cmdArgv: [process.execPath, '-e', "console.log('142/142')"] }),
+    makeOpts({
+      task: null,
+      command: null,
+      exit: null,
+      summary: null,
+      tier3: true,
+      cmdArgv: [process.execPath, '-e', "console.log('142/142')"],
+      env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1' },
+      confirm: false,
+    }),
     dir,
     FIXED_NOW,
   );
   assert.equal(green.exitCode, 0, green.message);
   const red = runRecordEvidence(
-    makeOpts({ task: null, command: null, exit: null, summary: null, tier3: true, cmdArgv: [process.execPath, '-e', 'process.exit(1)'] }),
+    makeOpts({
+      task: null,
+      command: null,
+      exit: null,
+      summary: null,
+      tier3: true,
+      cmdArgv: [process.execPath, '-e', 'process.exit(1)'],
+      env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1' },
+      confirm: false,
+    }),
     dir,
     FIXED_NOW,
   );

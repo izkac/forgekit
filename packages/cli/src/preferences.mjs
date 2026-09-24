@@ -324,6 +324,18 @@ export function resolveEffectivePreferences(opts = {}) {
       : {};
   const integrity = deepMerge(integrityDefaults, integrityLocal);
 
+  /** @type {Record<string, unknown>} */
+  const execDefaults =
+    defaults.exec && isPlainObject(defaults.exec)
+      ? /** @type {Record<string, unknown>} */ (defaults.exec)
+      : {};
+  /** @type {Record<string, unknown>} */
+  const execLocal =
+    localPrefs.exec && isPlainObject(localPrefs.exec)
+      ? /** @type {Record<string, unknown>} */ (localPrefs.exec)
+      : {};
+  const exec = deepMerge(execDefaults, execLocal);
+
   return {
     requestedPace,
     resolvedPace,
@@ -333,6 +345,7 @@ export function resolveEffectivePreferences(opts = {}) {
     localExists: Boolean(local),
     effective: expanded,
     integrity,
+    exec,
     shouldRunPerTaskReview: (ctx = {}) =>
       shouldRunPerTaskReview(expanded, ctx),
     shouldRunFinalReview: (ctx = {}) => shouldRunFinalReview(expanded, ctx),

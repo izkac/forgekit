@@ -36,11 +36,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { REPO_ROOT, resolveSessionOrExit, sessionPath } from './lib.mjs';
 
 function usage() {
   process.stderr.write(
-    'Usage: forge tdd run --task <nn-slug> --expect fail|pass [--session <id>] [--] <cmd> [args…]\n',
+    'Usage: forge tdd run --task <nn-slug> --expect fail|pass [--session <id>] [--] <cmd> [args…]\n' +
+      'Caller-chosen argv is refused unless FORGEKIT_ALLOW_EXEC=1, exec.allowCallerCommands=true, or a TTY confirm.\n',
   );
 }
 
@@ -150,11 +153,17 @@ function main() {
   const sessionId = resolveSessionOrExit(sessionIdArg, { command: 'forge tdd run', strict: false });
 
   const [cmd, ...cmdArgs] = cmdArgv;
+  const gate = resolveCallerExecGate({ command: 'forge tdd run', cmdArgv });
+  if (!gate.allowed) {
+    process.stderr.write(gate.message ?? 'forge tdd run: execution refused\n');
+    process.exit(1);
+  }
+
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   let settled = false;
 
-  const child = spawn(cmd, cmdArgs, { cwd: REPO_ROOT, stdio: 'inherit', shell: false });
+  const child = spawn(cmd, cmdArgs, { cwd: REPO_ROOT, stdio: 'inherit', ...CALLER_EXEC_SPAWN });
 
   child.on('error', (err) => {
     if (settled) return;
@@ -162,6 +171,7 @@ function main() {
     const durationMs = Date.now() - startedMs;
     const stamp = { cmd, args: cmdArgs, expect, exit: null, ok: false, startedAt, durationMs };
     const filePath = appendStamp(sessionId, task, stamp);
+    refreshIntegritySeal({ sessionDir: sessionPath(sessionId), repoRoot: REPO_ROOT });
     printReceipt(filePath, stamp);
     process.stderr.write(`forge tdd run: failed to execute ${cmd}: ${err.message}\n`);
     process.exit(1);
@@ -174,6 +184,7 @@ function main() {
     const ok = code !== null && (expect === 'fail' ? code !== 0 : code === 0);
     const stamp = { cmd, args: cmdArgs, expect, exit: code, ok, startedAt, durationMs };
     const filePath = appendStamp(sessionId, task, stamp);
+    refreshIntegritySeal({ sessionDir: sessionPath(sessionId), repoRoot: REPO_ROOT });
     printReceipt(filePath, stamp);
     if (!ok) {
       const outcome = code === null && signal ? `terminated by signal ${signal}` : `exited ${code}`;

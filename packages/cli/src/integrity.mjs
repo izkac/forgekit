@@ -28,6 +28,7 @@ import { hasBlockedMarker, readJson, writeJson } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { DEFAULT_SPECS_DIR, resolveProjectPlanEngine } from './plan-engine.mjs';
 import { classifyGuarded, findAllowance, loadAllowances, makeGitLsTree } from './guard.mjs';
+import { checkIntegritySeal } from './integrity-seal.mjs';
 import { NO_TDD_MARKER, NO_TDD_REASON_LABEL } from './record-evidence.mjs';
 
 /** Signals that a change involves jobs/workers and therefore needs a spine. */
@@ -897,19 +898,16 @@ function makeArchiveMoveLookup({ repoRoot, session, baseCommit }) {
  * becomes a problem, never a silent skip (a torn write there must not be a
  * free pass to clear every prior allowance).
  *
- * SCOPE NOTE (Minor 5): the diff this check reads only ever lists *tracked*
- * files, and `.forge/sessions/` is normally gitignored, so the
- * `integrity-artifact:` rule below only ever fires for artifacts committed
- * at the change-dir location (e.g. `openspec/changes/<change>/spine.json`).
- * A green run here does not demonstrate coverage of session-dir artifacts
- * (`sessionDir/spine.json` when there is no tracked change dir) — those are
- * untracked and invisible to `git diff` however they are edited. The same
- * scope gap covers `session.json`/`active.json` themselves (final-review
- * C2): a rewritten `baseCommit` or a deleted `features.tddEvidence` is
- * invisible here for the identical reason, on every host. The real defense
- * for those two files is `guard.mjs`'s `forge-control:` rule denying the
- * write at the hook (`forge guard check`) in the first place; this backstop
- * cannot see a tamper to a file it was never going to see in a diff.
+ * SCOPE NOTE (Minor 5, narrowed): the *git-diff* half of this check only
+ * ever lists *tracked* files, so the `integrity-artifact:` rule below still
+ * only fires here for artifacts committed at the change-dir location.
+ * Untracked session-dir artifacts (`session.json`, `active.json`, a
+ * session-dir `spine.json`) are covered by `checkIntegritySeal` instead —
+ * a sha256 fingerprint written by legitimate Forge writes and compared at
+ * phase boundaries / `runIntegrityChecks` / the Stop hook. A missing seal
+ * is not a finding (older sessions and fixtures); a mismatch or unreadable
+ * seal fails closed. The PreToolUse `forge-control:` rule remains the
+ * real-time defense; the seal is the backstop `git diff` could not be.
  *
  * CONSIDERED AND NOT IMPLEMENTED (final-review C2): validating that
  * `baseCommit` is an ancestor of `HEAD` (`git merge-base --is-ancestor`) was
@@ -1517,6 +1515,7 @@ export function runIntegrityChecks(opts) {
   }
 
   problems.push(...checkGuardedFiles({ cwd, sessionDir, session }).problems);
+  problems.push(...checkIntegritySeal({ cwd, sessionDir }).problems);
   problems.push(...checkTddEvidence({ sessionDir, session }).problems);
   problems.push(...checkTaskGates({ cwd, sessionDir, session }).problems);
 

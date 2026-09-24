@@ -53,9 +53,11 @@ One-shot without a global install: `npx @izkac/forgekit install …` (same bins 
 ### Trust boundary: what the CLI will run
 
 `forge evidence -- <cmd>` and `forge tdd run -- <cmd>` **execute the argv
-after `--` as you**. Spawn is `shell: false` (no `/bin/sh`, no `cmd.exe`) but
-there is **no allowlist and no confirmation gate**. The child runs with the
-same privileges as the user (or CI job) that invoked `forge`.
+after `--` as you**. Spawn is `shell: false` (no `/bin/sh`, no `cmd.exe`) and
+there is **no allowlist**, but execution is **refused until you opt in**:
+`FORGEKIT_ALLOW_EXEC=1`, `forge prefs -- --set exec.allowCallerCommands=true`,
+or a TTY confirm. The child runs with the same privileges as the user (or
+CI job) that invoked `forge`.
 
 Project hooks installed by `forge init` also spawn `forge` from the agent
 host (Claude Code, Cursor). An agent that can call tools can therefore call

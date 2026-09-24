@@ -78,9 +78,24 @@ before you install it or wire a project.
 **What the CLI will run.** `forge evidence -- <cmd> [args…]` and
 `forge tdd run -- <cmd> [args…]` take everything after `--` as an argv array
 and spawn it with `shell: false`. There is no `/bin/sh` or `cmd.exe` in the
-middle — and also no command allowlist and no "are you sure?" prompt. The
-tokens are executed as given. The transcribed form of `forge evidence`
+middle, and no command allowlist. The transcribed form of `forge evidence`
 (`--command --exit --summary`) does not spawn; the executed form does.
+
+**Opt-in / confirmation (default: refuse).** Execution is **blocked** until
+the operator opts in. A confused or compromised agent cannot silently spawn
+caller-chosen argv. Any one of these is enough:
+
+| How | When to use it |
+|-----|----------------|
+| `FORGEKIT_ALLOW_EXEC=1` (also `true` / `yes` / `on`) | CI, headless sessions, or a shell you already trust |
+| `forge prefs -- --set exec.allowCallerCommands=true` | This checkout (`.forge/preferences.local.json`) |
+| TTY confirm (`Proceed? [y/N]`) | Interactive terminal — stdin and stderr are TTYs |
+
+There is **no** `--allow-exec` flag. An agent that can invoke `forge` can
+add a flag as silently as it can add argv after `--`. The env var and the
+pref are meant to be set by the operator in the session environment *before*
+the agent starts; an agent that can rewrite the environment or the pref file
+is outside this gate (same as any other local secret).
 
 **Whose privileges.** The same user (or CI job) that invoked `forge`. A
 global `npm i -g` install does not raise privileges; it also does not drop
@@ -89,17 +104,18 @@ them. The child sees your environment, your files, your credentials.
 **What installers should assume.** Installing the public package and running
 `forge init` copies hooks that spawn `forge` from the agent host (Claude
 Code SessionStart / PreToolUse / Stop, Cursor sessionStart). Agent tool
-paths can therefore reach `forge`, and `forge` can therefore reach whatever
-command the session passes to `evidence` or `tdd run`. That is the product:
-evidence is a product of execution, not of the model narrating an exit code.
+paths can therefore reach `forge`, and — **once opted in** — `forge` can
+reach whatever command the session passes to `evidence` or `tdd run`. That
+is the product: evidence is a product of execution, not of the model
+narrating an exit code.
 
 **How to think about agent compromise.** A confused, prompt-injected, or
-compromised agent session that can call `forge` is equivalent to that agent
-having a shell as you. Do not run Forge-wired agents against secrets,
-production credentials, or hosts you would not type commands on yourself.
-Removing the global package and deleting the project hooks (`.claude/hooks`,
-`.cursor/hooks`, and the matching entries in `settings.json` / `hooks.json`)
-removes this surface. There is no in-CLI confirmation gate today.
+compromised agent session that can call `forge` **and** has already been
+opted in is equivalent to that agent having a shell as you. Do not run
+Forge-wired agents against secrets, production credentials, or hosts you
+would not type commands on yourself. Removing the global package and
+deleting the project hooks (`.claude/hooks`, `.cursor/hooks`, and the
+matching entries in `settings.json` / `hooks.json`) removes this surface.
 
 ---
 
@@ -509,13 +525,18 @@ configuration and trust anchors can't be edited around instead of the file a
 denial actually names; and with no explicit `--session`, the hook considers
 every unfinished in-window session rather than trusting `.forge/active.json`
 alone, so a second, unrelated session can't turn the guard off. `forge phase
-done|finish` re-checks from `git diff` as a backstop, which only ever sees
-**tracked** files: it catches a guarded test and a *committed* integrity
-artifact (e.g. a change-dir `spine.json`, or a tracked `.forge/config.json`)
-on every host, hooked or not, but not an artifact living only under the
-gitignored `.forge/sessions/<id>/` — including that session's own
-`session.json` and `.forge/active.json`, for which the hook is the only real
-defense. Tests an implementer writes fresh during the session stay editable.
+done|finish` re-checks from `git diff` as a backstop for **tracked** files
+(a guarded test, a committed change-dir `spine.json`, a tracked
+`.forge/config.json`) and from an **integrity seal** for untracked session
+artifacts (`session.json`, `.forge/active.json`, session-dir integrity
+files). The seal is a sha256 fingerprint written by legitimate Forge writes
+(`forge new` / `forge phase` / `forge tdd run` / `forge evidence`) and
+compared at every `forge phase` boundary and at `forge integrity-check`
+(the Stop hook runs the same check when the session claims completion). A
+mismatch or unreadable seal **fails closed**. Sessions that predate the
+seal, and fixtures that never wrote one, skip that half of the check — the
+next `saveSession` creates one. Tests an implementer writes fresh during
+the session stay editable.
 You will not usually run these commands yourself — the coordinator and hooks
 do — but they are the mechanism:
 

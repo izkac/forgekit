@@ -252,7 +252,12 @@ const HINT = 'Harness setup recorded';
  * output has to be parsed, and forge writes advisory notes to stderr.
  */
 function forge(cwd, args, extraEnv = {}) {
-  const env = { ...process.env, FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet'), ...extraEnv };
+  const env = {
+    ...process.env,
+    FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet'),
+    FORGEKIT_ALLOW_EXEC: '1',
+    ...extraEnv,
+  };
   delete env.CLAUDE_CODE_SESSION_ID;
   const r = spawnSync(process.execPath, [FORGE_BIN, ...args], { cwd, encoding: 'utf8', env });
   return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, stdout: r.stdout ?? '', code: r.status };

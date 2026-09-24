@@ -87,6 +87,7 @@ Paces: ${PACES.join(', ')}  (default: auto)
       Pin pace on the active session only (no local file write).
 
   forge prefs -- --set review.perTask=always
+  forge prefs -- --set exec.allowCallerCommands=true
   forge prefs -- --resolve --signal "add stripe refund"
 
 Defaults: preferences.defaults.json
@@ -94,7 +95,7 @@ Local overlay: .forge/preferences.local.json (appears only after a set)
 Matrix: .cursor/skills/forge/references/pace.md
 
 Options:
-  --set path=value   Nested override (repeatable)
+  --set path=value   Nested override (repeatable; exec.allowCallerCommands=true opts in to caller-argv exec)
   --session-set      Pin pace on active session only
   --resolve          Re-resolve auto for active session
   --signal <text>    Signals for auto / --resolve
@@ -266,6 +267,7 @@ export function runSetPrefs(argv, io = {}) {
       stdout.write(`verify.tier3=${effective.effective.verify.tier3}\n`);
       stdout.write(`models.bias=${effective.effective.models.bias}\n`);
       stdout.write(`brainstorm.depth=${effective.effective.brainstorm.depth}\n`);
+      stdout.write(`exec.allowCallerCommands=${effective.exec?.allowCallerCommands === true}\n`);
       if (effective.localExists) {
         stdout.write(`local=${effective.localPath}\n`);
       } else {

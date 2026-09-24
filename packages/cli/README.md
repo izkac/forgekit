@@ -75,10 +75,12 @@ The agent triages, brainstorms with you, plans a tracked change, writes the oper
 ### Trust boundary
 
 `forge evidence -- <cmd>` and `forge tdd run -- <cmd>` spawn the caller-chosen
-argv under **your** privileges (`shell: false`, no allowlist, no confirmation).
-`forge init` hooks also invoke `forge` from the agent host. A confused or
-compromised agent session can therefore run arbitrary programs as you — that
-is RCE-by-design for this public package, not a defect. Read the
+argv under **your** privileges (`shell: false`, no allowlist) **after** an
+explicit opt-in (`FORGEKIT_ALLOW_EXEC=1`, `exec.allowCallerCommands`, or a
+TTY confirm). `forge init` hooks also invoke `forge` from the agent host. A
+confused or compromised agent session that has already been opted in can
+therefore run arbitrary programs as you — that is RCE-by-design for this
+public package, not a defect. Read the
 **[trust-boundary section](https://github.com/izkac/forgekit/blob/main/docs/usage.md#trust-boundary-what-forge-will-run)**
 before you install.
 

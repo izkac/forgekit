@@ -20,6 +20,7 @@ import { resolveTemplatesRoot } from './init.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SRC, '..', '..', '..');
+const CLI_BIN = path.resolve(SRC, '..', 'bin');
 const TEMPLATE_HOOK = path.join(resolveTemplatesRoot(), 'claude', 'hooks', 'forge-test-guard.mjs');
 const REPO_HOOK = path.join(REPO_ROOT, '.claude', 'hooks', 'forge-test-guard.mjs');
 
@@ -81,11 +82,19 @@ function makeProject({
  */
 function runHook(root, payload, opts = {}) {
   const input = opts.raw !== undefined ? opts.raw : JSON.stringify(payload);
+  // Prepend this checkout's `bin/` so `resolveForgeInvocation` finds
+  // `forge.mjs` without a global install. A test that sets `PATH: ''`
+  // still wins (opts.env last) and covers the missing-binary fail-open.
   return spawnSync(process.execPath, [TEMPLATE_HOOK], {
     input,
     encoding: 'utf8',
     cwd: root,
-    env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...(opts.env ?? {}) },
+    env: {
+      ...process.env,
+      CLAUDE_PROJECT_DIR: root,
+      PATH: `${CLI_BIN}${path.delimiter}${process.env.PATH ?? ''}`,
+      ...(opts.env ?? {}),
+    },
   });
 }
 

@@ -216,12 +216,23 @@ when any guarded file is modified or deleted between the session's
 warning, not a false pass or false fail.
 
 This check reads `git diff`, which only ever reports **tracked** files —
-`.forge/config.json` is ordinarily tracked and so is covered here; a
-session's own `session.json` and `.forge/active.json` are not (they live
-under the normally-gitignored `.forge/sessions/`), so a tamper to either is
-invisible to this check regardless of what changed. The PreToolUse hook's
-`forge-control:` denial is the sole real-time defense for those two files;
-this backstop's coverage of them is not required and is not claimed.
+`.forge/config.json` is ordinarily tracked and so is covered here. A
+session's own `session.json`, `.forge/active.json`, and other session-dir
+integrity artifacts live under the normally-gitignored `.forge/sessions/`
+and SHALL be covered by a filesystem fingerprint (`integrity-seal.json`)
+written by legitimate Forge writes and compared at `forge phase` boundaries
+and by `forge integrity-check`. A mismatch or unreadable seal SHALL fail
+closed. A missing seal SHALL NOT be a finding (sessions and fixtures that
+predate the seal). The PreToolUse hook's `forge-control:` denial remains
+the real-time defense.
+
+#### Scenario: Untracked session.json mutation refuses done
+
+- GIVEN a session whose `integrity-seal.json` hashed `session.json`
+- AND a shell rewrite of that `session.json` after the seal was written
+- WHEN the operator runs `forge integrity-check`
+- THEN the check fails naming `session.json`
+- AND the finding says the artifact was mutated outside PreToolUse
 
 #### Scenario: Tampered baseline test refuses done
 

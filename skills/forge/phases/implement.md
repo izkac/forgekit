@@ -277,17 +277,15 @@ work.
   (there is no `forge guard list`; paste the ledger file's contents into
   `{GUARD_ALLOWANCES}` yourself), and a weak reason is a review finding (see
   [../subagents/task-reviewer-prompt.md](../subagents/task-reviewer-prompt.md)).
-- **The integrity backstop's coverage is narrower than the hook's.**
+- **The integrity backstop covers tracked files via `git diff` and untracked
+  session artifacts via a seal.**
   `forge integrity-check` / `forge phase done|finish` re-check guarded files
-  from `git diff`, which only ever sees **tracked** files — so the backstop
-  catches a guarded test (tracked at `baseCommit`) and a committed
-  change-dir artifact (e.g. `openspec/changes/<name>/spine.json`), and a
-  tracked `.forge/config.json`, on every host, hooked or not, but **not** an
-  integrity artifact living only under the gitignored `.forge/sessions/<id>/`
-  (including that session's own `session.json` and `.forge/active.json`),
-  which no diff can see. The hook is the real defense for session-dir
-  artifacts and for `session.json`/`active.json` specifically; the backstop
-  is a second line for what git can see.
+  from `git diff` (tracked tests, committed change-dir artifacts, a tracked
+  `.forge/config.json`) and from `integrity-seal.json` (untracked
+  `session.json`, `.forge/active.json`, session-dir integrity artifacts).
+  The seal is written by legitimate Forge writes and compared at every
+  `forge phase` boundary; a mismatch fails closed. The hook is still the
+  real-time defense.
 
 ## Forge constraints (include in every brief)
 

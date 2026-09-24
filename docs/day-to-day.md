@@ -7,8 +7,10 @@ reference: [usage.md](usage.md) (install, integrity internals, scoring) and
 
 **One thing to understand first:** most `forge` CLI commands are run *by the
 agent*, not by you. `forge evidence -- <cmd>` and `forge tdd run -- <cmd>`
-execute that command as you (no shell, no allowlist). A compromised agent
-session is a compromised user shell — see
+execute that command as you (no shell, no allowlist) **only after you opt
+in** (`FORGEKIT_ALLOW_EXEC=1`, `forge prefs -- --set exec.allowCallerCommands=true`,
+or a TTY confirm). A compromised agent session that is already opted in is
+a compromised user shell — see
 [Trust boundary](usage.md#trust-boundary-what-forge-will-run). Your
 day-to-day surface is small:
 

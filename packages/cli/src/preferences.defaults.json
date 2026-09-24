@@ -5,6 +5,9 @@
     "specsBeatNarrowTasks": true,
     "requireE2E": "when-jobs-or-workers"
   },
+  "exec": {
+    "allowCallerCommands": false
+  },
   "presets": {
     "thorough": {
       "review": {

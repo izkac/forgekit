@@ -25,7 +25,7 @@ const DEFAULT_TEST_GLOBS = [
   '**/tests/**',
 ];
 
-const INTEGRITY_ARTIFACTS = new Set([
+export const INTEGRITY_ARTIFACTS = new Set([
   'spine.json',
   'e2e.json',
   'e2e-results.json',
