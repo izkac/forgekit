@@ -57,8 +57,12 @@ function makeNoSessionProject() {
   return root;
 }
 
-function runTddRun(cwd, args) {
-  return spawnSync(process.execPath, [TDD_RUN_CLI, ...args], { cwd, encoding: 'utf8' });
+function runTddRun(cwd, args, extraEnv = {}) {
+  return spawnSync(process.execPath, [TDD_RUN_CLI, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1', ...extraEnv },
+  });
 }
 
 function stampsPath(sessionDir, task) {
@@ -336,7 +340,7 @@ test('the command is registered under `forge tdd`: an end-to-end run through the
   const r = spawnSync(
     process.execPath,
     [BIN, 'tdd', 'run', '--task', '01-thing', '--expect', 'pass', '--', ...PASS],
-    { cwd: root, encoding: 'utf8' },
+    { cwd: root, encoding: 'utf8', env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1' } },
   );
   assert.equal(r.status, 0, r.stderr);
   assert.equal(readStamps(sessionDir, '01-thing').length, 1);

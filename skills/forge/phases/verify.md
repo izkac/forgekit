@@ -112,12 +112,10 @@ forge integrity-check    # combined; forge phase done runs the same checks
 carrying `features.tddEvidence`) the red→green pairing gate: a guarded test
 tracked at `baseCommit` and modified, deleted, or renamed with no recorded
 allowance refuses here, on every host — hooked or not, since this check reads
-`git diff` directly rather than depending on the `PreToolUse` hook. That same
-`git diff` scoping means the integrity-artifact rule only ever fires for
-artifacts **committed** at a change-dir location (e.g.
-`openspec/changes/<name>/spine.json`) — an artifact living only under the
-gitignored `.forge/sessions/<id>/` is untracked and invisible to this check no
-matter how it was edited; the hook is the real defense there. A completed
+`git diff` directly rather than depending on the `PreToolUse` hook. Untracked
+session artifacts (`session.json`, `.forge/active.json`, session-dir
+integrity files) are covered by the integrity seal compared at this same
+gate and at every `forge phase` boundary; a mismatch fails closed. A completed
 task missing an ok `forge tdd run --expect fail` stamp chronologically before
 its ok `--expect pass` stamp — with no `--no-tdd` declaration in its
 `test-evidence.md` — also refuses here. A session that tampered with its own

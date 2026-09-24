@@ -32,6 +32,7 @@ import { COMBINED_TASKS, collectPlanFacts, suggestCeremonyFromPlan, suggestPaceF
 import { CONCRETE_PACES, isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
+import { checkIntegritySeal } from './integrity-seal.mjs';
 import { resolveChangeDir, runIntegrityChecks } from './integrity.mjs';
 import { writeSessionScorecard } from './score.mjs';
 import { appendSessionDigest } from './ledger.mjs';
@@ -158,6 +159,19 @@ sessionId = resolveSessionOrExit(sessionId, {
 });
 
 const { dir, session } = loadSession(sessionId);
+
+// Phase-boundary seal: untracked session.json / active.json / session-dir
+// artifacts a `git diff` cannot see. Missing seal is not a finding (older
+// fixtures); a mismatch fails closed here so implement→verify cannot carry
+// a silent shell edit into the next phase.
+const sealCheck = checkIntegritySeal({ cwd: process.cwd(), sessionDir: dir });
+if (sealCheck.problems.length > 0) {
+  process.stderr.write(
+    `Cannot enter phase "${phase}": session/test-guard integrity failed\n` +
+      `${sealCheck.problems.map((p) => `  - ${p}`).join('\n')}\n`,
+  );
+  process.exit(1);
+}
 
 session.phase = phase;
 appendPhaseHistory(session, phase, new Date().toISOString());

@@ -71,7 +71,7 @@ Commands:
   resolve-model --tier …  Resolve subagent model JSON
   enforce-model           PreToolUse hook body: hold dispatches to models.local.json
   doctor                  Plan-engine readiness (OpenSpec or specs)
-  evidence --task <nn-slug> -- <cmd>  Execute + record tier-2 test-evidence.md (--tier3: stamp verify-runs.jsonl)
+  evidence --task <nn-slug> -- <cmd>  Execute + record tier-2 test-evidence.md (opt-in: FORGEKIT_ALLOW_EXEC or exec.allowCallerCommands)
   refute add|list         Known-false ledger: refuted claims the next brief must carry
   reminder                Session reminder (for hooks)
   overlay                 Re-apply OpenSpec vendor overlays in this project
@@ -86,7 +86,7 @@ Commands:
   gate init|check|status  Opt-in per-group executable gates (gates.json; .forge/config.json → gates.enabled)
   guard check --file <path> [--json]  Guarded-file check (used by the test-guard hook)
   test-allow <path> --reason "<why>"  Record a guard allowance (escape hatch)
-  tdd run --task <nn-slug> --expect fail|pass [--] <cmd>  Execute + stamp red/green evidence
+  tdd run --task <nn-slug> --expect fail|pass [--] <cmd>  Execute + stamp red/green evidence (same exec opt-in as evidence)
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)
   score [--write]         L2 session scorecard (auto-written at phase done)

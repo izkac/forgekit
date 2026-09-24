@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isTerminalPhase, registerSession } from './lib/fleet.mjs';
 import { findRepoRoot } from './repo-root.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 
 export { findRepoRoot };
 
@@ -100,6 +101,7 @@ export function writeActive(sessionId) {
     sessionPath: path.relative(REPO_ROOT, sessionPath(sessionId)).replace(/\\/g, '/'),
     updatedAt: new Date().toISOString(),
   });
+  refreshIntegritySeal({ sessionDir: sessionPath(sessionId), repoRoot: REPO_ROOT });
 }
 
 /**
@@ -399,7 +401,9 @@ export function saveSession(dir, session) {
   // Mirror into ~/.forgekit/fleet so `forge fleet` sees every project's
   // sessions. Project root derived from dir (<root>/.forge/sessions/<id>),
   // not REPO_ROOT, so callers with explicit dirs mirror correctly too.
-  registerSession(path.resolve(dir, '..', '..', '..'), session);
+  const repoRoot = path.resolve(dir, '..', '..', '..');
+  registerSession(repoRoot, session);
+  refreshIntegritySeal({ sessionDir: dir, repoRoot });
 }
 
 /**

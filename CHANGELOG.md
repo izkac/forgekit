@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Caller-exec opt-in.** `forge evidence -- <cmd>` and `forge tdd run -- <cmd>`
+  still spawn caller-chosen argv as you (`shell: false`, no allowlist), but
+  they now **refuse by default**. Opt in with `FORGEKIT_ALLOW_EXEC=1` (CI /
+  trusted non-interactive sessions), `forge prefs -- --set
+  exec.allowCallerCommands=true`, or a TTY confirm. There is no `--allow-exec`
+  flag — an agent that can invoke `forge` can add a flag as silently as it
+  can add argv after `--`.
+- **Session integrity seal.** Untracked `.forge/sessions/…` artifacts
+  (`session.json`, `active.json`, session-dir integrity files) are hashed
+  after legitimate Forge writes and compared at every `forge phase` boundary
+  and at `forge integrity-check` (the Stop hook included). A mismatch or
+  unreadable seal fails closed. Group-batch high-risk review is unchanged.
+
 ## 0.3.62 — 2026-09-23
 
 - **Trust boundary is documented.** README, the npm package README, and

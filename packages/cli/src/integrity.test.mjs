@@ -33,6 +33,7 @@ import {
 } from './integrity.mjs';
 import { NO_TDD_MARKER, NO_TDD_REASON_LABEL, runRecordEvidence } from './record-evidence.mjs';
 import { addAllowance } from './guard.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(tmpdir(), prefix));
@@ -1116,16 +1117,11 @@ test('runIntegrityChecks: guardedFiles — C1: a tracked .forge/config.json rewr
   }
 });
 
-test('runIntegrityChecks: guardedFiles — C2 acknowledged scope gap: a tampered session.json is invisible to the git-diff backstop (never tracked)', () => {
-  // Documents the same SCOPE NOTE class of limitation `checkGuardedFiles`
-  // already states for session-dir integrity artifacts: `.forge/sessions/`
-  // is gitignored in real projects and this fixture's session.json is never
-  // git-added either way, so a rewrite is invisible to `git diff` regardless
-  // of what it deletes (baseCommit, features.tddEvidence, …). The hook
-  // (guard-cli.mjs, C2 fix) is the real defense against this tamper; this
-  // test exists so a future change to the backstop's scope does not
-  // silently start relying on git-diff coverage that was never there.
-  const cwd = gitRepo('forge-guard-sessionjson-scope-');
+test('runIntegrityChecks: guardedFiles — C2: a tampered untracked session.json is caught by the integrity seal', () => {
+  // session.json lives under gitignored `.forge/sessions/` and is invisible
+  // to `git diff`. The seal (integrity-seal.mjs) is the backstop: hash the
+  // file after a legitimate Forge write, then refuse a later shell rewrite.
+  const cwd = gitRepo('forge-guard-sessionjson-seal-');
   try {
     fs.writeFileSync(path.join(cwd, 'a.test.mjs'), 'one\n', 'utf8');
     gitCommitAll(cwd, 'base');
@@ -1133,17 +1129,23 @@ test('runIntegrityChecks: guardedFiles — C2 acknowledged scope gap: a tampered
 
     const sessionDir = makeSessionDir(cwd);
     writeNaSpine(sessionDir);
-    fs.writeFileSync(path.join(sessionDir, 'session.json'), '{}\n', 'utf8'); // the C2 tamper itself
+    fs.writeFileSync(
+      path.join(sessionDir, 'session.json'),
+      `${JSON.stringify({ id: 's1', slug: 'x', baseCommit }, null, 2)}\n`,
+      'utf8',
+    );
+    refreshIntegritySeal({ sessionDir, repoRoot: cwd });
+    fs.writeFileSync(path.join(sessionDir, 'session.json'), '{}\n', 'utf8');
 
     const result = runIntegrityChecks({
       cwd,
       sessionDir,
       session: { slug: 'x', openspecChange: null, baseCommit },
     });
-    assert.equal(
+    assert.equal(result.ok, false);
+    assert.ok(
       result.problems.some((p) => p.includes('session.json')),
-      false,
-      'this fixture is the documented gap, not a regression: session.json was never tracked, so git diff cannot see it',
+      `expected a session.json seal finding, got: ${JSON.stringify(result.problems)}`,
     );
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });

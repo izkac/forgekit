@@ -45,6 +45,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
@@ -177,7 +179,12 @@ export function buildEvidence({
 export function executeCommand(cmdArgv, cwd) {
   const [cmd, ...args] = cmdArgv;
   const command = cmdArgv.join(' ');
-  const res = spawnSync(cmd, args, { cwd, shell: false, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const res = spawnSync(cmd, args, {
+    cwd,
+    ...CALLER_EXEC_SPAWN,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (res.error) return { command, exit: null, tail: '', error: res.error.message };
   const out = `${res.stdout ?? ''}${res.stderr ?? ''}`;
   process.stdout.write(out);
@@ -341,6 +348,20 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     return { exitCode: 1, message: `Session dir not found: ${sessionDir} (session ${sessionId})` };
   }
 
+  if (executed) {
+    const gate = resolveCallerExecGate({
+      command: 'forge evidence',
+      cmdArgv: opts.cmdArgv,
+      cwd,
+      forgeDir,
+      env: opts.env,
+      confirm: opts.confirm,
+    });
+    if (!gate.allowed) {
+      return { exitCode: 1, message: (gate.message ?? 'forge evidence: execution refused').trimEnd() };
+    }
+  }
+
   if (opts.tier3) {
     // Tier 3 is one fresh full-workspace run at verify. Its stamp is a ledger
     // line, not a task file: verify-evidence.md stays the coordinator's prose
@@ -359,6 +380,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     };
     const ledger = path.join(sessionDir, 'verify-runs.jsonl');
     fs.appendFileSync(ledger, `${JSON.stringify(stamp)}\n`, 'utf8');
+    refreshIntegritySeal({ sessionDir, repoRoot: cwd });
     const receipt = [
       `- **Command:** \`${run.command}\``,
       `- **Exit code:** ${run.exit ?? `spawn failed: ${run.error}`}`,
@@ -467,6 +489,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     }),
     'utf8',
   );
+  refreshIntegritySeal({ sessionDir, repoRoot: cwd });
 
   return { exitCode: 0, message: `wrote: ${filePath}${executed ? ` (executed, exit ${testExit})` : ''}` };
 }
@@ -497,6 +520,8 @@ Options:
   --session <id>      Session id (default: sessionId from .forge/active.json)
   --allow-fail        Write evidence even when --exit is non-zero
   --forge-dir <path>  Forge root directory (default: .forge under cwd)
+  Executed mode (\`-- <cmd>\`) is refused unless FORGEKIT_ALLOW_EXEC=1,
+  exec.allowCallerCommands=true, or a TTY confirm. Transcribed mode does not spawn.
   -h, --help          Show this help
 `);
 }

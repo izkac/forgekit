@@ -58,7 +58,7 @@ quietly re-scoping it.
 - **Derive every expected value from your fixture in code — never from a number quoted in this brief.** Figures here are illustrative and have been wrong before; a wrong expected value in a negative assertion passes against buggy code and looks like coverage. If a claim above is load-bearing and not tagged `measured:`, verify it yourself before building on it, and say in your report what you found.
 - **No** `git commit` or `git push` unless the user explicitly asked in the current message. **Never** run `git checkout`, `git restore`, or `git stash` — those can discard another task's uncommitted work sitting in the same working tree. If you need to back out your own change to a file, copy it aside first (`cp file file.bak`) and restore from the copy, never from git.
 - **Testing tiers:** tier 1 = scoped test file/pattern per red/green cycle; tier 2 = narrowest command proving this task. **Do not** run the full workspace suite unless this task touches shared contracts or the brief says so — that is tier 3 and runs once at verify.
-- **Tier-2 evidence for behavior changes comes from `forge tdd run`, not from you reporting a command and exit code:**
+- **Tier-2 evidence for behavior changes comes from `forge tdd run`, not from you reporting a command and exit code.** The operator must already have opted in (`FORGEKIT_ALLOW_EXEC` or `exec.allowCallerCommands`); if the CLI refuses, stop and tell them — do not set the env var or rewrite preferences yourself:
   ```bash
   forge tdd run --session {SESSION_ID} --task {TASK_ID} --expect fail -- <tier-2 cmd>   # before writing production code
   forge tdd run --session {SESSION_ID} --task {TASK_ID} --expect pass -- <tier-2 cmd>   # once it's green

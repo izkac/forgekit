@@ -326,7 +326,7 @@ forge e2e run --repeat 5 [--record-baseline]
                                   # measure harness flakiness; write e2e.baseline
 forge cleanup [--dry-run]         # prune sessions >14 days or finished
 forge evidence --task <nn>-<slug> [--no-tdd --reason "…"] -- <cmd> [args…]
-                                  # EXECUTE the command; record tier-2 test-evidence.md with the observed exit
+                                  # EXECUTE the command (opt-in: FORGEKIT_ALLOW_EXEC or exec.allowCallerCommands)
 forge evidence --tier3 -- <cmd>   # execute the tier-3 run; stamp <session>/verify-runs.jsonl
 forge evidence --task … --command "<cmd>" --exit 0 --summary "<text>"
                                   # transcribed (legacy) — warns; file and precheck say UNVERIFIED

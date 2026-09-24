@@ -65,6 +65,15 @@ test('resolveEffectivePreferences surfaces integrity defaults', () => {
   assert.equal(eff.integrity.requireE2E, 'when-jobs-or-workers');
 });
 
+test('resolveEffectivePreferences surfaces exec.allowCallerCommands default (off)', () => {
+  const forgeDir = tmp('forge-prefs-exec-');
+  const eff = resolveEffectivePreferences({ forgeDir, defaultsPath: DEFAULTS_PATH });
+  assert.equal(eff.exec.allowCallerCommands, false);
+  writeLocalPreferences({ forgeDir, patch: { exec: { allowCallerCommands: true } } });
+  const on = resolveEffectivePreferences({ forgeDir, defaultsPath: DEFAULTS_PATH });
+  assert.equal(on.exec.allowCallerCommands, true);
+});
+
 test('expandPace brisk matrix', () => {
   const expanded = expandPace({ pace: 'brisk', defaults: JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf8')) });
   assert.equal(expanded.review.perTask, 'never');
