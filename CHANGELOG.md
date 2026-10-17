@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.63 — 2026-10-17
 
 - **Caller-exec opt-in.** `forge evidence -- <cmd>` and `forge tdd run -- <cmd>`
   still spawn caller-chosen argv as you (`shell: false`, no allowlist), but
