@@ -15,6 +15,12 @@
   and at `forge integrity-check` (the Stop hook included). A mismatch or
   unreadable seal fails closed. Group-batch high-risk review is unchanged.
 
+- **`forgekit update` upgrades the global package on Windows again.** It ran
+  `npm.cmd` without a shell, which Node rejects with EINVAL since the
+  CVE-2024-27980 fix, so every update reported "Could not reach npm". It now
+  runs `node <npm-cli.js>` with `shell: false` (cmd.exe only if npm-cli.js
+  can't be found), for both `npm view` and `npm i -g`.
+
 ## 0.3.62 — 2026-09-23
 
 - **Trust boundary is documented.** README, the npm package README, and
