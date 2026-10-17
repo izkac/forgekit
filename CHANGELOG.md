@@ -36,6 +36,20 @@
   project whose path merely contains the temp dir name" redirected `HOME` but
   not `USERPROFILE`, which `os.homedir()` reads on Windows, so it left
   `\home\demo-user\Temp-project` sessions in `~/.forgekit/fleet/sessions`.
+- **Stop hook closes sessions left at review.** Agents were ending their
+  turn on a summary with the session still at `review`, because the Stop
+  hook only nudged when `reviews/final-review.md` existed. It now blocks
+  once at `review` or `finish` (and at `verify`/`implement` once an approved
+  final review exists) and tells the agent to run `forge phase done
+  --session <id>`, or `--allow-incomplete "<what the user must do>"` when
+  only manual steps are left. A `NOT READY`/`REJECTED` final review still
+  lets the stop through. The hook now resolves the session the way
+  `forge reminder` does (pointer, else the only open session), and a
+  session whose `host.sessionIds` holds the payload's `session_id` wins, so
+  a second agent in the same checkout is not blocked by the first one's
+  session. It still blocks once (`stop_hook_active`) and fails open. Re-run
+  `forge init --claude` to pick up the new hook; forgekit's own `.claude/`
+  now registers it too.
 
 ## 0.3.62 — 2026-09-23
 

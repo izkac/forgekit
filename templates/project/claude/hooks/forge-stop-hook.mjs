@@ -3,8 +3,15 @@
  * Stop: the turn-end completion backstop. Blocks the turn from ending only
  * when the active Forge session claims completion (phase in
  * verify/review/finish, or implement with tasksComplete >= tasksTotal) while
- * `forge integrity-check` still fails — or when integrity is green and an
- * approved final review exists but `forge phase done` never ran.
+ * `forge integrity-check` still fails — or when integrity is green and the
+ * session is ready to close (`review`/`finish`, or an approved final review)
+ * but `forge phase done` never ran.
+ *
+ * The session is resolved like `forge reminder` (the active pointer if it
+ * names an open session, else the only open one), except that a session whose
+ * `host.sessionIds` holds the payload's `session_id` wins outright, and one
+ * bound only to other host sessions is never ours — so a second agent in the
+ * same checkout is not blocked by the first one's session.
  *
  * Design D-stop-gate: everything up to the claim-state test is plain
  * `node:fs` — no child process. A child (`forge integrity-check`) is spawned
@@ -19,6 +26,8 @@ import path from 'node:path';
 import { resolveForgeInvocation } from './resolve-forge.mjs';
 
 const FAST_EXIT_PHASES = new Set(['triage', 'brainstorm', 'plan', 'done', 'skipped']);
+// Keep in sync with TERMINAL_PHASES in packages/cli/src/lib/fleet.mjs.
+const TERMINAL_PHASES = new Set(['done', 'skipped']);
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -38,6 +47,52 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+/**
+ * @param {string} root
+ * @param {unknown} hostSessionId the Stop payload's `session_id`
+ * @returns {{ id: string, session: Record<string, any> } | null}
+ */
+function resolveSession(root, hostSessionId) {
+  const sessionsDir = path.join(root, '.forge', 'sessions');
+  let names;
+  try {
+    names = fs.readdirSync(sessionsDir);
+  } catch {
+    return null;
+  }
+  const open = [];
+  for (const name of names) {
+    let session;
+    try {
+      session = readJson(path.join(sessionsDir, name, 'session.json'));
+    } catch {
+      continue; // unreadable: not ours to block on (fail open)
+    }
+    if (!session || typeof session !== 'object' || TERMINAL_PHASES.has(session.phase)) continue;
+    open.push({ id: name, session });
+  }
+
+  const hostIds = (c) =>
+    Array.isArray(c.session.host?.sessionIds) ? c.session.host.sessionIds : [];
+  const host = typeof hostSessionId === 'string' && hostSessionId ? hostSessionId : null;
+  if (host) {
+    const mine = open.find((c) => hostIds(c).includes(host));
+    if (mine) return mine;
+  }
+  // With a host id in hand, a session bound to other host sessions is theirs.
+  const ours = host ? open.filter((c) => hostIds(c).length === 0) : open;
+
+  let active = null;
+  try {
+    active = readJson(path.join(root, '.forge', 'active.json'))?.sessionId ?? null;
+  } catch {
+    // no usable pointer
+  }
+  const pointed = ours.find((c) => c.id === active);
+  if (pointed) return pointed;
+  return open.length === 1 && ours.length === 1 ? ours[0] : null;
+}
+
 async function main() {
   const raw = await readStdin();
 
@@ -55,26 +110,9 @@ async function main() {
   // claim-state test (further down) passes. ---
   const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-  const activeFile = path.join(REPO_ROOT, '.forge', 'active.json');
-  if (!fs.existsSync(activeFile)) process.exit(0);
-  let active;
-  try {
-    active = readJson(activeFile);
-  } catch {
-    process.exit(0);
-  }
-  const sessionId = active && typeof active === 'object' ? active.sessionId : null;
-  if (typeof sessionId !== 'string' || !sessionId) process.exit(0);
-
-  const sessionFile = path.join(REPO_ROOT, '.forge', 'sessions', sessionId, 'session.json');
-  if (!fs.existsSync(sessionFile)) process.exit(0);
-  let session;
-  try {
-    session = readJson(sessionFile);
-  } catch {
-    process.exit(0);
-  }
-  if (!session || typeof session !== 'object') process.exit(0);
+  const resolved = resolveSession(REPO_ROOT, payload?.session_id);
+  if (!resolved) process.exit(0);
+  const { id: sessionId, session } = resolved;
 
   if (FAST_EXIT_PHASES.has(session.phase)) process.exit(0);
 
@@ -112,7 +150,7 @@ async function main() {
   });
 
   if (r.status === 0) {
-    // Integrity is green, but an approved final review with no `forge phase
+    // Integrity is green, but a session ready to close with no `forge phase
     // done` is the stall: the turn ends on a summary and the session sits in
     // review forever. Nudge once per turn (stop_hook_active stops the loop).
     let finalReview = null;
@@ -122,14 +160,18 @@ async function main() {
         'utf8',
       );
     } catch {
+      // No final review: only review/finish count as ready to close.
+    }
+    if (finalReview === null && session.phase !== 'review' && session.phase !== 'finish') {
       process.exit(0);
     }
-    const head = finalReview.split(/\r?\n/).slice(0, 20).join('\n');
+    const head = (finalReview ?? '').split(/\r?\n/).slice(0, 20).join('\n');
     if (/\b(NOT READY|REJECTED)\b/.test(head)) process.exit(0);
+    const done = `forge phase done --session ${sessionId}`;
     const reason =
-      `Forge session ${sessionId} has an approved final review but was never finished.\n` +
-      'Finish now (phases/finish.md): archive the change, then `forge phase done` and `forge cleanup`.\n' +
-      'If only human/manual tasks remain, run `forge phase done --allow-incomplete "<what is left>"` ' +
+      `Forge session ${sessionId} is at ${session.phase} and ready to close, but was never finished.\n` +
+      `Finish now, in this turn (phases/finish.md): archive the change, then \`${done}\` and \`forge cleanup\`.\n` +
+      `If only manual steps remain, run \`${done} --allow-incomplete "<what the user must do>"\` ` +
       'and tell the user what they still need to do.';
     process.stdout.write(`${JSON.stringify({ decision: 'block', reason })}\n`);
     process.exit(0);

@@ -136,6 +136,16 @@ that reviewer. On small low-risk changes verify + review collapse into one
 **6. Finish.** The change is archived, `forge phase done` runs the integrity
 gate and writes a scorecard. If it refuses, see §6.
 
+On Claude Code this happens in the same turn as the approved final review. If
+the agent tries to stop on a summary while its session sits at `review` (or
+`finish`, or `verify` with a final review written), the `Stop` hook blocks
+that stop once and tells it to run `forge phase done` — or `forge phase done
+--allow-incomplete "<what you must do>"` when only manual steps are left, in
+which case it tells you what those are. It blocks once, never loops, and
+only for the agent's own session: with two agents in one checkout, each is
+matched to its own session. Turn it off with `hooks.stopGate: "off"` in
+`.forge/config.json`.
+
 ---
 
 ## 4. Pace — how much ceremony you get
