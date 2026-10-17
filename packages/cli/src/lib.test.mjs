@@ -62,6 +62,34 @@ test('forge cleanup removes an undatable abandoned session', () => {
   assert.equal(fs.existsSync(sessionDir), false);
 });
 
+for (const flags of [['--help'], ['-h'], ['--dry-rnu']]) {
+  test(`forge cleanup ${flags.join(' ')} deletes nothing (volo F123)`, () => {
+    // `--help` used to run the real sweep: a finished session — gitignored
+    // scratch, no recovery — was gone before anyone read a usage line.
+    const root = tmp('forge-cleanup-help-');
+    const sessionDir = path.join(root, '.forge', 'sessions', 'done-one');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const now = new Date().toISOString();
+    fs.writeFileSync(
+      path.join(sessionDir, 'session.json'),
+      `${JSON.stringify({ slug: 'done-one', phase: 'done', createdAt: now, updatedAt: now })}\n`,
+      'utf8',
+    );
+
+    const cleanup = path.join(path.dirname(SESSION_STATUS), 'cleanup-sessions.mjs');
+    const res = spawnSync(process.execPath, [cleanup, ...flags], {
+      cwd: root,
+      env: { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-cleanup-fleet-'), 's') },
+      encoding: 'utf8',
+    });
+
+    const isHelp = flags[0] !== '--dry-rnu';
+    assert.equal(res.status, isHelp ? 0 : 1, res.stderr);
+    assert.match(isHelp ? res.stdout : res.stderr, /Usage/);
+    assert.equal(fs.existsSync(sessionDir), true, 'the finished session is still there');
+  });
+}
+
 test('findRepoRoot never climbs into the home directory (a stray ~/.forge is not a project)', () => {
   // A temp dir sits below the home dir on every platform; a `.forge` or `.git`
   // in the home dir must not become the root of an unrelated temp project —
@@ -227,6 +255,8 @@ test('forge new outside any host session succeeds, silently, and stays unbound',
   const root = tmp('forge-new-nohost-');
   const env = { ...process.env, FORGEKIT_FLEET_DIR: path.join(tmp('forge-new-fleet-'), 's') };
   delete env.CLAUDE_CODE_SESSION_ID;
+  delete env.CURSOR_CONVERSATION_ID;
+  delete env.CURSOR_TRACE_ID;
 
   const res = spawnSync(process.execPath, [FORGE_BIN, 'new', 'telemetry-probe'], {
     cwd: root,

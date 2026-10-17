@@ -4,8 +4,7 @@
  * Skips the active session unless --include-active is passed.
  *
  * Usage:
- *   forge cleanup
- *   forge cleanup-sessions [--dry-run] [--include-active]
+ *   forge cleanup [--dry-run] [--include-active] [--session <id> [--include-unfinished]]
  */
 
 import fs from 'node:fs';
@@ -21,6 +20,32 @@ import {
 import { isTerminalPhase, unregisterSession } from './lib/fleet.mjs';
 import { resolveProjectPlanEngine } from './plan-engine.mjs';
 import { appendScorecardLedger } from './score.mjs';
+
+const USAGE = `Usage: forge cleanup [--dry-run] [--include-active] [--session <id> [--include-unfinished]]
+
+Deletes finished sessions and sessions older than ${RETENTION_DAYS} days. Session
+folders are gitignored scratch — there is no recovery. Run --dry-run first.
+`;
+
+// THIS COMMAND DELETES, SO EVERY ARGUMENT IS CHECKED BEFORE ANYTHING ELSE.
+// `--help` used to fall straight through to the sweep (volo F123): the operator
+// asked what it does and lost a finished session finding out. A typo'd flag
+// (`--dry-rnu`) did the same, so unknown arguments refuse too.
+{
+  const argv = process.argv.slice(2);
+  if (argv.includes('--help') || argv.includes('-h')) {
+    process.stdout.write(USAGE);
+    process.exit(0);
+  }
+  const known = new Set(['--dry-run', '--include-active', '--include-unfinished', '--session']);
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--session') i += 1;
+    else if (!known.has(argv[i])) {
+      process.stderr.write(`Unknown argument: ${argv[i]} — nothing was deleted.\n\n${USAGE}`);
+      process.exit(1);
+    }
+  }
+}
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');

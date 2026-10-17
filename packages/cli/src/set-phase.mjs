@@ -59,11 +59,14 @@ const VALID_PHASES = new Set([
 export const TASK_COUNT_ESCALATION_THRESHOLD = 15;
 
 const args = process.argv.slice(2);
-if (args.length === 0 || args[0] === '--help') {
-  process.stderr.write(
+// `--help` anywhere, not just first: `forge phase skipped --help` used to close
+// the session (and `done` to score and file it) instead of printing usage.
+const wantsHelp = args.includes('--help') || args.includes('-h');
+if (args.length === 0 || wantsHelp) {
+  (wantsHelp ? process.stdout : process.stderr).write(
     'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--notes-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
   );
-  process.exit(1);
+  process.exit(wantsHelp ? 0 : 1);
 }
 
 const phase = args[0];

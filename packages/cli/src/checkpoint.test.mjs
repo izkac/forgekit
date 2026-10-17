@@ -127,6 +127,27 @@ test('checkpoint commits the working tree and records the commit on the session'
   assert.equal(out.range, `${baseSha}..HEAD`);
 });
 
+test('--path scopes the commit with only one session open, and never sweeps in staged work (helm F51)', () => {
+  // The single-session branch ignored --path and ran `git add -A`, so the
+  // user's own uncommitted work landed in a checkpoint they had scoped away.
+  const { cwd } = makeProject();
+  fs.writeFileSync(path.join(cwd, 'mine.txt'), 'mine\n', 'utf8');
+  fs.writeFileSync(path.join(cwd, 'user-wip.txt'), 'wip\n', 'utf8');
+  fs.writeFileSync(path.join(cwd, 'user-staged.txt'), 'staged\n', 'utf8');
+  git(cwd, 'add', 'user-staged.txt');
+
+  const { status, out, stderr } = run(cwd, ['--group', 'g1', '--path', 'mine.txt']);
+
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(out.files, ['mine.txt']);
+  assert.deepEqual(git(cwd, 'show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean), ['mine.txt']);
+  const left = git(cwd, 'status', '--porcelain', '--', '.', ':(exclude).forge');
+  for (const f of ['README.md', 'new-module.mjs', 'user-wip.txt', 'user-staged.txt']) {
+    assert.ok(left.includes(f), `${f} is left uncommitted`);
+  }
+  assert.match(left, /^A {2}user-staged\.txt$/m, "the user's staged file stays staged");
+});
+
 test('a second checkpoint reports the range covering only the new group', () => {
   const { cwd, sessionDir } = makeProject();
   const first = run(cwd, ['--group', 'group-01']);

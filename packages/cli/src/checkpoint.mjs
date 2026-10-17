@@ -38,9 +38,8 @@ function usage() {
   process.stderr.write(
     `Usage:
   forge checkpoint --group <name> [--tasks <ids>] [--message <subject>]
-  forge checkpoint --path <p> [--path <p> ...]  scope staging to these paths
-                                             (only consulted while another
-                                             session's change dir is open)
+  forge checkpoint --path <p> [--path <p> ...]  commit only these paths (plus
+                                             this session's change dir)
   forge checkpoint --dry-run                 what would be committed
   forge checkpoint --range [--last]          diff range for a reviewer brief
 
@@ -515,6 +514,12 @@ const otherOpen = otherOpenChangeDirs(sessionsDir, sessionId, planDir);
 
 /** @type {string[]} */
 let stagedFiles;
+// Set when staging was scoped (anything but `git add -A`): the commit then
+// names exactly these paths, so a file someone else had already staged stays
+// staged and out of the checkpoint.
+let commitPaths = false;
+const mineDir = session.openspecChange ? path.join(planDir, 'changes', session.openspecChange) : '';
+const scopedPaths = opts.paths?.length ? opts.paths.map((p) => toRepoRelative(cwd, p)) : null;
 
 if (otherOpen.length === 0) {
   // --- single-session path: unchanged (F72 backstop) ---
@@ -533,21 +538,36 @@ if (otherOpen.length === 0) {
       },
     );
   }
-  try {
-    gitOut(cwd, ['add', '-A', ...EXCLUDE_SCRATCH]);
-  } catch (err) {
-    fail(`git add failed: ${err instanceof Error ? err.message : err}`);
+  if (scopedPaths) {
+    // --path scopes in every mode, not only when another session is open
+    // (helm F51): this branch ran `git add -A` regardless and committed the
+    // user's unrelated work along with the named paths.
+    stagedFiles = pending
+      .filter((e) => isUnderDir(e.path, mineDir) || scopedPaths.some((rel) => isUnderDir(e.path, rel)))
+      .map((e) => e.path);
+    commitPaths = true;
+    try {
+      if (stagedFiles.length > 0) gitOut(cwd, ['add', '--', ...stagedFiles]);
+    } catch (err) {
+      fail(`git add failed: ${err instanceof Error ? err.message : err}`);
+    }
+  } else {
+    try {
+      gitOut(cwd, ['add', '-A', ...EXCLUDE_SCRATCH]);
+    } catch (err) {
+      fail(`git add failed: ${err instanceof Error ? err.message : err}`);
+    }
+    stagedFiles = files;
   }
-  stagedFiles = files;
 } else {
   // --- another session is open: refuse or scope, never sweep its work in
   // (F111) — `git add -A` is never used once there is overlap.
-  const mineDir = session.openspecChange ? path.join(planDir, 'changes', session.openspecChange) : '';
+  commitPaths = true;
   const { mine, foreignPlan, shared } = classifyPendingEntries(pending, mineDir, otherOpen);
   const owners = otherOpenChangeDirOwners(sessionsDir, sessionId, planDir);
 
-  if (opts.paths && opts.paths.length > 0) {
-    const resolvedPaths = opts.paths.map((p) => toRepoRelative(cwd, p));
+  if (scopedPaths) {
+    const resolvedPaths = scopedPaths;
     for (const rel of resolvedPaths) {
       const badDir = otherOpen.find((dir) => isUnderDir(rel, dir));
       if (badDir) {
@@ -620,7 +640,9 @@ if (stagedFiles.length === 0) {
 
 // --- commit (never push) ---
 const prev = checkpoints.length ? checkpoints[checkpoints.length - 1].sha : null;
-const commit = git(cwd, ['commit', '-m', subject, '--no-verify']);
+// ponytail: pathspec on argv, same length ceiling as the `git add` above;
+// --pathspec-from-file if a checkpoint ever names thousands of files.
+const commit = git(cwd, ['commit', '-m', subject, '--no-verify', ...(commitPaths ? ['--', ...stagedFiles] : [])]);
 if (commit.status !== 0) {
   fail(`git commit failed: ${commit.stderr.trim() || commit.stdout.trim()}`);
 }

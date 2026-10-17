@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **`forge cleanup --help` no longer deletes sessions.** It had no help
+  handling and ran the real sweep, removing finished sessions (gitignored, no
+  recovery). `--help` / `-h` now prints usage and exits 0, and any unknown
+  flag refuses with exit 1 before anything is touched. `forge phase
+  done|finish|skipped --help` likewise printed nothing and changed the phase;
+  `--help` is now honoured anywhere on the line.
+- **`forge checkpoint --path` scopes the commit with one session open.** The
+  single-session path ignored `--path` and ran `git add -A`, committing the
+  user's unrelated work. `--path` now stages only the named paths plus this
+  session's change dir in every mode, and scoped checkpoints commit with an
+  explicit pathspec so files someone else had already staged stay out.
+- **Test fix:** the "forge new outside any host session" test cleared
+  `CLAUDE_CODE_SESSION_ID` but not the Cursor variables, so it failed when the
+  suite ran inside Cursor.
+
 ## 0.3.63 — 2026-10-17
 
 - **Caller-exec opt-in.** `forge evidence -- <cmd>` and `forge tdd run -- <cmd>`

@@ -87,6 +87,22 @@ function phaseHistory(sessionFile) {
   return JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phaseHistory;
 }
 
+for (const phase of ['done', 'finish', 'skipped']) {
+  test(`phase ${phase} --help prints usage and leaves the session alone`, () => {
+    // `--help` was only read as the first argument, so `forge phase skipped
+    // --help` closed the session instead of explaining the flags.
+    const dir = tmp('forge-phase-help-');
+    const sessionFile = makeForgeFixture(dir, 'help-sess');
+    const before = fs.readFileSync(sessionFile, 'utf8');
+
+    const res = spawnSync(process.execPath, [SCRIPT, phase, '--help'], { cwd: dir, encoding: 'utf8' });
+
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /Usage: forge phase/);
+    assert.equal(fs.readFileSync(sessionFile, 'utf8'), before, 'session.json is untouched');
+  });
+}
+
 test('phase verify announces the combined-close path imperatively on stderr', () => {
   // Cohort 4 measured the failure this rail closes: 3 sessions resolved
   // `combined` and 0 followed close.md — one ran a capable final reviewer
