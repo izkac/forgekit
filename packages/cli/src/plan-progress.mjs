@@ -10,6 +10,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveChangeDir } from './integrity.mjs';
+// Cycle (lib → fleet → here) is safe: writeJson is a hoisted declaration,
+// and integrity.mjs above already closes the same loop.
+import { writeJson } from './lib.mjs';
 
 /** A tasks.md checkbox line; capture group 1 is the mark (` ` / `x` / `X`). */
 const TASK_LINE_RE = /^\s*-\s*\[([ xX])\]\s+/;
@@ -91,11 +94,7 @@ export function healSessionProgress(opts) {
   const nowIso = new Date(opts.now ?? Date.now()).toISOString();
   session.updatedAt = nowIso;
   try {
-    fs.writeFileSync(
-      path.join(sessionDir, 'session.json'),
-      `${JSON.stringify(session, null, 2)}\n`,
-      'utf8',
-    );
+    writeJson(path.join(sessionDir, 'session.json'), session);
     const statusPath = path.join(sessionDir, 'status.json');
     if (fs.existsSync(statusPath)) {
       let status = {};
@@ -108,7 +107,7 @@ export function healSessionProgress(opts) {
       status.tasksComplete = session.tasksComplete;
       status.updatedAt = nowIso;
       status.phase = session.phase;
-      fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`, 'utf8');
+      writeJson(statusPath, status);
     }
   } catch {
     /* heal is advisory — callers still use in-memory overlay */

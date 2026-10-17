@@ -12,9 +12,8 @@
  * `.forge/findings.jsonl`, durable across session cleanup.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
-import { readLedger } from './ledger.mjs';
+import { readLedger, withLedgerLock, writeLedger } from './ledger.mjs';
 
 export const SEVERITIES = ['blocker', 'major', 'minor', 'note'];
 export const KINDS = ['bug', 'debt', 'tradeoff', 'idea', 'process'];
@@ -52,9 +51,19 @@ export function nextFindingId(entries) {
  * @param {Record<string, any>[]} entries
  */
 function writeAll(forgeDir, entries) {
-  const file = findingsPath(forgeDir);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf8');
+  writeLedger(findingsPath(forgeDir), entries);
+}
+
+/**
+ * Mutations read-modify-write the whole ledger, so they hold its lock: two
+ * sessions adding at once would otherwise mint the same id and drop a line.
+ * @template {{ forgeDir: string }} O
+ * @template T
+ * @param {(opts: O) => T} fn
+ * @returns {(opts: O) => T}
+ */
+function locked(fn) {
+  return (opts) => withLedgerLock(findingsPath(opts.forgeDir), () => fn(opts));
 }
 
 /** @param {unknown} ids */
@@ -87,7 +96,7 @@ function requireKnownDependencies(entries, ids) {
  *           dependsOn?: string[], session?: { sessionId?: string | null, slug?: string | null },
  *           now?: () => Date }} opts
  */
-export function addFinding(opts) {
+export const addFinding = locked(function addFinding(opts) {
   const text = String(opts.text ?? '').trim();
   if (!text) throw new Error('A finding needs text: forge finding add "<text>"');
   const kind = opts.kind;
@@ -119,12 +128,12 @@ export function addFinding(opts) {
   };
   writeAll(opts.forgeDir, [...entries, entry]);
   return entry;
-}
+});
 
 /**
  * @param {{ forgeDir: string, id: string, dependsOn: string[] }} opts
  */
-export function linkFinding(opts) {
+export const linkFinding = locked(function linkFinding(opts) {
   const entries = readFindings(opts.forgeDir);
   const idx = entries.findIndex((entry) => entry.id === opts.id);
   if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
@@ -137,12 +146,12 @@ export function linkFinding(opts) {
   };
   writeAll(opts.forgeDir, entries);
   return entries[idx];
-}
+});
 
 /**
  * @param {{ forgeDir: string, id: string, note?: string | null, now?: () => Date }} opts
  */
-export function resolveFinding(opts) {
+export const resolveFinding = locked(function resolveFinding(opts) {
   const entries = readFindings(opts.forgeDir);
   const idx = entries.findIndex((e) => e.id === opts.id);
   if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
@@ -191,12 +200,12 @@ export function resolveFinding(opts) {
   };
   writeAll(opts.forgeDir, entries);
   return { entry: entries[idx], dependents };
-}
+});
 
 /**
  * @param {{ forgeDir: string, id: string, from: string, note: string, now?: () => Date }} opts
  */
-export function reopenFinding(opts) {
+export const reopenFinding = locked(function reopenFinding(opts) {
   const entries = readFindings(opts.forgeDir);
   const idx = entries.findIndex((entry) => entry.id === opts.id);
   if (idx < 0) throw new Error(`No finding with id ${opts.id}. See: forge finding list --all`);
@@ -228,7 +237,7 @@ export function reopenFinding(opts) {
   };
   writeAll(opts.forgeDir, entries);
   return entries[idx];
-}
+});
 
 /**
  * Slug tokens long enough to match subjects without noise (`fix`, `add`, …).

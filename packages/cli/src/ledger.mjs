@@ -49,6 +49,72 @@ export function readLedger(file) {
   return out;
 }
 
+const LOCK_STALE_MS = 5_000;
+const LOCK_TIMEOUT_MS = 10_000;
+const sleepCell = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Run `fn` holding an exclusive `<file>.lock`. Project-level ledgers are
+ * shared by every forge session in the checkout, and their writers are
+ * read-modify-write: two sessions without this both read the same snapshot
+ * and the second write drops the first one's line (or mints the same id).
+ *
+ * ponytail: a lock older than LOCK_STALE_MS is taken as a crashed holder and
+ * broken; two waiters breaking it at once can both enter. Holders keep it for
+ * milliseconds, so that needs a >5s stall — use a real lock library if not.
+ *
+ * @template T
+ * @param {string} file
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withLedgerLock(file, fn) {
+  const lock = `${file}.lock`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      fs.closeSync(fs.openSync(lock, 'wx'));
+      break;
+    } catch (err) {
+      // EPERM / EBUSY: Windows reports a lock that is mid-delete this way.
+      if (!['EEXIST', 'EPERM', 'EBUSY'].includes(/** @type {any} */ (err)?.code)) throw err;
+    }
+    try {
+      if (Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS) {
+        fs.rmSync(lock, { force: true });
+        continue;
+      }
+    } catch {
+      continue; // released between open and stat
+    }
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${lock}`);
+    Atomics.wait(sleepCell, 0, 0, 5 + Math.random() * 20);
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(lock, { force: true });
+  }
+}
+
+/**
+ * Replace a jsonl ledger via temp file + rename, so an unlocked reader never
+ * sees a half-written file.
+ * @param {string} file
+ * @param {Record<string, any>[]} entries
+ */
+export function writeLedger(file, entries) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf8');
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
 /**
  * @param {string} file
  * @param {Record<string, any>[]} lines
@@ -57,11 +123,11 @@ export function readLedger(file) {
 function appendLines(file, lines, replaceWhen) {
   if (lines.length === 0) return 0;
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const kept = replaceWhen ? readLedger(file).filter((e) => !replaceWhen(e)) : readLedger(file);
-    const all = [...kept, ...lines].map((e) => JSON.stringify(e));
-    fs.writeFileSync(file, `${all.join('\n')}\n`, 'utf8');
-    return lines.length;
+    return withLedgerLock(file, () => {
+      const kept = replaceWhen ? readLedger(file).filter((e) => !replaceWhen(e)) : readLedger(file);
+      writeLedger(file, [...kept, ...lines]);
+      return lines.length;
+    });
   } catch {
     return 0; // advisory
   }

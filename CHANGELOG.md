@@ -14,6 +14,14 @@
   after legitimate Forge writes and compared at every `forge phase` boundary
   and at `forge integrity-check` (the Stop hook included). A mismatch or
   unreadable seal fails closed. Group-batch high-risk review is unchanged.
+- **Concurrent sessions no longer lose ledger lines.** The project-level
+  ledgers every session in a checkout shares (`findings.jsonl`,
+  `sessions.jsonl`, `deferrals.jsonl`, `known-false.jsonl`,
+  `scorecards.jsonl`) were read-modify-write with no lock, so two sessions
+  writing at once dropped a line and `forge finding add` could mint the same
+  `F<n>` twice. Writers now hold a `<file>.lock` and replace the file via
+  temp + rename; formats are unchanged. `healSessionProgress` writes
+  `session.json` / `status.json` atomically too.
 
 ## 0.3.62 — 2026-09-23
 

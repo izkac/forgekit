@@ -29,7 +29,14 @@ import { isHighRiskText, resolveEffectivePreferences } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
-import { appendDeferralLedger, appendKnownFalseLedger, appendSessionDigest } from './ledger.mjs';
+import {
+  appendDeferralLedger,
+  appendKnownFalseLedger,
+  appendSessionDigest,
+  readLedger,
+  withLedgerLock,
+  writeLedger,
+} from './ledger.mjs';
 
 /** Keep in sync with set-phase.mjs TASK_COUNT_ESCALATION_THRESHOLD. */
 const TASK_COUNT_ESCALATION_THRESHOLD = 15;
@@ -989,17 +996,10 @@ export function appendScorecardLedger(sessionDir, card, session = {}) {
         .filter((c) => c.points < c.max)
         .map((c) => ({ id: c.id, points: c.points, max: c.max, notes: c.notes })),
     };
-    const kept = (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n') : [])
-      .filter(Boolean)
-      .filter((l) => {
-        try {
-          return JSON.parse(l).sessionId !== card.sessionId;
-        } catch {
-          return false;
-        }
-      });
-    kept.push(JSON.stringify(line));
-    fs.writeFileSync(file, `${kept.join('\n')}\n`, 'utf8');
+    withLedgerLock(file, () => {
+      const kept = readLedger(file).filter((e) => e.sessionId !== card.sessionId);
+      writeLedger(file, [...kept, line]);
+    });
   } catch {
     /* ledger is advisory — never block a scorecard write */
   }
