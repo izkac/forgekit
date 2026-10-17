@@ -260,7 +260,7 @@ test('active.json names a session with no session.json on disk: exit 0, empty st
 });
 
 test('wired to the real forge integrity-check: red without spine.json, green once spine.json is a valid notApplicable doc', () => {
-  const { root, sessionId, sessionDir } = makeProject({ phase: 'review' });
+  const { root, sessionId, sessionDir } = makeProject({ phase: 'verify' });
   const cmd = fakeForgeCmd(REAL_FORGE_BIN);
 
   // Fixture sanity: prove integrity-check is red on this fixture, and read
@@ -299,4 +299,100 @@ test('wired to the real forge integrity-check: red without spine.json, green onc
   const r2 = runHook(root, {}, { env: { FORGE_STOP_HOOK_FORGE_CMD: cmd } });
   assert.equal(r2.status, 0, r2.stderr);
   assert.equal(r2.stdout, '', 'green integrity-check exits 0 with no block JSON');
+});
+
+// --- Finish nudge + session resolution (host session_id) ---
+
+function addSession(root, sessionId, fields) {
+  const dir = path.join(root, '.forge', 'sessions', sessionId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'session.json'),
+    `${JSON.stringify({ id: sessionId, slug: sessionId, ...fields })}\n`,
+    'utf8',
+  );
+  return dir;
+}
+
+function greenEnv(root) {
+  return { FORGE_STOP_HOOK_FORGE_CMD: fakeForgeCmd(writeFakeForge(root, { exitCode: 0 })) };
+}
+
+function blockReason(r) {
+  assert.equal(r.status, 0, r.stderr);
+  assert.notEqual(r.stdout, '', 'expected a block decision');
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  return out.reason;
+}
+
+function assertAllowed(r) {
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '');
+}
+
+test('review with no final-review.md yet: blocks with phase done and --allow-incomplete, scoped by --session', () => {
+  const { root } = makeProject({ phase: 'review' });
+  const reason = blockReason(runHook(root, {}, { env: greenEnv(root) }));
+  assert.match(reason, /forge phase done --session s1/);
+  assert.match(reason, /--allow-incomplete "<what the user must do>"/);
+});
+
+test('finish phase that never ran phase done: blocks', () => {
+  const { root } = makeProject({ phase: 'finish' });
+  assert.match(blockReason(runHook(root, {}, { env: greenEnv(root) })), /forge phase done/);
+});
+
+test('verify with an approved final-review.md: blocks', () => {
+  const { root, sessionDir } = makeProject({ phase: 'verify' });
+  writeFinalReview(sessionDir, '**APPROVED.**\n');
+  assert.match(blockReason(runHook(root, {}, { env: greenEnv(root) })), /forge phase done/);
+});
+
+test('no active.json but exactly one open session at review: resolves it and blocks', () => {
+  const root = tmp('stop-hook-only-open-');
+  addSession(root, 'only', { phase: 'review' });
+  addSession(root, 'old', { phase: 'done' });
+  assert.match(blockReason(runHook(root, {}, { env: greenEnv(root) })), /session only/);
+});
+
+test('two open sessions, no pointer: ambiguous, allows', () => {
+  const root = tmp('stop-hook-ambiguous-');
+  addSession(root, 'a', { phase: 'review' });
+  addSession(root, 'b', { phase: 'review' });
+  assertAllowed(runHook(root, {}, { env: greenEnv(root) }));
+});
+
+test('payload session_id matching host.sessionIds wins over the active pointer', () => {
+  const root = tmp('stop-hook-host-');
+  addSession(root, 'first', { phase: 'review', host: { sessionIds: ['agent-1'] } });
+  addSession(root, 'second', { phase: 'implement', tasksTotal: 3, tasksComplete: 1, host: { sessionIds: ['agent-2'] } });
+  fs.writeFileSync(path.join(root, '.forge', 'active.json'), JSON.stringify({ sessionId: 'first' }), 'utf8');
+  const env = greenEnv(root);
+
+  // The second agent is mid-implement in its own session: not blocked by the first's review.
+  assertAllowed(runHook(root, { session_id: 'agent-2' }, { env }));
+  // The first agent is blocked on its own session.
+  assert.match(blockReason(runHook(root, { session_id: 'agent-1' }, { env })), /session first/);
+  // A host session bound to nothing never inherits another agent's bound session.
+  assertAllowed(runHook(root, { session_id: 'agent-3' }, { env }));
+  // No session_id at all: falls back to the pointer, as before.
+  assert.match(blockReason(runHook(root, {}, { env })), /session first/);
+});
+
+test('unbound session still resolves via the pointer when the payload has a session_id', () => {
+  const { root } = makeProject({ phase: 'review' });
+  assert.match(blockReason(runHook(root, { session_id: 'agent-x' }, { env: greenEnv(root) })), /session s1/);
+});
+
+test('error: integrity-check exits non-zero with non-JSON output: fails open', () => {
+  const { root } = makeProject({ phase: 'review' });
+  const crash = path.join(root, 'crash.mjs');
+  fs.writeFileSync(crash, "process.stdout.write('boom'); process.exit(3);\n", 'utf8');
+  assertAllowed(runHook(root, {}, { env: { FORGE_STOP_HOOK_FORGE_CMD: fakeForgeCmd(crash) } }));
+});
+
+test('error: unparseable payload: fails open', () => {
+  const { root } = makeProject({ phase: 'review' });
+  assertAllowed(runHook(root, null, { raw: '{ nope', env: greenEnv(root) }));
 });
