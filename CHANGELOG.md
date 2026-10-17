@@ -22,6 +22,20 @@
   `F<n>` twice. Writers now hold a `<file>.lock` and replace the file via
   temp + rename; formats are unchanged. `healSessionProgress` writes
   `session.json` / `status.json` atomically too.
+- **`forge phase done` counts tasks from `tasks.md`.** The done gate read the
+  session's cached `tasksComplete`/`tasksTotal`, which drift (real refusals
+  read "tasks incomplete (10/9)" and "(0/11)"). It now overlays the checkbox
+  counts from the change's `tasks.md` — the archived copy once filed — per
+  ADR 0002, and falls back to the cache only when no `tasks.md` is readable.
+- **An empty live change dir no longer blocks the archive check.** On Windows
+  `openspec archive` often leaves the live `changes/<name>/` behind, empty,
+  because another process holds it (EBUSY). When that dir holds no files and a
+  dated copy exists under `changes/archive/*-<name>`, the change counts as
+  archived — no `--archive-waived` needed.
+- **Fleet test no longer writes to the real registry on Windows.** "a real
+  project whose path merely contains the temp dir name" redirected `HOME` but
+  not `USERPROFILE`, which `os.homedir()` reads on Windows, so it left
+  `\home\demo-user\Temp-project` sessions in `~/.forgekit/fleet/sessions`.
 
 ## 0.3.62 — 2026-09-23
 
