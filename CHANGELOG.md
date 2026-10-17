@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.64 — 2026-10-17
 
 - **`forge cleanup --help` no longer deletes sessions.** It had no help
   handling and ran the real sweep, removing finished sessions (gitignored, no
