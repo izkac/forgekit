@@ -33,7 +33,8 @@ import { CONCRETE_PACES, isHighRiskText } from './preferences.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { checkIntegritySeal } from './integrity-seal.mjs';
-import { resolveChangeDir, runIntegrityChecks } from './integrity.mjs';
+import { isArchivedLeftover, resolveChangeDir, runIntegrityChecks } from './integrity.mjs';
+import { overlayPlanProgress, readPlanTaskProgress } from './plan-progress.mjs';
 import { writeSessionScorecard } from './score.mjs';
 import { appendSessionDigest } from './ledger.mjs';
 import { bindHost } from './metrics/host.mjs';
@@ -604,6 +605,11 @@ enforceSpecVerifyGate();
 function enforceDoneGate() {
   if (phase !== 'done' && phase !== 'finish') return;
 
+  // ADR 0002: tasks.md is the source of truth; session counts are a cache that
+  // drifts ("tasks incomplete (10/9)"). Read it — from the archive once the
+  // change is filed — and keep the cache only when no tasks.md can be read.
+  overlayPlanProgress(session, readPlanTaskProgress({ cwd: process.cwd(), session }));
+
   const total = Number(session.tasksTotal) || 0;
   const complete = Number(session.tasksComplete) || 0;
   const evidencePath = path.join(dir, 'verify-evidence.md');
@@ -640,7 +646,7 @@ function enforceDoneGate() {
   // there would demand an archive that hasn't happened yet on every mid-flight
   // session.
   const liveChangeDir = resolveChangeDir({ cwd: process.cwd(), session, forWrite: true });
-  if (liveChangeDir && fs.existsSync(liveChangeDir)) {
+  if (liveChangeDir && fs.existsSync(liveChangeDir) && !isArchivedLeftover(liveChangeDir)) {
     // --archive-waived names this specific problem, unlike --allow-incomplete
     // below, which swallows every done-gate problem and marks the session
     // incomplete. A change that is complete and merely unfiled is not

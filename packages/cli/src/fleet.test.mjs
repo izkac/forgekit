@@ -476,14 +476,22 @@ test('a real project whose path merely contains the temp dir name is registered'
   const fakeHome = tmp('forge-fleet-home-substr-');
   const prevFleet = process.env.FORGEKIT_FLEET_DIR;
   const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
   delete process.env.FORGEKIT_FLEET_DIR;
+  // os.homedir() reads USERPROFILE on Windows, not HOME — redirect both, or
+  // these entries land in the developer's real ~/.forgekit/fleet registry.
   process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
   try {
     for (const [i, root] of [
       path.join(path.sep, 'home', 'demo-user', `${path.basename(tmpdir())}-project`),
       path.join(path.sep, 'home', 'demo-user', `${path.basename(tmpdir())}foo`, 'app'),
     ].entries()) {
       registerSession(root, makeSession(`sess-substr-${i}`));
+      assert.ok(
+        entryFile(root, `sess-substr-${i}`).startsWith(fakeHome),
+        'the entry must land in the redirected home, never the real registry',
+      );
       assert.equal(
         fs.existsSync(entryFile(root, `sess-substr-${i}`)),
         true,
@@ -493,7 +501,10 @@ test('a real project whose path merely contains the temp dir name is registered'
   } finally {
     if (prevFleet === undefined) delete process.env.FORGEKIT_FLEET_DIR;
     else process.env.FORGEKIT_FLEET_DIR = prevFleet;
-    process.env.HOME = prevHome;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     fs.rmSync(fakeHome, { recursive: true, force: true });
   }
 });

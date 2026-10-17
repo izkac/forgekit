@@ -539,6 +539,108 @@ test('phase done reaches done when the change exists only under the archive path
   }
 });
 
+/**
+ * A clean specs session whose change is archived under `changes/archive/`.
+ * Cache counts and the archived tasks.md body are the knobs the tests turn.
+ */
+function makeArchivedSpecsSession(dir, id, { tasksTotal, tasksComplete, tasksMd }) {
+  const sessionFile = makeForgeFixture(dir, id);
+  const sessionDir = path.dirname(sessionFile);
+  const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  s.planType = 'specs';
+  s.openspecChange = 'shipped-change';
+  s.tasksTotal = tasksTotal;
+  s.tasksComplete = tasksComplete;
+  fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+  fs.writeFileSync(path.join(sessionDir, 'verify-evidence.md'), '# Verify evidence\nok\n');
+  plantSpecVerifyCleared(sessionDir);
+  const archivedDir = path.join(dir, 'specs', 'changes', 'archive', '2026-01-01-shipped-change');
+  fs.mkdirSync(archivedDir, { recursive: true });
+  fs.writeFileSync(path.join(archivedDir, 'tasks.md'), tasksMd);
+  fs.writeFileSync(
+    path.join(archivedDir, 'spine.json'),
+    `${JSON.stringify({ notApplicable: 'test fixture', rows: [] })}\n`,
+  );
+  return sessionFile;
+}
+
+test('phase done counts tasks from the archived tasks.md, not a stale session cache', () => {
+  // Real refusals: "tasks incomplete (10/9)", "(0/11)" — the cache drifted
+  // while every checkbox in tasks.md was ticked (ADR 0002).
+  for (const [complete, total] of [[10, 9], [0, 11]]) {
+    const dir = tmp('forge-done-stale-cache-');
+    try {
+      const sessionFile = makeArchivedSpecsSession(dir, 'sess-stale-cache', {
+        tasksTotal: total,
+        tasksComplete: complete,
+        tasksMd: '- [x] one\n- [x] two\n- [X] three\n',
+      });
+      const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+      const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+      assert.equal(s.tasksTotal, 3);
+      assert.equal(s.tasksComplete, 3);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('phase done refuses when tasks.md has an unticked box even if the cache says complete', () => {
+  const dir = tmp('forge-done-tasksmd-open-');
+  try {
+    makeArchivedSpecsSession(dir, 'sess-tasksmd-open', {
+      tasksTotal: 2,
+      tasksComplete: 2,
+      tasksMd: '- [x] one\n- [ ] two\n',
+    });
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /tasks incomplete \(1\/2\)/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done treats an empty live change dir left beside its archived copy as archived', () => {
+  // Windows: `openspec archive` copies to archive/ but cannot remove the live
+  // dir another process holds open (EBUSY), leaving it empty.
+  const dir = tmp('forge-done-empty-live-');
+  try {
+    makeArchivedSpecsSession(dir, 'sess-empty-live', {
+      tasksTotal: 1,
+      tasksComplete: 1,
+      tasksMd: '- [x] one\n',
+    });
+    fs.mkdirSync(path.join(dir, 'specs', 'changes', 'shipped-change', 'nested-empty'), { recursive: true });
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /change not archived/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('phase done still refuses an empty live change dir with no archived copy', () => {
+  const dir = tmp('forge-done-empty-live-noarchive-');
+  try {
+    const sessionFile = makeForgeFixture(dir, 'sess-empty-noarchive');
+    const sessionDir = path.dirname(sessionFile);
+    const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    s.planType = 'specs';
+    s.openspecChange = 'never-archived';
+    fs.writeFileSync(sessionFile, `${JSON.stringify(s, null, 2)}\n`);
+    makeDoneable(sessionDir);
+    plantSpecVerifyCleared(sessionDir);
+    fs.mkdirSync(path.join(dir, 'specs', 'changes', 'never-archived'), { recursive: true });
+    const r = spawnSync(process.execPath, [SCRIPT, 'done'], { cwd: dir, encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /change not archived/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('phase done raises no archive problem for a session with no tracked change', () => {
   // Pass-through case: openspecChange unset means resolveChangeDir has
   // nothing to resolve, so the archive gate has nothing to check.

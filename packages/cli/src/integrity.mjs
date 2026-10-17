@@ -100,10 +100,33 @@ function findArchivedChangeDir(changesDir, change) {
   return matches.length ? path.join(archiveDir, matches[matches.length - 1]) : null;
 }
 
+/** True when `dir` contains no files at any depth (empty subdirs allowed). */
+function holdsNoFiles(dir) {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .every((e) => e.isDirectory() && holdsNoFiles(path.join(dir, e.name)));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when the live change dir is a leftover shell of an archive that already
+ * happened: it holds no files and a dated copy exists under `archive/`. On
+ * Windows `openspec archive` copies the change, then fails to remove a live
+ * dir another process holds open (EBUSY), leaving it empty.
+ *
+ * @param {string} liveDir `<plan.dir>/changes/<name>`
+ */
+export function isArchivedLeftover(liveDir) {
+  return holdsNoFiles(liveDir) && findArchivedChangeDir(path.dirname(liveDir), path.basename(liveDir)) !== null;
+}
+
 /** Live change dir if present, else its archived copy, else the live path. */
 function liveOrArchived(changesDir, change) {
   const liveDir = path.join(changesDir, change);
-  if (fs.existsSync(liveDir)) return liveDir;
+  if (fs.existsSync(liveDir) && !isArchivedLeftover(liveDir)) return liveDir;
   return findArchivedChangeDir(changesDir, change) ?? liveDir;
 }
 
