@@ -1100,8 +1100,30 @@ export function runningFromMonorepo() {
   }
 }
 
-function npmBin() {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+/**
+ * How to run npm without a shell. On Windows `npm.cmd` can't be spawned with
+ * `shell: false` (EINVAL since CVE-2024-27980), so run `node <npm-cli.js>`
+ * instead — from `npm_execpath`, else next to node.exe. cmd.exe is the
+ * last resort when npm-cli.js isn't found.
+ * @param {string[]} args
+ * @param {{ platform?: string, execPath?: string, env?: NodeJS.ProcessEnv, exists?: (p: string) => boolean }} [opts]
+ * @returns {{ file: string, args: string[], shell: boolean }}
+ */
+export function npmInvocation(args, opts = {}) {
+  const {
+    platform = process.platform,
+    execPath = process.execPath,
+    env = process.env,
+    exists = fs.existsSync,
+  } = opts;
+  if (platform !== 'win32') return { file: 'npm', args, shell: false };
+  const w = path.win32;
+  const cli = [
+    env.npm_execpath,
+    w.join(w.dirname(execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ].find((c) => c && w.basename(c).toLowerCase() === 'npm-cli.js' && exists(c));
+  if (cli) return { file: execPath, args: [cli, ...args], shell: false };
+  return { file: ['npm', ...args.map((a) => `"${a}"`)].join(' '), args: [], shell: true };
 }
 
 /**
@@ -1110,13 +1132,17 @@ function npmBin() {
  */
 export function fetchRegistryVersion(pkg = '@izkac/forgekit') {
   try {
-    const out = execFileSync(npmBin(), ['view', pkg, 'version'], {
+    const npm = npmInvocation(['view', pkg, 'version']);
+    const out = execFileSync(npm.file, npm.args, {
       encoding: 'utf8',
       timeout: 20000,
+      stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
+      shell: npm.shell,
     });
     const v = String(out).trim();
-    return v || null;
+    // Only a plain semver goes on to `npm i -g` (and possibly a cmd.exe line).
+    return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(v) ? v : null;
   } catch {
     return null;
   }
@@ -1136,9 +1162,11 @@ export function maybeUpdateGlobalPackage(opts = {}) {
   const latest = fetchRegistryVersion();
   if (!latest) return { status: 'offline', current };
   if (!versionIsNewer(latest, current)) return { status: 'current', latest, current };
-  const r = spawnSync(npmBin(), ['i', '-g', `@izkac/forgekit@${latest}`], {
+  const npm = npmInvocation(['i', '-g', `@izkac/forgekit@${latest}`]);
+  const r = spawnSync(npm.file, npm.args, {
     stdio: 'inherit',
     windowsHide: true,
+    shell: npm.shell,
   });
   if (r.status !== 0) {
     return { status: 'failed', latest, current, message: 'npm i -g failed' };

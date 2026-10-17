@@ -24,6 +24,7 @@ import {
   AGENTS,
   versionIsNewer,
   runningFromMonorepo,
+  npmInvocation,
 } from './install.mjs';
 import * as installApi from './install.mjs';
 import { loadUserConfig, saveUserConfig } from './config.mjs';
@@ -688,6 +689,26 @@ test('versionIsNewer compares dotted versions', () => {
   assert.equal(versionIsNewer('0.3.52', '0.3.52'), false);
   assert.equal(versionIsNewer('0.3.51', '0.3.52'), false);
   assert.equal(versionIsNewer('1.0.0', '0.9.9'), true);
+});
+
+test('npmInvocation runs node npm-cli.js on Windows instead of npm.cmd', () => {
+  const execPath = String.raw`C:\Program Files\nodejs\node.exe`;
+  const besideNode = String.raw`C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js`;
+  const fromEnv = String.raw`D:\tools\npm\bin\npm-cli.js`;
+  const win = (env, present) => npmInvocation(['view', 'x', 'version'], {
+    platform: 'win32', execPath, env, exists: (p) => present.includes(p),
+  });
+  assert.deepEqual(win({}, [besideNode]), {
+    file: execPath, args: [besideNode, 'view', 'x', 'version'], shell: false,
+  });
+  assert.deepEqual(win({ npm_execpath: fromEnv }, [fromEnv, besideNode]).args[0], fromEnv);
+  // pnpm/yarn set npm_execpath too — ignore anything that isn't npm-cli.js.
+  const pnpm = String.raw`C:\pnpm\bin\pnpm.cjs`;
+  assert.equal(win({ npm_execpath: pnpm }, [pnpm, besideNode]).args[0], besideNode);
+  assert.deepEqual(win({}, []), { file: 'npm "view" "x" "version"', args: [], shell: true });
+  assert.deepEqual(npmInvocation(['view'], { platform: 'linux' }), {
+    file: 'npm', args: ['view'], shell: false,
+  });
 });
 
 test('runningFromMonorepo is true in this checkout', () => {
