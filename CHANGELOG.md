@@ -16,6 +16,11 @@
 - **Test fix:** the "forge new outside any host session" test cleared
   `CLAUDE_CODE_SESSION_ID` but not the Cursor variables, so it failed when the
   suite ran inside Cursor.
+- **`forgekit update` upgrades the global package on Windows again.** It ran
+  `npm.cmd` without a shell, which Node rejects with EINVAL since the
+  CVE-2024-27980 fix, so every update reported "Could not reach npm". It now
+  runs `node <npm-cli.js>` with `shell: false` (cmd.exe only if npm-cli.js
+  can't be found), for both `npm view` and `npm i -g`.
 
 ## 0.3.63 — 2026-10-17
 
@@ -67,12 +72,6 @@
   session. It still blocks once (`stop_hook_active`) and fails open. Re-run
   `forge init --claude` to pick up the new hook; forgekit's own `.claude/`
   now registers it too.
-
-- **`forgekit update` upgrades the global package on Windows again.** It ran
-  `npm.cmd` without a shell, which Node rejects with EINVAL since the
-  CVE-2024-27980 fix, so every update reported "Could not reach npm". It now
-  runs `node <npm-cli.js>` with `shell: false` (cmd.exe only if npm-cli.js
-  can't be found), for both `npm view` and `npm i -g`.
 
 ## 0.3.62 — 2026-09-23
 
