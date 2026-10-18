@@ -566,6 +566,14 @@ forge fleet sync      # re-register every session under this project's .forge/
 
 `<session>` matches by slug, session id, or project name (must be unique).
 
+Linked worktrees, including T3 Code's `t3-*` directories, show the parent
+repository's name while keeping separate session entries. ENGINE identifies
+the agent running inside T3 (`codex`, `deepseek`, or `opencode`, for example),
+and is saved with the session so a later `fleet sync` from another shell
+preserves it. Existing worktree names repair on the next Fleet refresh;
+older sessions without an engine pick it up when their agent next saves
+the session.
+
 Sessions heartbeat on every agent turn (the AGE column reflects real activity),
 and when a session starts or resumes in a project that already has another live
 session, both agents are warned — the new one in its session-start context, the

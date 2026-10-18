@@ -96,7 +96,8 @@ function healthFor(entry) {
 
 function renderTable(entries) {
   if (entries.length === 0) return 'No fleet sessions. Start one with `forge new <slug>`.\n';
-  const header = `${pad('PROJECT', 18)} ${pad('SESSION', 26)} ${pad('ENGINE', 7)} ${pad('PHASE', 18)} ${pad('TASKS', 16)} ${pad('HEALTH', 6)} ${pad('PACE', 9)} ${pad('AGE', 4)} MSGS`;
+  const engineWidth = entries.reduce((width, e) => Math.max(width, String(e.engine ?? '').length), 7);
+  const header = `${pad('PROJECT', 18)} ${pad('SESSION', 26)} ${pad('ENGINE', engineWidth)} ${pad('PHASE', 18)} ${pad('TASKS', 16)} ${pad('HEALTH', 6)} ${pad('PACE', 9)} ${pad('AGE', 4)} MSGS`;
   const lines = [header, '-'.repeat(header.length)];
   /** @type {string[]} */
   const notes = [];
@@ -107,7 +108,7 @@ function renderTable(entries) {
       notes.push(`${e.projectName}/${e.slug}: ${health.line}`);
     }
     lines.push(
-      `${pad(e.projectName, 18)} ${pad(e.slug, 26)} ${pad(e.engine ?? '—', 7)} ${pad(
+      `${pad(e.projectName, 18)} ${pad(e.slug, 26)} ${pad(e.engine ?? '—', engineWidth)} ${pad(
         e.missing ? 'missing' : phaseBar(e.phase),
         18,
       )} ${pad(tasksCell(e), 16)} ${pad(healthCell(health.state), 6)} ${pad(e.pace ?? '—', 9)} ${pad(relTime(e.lastSeen ?? e.updatedAt), 4)} ${

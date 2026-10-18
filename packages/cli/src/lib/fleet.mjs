@@ -89,14 +89,45 @@ export function entryFile(projectRoot, sessionId) {
 }
 
 /**
- * Best-effort engine detection from env vars set by agent harnesses.
- * ponytail: claude + cursor only; other engines show as null until they
- * grow a detectable env marker.
+ * Identify the running agent from its session markers, including when T3
+ * hosts it. Installed SDKs, config directories and T3 itself do not identify
+ * the engine currently driving a session.
  */
 export function detectEngine(env = process.env) {
-  if (env.CLAUDECODE) return 'claude';
-  if (env.CURSOR_TRACE_ID || env.CURSOR_AGENT) return 'cursor';
+  const has = (key) => typeof env[key] === 'string' && env[key].trim() !== '';
+  // DeepSeek owns DSH_* per shell execution; OpenCode sets OPENCODE in its
+  // CLI and OPENCODE_TERMINAL in its newer shell executor. Home directories,
+  // config paths and provider credentials alone are not runtime markers.
+  if (env.DSH_SHELL === '1' || has('DSH_SESSION_ID')) return 'deepseek';
+  if (env.OPENCODE === '1' || env.OPENCODE_TERMINAL === '1') return 'opencode';
+  if (has('CODEX_THREAD_ID') || has('CODEX_SESSION_ID')) return 'codex';
+  if (has('CLAUDECODE') || has('CLAUDE_CODE_SESSION_ID')) return 'claude';
+  if (has('CURSOR_TRACE_ID') || has('CURSOR_AGENT') || has('CURSOR_CONVERSATION_ID')) return 'cursor';
   return null;
+}
+
+/**
+ * A linked worktree keeps its own session paths and registry key, but belongs
+ * to the repository named by Git's shared .git directory. Read Git's pointers
+ * directly so fleet watch need not launch git for every row on every refresh.
+ * Ordinary projects, submodules and unreadable metadata retain their name.
+ */
+function projectNameFor(projectRoot) {
+  try {
+    const pointer = fs.readFileSync(path.join(projectRoot, '.git'), 'utf8').trim();
+    const match = /^gitdir:\s*(.+)$/.exec(pointer);
+    if (match) {
+      const gitDir = path.resolve(projectRoot, match[1]);
+      const common = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
+      const commonDir = path.resolve(gitDir, common);
+      if (common && path.basename(commonDir) === '.git') {
+        return path.basename(path.dirname(commonDir));
+      }
+    }
+  } catch {
+    // No linked-worktree metadata; the checkout's name is still usable.
+  }
+  return path.basename(projectRoot);
 }
 
 /**
@@ -209,8 +240,10 @@ function formatRegisterWarning(err, env = process.env) {
  *
  * @param {string} projectRoot absolute project path
  * @param {Record<string, any>} session forge session.json contents
+ * @param {{ engine?: string | null }} [opts] null skips detecting the caller
+ *   when syncing sessions belonging to other agents
  */
-export function registerSession(projectRoot, session) {
+export function registerSession(projectRoot, session, { engine = detectEngine() } = {}) {
   try {
     // Only the *default* registry is protected. `FORGEKIT_FLEET_DIR` means the
     // caller has already pointed the registry somewhere it owns — that is the
@@ -227,7 +260,7 @@ export function registerSession(projectRoot, session) {
     }
     const entry = {
       project: projectRoot,
-      projectName: path.basename(projectRoot),
+      projectName: projectNameFor(projectRoot),
       sessionId: session.id,
       slug: session.slug,
       phase: session.phase,
@@ -236,7 +269,7 @@ export function registerSession(projectRoot, session) {
       tasksTotal: session.tasksTotal ?? 0,
       tasksComplete: session.tasksComplete ?? 0,
       pace: session.resolvedPace ?? session.pace ?? null,
-      engine: detectEngine() ?? prev.engine ?? null,
+      engine: engine ?? session.engine ?? prev.engine ?? null,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastSeen: new Date().toISOString(),
@@ -346,7 +379,7 @@ export function flushPendingSessions(projectRoot) {
       continue;
     }
     if (!session?.id) session = { ...session, id };
-    registerSession(projectRoot, session);
+    registerSession(projectRoot, session, { engine: null });
     if (fs.existsSync(pendingPath(projectRoot, id))) failed += 1;
     else registered += 1;
   }
@@ -385,7 +418,7 @@ export function syncProjectSessions(projectRoot) {
       continue;
     }
     if (!session?.id) session = { ...session, id: name };
-    registerSession(projectRoot, session);
+    registerSession(projectRoot, session, { engine: null });
     if (fs.existsSync(entryFile(projectRoot, session.id))) registered += 1;
     else failed += 1;
   }
@@ -402,6 +435,7 @@ export function syncProjectSessions(projectRoot) {
  * of truth; the entry is only a cache, so reads refresh it.
  */
 const MIRRORED_FIELDS = [
+  'engine',
   'slug',
   'phase',
   'planType',
@@ -422,11 +456,14 @@ const MIRRORED_FIELDS = [
  * @param {string} sessionDir
  */
 function reconcileEntry(entry, sessionDir) {
+  const projectName = projectNameFor(entry.project);
+  let changed = entry.projectName !== projectName;
+  entry.projectName = projectName;
   let session;
   try {
     session = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'));
   } catch {
-    return false; // unreadable/absent — keep the cached view
+    return changed; // unreadable/absent — keep the cached session fields
   }
   // tasks.md is authoritative for progress; heal the session cache when it
   // diverges so fleet/status/health stop lying about idle 0/N sessions.
@@ -435,7 +472,7 @@ function reconcileEntry(entry, sessionDir) {
     sessionDir,
     session,
   });
-  let changed = healed.changed;
+  changed = healed.changed || changed;
   for (const key of MIRRORED_FIELDS) {
     const value = session[key];
     if (value === undefined) continue;

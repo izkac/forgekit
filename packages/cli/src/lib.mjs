@@ -6,7 +6,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isTerminalPhase, registerSession } from './lib/fleet.mjs';
+import { detectEngine, isTerminalPhase, registerSession } from './lib/fleet.mjs';
 import { findRepoRoot } from './repo-root.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 
@@ -395,6 +395,8 @@ export function loadSession(sessionId) {
 }
 
 export function saveSession(dir, session) {
+  const engine = detectEngine();
+  if (engine) session.engine = engine;
   session.updatedAt = new Date().toISOString();
   writeJson(path.join(dir, 'session.json'), session);
   writeJson(path.join(dir, 'status.json'), defaultStatus(session));

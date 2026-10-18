@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.65 — 2026-10-18
+
+- **Fleet names linked worktrees by their repository.** T3 Code's `t3-*`
+  worktrees show their parent project name while keeping separate session
+  paths. Existing registry names repair on the next Fleet refresh.
+- **Fleet detects Codex, DeepSeek Harness, and OpenCode.** Engine detection
+  reads their runtime markers, including agents hosted by T3. Session saves
+  preserve the engine so syncing from another shell cannot replace it with
+  the viewer's engine. The ENGINE column fits the full engine name.
+- **Regression coverage:** real Git worktrees and CLI session creation,
+  engine changes on resume, sync from other engines, and full Fleet display.
+
 ## 0.3.64 — 2026-10-17
 
 - **`forge cleanup --help` no longer deletes sessions.** It had no help
