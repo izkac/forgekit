@@ -1,0 +1,12 @@
+{
+  "change": "smarter-test-runs",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "tier3-lock: two worktrees' full runs serialize; group run skips the lock; failed-only rescues a red full run in forge status",
+      "cmd": "node scripts/e2e/harness-portability.mjs tier3-lock",
+      "expect": "TIER3 LOCK GREEN",
+      "timeoutMs": 180000
+    }
+  ]
+}

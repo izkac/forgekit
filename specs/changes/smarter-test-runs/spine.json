@@ -1,0 +1,33 @@
+{
+  "change": "smarter-test-runs",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "test-runs: full tier-3 runs serialized across sessions",
+      "library": "packages/cli/src/tier3-lock.mjs (acquireTier3Lock)",
+      "runtimeOwner": "forge evidence --tier3 (record-evidence.mjs, scope full)",
+      "writes": "<git-common-dir>/forge/tier3.lock (held during the run); verify-runs.jsonl stamp",
+      "reads": "git common dir; holder pid liveness",
+      "uiConsumer": "CLI stderr waiting message naming the holder",
+      "evidence": "tier3-lock.test.mjs, record-evidence.test.mjs; e2e tier3-lock step"
+    },
+    {
+      "capability": "test-runs: stamp scope and tier-3 verdict",
+      "library": "packages/cli/src/record-evidence.mjs (--scope), packages/cli/src/proven.mjs (lastTier3)",
+      "runtimeOwner": "forge evidence --tier3 --scope; forge status",
+      "writes": "verify-runs.jsonl stamps with scope",
+      "reads": "verify-runs.jsonl",
+      "uiConsumer": "forge status proven.tier3 + summary line",
+      "evidence": "record-evidence.test.mjs, proven tests; e2e tier3-lock step"
+    },
+    {
+      "capability": "session-lifecycle: nested-repo base commits",
+      "library": "packages/cli/src/new-session.mjs",
+      "runtimeOwner": "forge new (CLI)",
+      "writes": "session.json nestedBaseCommits",
+      "reads": "nested .git dirs, git rev-parse HEAD",
+      "uiConsumer": "forge status output",
+      "evidence": "new-session tests"
+    }
+  ]
+}

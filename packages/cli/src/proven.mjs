@@ -31,22 +31,55 @@ export const UNVERIFIED_SOURCES = Object.freeze([
 ]);
 
 /**
- * Last tier-3 stamp `forge evidence --tier3` wrote, or null.
+ * Tier-3 verdict from `verify-runs.jsonl`, judged by the last `full` stamp
+ * (a stamp with no `scope` field is a legacy full run). Returns null when no
+ * full stamp exists — scoped stamps alone are not tier 3.
+ *
+ * Fields: `ok`/`exit`/`command`/`at` describe the last full stamp, unchanged.
+ * `scope` is always 'full'. When that stamp is red and the last `failed-only`
+ * stamp appended after it is green, `ok` is true, `via` is 'failed-only' and
+ * `rescue` is `{ command, at }` of that re-run (`exit` still the full run's
+ * exit). `fix` and `group` stamps never change the verdict. `counts` is the
+ * number of stamps per scope across the whole file.
+ *
  * @param {string} sessionDir
  */
 function lastTier3(sessionDir) {
   const file = path.join(sessionDir, 'verify-runs.jsonl');
   if (!fs.existsSync(file)) return null;
-  const lines = fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim());
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
+  /** @type {Array<Record<string, any> & { scope: string }>} */
+  const stamps = [];
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    if (!line.trim()) continue;
     try {
-      const s = JSON.parse(lines[i]);
-      return { ok: s.ok === true, exit: s.exit ?? null, command: s.command ?? '', at: s.startedAt ?? null };
+      const s = JSON.parse(line);
+      stamps.push({ ...s, scope: s.scope ?? 'full' });
     } catch {
       // skip a torn line
     }
   }
-  return null;
+  const counts = { full: 0, 'failed-only': 0, fix: 0, group: 0 };
+  for (const s of stamps) if (s.scope in counts) counts[s.scope] += 1;
+  const fullAt = stamps.findLastIndex((s) => s.scope === 'full');
+  if (fullAt === -1) return null;
+  const full = stamps[fullAt];
+  const verdict = {
+    ok: full.ok === true,
+    exit: full.exit ?? null,
+    command: full.command ?? '',
+    at: full.startedAt ?? null,
+    scope: 'full',
+    counts,
+  };
+  if (verdict.ok) return verdict;
+  const retry = stamps.slice(fullAt + 1).findLast((s) => s.scope === 'failed-only');
+  if (retry?.ok !== true) return verdict;
+  return {
+    ...verdict,
+    ok: true,
+    via: 'failed-only',
+    rescue: { command: retry.command ?? '', at: retry.startedAt ?? null },
+  };
 }
 
 /**
@@ -93,7 +126,14 @@ export function provenFacts(opts) {
  * @param {ReturnType<typeof provenFacts>} p
  */
 export function provenLine(p) {
-  const tier3 = p.tier3 ? (p.tier3.ok ? 'tier3 exit 0' : `tier3 exit ${p.tier3.exit ?? 'null'}`) : 'tier3 not stamped';
+  const t3 = p.tier3;
+  const tier3 = !t3
+    ? 'tier3 not stamped'
+    : t3.via
+      ? `tier3 ok via ${t3.via} re-run (full run exit ${t3.exit ?? 'null'})`
+      : t3.ok
+        ? 'tier3 exit 0'
+        : `tier3 exit ${t3.exit ?? 'null'}`;
   const kf = p.knownFalse > 0 ? `; known-false ${p.knownFalse} (forge refute list)` : '';
   return (
     `Proven (executed): tasks ${p.tasks.ok}/${p.tasks.total} evidence ok; ${tier3}; e2e ${p.e2e.state}${kf}. ` +

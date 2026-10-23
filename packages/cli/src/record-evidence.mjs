@@ -38,6 +38,8 @@
  *   --allow-fail        Write evidence even when the exit code is non-zero
  *   --tier3             Executed mode only: stamp a tier-3 run into
  *                        <session>/verify-runs.jsonl instead of a task file
+ *   --scope <scope>    With --tier3: what the run covered — full (default),
+ *                        failed-only, fix, or group. Recorded as `scope` in the stamp
  *   --forge-dir <path>  Forge root directory (default: .forge under cwd)
  */
 
@@ -51,6 +53,9 @@ import { unfinishedSessions } from './lib.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
 export const TIER3_LABEL = '3 (full workspace)';
+
+/** What a tier-3 stamp covered. A stamp with no `scope` field is read as `full`. */
+export const TIER3_SCOPES = Object.freeze(['full', 'failed-only', 'fix', 'group']);
 
 /** `Recorded by:` values — readers key on the executed one to tell a captured exit code from a claimed one. */
 export const RECORDED_BY_EXECUTED = 'forge evidence (executed — exit code and output captured from the process)';
@@ -94,6 +99,8 @@ export function parseArgs(argv) {
     noTdd: false,
     reason: null,
     tier3: false,
+    /** @type {string | null} raw `--scope` value; validated by `runRecordEvidence` */
+    scope: null,
     /** @type {string[]} everything after `--`: the command to execute */
     cmdArgv: [],
     help: false,
@@ -106,6 +113,7 @@ export function parseArgs(argv) {
       break;
     }
     if (arg === '--tier3') opts.tier3 = true;
+    else if (arg === '--scope') opts.scope = argv[++i];
     else if (arg === '--task') opts.task = argv[++i];
     else if (arg === '--command') opts.command = argv[++i];
     else if (arg === '--exit') opts.exit = argv[++i];
@@ -268,6 +276,17 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
   if (opts.tier3 && !executed) {
     return { exitCode: 1, message: '--tier3 stamps an executed run: pass the command after `--`.' };
   }
+  if (opts.scope != null) {
+    if (!opts.tier3) {
+      return { exitCode: 1, message: '--scope only applies to a tier-3 stamp: pass --tier3 as well.' };
+    }
+    if (!TIER3_SCOPES.includes(opts.scope)) {
+      return {
+        exitCode: 1,
+        message: `--scope must be one of ${TIER3_SCOPES.join('|')}, got: ${opts.scope}`,
+      };
+    }
+  }
   if (!opts.task && !opts.tier3) {
     return { exitCode: 1, message: '--task is required' };
   }
@@ -369,7 +388,9 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     const startedAt = now().toISOString();
     const t0 = Date.now();
     const run = executeCommand(opts.cmdArgv, cwd);
+    const scope = opts.scope ?? 'full';
     const stamp = {
+      scope,
       command: run.command,
       exit: run.exit,
       ok: run.exit === 0,
@@ -383,6 +404,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     refreshIntegritySeal({ sessionDir, repoRoot: cwd });
     const receipt = [
       `- **Command:** \`${run.command}\``,
+      `- **Scope:** ${scope}`,
       `- **Exit code:** ${run.exit ?? `spawn failed: ${run.error}`}`,
       `- **Run at:** ${startedAt}`,
       `- **Recorded by:** ${RECORDED_BY_EXECUTED} → \`verify-runs.jsonl\``,
@@ -506,6 +528,7 @@ Record tier-2 test evidence for a Forge implement task at
 
 Options:
   --tier3             With \`-- <cmd>\`: stamp a tier-3 run instead of a task file
+  --scope <scope>     With --tier3: full (default) | failed-only | fix | group
   --task <nn-slug>    Task directory name, e.g. 03-record-evidence (required)
   --command <cmd>     Test command that was run (required unless --no-tdd is
                        given with no command details at all)
