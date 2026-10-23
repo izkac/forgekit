@@ -38,6 +38,7 @@ import {
   validateE2e,
   writeE2eResults,
 } from './integrity.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 
 const args = process.argv.slice(2);
 const sub = args[0] && !args[0].startsWith('--') ? args[0] : 'status';
@@ -204,6 +205,8 @@ if (sub === 'unskip') {
 if (sub === 'init') {
   try {
     initE2e({ file, change: session.openspecChange ?? null, force });
+    // `--force` can overwrite a sealed session-dir copy (no change named yet).
+    refreshIntegritySeal({ sessionDir: dir });
   } catch (err) {
     process.stderr.write(`${err instanceof Error ? err.message : err}\n`);
     process.exit(1);
@@ -306,6 +309,8 @@ if (sub === 'run') {
     results = runs.find((r) => !r.ok) ?? results;
   }
   const resultsFile = writeE2eResults(dir, results);
+  // e2e-results.json is sealed: a legitimate write must not read as tampering at the next phase boundary.
+  refreshIntegritySeal({ sessionDir: dir });
   for (const step of results.steps) {
     if (step.skipped) {
       process.stdout.write(`  - ${step.name}: skipped (earlier step failed)\n`);

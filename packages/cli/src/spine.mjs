@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import { loadSession, resolveSessionOrExit, readJson } from './lib.mjs';
 import { initSpine, spinePath, validateSpine } from './integrity.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 
 const args = process.argv.slice(2);
 const sub = args[0] && !args[0].startsWith('--') ? args[0] : 'status';
@@ -52,6 +53,8 @@ const file = spinePath({ session, sessionDir: dir, forWrite: sub === 'init' });
 if (sub === 'init') {
   try {
     initSpine({ file, change: session.openspecChange ?? null, force });
+    // `--force` can overwrite a sealed session-dir copy (no change named yet).
+    refreshIntegritySeal({ sessionDir: dir });
   } catch (err) {
     process.stderr.write(`${err instanceof Error ? err.message : err}\n`);
     process.exit(1);

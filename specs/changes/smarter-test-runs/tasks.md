@@ -25,3 +25,4 @@
 
 ## 7. Seal coverage for cache heals
 - [x] 7.1 `packages/cli/src/plan-progress.mjs` `healSessionProgress` and `packages/cli/src/score.mjs` `healCachedScore` refresh the integrity seal after rewriting `session.json` (import `refreshIntegritySeal` from `integrity-seal.mjs`, which has no lib.mjs import — no cycle). Tests in new `packages/cli/src/seal-heal.test.mjs`: sealed session → tick a task in tasks.md → `healSessionProgress` → `checkIntegritySeal` clean; same for `healCachedScore` via `writeSessionScorecard` (or the exported path that reaches it).
+- [x] 7.2 `forge e2e run` and `forge gate check` refresh the integrity seal after writing `e2e-results.json` / `gate-results.json` (find the actual writers — `integrity.mjs` holds the results-path helpers; `gate.mjs:238` writes gate results via `writeJson`). Tests in new `packages/cli/src/seal-results.test.mjs`, incl. a real-CLI scenario: sealed session → `forge e2e run` → `forge phase <next>` exits 0.

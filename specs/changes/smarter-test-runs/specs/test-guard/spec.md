@@ -25,3 +25,15 @@ heal is never reported as tampering at the next phase boundary.
 - WHEN `forge status` (or the fleet/reminder read) heals `tasksComplete`
 - AND the operator then runs `forge phase <next>`
 - THEN the seal check passes
+
+### Requirement: Results writers keep the seal current
+Every Forge command that writes a sealed session artifact as its result —
+`forge e2e run` (`e2e-results.json`), `forge gate check` (`gate-results.json`)
+— SHALL refresh the integrity seal after the write, so running the product
+loop or a gate never makes the next phase transition refuse as tampering.
+
+#### Scenario: E2E run then phase transition
+- GIVEN a sealed session with a change whose `e2e.json` has a passing step
+- WHEN the operator runs `forge e2e run`
+- AND then runs `forge phase <next>`
+- THEN the seal check passes

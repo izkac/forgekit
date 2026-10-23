@@ -25,6 +25,7 @@ import crypto from 'node:crypto';
 import { loadSession, resolveSessionOrExit, readJson, writeJson } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { resolveChangeDir, runE2eSteps } from './integrity.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 
 const GATES_FILE = 'gates.json';
 const GATE_RESULTS_FILE = 'gate-results.json';
@@ -236,6 +237,8 @@ if (sub === 'check') {
   const results = { groups: outGroups, ranAt: new Date().toISOString() };
   const resultsFile = gateResultsPath(dir);
   writeJson(resultsFile, results);
+  // gate-results.json is sealed: a legitimate write must not read as tampering at the next phase boundary.
+  refreshIntegritySeal({ sessionDir: dir });
   process.stdout.write(`${allOk ? 'GREEN' : 'FAILED'} — results: ${resultsFile}\n`);
   process.exit(allOk ? 0 : 1);
 }
