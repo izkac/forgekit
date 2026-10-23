@@ -115,6 +115,7 @@ test('waits while a live process holds the lock, names the holder, then proceeds
   assert.equal(notes.length, 1, 'waiting notice is printed once, not per poll');
   assert.ok(notes[0].includes('holder-slug'), notes[0]);
   assert.ok(notes[0].includes(String(child.pid)), notes[0]);
+  assert.ok(notes[0].includes(lock), 'the notice names the lock file, the manual escape for a reused pid');
   assert.match(notes[0], /waiting/);
   assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, process.pid);
   release();

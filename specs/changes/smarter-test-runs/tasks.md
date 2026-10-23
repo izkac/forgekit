@@ -9,7 +9,7 @@
 
 ## 3. Cross-session tier-3 lock
 - [x] 3.1 New `packages/cli/src/tier3-lock.mjs`: `lockPathFor(cwd)` (git common dir → `<common>/forge/tier3.lock`, else `.forge/tier3.lock`); `acquireTier3Lock({ cwd, sessionId, slug, pollMs, notify })` with wx create, holder JSON, dead-pid and old-unparseable takeover, wait loop with holder message, fail-open on other errors; release only if the file names our pid. Tests in `tier3-lock.test.mjs`: acquire/release; waits while a live child process holds it and proceeds after release; dead-pid takeover; unwritable dir → warning + no-op release; two worktrees of one repo resolve the same lock path.
-- [x] 3.2 Wire into `record-evidence.mjs`: only `--tier3` with scope `full` acquires; release in `finally` and on exit/SIGINT/SIGTERM. Tests in new `record-evidence-lock.test.mjs`: scope `group` runs while a lock is held; a full run stamps after the holder releases.
+- [x] 3.2 Wire into `record-evidence.mjs`: only `--tier3` with scope `full` acquires; release in `finally` plus an `exit` listener (no SIGINT/SIGTERM listeners — they cannot run inside `spawnSync`; a killed holder is taken over as a dead pid). Tests in new `record-evidence-lock.test.mjs`: scope `group` runs while a lock is held; a full run stamps after the holder releases.
 
 ## 4. Nested-repo base commits
 - [x] 4.1 `packages/cli/src/new-session.mjs`: scan depth ≤2 (skip `node_modules`, dot-dirs) for dirs with a `.git` entry; record `session.nestedBaseCommits` keyed by posix rel path; omit unreadable HEADs; absent when none. `session-status.mjs` shows it. Tests in new `new-session-nested.test.mjs`: nested repo recorded; none → absent.

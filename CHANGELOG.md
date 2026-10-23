@@ -24,6 +24,10 @@
 - **Nested base commits.** `forge new` records `session.nestedBaseCommits`
   (`{ "<rel/path>": "<sha>" }`, nested git repos up to two levels deep) next to
   `baseCommit`, so the group tier has a base for each repo.
+- **Cache heals keep the seal current.** `forge status`, the reminder hook and
+  `forge score` rewrite `session.json` when `tasks.md` progress or the cached
+  score drifts; they now refresh the integrity seal too, so ticking a task box
+  no longer makes the next `forge phase` refuse as tampering.
 - **Seal refresh retries.** The integrity seal is written atomically and retries
   up to three times on EBUSY/EPERM/EACCES, fixing a false tamper failure under
   load.

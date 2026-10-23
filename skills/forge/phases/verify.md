@@ -42,7 +42,9 @@ lock at `<git-common-dir>/forge/tier3.lock` (`.forge/tier3.lock` outside git),
 shared by every worktree of the repo. If another session holds it, you see
 `tier-3 lock held by <slug> (pid N, since T) — waiting` and the run proceeds when
 it frees; a dead holder is taken over, and if the lock cannot be created the run
-proceeds with a warning. Scoped runs never wait.
+proceeds with a warning. Scoped runs never wait. A full run that waits behind
+another session's can outlast a host shell timeout — run it in the background
+when your host offers that.
 
 **Run it through `forge evidence --tier3`, not bare.** The CLI executes the
 command and stamps the observed exit code and output tail into

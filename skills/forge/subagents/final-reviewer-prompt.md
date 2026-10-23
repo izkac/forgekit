@@ -26,8 +26,9 @@ finds nothing the block does not already say and is most of what a final review
 used to cost. Read it; judge the *reasons* (allowances, no-TDD declarations);
 treat a `FAIL`/`PROBLEMS` line as a finding.
 
-One check beyond the precheck: if it shows tier 3 ok **via failed-only**, read
-the red full run's stamped tail in `verify-runs.jsonl` and confirm the
+One check beyond the precheck: if `forge status` → `proven.tier3.via` is
+`failed-only` (or `verify-evidence.md` says tier 3 passed via a failed-only
+re-run), read the red full run's stamped tail in `verify-runs.jsonl` and confirm the
 `failed-only` command named exactly the files that failed there. A failing file
 the re-run skipped is a finding. Do not run the suite yourself.
 

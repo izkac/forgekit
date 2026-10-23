@@ -114,7 +114,7 @@ export function parseArgs(argv) {
       break;
     }
     if (arg === '--tier3') opts.tier3 = true;
-    else if (arg === '--scope') opts.scope = argv[++i];
+    else if (arg === '--scope') opts.scope = argv[++i] ?? ''; // missing value → usage error, never a silent full run
     else if (arg === '--task') opts.task = argv[++i];
     else if (arg === '--command') opts.command = argv[++i];
     else if (arg === '--exit') opts.exit = argv[++i];

@@ -12,8 +12,10 @@
     once, then every 60 s; poll every 5 s (injectable for tests).
   Any other create error (EPERM/EACCES/ENOENT on mkdir) → stderr warning, return
   a no-op release (fail open — the lock saves time, it guards nothing).
-- Release: unlink if the file still names our pid; registered on `exit`,
-  `SIGINT`, `SIGTERM` while held.
+- Release: unlink if the file still names our pid; `finally` around the
+  command plus an `exit` listener while held. No SIGINT/SIGTERM listeners: the
+  lock is held inside `spawnSync`, where they cannot run, and they would swallow
+  a later Ctrl-C. A killed holder leaves the file for the dead-pid takeover.
 - Ceiling: two waiters that both see the same dead holder can both run once.
   Acceptable (perf only); upgrade path is rename-and-verify ownership.
 - Alternatives rejected: `proper-lockfile` (new dependency for ~60 lines);
@@ -45,6 +47,12 @@
 - Write seal via tmp + rename. Retry compute+write up to 3 times on EBUSY / EPERM /
   EACCES with a sync backoff (`Atomics.wait`, 50/100/200 ms). Final failure keeps
   the existing warning.
+
+## Cache heals keep the seal current (added mid-change)
+- `healSessionProgress` (plan-progress.mjs) and `healCachedScore` (score.mjs)
+  rewrite `session.json` outside `saveSession`; both now call
+  `refreshIntegritySeal` after the write. Found when ticking a task box made the
+  next `forge phase` refuse as tampering.
 
 ## Docs (run-count rules)
 Group tier → verify sweep → one full run per workspace → failed-only on red →

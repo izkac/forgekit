@@ -41,7 +41,8 @@ Record in `.forge/sessions/<id>/tasks/<nn>-<slug>/test-evidence.md`. See [test-e
 At each `tasks.md` group close, run the tests **related to the group's diff**, not the full suite:
 
 - Jest: `--changedSince=<base>`; Vitest: `run --changed <base>`
-- `<base>` is `session.baseCommit` for the outer repo, or `session.nestedBaseCommits[<repo>]` for a nested git repo (or the last checkpoint sha when checkpoints are on)
+- `<base>` is `session.baseCommit` for the outer repo, or `session.nestedBaseCommits[<repo>]` for a nested git repo (or the last checkpoint sha when checkpoints are on). No `baseCommit` (project root is not a git repo) → name the changed test files explicitly instead
+- Nested repo: run `forge` from the project root (it finds the session there) and change directory inside the command, e.g. `forge evidence --tier3 --scope group -- npm --prefix volo_web test -- --changedSince=<sha>`
 - Stamp it: `forge evidence --tier3 --scope group -- <cmd>` (a group stamp never changes the `proven.tier3` verdict)
 
 If the group's diff touches test harness, setup files, runner config, package manifests or lockfiles, **do not** run the full suite here. Note it in `group-review.md`; verify's single full run covers it.

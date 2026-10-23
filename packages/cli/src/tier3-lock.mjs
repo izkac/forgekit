@@ -93,6 +93,10 @@ export function acquireTier3Lock({
   const lock = lockPathFor(cwd);
   const noop = () => {};
   let lastNotice = -Infinity;
+  // Windows refuses `wx` with EPERM/EACCES while a released lock's delete is
+  // still pending. ponytail: a few short retries before failing open; a real
+  // permission problem still fails open, just ~0.5 s later.
+  let busyRetries = 5;
 
   const unlocked = (err) => {
     notify(`[forge] Warning: could not create tier-3 lock ${lock} (${/** @type {Error} */ (err).message}) — running unlocked`);
@@ -110,7 +114,13 @@ export function acquireTier3Lock({
     try {
       fd = fs.openSync(lock, 'wx');
     } catch (err) {
-      if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'EEXIST') return unlocked(err);
+      const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+      if ((code === 'EPERM' || code === 'EACCES') && busyRetries > 0) {
+        busyRetries -= 1;
+        sleep(100);
+        continue;
+      }
+      if (code !== 'EEXIST') return unlocked(err);
       // Held (or released a moment ago — readHolder/stat below retry that).
     }
     if (fd !== undefined) {
@@ -156,7 +166,7 @@ export function acquireTier3Lock({
       lastNotice = now;
       const who = holder?.slug || holder?.sessionId || 'unknown';
       notify(
-        `[forge] tier-3 lock held by ${who} (pid ${holder?.pid ?? 'unknown'}, since ${holder?.startedAt ?? 'unknown'}) — waiting`,
+        `[forge] tier-3 lock held by ${who} (pid ${holder?.pid ?? 'unknown'}, since ${holder?.startedAt ?? 'unknown'}) — waiting; lock file ${lock}`,
       );
     }
     sleep(pollMs);

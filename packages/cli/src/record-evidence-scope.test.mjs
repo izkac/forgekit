@@ -78,6 +78,17 @@ test('unknown scope is a usage error and spawns nothing', () => {
   assert.equal(fs.existsSync(ledger), false, 'no stamp must be written');
 });
 
+test('--scope with no value is a usage error, not a silent full run', () => {
+  const { dir, ledger } = makeFixture();
+  const marker = path.join(dir, 'ran-empty');
+  const parsed = parseArgs(['--tier3', '--scope']);
+  const res = runRecordEvidence(tier3Opts({ scope: parsed.scope }, marker), dir, FIXED_NOW);
+  assert.notEqual(res.exitCode, 0);
+  assert.match(res.message, /--scope/);
+  assert.equal(fs.existsSync(marker), false, 'command must not have been spawned');
+  assert.equal(fs.existsSync(ledger), false, 'no stamp must be written');
+});
+
 test('--scope without --tier3 is a usage error and spawns nothing', () => {
   const { dir } = makeFixture();
   const marker = path.join(dir, 'ran-notier3');

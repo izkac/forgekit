@@ -35,7 +35,8 @@ runs) that are not real, which then cause yet another full run.
 
 ## Impact
 - Code: `packages/cli/src/tier3-lock.mjs` (new), `record-evidence.mjs`,
-  `proven.mjs`, `new-session.mjs`, `session-status.mjs`, `integrity-seal.mjs`.
+  `proven.mjs`, `new-session.mjs`, `integrity-seal.mjs`, `plan-progress.mjs`,
+  `score.mjs`, `scripts/e2e/harness-portability.mjs` (`tier3-lock` step).
 - Docs/skills: `references/test-strategy.md`, `phases/verify.md`,
   `phases/close.md`, `phases/implement.md` (group step),
   `skills/verification-before-completion`, `skills/specs-verify-change`,
