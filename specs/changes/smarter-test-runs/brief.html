@@ -1,0 +1,89 @@
+<!-- forge-brief-specs-hash:718fcae60c8e64bf -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smarter test runs</title>
+<style>
+  body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1d1d1f; background: #fff; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.7rem; margin-bottom: .2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .2rem; }
+  code { background: #f2f2f2; padding: 0 .25rem; border-radius: 3px; font-size: .92em; }
+  table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #e5e5e5; vertical-align: top; }
+  .muted { color: #666; }
+</style>
+</head>
+<body>
+<h1>Smarter test runs</h1>
+<p class="muted">Forge change <code>smarter-test-runs</code></p>
+
+<h2>TL;DR</h2>
+<p>A Forge change today can run the whole test suite three to seven times, and several sessions on the same project run it at the same time, which slows the machine enough to produce fake failures. After this change each project's full suite runs once per change, only one session runs a full suite at a time, and fake failures from load are checked by re-running just the failing files.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>When two or three Forge sessions work on one project, even in separate worktrees, their full test runs take turns. A waiting session says whose run it is waiting for.</li>
+  <li>Verify runs the full suite once. Fixes made afterwards (leftover sweep, review) run only the tests for what they touched.</li>
+  <li>If a full run fails, only the failing files are re-run. If they pass on their own, the failures were caused by load and the change can move on without another full run.</li>
+  <li>At the end of each task group, the tests related to that group's changes run, so problems show up before verify.</li>
+  <li><code>forge status</code> tells you honestly whether the full run passed, passed after a failing-files re-run, or failed.</li>
+  <li>Sessions remember the starting commit of nested repositories (like <code>volo_web</code>), so "tests changed since the start" works there too.</li>
+  <li>A false "session file was tampered with" error that showed up under heavy load is fixed.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>Every full run goes through <code>forge evidence --tier3</code>. That command now takes a lock file stored in the repository's shared git folder, so all worktrees see the same lock. Runs of the smaller kinds (failing files, fix tests, group tests) are labelled and skip the lock. <code>forge status</code> reads the labels to decide whether the full run counts as passed.</p>
+<pre class="mermaid">
+flowchart TD
+  G[Task group closes] --> R[Run tests related to the group's diff]
+  R --> S[Verify: leftover sweep and its fixes]
+  S --> L{Full-run lock free?}
+  L -- no --> W[Wait, naming the holder] --> L
+  L -- yes --> F[Full suite, once per project]
+  F -- green --> D[Review]
+  F -- red --> O[Re-run only the failing files]
+  O -- green: load only --> D
+  O -- red: real failure --> X[Fix, re-run those files] --> D
+  D --> Y[Review fixes: only the tests they touch]
+</pre>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Nothing to configure. The lock is automatic.</li>
+  <li>You may see <em>"tier-3 lock held by &lt;session&gt; (pid …) — waiting"</em> in a session's output. That is expected.</li>
+  <li>If a crashed run ever leaves a lock behind and its process id was reused by another program, delete the lock file named in the message.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>The lock only covers full runs started through Forge. A test command an agent runs directly is not coordinated.</li>
+  <li>"Run the full suite once" is a rule in the instructions, not something the tool blocks. Reviewers can see every run's label in the evidence.</li>
+  <li>If two sessions both find the same dead lock at the same moment, both may run once. This only costs time.</li>
+  <li>The tool trusts the agent's list of failing files for the re-run. The final reviewer checks it against the failed run's output.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Choosing test commands for a project. Forge documents the Jest/Vitest options; the project's own commands stay the agent's choice.</li>
+  <li>Changing pace presets.</li>
+  <li>Showing lock holders in <code>forge fleet</code>.</li>
+  <li>A project's full end-to-end smoke suite. That belongs in CI; Forge runs only the change's own steps.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>Size</th></tr>
+  <tr><td>1. Fix the false tamper error under load</td><td>1 task</td></tr>
+  <tr><td>2. Label test runs and judge the full run correctly</td><td>2 tasks</td></tr>
+  <tr><td>3. Lock so one full run happens at a time</td><td>2 tasks</td></tr>
+  <tr><td>4. Record nested repository start commits</td><td>1 task</td></tr>
+  <tr><td>5. Rewrite the instructions: full suite once</td><td>4 tasks</td></tr>
+  <tr><td>6. End-to-end check with two real worktrees</td><td>1 task</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

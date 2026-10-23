@@ -128,6 +128,7 @@ export function computeIntegrityFingerprint({ repoRoot, sessionDir }) {
     } catch (err) {
       throw new Error(
         `cannot hash protected path ${rel}: ${err instanceof Error ? err.message : err}`,
+        { cause: err },
       );
     }
   }
@@ -141,23 +142,68 @@ export function integritySealPath(sessionDir) {
   return path.join(sessionDir, SEAL_BASENAME);
 }
 
+const TRANSIENT_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+/** Total attempts (1 try + 3 retries, per spec) and the sync pause before each retry. */
+const SEAL_ATTEMPTS = 4;
+const SEAL_BACKOFF_MS = Object.freeze([50, 100, 200]);
+
+/** @param {number} ms */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
- * Rewrite the seal from the current filesystem. Best-effort: a failed seal
- * write must not break the Forge command that just wrote a legitimate file
- * (the next check then sees a stale or missing seal and escalates).
+ * Walk the error and its `cause` chain: `computeIntegrityFingerprint` wraps
+ * hash errors in a plain `Error`, which hides the original `code`.
  *
- * @param {{ sessionDir: string, repoRoot?: string }} opts
+ * @param {unknown} err
+ */
+function isTransientFsError(err) {
+  for (let e = err, depth = 0; e && depth < 4; e = /** @type {any} */ (e).cause, depth += 1) {
+    const code = /** @type {any} */ (e).code;
+    if (typeof code === 'string' && TRANSIENT_CODES.has(code)) return true;
+  }
+  return false;
+}
+
+/**
+ * Rewrite the seal from the current filesystem. Atomic (tmp + rename) and
+ * retried on EBUSY/EPERM/EACCES — a transient Windows lock must not leave the
+ * previous seal behind, which the next check reads as tampering. Still
+ * best-effort once attempts run out: a failed seal write must not break the
+ * Forge command that just wrote a legitimate file (the next check then sees a
+ * stale or missing seal and escalates).
+ *
+ * ponytail: fixed 4 attempts (3 retries) with 50/100/200 ms sync backoff — a ceiling, not a
+ * tunable; sync because every caller (`saveSession`, `writeActive`) is sync.
+ *
+ * @param {{ sessionDir: string, repoRoot?: string, fsImpl?: typeof fs }} opts
+ *   `fsImpl` is a test seam for injecting write failures.
  * @returns {{ path: string, fingerprint: ReturnType<typeof computeIntegrityFingerprint> } | null}
  */
-export function refreshIntegritySeal({ sessionDir, repoRoot }) {
+export function refreshIntegritySeal({ sessionDir, repoRoot, fsImpl = fs }) {
   if (!sessionDir) return null;
   const root = repoRoot ?? repoRootFromSessionDir(sessionDir);
+  const file = integritySealPath(sessionDir);
+  const tmpPath = `${file}.${process.pid}.tmp`;
   try {
-    fs.mkdirSync(sessionDir, { recursive: true });
-    const fingerprint = computeIntegrityFingerprint({ repoRoot: root, sessionDir });
-    const file = integritySealPath(sessionDir);
-    fs.writeFileSync(file, `${JSON.stringify(fingerprint, null, 2)}\n`, 'utf8');
-    return { path: file, fingerprint };
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        fsImpl.mkdirSync(sessionDir, { recursive: true });
+        const fingerprint = computeIntegrityFingerprint({ repoRoot: root, sessionDir });
+        fsImpl.writeFileSync(tmpPath, `${JSON.stringify(fingerprint, null, 2)}\n`, 'utf8');
+        fsImpl.renameSync(tmpPath, file);
+        return { path: file, fingerprint };
+      } catch (err) {
+        try {
+          fsImpl.rmSync(tmpPath, { force: true });
+        } catch {
+          // best effort — the write already failed
+        }
+        if (attempt >= SEAL_ATTEMPTS || !isTransientFsError(err)) throw err;
+        sleepSync(SEAL_BACKOFF_MS[attempt - 1]);
+      }
+    }
   } catch (err) {
     process.stderr.write(
       `[forge] Warning: could not refresh integrity seal — ${err instanceof Error ? err.message : err}\n`,
