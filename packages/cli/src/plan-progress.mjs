@@ -13,6 +13,7 @@ import { resolveChangeDir } from './integrity.mjs';
 // Cycle (lib → fleet → here) is safe: writeJson is a hoisted declaration,
 // and integrity.mjs above already closes the same loop.
 import { writeJson } from './lib.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 
 /** A tasks.md checkbox line; capture group 1 is the mark (` ` / `x` / `X`). */
 const TASK_LINE_RE = /^\s*-\s*\[([ xX])\]\s+/;
@@ -109,6 +110,9 @@ export function healSessionProgress(opts) {
       status.phase = session.phase;
       writeJson(statusPath, status);
     }
+    // A legitimate heal must not read as tampering at the next phase boundary.
+    // integrity-seal.mjs imports only node built-ins, so no cycle with lib.mjs.
+    refreshIntegritySeal({ sessionDir });
   } catch {
     /* heal is advisory — callers still use in-memory overlay */
   }

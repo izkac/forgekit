@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hasBlockedMarker, readJson, writeJson } from './lib.mjs';
+import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { loadAllowances } from './guard.mjs';
 import {
   JOBS_SIGNAL_RE,
@@ -1034,6 +1035,8 @@ function healCachedScore(sessionDir, session, card) {
     onDisk.score = card.score;
     onDisk.scoreGrade = card.grade;
     writeJson(file, onDisk);
+    // Keep the seal current so this legitimate rewrite is not reported as tampering.
+    refreshIntegritySeal({ sessionDir });
   } catch {
     /* advisory — a cache that cannot be healed must not cost the scorecard */
   }

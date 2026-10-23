@@ -13,3 +13,15 @@ check reads as tampering.
 - GIVEN the seal write fails once with EBUSY
 - WHEN a Forge command refreshes the seal
 - THEN the retry succeeds and the seal matches the current files
+
+### Requirement: Cache heals keep the seal current
+Every Forge code path that rewrites `session.json` to heal a derived cache —
+task progress reconciled from `tasks.md`, the cached score reconciled from the
+scorecard — SHALL refresh the integrity seal after the write, so a legitimate
+heal is never reported as tampering at the next phase boundary.
+
+#### Scenario: Ticked task then phase transition
+- GIVEN a sealed session and a newly ticked box in the change's `tasks.md`
+- WHEN `forge status` (or the fleet/reminder read) heals `tasksComplete`
+- AND the operator then runs `forge phase <next>`
+- THEN the seal check passes

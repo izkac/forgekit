@@ -22,3 +22,6 @@
 
 ## 6. Product loop
 - [x] 6.1 `scripts/e2e/harness-portability.mjs`: add a `tier3-lock` subcommand. Scratch git repo + a linked worktree, each with a Forge session; start `forge evidence --tier3 -- node -e <sleep 3s>` in both concurrently (`FORGEKIT_ALLOW_EXEC=1`); assert the runs did not overlap (stamp start/duration) and the second printed the waiting line; assert a `--scope group` run during a held lock does not wait; stamp a red full then a green failed-only and assert `forge status` reads tier 3 ok via failed-only. Prints `TIER3 LOCK GREEN`. Evidence: `forge e2e run`.
+
+## 7. Seal coverage for cache heals
+- [x] 7.1 `packages/cli/src/plan-progress.mjs` `healSessionProgress` and `packages/cli/src/score.mjs` `healCachedScore` refresh the integrity seal after rewriting `session.json` (import `refreshIntegritySeal` from `integrity-seal.mjs`, which has no lib.mjs import — no cycle). Tests in new `packages/cli/src/seal-heal.test.mjs`: sealed session → tick a task in tasks.md → `healSessionProgress` → `checkIntegritySeal` clean; same for `healCachedScore` via `writeSessionScorecard` (or the exported path that reaches it).

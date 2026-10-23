@@ -1,4 +1,4 @@
-<!-- forge-brief-specs-hash:718fcae60c8e64bf -->
+<!-- forge-brief-specs-hash:e55e6d94a3c82d2a -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -30,7 +30,7 @@
   <li>At the end of each task group, the tests related to that group's changes run, so problems show up before verify.</li>
   <li><code>forge status</code> tells you honestly whether the full run passed, passed after a failing-files re-run, or failed.</li>
   <li>Sessions remember the starting commit of nested repositories (like <code>volo_web</code>), so "tests changed since the start" works there too.</li>
-  <li>A false "session file was tampered with" error that showed up under heavy load is fixed.</li>
+  <li>False "session file was tampered with" errors are fixed: one that showed up under heavy load, and one that hit after ticking a task box and then changing phase.</li>
 </ul>
 
 <h2>How it works</h2>
@@ -81,6 +81,7 @@ flowchart TD
   <tr><td>4. Record nested repository start commits</td><td>1 task</td></tr>
   <tr><td>5. Rewrite the instructions: full suite once</td><td>4 tasks</td></tr>
   <tr><td>6. End-to-end check with two real worktrees</td><td>1 task</td></tr>
+  <tr><td>7. Fix the false tamper error after ticking a task (found during this change)</td><td>1 task</td></tr>
 </table>
 
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
