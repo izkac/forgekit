@@ -198,7 +198,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // Imported, never retyped: these fixtures describe dispatches on either side of
@@ -392,6 +392,60 @@ function git(cwd, ...args) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} (in ${cwd}): ${r.stderr}`);
   return r.stdout.trim();
+}
+
+/* ---------- tier3-lock fixture ---------- */
+
+/**
+ * One checkout (the main repo or a linked worktree) with its own Forge session.
+ * `.forge/` is untracked, so a worktree has none until it is written here. The
+ * tier-3 lock lives in the shared git common dir, which is why the phase uses a
+ * worktree rather than two unrelated clones. Returns the session's stamp file.
+ */
+function makeTier3Checkout(dir, id, slug) {
+  const sessionDir = path.join(dir, '.forge', 'sessions', id);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, 'session.json'),
+    `${JSON.stringify({ id, slug, planType: 'specs', openspecChange: 'my-change' })}\n`,
+  );
+  fs.writeFileSync(path.join(dir, '.forge', 'active.json'), `${JSON.stringify({ sessionId: id })}\n`);
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' } }, null, 2)}\n`,
+  );
+  fs.mkdirSync(path.join(dir, 'specs', 'changes', 'my-change'), { recursive: true });
+  return path.join(sessionDir, 'verify-runs.jsonl');
+}
+
+/** Async twin of `forge()` for runs that must overlap in time; resolves when the child closes. */
+function forgeAsync(cwd, args, extraEnv = {}) {
+  const env = { ...process.env, FORGEKIT_FLEET_DIR: path.join(SCRATCH, '.fleet'), ...extraEnv };
+  delete env.CLAUDE_CODE_SESSION_ID;
+  const child = spawn(process.execPath, [FORGE_BIN, ...args], { cwd, env });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (d) => (stdout += d));
+  child.stderr.on('data', (d) => (stderr += d));
+  const done = new Promise((resolve) => {
+    child.on('close', (code) => resolve({ code, stdout, stderr, out: `${stdout}${stderr}` }));
+  });
+  return { child, done };
+}
+
+/** Poll until `fn()` is truthy or `timeoutMs` passes. */
+async function waitFor(fn, timeoutMs, stepMs = 25) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (fn()) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+}
+
+function lastStamp(file) {
+  const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+  return JSON.parse(lines[lines.length - 1]);
 }
 
 /**
@@ -3372,13 +3426,145 @@ if (phase === 'boot') {
   }
 
   process.stdout.write('AGENTS TARGET GREEN\n');
+} else if (phase === 'tier3-lock') {
+  // THE TIER-3 LOCK, AGAINST THE SHIPPED BINARY: two sessions in two worktrees
+  // of one repo start a full tier-3 run together. The lock must serialize them
+  // (stamps do not overlap, the second says it is waiting); a scoped run must
+  // not queue behind a held lock; and a red full run followed by a green
+  // failed-only re-run must read as tier 3 ok via failed-only — while a green
+  // `fix` run must not rescue it.
+  const SLEEP_MS = 3000;
+  const HELD_SLEEP_MS = 4000;
+  const OVERLAP_TOLERANCE_MS = 20; // stamp times are ms-rounded reads of two clocks
+  const LOCK_APPEAR_MS = 15_000;
+  const sleepCmd = (ms) => ['node', '-e', `setTimeout(()=>{},${ms})`];
+  const execEnv = { FORGEKIT_ALLOW_EXEC: '1' };
+
+  const base = `${SCRATCH}-tier3-lock`;
+  const repo = path.join(base, 'main');
+  const wt = path.join(base, 'wt2');
+  const rmBase = () => fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  rmBase();
+  fs.mkdirSync(repo, { recursive: true });
+
+  git(repo, 'init', '-q', '-b', 'work');
+  git(repo, 'config', 'user.email', 'e2e@example.com');
+  git(repo, 'config', 'user.name', 'E2E Harness');
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.forge/\n');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'tier3 lock fixture\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'base');
+  git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt2');
+
+  const stampsA = makeTier3Checkout(repo, 'sa', 'alpha');
+  const stampsB = makeTier3Checkout(wt, 'sb', 'beta');
+  const lockFile = path.join(path.resolve(repo, git(repo, 'rev-parse', '--git-common-dir')), 'forge', 'tier3.lock');
+  const readHolder = () => {
+    try {
+      return JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+
+  // --- 1. two full runs: serialized, the second announces the wait ---
+  const first = forgeAsync(repo, ['evidence', '--tier3', '--', ...sleepCmd(SLEEP_MS)], execEnv);
+  // Start the second only once the first demonstrably holds the lock, so which
+  // run waits is not a startup-time coin flip.
+  if (!(await waitFor(() => readHolder()?.slug === 'alpha', LOCK_APPEAR_MS))) {
+    first.child.kill();
+    fail('the first full run never took the tier-3 lock', lockFile);
+  }
+  const second = forgeAsync(wt, ['evidence', '--tier3', '--', ...sleepCmd(SLEEP_MS)], execEnv);
+  const [r1, r2] = await Promise.all([first.done, second.done]);
+  if (r1.code !== 0) fail(`first full run exited ${r1.code}`, r1.out);
+  if (r2.code !== 0) fail(`second full run exited ${r2.code}`, r2.out);
+  const s1 = lastStamp(stampsA);
+  const s2 = lastStamp(stampsB);
+  for (const [name, s] of [['alpha', s1], ['beta', s2]]) {
+    if (s.scope !== 'full' || s.ok !== true) fail(`${name}'s stamp is not a green full run`, JSON.stringify(s));
+    if (s.durationMs < SLEEP_MS - OVERLAP_TOLERANCE_MS) {
+      fail(`${name}'s stamp durationMs ${s.durationMs} is shorter than the ${SLEEP_MS} ms command`, JSON.stringify(s));
+    }
+  }
+  const end1 = Date.parse(s1.startedAt) + s1.durationMs;
+  if (Date.parse(s2.startedAt) < end1 - OVERLAP_TOLERANCE_MS) {
+    fail(
+      'the two full runs overlapped — the second started before the first finished',
+      `alpha ${s1.startedAt} +${s1.durationMs}ms, beta ${s2.startedAt} +${s2.durationMs}ms`,
+    );
+  }
+  if (!r2.stderr.includes('tier-3 lock held by') || !r2.stderr.includes('alpha')) {
+    fail('the waiting run did not print the "tier-3 lock held by alpha" line', r2.out);
+  }
+  if (r1.stderr.includes('tier-3 lock held by')) {
+    fail('the run that took the lock first also reported waiting', r1.out);
+  }
+  if (fs.existsSync(lockFile)) fail('the tier-3 lock file survived both runs', lockFile);
+
+  // --- 2. a scoped run during a held lock does not wait ---
+  const held = forgeAsync(repo, ['evidence', '--tier3', '--', ...sleepCmd(HELD_SLEEP_MS)], execEnv);
+  if (!(await waitFor(() => readHolder()?.slug === 'alpha', LOCK_APPEAR_MS))) {
+    held.child.kill();
+    fail('the lock holder never took the tier-3 lock for the scoped-run check', lockFile);
+  }
+  const t0 = Date.now();
+  const scoped = forge(wt, ['evidence', '--tier3', '--scope', 'group', '--', 'node', '-e', ''], execEnv);
+  const scopedMs = Date.now() - t0;
+  const heldAtEnd = readHolder()?.slug === 'alpha';
+  const heldRes = await held.done;
+  if (scoped.code !== 0) fail(`the --scope group run exited ${scoped.code}`, scoped.out);
+  if (!heldAtEnd) {
+    fail('the lock was already released when the --scope group run finished — the check proved nothing', scoped.out);
+  }
+  if (scopedMs >= HELD_SLEEP_MS) {
+    fail(`the --scope group run took ${scopedMs} ms, as long as the held lock`, scoped.out);
+  }
+  if (scoped.out.includes('waiting') || scoped.out.includes('tier-3 lock held by')) {
+    fail('the --scope group run reported waiting on the lock', scoped.out);
+  }
+  if (heldRes.code !== 0) fail(`the lock holder exited ${heldRes.code}`, heldRes.out);
+
+  // --- 3. verdict: red full + green failed-only reads ok via failed-only ---
+  const statusTier3 = (cwd) => {
+    const r = forge(cwd, ['status']);
+    let parsed;
+    try {
+      parsed = JSON.parse(r.stdout);
+    } catch {
+      fail('forge status did not print parseable JSON', tail(r.out, 30));
+    }
+    return parsed.proven?.tier3 ?? null;
+  };
+  const red = forge(repo, ['evidence', '--tier3', '--', 'node', '-e', 'process.exit(1)'], execEnv);
+  if (red.code === 0) fail('a red full tier-3 run exited 0', red.out);
+  const retry = forge(repo, ['evidence', '--tier3', '--scope', 'failed-only', '--', 'node', '-e', ''], execEnv);
+  if (retry.code !== 0) fail(`the green failed-only run exited ${retry.code}`, retry.out);
+  const rescued = statusTier3(repo);
+  if (!rescued || rescued.ok !== true || rescued.via !== 'failed-only') {
+    fail('forge status did not read tier 3 ok via failed-only after red full + green failed-only', JSON.stringify(rescued));
+  }
+
+  // --- 4. a green `fix` run must not rescue a red full ---
+  const redB = forge(wt, ['evidence', '--tier3', '--', 'node', '-e', 'process.exit(1)'], execEnv);
+  if (redB.code === 0) fail('a red full tier-3 run exited 0 in the second checkout', redB.out);
+  const fix = forge(wt, ['evidence', '--tier3', '--scope', 'fix', '--', 'node', '-e', ''], execEnv);
+  if (fix.code !== 0) fail(`the green fix run exited ${fix.code}`, fix.out);
+  const unrescued = statusTier3(wt);
+  if (!unrescued || unrescued.ok !== false || unrescued.via) {
+    fail('a green --scope fix run rescued a red full tier-3 run', JSON.stringify(unrescued));
+  }
+
+  spawnSync('git', ['worktree', 'prune'], { cwd: repo });
+  rmBase();
+  process.stdout.write('TIER3 LOCK GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'brainstorm-gate|init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target\n',
+      'brainstorm-gate|init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target|tier3-lock\n',
   );
   process.exit(1);
 }
