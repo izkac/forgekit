@@ -50,6 +50,7 @@ import { pathToFileURL } from 'node:url';
 import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
+import { acquireTier3Lock } from './tier3-lock.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
 export const TIER3_LABEL = '3 (full workspace)';
@@ -385,10 +386,26 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     // Tier 3 is one fresh full-workspace run at verify. Its stamp is a ledger
     // line, not a task file: verify-evidence.md stays the coordinator's prose
     // and this is the executed fact it must cite.
+    const scope = opts.scope ?? 'full';
+    // Only a full run is serialized across sessions; scoped runs are cheap.
+    let release = () => {};
+    if (scope === 'full') {
+      let slug = null;
+      try {
+        slug = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'))?.slug ?? null;
+      } catch {
+        // no readable session.json — the holder just won't carry a slug
+      }
+      release = acquireTier3Lock({ cwd, sessionId, slug });
+    }
     const startedAt = now().toISOString();
     const t0 = Date.now();
-    const run = executeCommand(opts.cmdArgv, cwd);
-    const scope = opts.scope ?? 'full';
+    let run;
+    try {
+      run = executeCommand(opts.cmdArgv, cwd);
+    } finally {
+      release();
+    }
     const stamp = {
       scope,
       command: run.command,

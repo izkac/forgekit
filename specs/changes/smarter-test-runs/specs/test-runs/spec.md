@@ -36,8 +36,13 @@ SHALL NOT take the lock.
 
 #### Scenario: Lock released on exit
 - GIVEN a full run holding the lock
-- WHEN the command exits, fails, or forge is interrupted
+- WHEN the command exits or fails
 - THEN the lock file is removed
+
+#### Scenario: Interrupted run does not block the next one
+- GIVEN a full run killed while holding the lock (Ctrl-C, task kill)
+- WHEN another session starts a full run
+- THEN it takes the lock over because the holder pid is no longer running
 
 ### Requirement: Tier-3 stamps record their scope
 `forge evidence --tier3` SHALL accept `--scope full|failed-only|fix|group`,

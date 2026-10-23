@@ -113,6 +113,9 @@ test('resolveCallerExecGate: allowed when confirm returns true', () => {
   const gate = resolveCallerExecGate({
     command: 'forge tdd run',
     cmdArgv: ['rm', '-rf', '/'],
+    // Empty prefs dir: without it the gate reads this checkout's real
+    // .forge/preferences.local.json and an operator opt-in answers first.
+    forgeDir: tmp('exec-gate-confirm-'),
     env: {},
     confirm: () => true,
   });
