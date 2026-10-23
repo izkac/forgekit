@@ -44,7 +44,7 @@ Follow `~/.agents/skills/forge/phases/implement.md`:
 
 - **Do not** implement all tasks inline in coordinator context
 - One **implementer** per `tasks.md` **group** (`##` section), tasks in order. Split 1:1 only when that task's **own line** is money/auth/contracts/migrations/secrets, the group has more than 4 tasks, or the tasks share nothing
-- One **task reviewer** (spec + quality in one pass) when the group closes. Mid-group low-risk: coordinator self-check. Immediate review only for that high-risk task line — **not** because the change name or slug matched
+- One **task reviewer** (spec + quality in one pass) when the group closes. Mid-group: nothing, high-risk included — reviews never run per task. A group holding a high-risk task line always gets a dispatched reviewer (never a self-check) — match the task line, **not** the change name or slug
 - Mark `- [x]` in `tasks.md` as each task lands
 - Bundled skills: `skills/subagent-driven-development` + `skills/test-driven-development`
 
