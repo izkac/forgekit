@@ -8,6 +8,8 @@ Read and follow [../skills/verification-before-completion/SKILL.md](../skills/ve
 
 ## Required checks
 
+**Order:** audit tier 2 (step 1) → **leftover sweep and its fixes (step 7)** → tier 3 (step 2). The sweep runs before the full test run so its fixes are covered by that one run.
+
 ### 1. Audit tier 2 evidence (per task)
 
 For each completed task under `.forge/sessions/<id>/tasks/<nn>-<slug>/`:
@@ -22,17 +24,25 @@ If any task lacks evidence, shows non-zero exit, or reviewers rejected test cove
 
 ### 2. Tier 3 (scope from pace)
 
-After tier 2 audit passes, honor `verify.tier3` from [../references/pace.md](../references/pace.md) / `forge status`:
+After the tier 2 audit **and the leftover sweep (step 7, with its fixes)** are done, honor `verify.tier3` from [../references/pace.md](../references/pace.md) / `forge status`:
 
 | `verify.tier3` | Action |
 | -------------- | ------ |
-| `full-workspace` | One fresh full test per affected workspace (default thorough/standard) |
+| `full-workspace` | One full test per affected workspace, one workspace after another (default thorough/standard) |
 | `affected-only` | Full test only for workspaces touched by this change |
 | `audit-tier2-only` | Do **not** run the suite; record deferral to push/CI in `verify-evidence.md` |
 
 ```bash
-forge evidence --tier3 -- npm test [-- --workspace <affected>]   # one per affected workspace
+forge evidence --tier3 -- npm test [-- --workspace <affected>]   # once per affected workspace, sequentially
 ```
+
+Run each affected workspace's full suite **exactly once**, one after another —
+never in parallel. Full runs (`--scope full`, the default) take a cross-session
+lock at `<git-common-dir>/forge/tier3.lock` (`.forge/tier3.lock` outside git),
+shared by every worktree of the repo. If another session holds it, you see
+`tier-3 lock held by <slug> (pid N, since T) — waiting` and the run proceeds when
+it frees; a dead holder is taken over, and if the lock cannot be created the run
+proceeds with a warning. Scoped runs never wait.
 
 **Run it through `forge evidence --tier3`, not bare.** The CLI executes the
 command and stamps the observed exit code and output tail into
@@ -56,7 +66,19 @@ Save to `.forge/sessions/<id>/verify-evidence.md`, pasting the receipt:
 - **Recorded by:** forge evidence (executed — …) → `verify-runs.jsonl`
 ```
 
-Cite this file when claiming the implementation passes. Exit code must be `0` before leaving verify. A red tier 3 refutes something: before fixing, record it — `forge refute add --task <task-id> --claim "…" --actual "…" --source tier3` — so the fix-round brief carries it.
+Cite this file when claiming the implementation passes. Exit code must be `0` before leaving verify (or the red run cleared by a green `failed-only` re-run, below). A red tier 3 refutes something: before fixing, record it — `forge refute add --task <task-id> --claim "…" --actual "…" --source tier3` — so the fix-round brief carries it.
+
+**Stamp scopes.** `forge evidence --tier3 --scope full|failed-only|fix|group -- <cmd>` (`--scope` needs `--tier3`; default `full`). `forge status` → `proven.tier3` judges by the last `full` stamp: green is ok; red followed by a green `failed-only` is ok "via failed-only"; `fix` and `group` stamps never change the verdict; no full stamp reads "not stamped".
+
+**Red full run.** Do not run the full suite again. Re-run only the failing files:
+
+```bash
+forge evidence --tier3 --scope failed-only -- npm test -- <failing files>
+```
+
+Green alone means the failures were load-induced and tier 3 counts as passed. Still red is a real failure: record it with `forge refute add … --source tier3`, fix, and re-run those files with `--scope failed-only`.
+
+**Fixes after the full run** (sweep or review findings): run only the tests for what the fix touched, `forge evidence --tier3 --scope fix -- <cmd>`. The one exception: a fix that touches test harness, setup files, runner config, package manifests or lockfiles earns one more `full` run.
 
 ### 2b. Strict typecheck — enforced at the gate, not here
 
@@ -89,7 +111,7 @@ Record the trace in `verify-evidence.md` (a short REQ → caller table is enough
 
 Before leaving verify / claiming the change complete, pick **one**:
 
-1. **Run.** Confirm `e2e.json` (scaffolded at plan time via `forge e2e init`) drives the **closed product loop** — not a single job slice. When the design has a producer/consumer split (analyze vs execute, proposals vs ratify), the loop is: produce artifact → consumer reads it → decision/state change → **next run's output differs from baseline**. Steps must assert domain side effects; a step list that would pass against a stubbed handler is invalid. Then `forge e2e run` — a **green run** is required; results go stale if `e2e.json` changes afterwards (re-run). Prose in `verify-evidence.md` no longer satisfies the done gate.
+1. **Run.** Confirm `e2e.json` (scaffolded at plan time via `forge e2e init`) drives the **closed product loop** — not a single job slice. When the design has a producer/consumer split (analyze vs execute, proposals vs ratify), the loop is: produce artifact → consumer reads it → decision/state change → **next run's output differs from baseline**. Steps must assert domain side effects; a step list that would pass against a stubbed handler is invalid. Then `forge e2e run` — it covers **this change's own steps**; a project's full e2e smoke suite belongs in CI, not in each change. A **green run** is required; results go stale if `e2e.json` changes afterwards (re-run). Prose in `verify-evidence.md` no longer satisfies the done gate.
 2. **Skip.** If the project is `forge e2e disable`'d or this session was `forge e2e skip`'d (user asked this conversation), do **not** run E2E and do **not** write `BLOCKED`. Record the skip reason under `## Product loop`. A missing recorded harness is not a skip — still author a cheap `e2e.json` unless skip/disable is set.
 3. **BLOCKED.** Only when the required loop could not run. Leave an explicit **`BLOCKED`** list in `verify-evidence.md`. The done gate then refuses `done` until unblocked or the user signs `--allow-incomplete`. Known debt uses `## Known debt` / `## Out of scope`, never `BLOCKED`. (`e2e.json` `notApplicable` is only for loops no command can drive — reviewers police the reason.)
 
@@ -130,11 +152,11 @@ Fix any failure before proceeding — `forge phase done|finish` refuses on the s
 - For OpenSpec: `openspec instructions apply --change "<name>" --json` shows expected progress.
 - Requirements met = line-by-line vs **capability specs**, not vs a narrowed task reading.
 
-### 7. Leftover sweep (before final review)
+### 7. Leftover sweep (before tier 3 and final review)
 
 Forge's implementers and reviewers stay inside `tasks.md` and the session
 diff. That is why leftover consumers, docs, and files nobody listed survive a
-green verify. This step catches them. **It runs before final review.**
+green verify. This step catches them. **It runs before tier 3 (so the single full run covers its fixes) and before final review.**
 
 #### Specs (`planType: specs`) — always on
 
@@ -173,9 +195,10 @@ session's `planType` is `openspec`. If the skill is missing, skip it — do not 
 3. Skip a finding only when it explicitly says no action, or it matches a
    recorded design decision that fixing would contradict. Record those under
    **Skipped** with the reason. Do not skip "nice to have" leftovers.
-4. If you edited code after `verify-evidence.md` was recorded, re-run tier 3
-   (see below). Then re-run OpenSpec verify. Cap at two extra passes (three
-   total). Still dirty → stop and ask the user; do not loop.
+4. Prove the fixes before tier 3 runs (it covers them); if tier 3 is already
+   stamped, run only the touched tests with `--scope fix` (see step 2). Then
+   re-run OpenSpec verify. Cap at two extra passes (three total). Still dirty →
+   stop and ask the user; do not loop.
 5. Save the vendor report plus this block to
    `.forge/sessions/<id>/openspec-verify.md`:
 
@@ -196,17 +219,19 @@ leftovers used to ship.
 forge phase verify
 ```
 
-## When to re-run tier 3
+## Re-proving after tier 3 (no second full run)
 
-- Tier 3 failed (fix, then re-run tier 3)
-- Coordinator edited code after `verify-evidence.md` was recorded
-- Quality or final reviewer flagged test gaps
-- User explicitly asks for a fresh run
+- Tier 3 failed → re-run only the failing files, `--scope failed-only` (green alone = load-induced; still red = real failure: refute, fix, `failed-only` again)
+- Sweep, quality-review or final-review fixes → run only the touched tests, `--scope fix`
+- Fix touched test harness, setup, runner config, package manifests or lockfiles → one more `full` run (the only exception)
+- Reviewer flagged a test gap → add the test and run it with `--scope fix`
+- User explicitly asks for a fresh full run → run it
 
 ## When NOT to re-run
 
 - Tier 2 narrow commands — already audited; duplicating them is slow and redundant
 - Tier 3 passed and nothing changed since — do not run full suite again "for freshness"
+- A second full suite because code was edited after `verify-evidence.md` was recorded — use `--scope fix`
 
 Then proceed to [review.md](./review.md). Leftover findings must already be
 fixed — the final reviewer reads the **post-fix** diff.

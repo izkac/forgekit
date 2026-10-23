@@ -120,9 +120,12 @@ User request
             │     standard=per group    │
             │     └─ fail ──► retry     │
             │  (tier 2 narrow evidence) │
+            │  group close: tests for   │
+            │  the diff (--scope group) │
             └─────────────┬─────────────┘
                           ▼
-         Verify: audit tier 2 + tier 3 (scope from pace)
+         Verify: audit tier 2 → leftover sweep + fixes
+                  → tier 3 (scope from pace; each workspace once)
                   + forge e2e run (green), skip, or BLOCKED
                   + forge integrity-check
                           │
@@ -327,7 +330,13 @@ forge e2e run --repeat 5 [--record-baseline]
 forge cleanup [--dry-run]         # prune sessions >14 days or finished
 forge evidence --task <nn>-<slug> [--no-tdd --reason "…"] -- <cmd> [args…]
                                   # EXECUTE the command (opt-in: FORGEKIT_ALLOW_EXEC or exec.allowCallerCommands)
-forge evidence --tier3 -- <cmd>   # execute the tier-3 run; stamp <session>/verify-runs.jsonl
+forge evidence --tier3 [--scope full|failed-only|fix|group] -- <cmd>
+                                  # execute the tier-3 run; stamp <session>/verify-runs.jsonl
+                                  # default scope full; --scope needs --tier3
+                                  # full takes a cross-session lock (<git-common-dir>/forge/tier3.lock;
+                                  # a second session waits, a dead holder is taken over); scoped runs never wait
+                                  # status proven.tier3 = last full stamp; red + green failed-only = ok "via failed-only";
+                                  # fix/group stamps never change the verdict
 forge evidence --task … --command "<cmd>" --exit 0 --summary "<text>"
                                   # transcribed (legacy) — warns; file and precheck say UNVERIFIED
 forge refute add --task <nn>-<slug> --claim "<believed>" --actual "<evidence showed>" [--source reviewer|gate|e2e|tier3|tdd|operator]
@@ -658,7 +667,7 @@ most 4 tasks, and always 1:1 for money/auth/contracts/migrations. Each unit:
 4. Mark each finished task complete (`tasks.md` checkbox or session progress).
 5. After all tasks: **verify** (tier 3 scope from pace; leftover sweep: `spec-verify.md` always on for specs, `openspec-verify.md` when `openspec-verify-change` is present) → **final reviewer** (unless pace skips; dispatch it with the Task description exactly what `forge review-label final` prints, which also stamps the dispatch into `reviews/dispatches.json` so the evidence survives host-transcript pruning — see [phases/review.md](../phases/review.md)) → finish.
 
-Test tiers: [test-strategy.md](../references/test-strategy.md) — scoped TDD per task, narrow evidence per task, full workspace **once** at verify when pace requires it (not every task).
+Test tiers: [test-strategy.md](../references/test-strategy.md) — scoped TDD per task, narrow evidence per task, tests related to the diff at each group close (`--scope group`), then the leftover sweep and the full workspace **once per workspace** at verify when pace requires it (not every task). A red full run is re-proved with `--scope failed-only`, later fixes with `--scope fix` — never a second full run.
 
 ### Model selection (capability × billing)
 

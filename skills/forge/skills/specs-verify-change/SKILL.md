@@ -114,9 +114,10 @@ Always announce: "Using change: \<name\>".
    under **Skipped** with the reason. Do not skip "nice to have" leftovers.
    Dispatch a fix subagent for anything non-trivial.
 
-   If you edited code after `verify-evidence.md` was recorded, re-run tier 3,
-   then re-run this sweep. Cap at two extra passes. Still dirty → stop and
-   ask the user.
+   This sweep runs before tier 3, so the single full run covers its fixes. If
+   tier 3 is already stamped, prove the fixes with `forge evidence --tier3
+   --scope fix -- <touched tests>` (never a second full run), then re-run this
+   sweep. Cap at two extra passes. Still dirty → stop and ask the user.
 
 9. **Save the report**
 

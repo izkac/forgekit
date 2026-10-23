@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **Tier 3 is serialized across sessions and worktrees.** A `full` tier-3 run
+  takes a lock at `<git-common-dir>/forge/tier3.lock` (`.forge/tier3.lock`
+  outside git). A second session's full run waits and prints who holds it; a
+  dead holder is taken over, and an uncreatable lock only warns. Scoped runs
+  never wait.
+- **`forge evidence --tier3 --scope full|failed-only|fix|group`.** Stamps now
+  carry a scope. `forge status` judges `proven.tier3` by the last `full` stamp:
+  a red full run followed by a green `failed-only` reads ok "via failed-only";
+  `fix` and `group` stamps never change the verdict.
+- **Group tier.** At each `tasks.md` group close the coordinator runs tests
+  related to the group's diff (Jest `--changedSince`, Vitest `run --changed`),
+  stamped `--scope group`. A diff touching harness, setup, runner config,
+  manifests or lockfiles defers to verify's full run.
+- **Verify order and run-once rules.** The leftover sweep and its fixes now run
+  before tier 3. Each workspace's full suite runs exactly once, sequentially. A
+  red run is re-proved with `failed-only`, later fixes with `fix`; the
+  "re-run tier 3 after editing code" rule is gone. The one exception is a fix
+  touching test harness, setup, config or lockfiles. The change's own e2e steps
+  run in verify; a project's full e2e smoke suite belongs in CI.
+- **Nested base commits.** `forge new` records `session.nestedBaseCommits`
+  (`{ "<rel/path>": "<sha>" }`, nested git repos up to two levels deep) next to
+  `baseCommit`, so the group tier has a base for each repo.
+- **Seal refresh retries.** The integrity seal is written atomically and retries
+  up to three times on EBUSY/EPERM/EACCES, fixing a false tamper failure under
+  load.
+
 ## 0.3.65 — 2026-10-18
 
 - **Fleet names linked worktrees by their repository.** T3 Code's `t3-*`

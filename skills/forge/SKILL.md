@@ -141,7 +141,7 @@ Before **every** Task/Agent/subagent dispatch (including retries):
 
 Layout: [references/forge-layout.md](./references/forge-layout.md)
 
-Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1 scoped TDD per task, tier 2 narrow evidence per task, tier 3 full workspace once at verify.
+Testing: [references/test-strategy.md](./references/test-strategy.md) — tier 1 scoped TDD per task, tier 2 narrow evidence per task, group tier (tests for the diff) at each group close, tier 3 full workspace once per workspace at verify after the leftover sweep (red run → `--scope failed-only`, fixes → `--scope fix`, never a second full run).
 
 ## Guardrails (every phase)
 

@@ -26,6 +26,11 @@ finds nothing the block does not already say and is most of what a final review
 used to cost. Read it; judge the *reasons* (allowances, no-TDD declarations);
 treat a `FAIL`/`PROBLEMS` line as a finding.
 
+One check beyond the precheck: if it shows tier 3 ok **via failed-only**, read
+the red full run's stamped tail in `verify-runs.jsonl` and confirm the
+`failed-only` command named exactly the files that failed there. A failing file
+the re-run skipped is a finding. Do not run the suite yourself.
+
 ## Scope and mode
 
 Session diff range: {DIFF_RANGE}   <!-- REQUIRED. `forge checkpoint --range` (no `--last`) → the whole session from `session.baseCommit`. No checkpoints: `git diff` against that base + the untracked files in `git status`. The precheck above lists the changed files. -->

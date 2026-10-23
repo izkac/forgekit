@@ -75,7 +75,11 @@ review, it just fails the gate later.
    code is stamped in `verify-runs.jsonl`; that run *is* the session's tier 3 —
    do not re-run it), or `BLOCKED: <reason>` if it could not run. If
    `forge status` still says `tier3 not stamped`, the closer reported a run it
-   did not make through the CLI — treat its exit code as UNVERIFIED.
+   did not make through the CLI — treat its exit code as UNVERIFIED. A red
+   closer run is not re-run in full: have the closer re-prove only the failing
+   files with `forge evidence --tier3 --scope failed-only -- <cmd with those files>`
+   (green alone = load-induced; still red = real failure — fix, then
+   `failed-only` again).
 
    ```bash
    forge phase review
@@ -83,7 +87,8 @@ review, it just fails the gate later.
 
 5. **Fix round (at most one).** `NOT READY` → fix the named findings (dispatch a
    fix subagent for anything non-trivial), have the **same closer** re-check the
-   changed files only, and update both records. Still `NOT READY` → escalate to
+   changed files only (`--scope fix` for the tests they touch — never a second
+   full run), and update both records. Still `NOT READY` → escalate to
    the human with the findings; do not loop.
 
 6. **Finish as normal** — [finish.md](./finish.md): archive, `forge phase done`

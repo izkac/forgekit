@@ -1,6 +1,6 @@
 # Tiered test strategy (Forge)
 
-Forge uses **three tiers**. Do **not** run the full workspace or monorepo test suite on every subagent task — that is slow and redundant when verify runs tier 3 once.
+Forge uses **three tiers**, plus a **group tier** at each `tasks.md` group close. Do **not** run the full workspace or monorepo test suite on every subagent task — that is slow and redundant when verify runs tier 3 once.
 
 ## Tier 1 — TDD loop (within a task)
 
@@ -36,17 +36,36 @@ Record in `.forge/sessions/<id>/tasks/<nn>-<slug>/test-evidence.md`. See [test-e
 - Multiple tasks target the same workspace (full suite runs once at **verify**)
 - Motivation is only "to be safe" — that is **verify's** job
 
+## Group tier — group close (coordinator)
+
+At each `tasks.md` group close, run the tests **related to the group's diff**, not the full suite:
+
+- Jest: `--changedSince=<base>`; Vitest: `run --changed <base>`
+- `<base>` is `session.baseCommit` for the outer repo, or `session.nestedBaseCommits[<repo>]` for a nested git repo (or the last checkpoint sha when checkpoints are on)
+- Stamp it: `forge evidence --tier3 --scope group -- <cmd>` (a group stamp never changes the `proven.tier3` verdict)
+
+If the group's diff touches test harness, setup files, runner config, package manifests or lockfiles, **do not** run the full suite here. Note it in `group-review.md`; verify's single full run covers it.
+
+**Runner blind spots.** Related-test selection only follows imports, so some tests are invisible to it (locale/translation files Vitest can't trace, name-registered model lists Jest can't see). Add those test paths explicitly. Projects list their blind spots in their `AGENTS.md`.
+
 ## Tier 3 — Verify phase (coordinator, after all tasks)
 
 After all implement tasks complete:
 
 1. **Audit** every `tasks/<nn>-<slug>/test-evidence.md` (exit `0`, pass summary, reviewers approved).
-2. Run **one fresh full workspace test** for each affected workspace (plus downstream consumer workspaces when contracts changed).
-3. Save output to `.forge/sessions/<id>/verify-evidence.md`.
+2. Run the leftover sweep (spec-verify / openspec-verify) and apply its fixes **before** the full run, so the full run covers them.
+3. Run each affected workspace's full suite **exactly once**, one workspace after another (not in parallel), via `forge evidence --tier3 -- <cmd>` (plus downstream consumer workspaces when contracts changed).
+4. Save output to `.forge/sessions/<id>/verify-evidence.md`.
 
 Tier 3 is the integration/regression gate. Cite this file when claiming the implementation passes.
 
-Re-run tier 3 when: tier 3 failed, coordinator edited code after verify evidence, quality/final review flagged test gaps, or the user asks for a fresh run.
+**No second full run.** Later failures and fixes are re-proven with scoped runs (`forge evidence --tier3 --scope <failed-only|fix> -- <cmd>`):
+
+- **Red full run:** re-run only the failing files with `--scope failed-only`. Green alone means the failures were load-induced and tier 3 counts as passed (`forge status` says "via failed-only"). Still red is a real failure: `forge refute add … --source tier3`, fix, then re-run those files with `--scope failed-only`.
+- **Sweep or review fixes:** run only the tests for what the fix touched, with `--scope fix`.
+- **The one exception:** a fix that touches test harness, setup, runner config, package manifests or lockfiles earns one more `full` run.
+
+Full runs take a cross-session lock, so a second session's full run waits instead of competing for the machine. Scoped runs never wait.
 
 **Do not** re-run tier 2 narrow commands at verify — audit them instead.
 
@@ -56,7 +75,9 @@ Re-run tier 3 when: tier 3 failed, coordinator edited code after verify evidence
 | ---- | --- | ---- | ----- |
 | 1 | Implementer | Each TDD red/green/refactor | Single file or pattern |
 | 2 | Implementer | Task done | Narrowest proof for this task |
-| 3 | Coordinator | Verify phase (once) | Full affected workspace(s) |
+| Group | Coordinator | Each `tasks.md` group close | Tests related to the group's diff (`--scope group`) |
+| 3 | Coordinator | Verify phase, after the sweep (once per workspace) | Full affected workspace(s) |
+| 3 re-proof | Coordinator | Red full run, or sweep/review fixes | Failing files (`failed-only`) or touched tests (`fix`) |
 
 ## Anti-patterns
 
@@ -64,5 +85,7 @@ Re-run tier 3 when: tier 3 failed, coordinator edited code after verify evidence
 | ----- | ---------- |
 | Full workspace test on every task | Tier 1 scoped + tier 2 narrow evidence |
 | Skip tier 3 because tasks passed | Always run tier 3 once at verify |
+| Second full run after a red run or a late fix | `--scope failed-only` / `--scope fix` |
+| Full suite at group close | Group tier: tests related to the diff |
 | Re-run tier 2 commands at verify | Audit task evidence; run tier 3 full suite |
 | Full monorepo test at tier 2 | Tier 2 narrow; tier 3 per workspace (or listed consumers) |

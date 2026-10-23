@@ -39,7 +39,11 @@ spec excerpt sends you there; no directory sweeps, no grepping for related code.
    through the CLI so the exit code is observed rather than reported —
    `forge evidence --tier3 --session {SESSION_ID} -- {AFFECTED_TEST_COMMAND}` —
    and paste the receipt it prints (command, exit code, run time). This is the
-   session's tier-3 run; there is no separate verify phase behind you.
+   session's tier-3 run; there is no separate verify phase behind you. Run it
+   once. If it is red, do not run the full command again: re-run only the
+   failing files with `forge evidence --tier3 --scope failed-only --session
+   {SESSION_ID} -- <command with those files>` (green alone = load-induced;
+   still red = a real failure to report).
 4. **Integrity:** no stub-with-success in the diff; new library code names its
    production caller; tests would fail on a no-op.
 

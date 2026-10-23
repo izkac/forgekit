@@ -17,7 +17,7 @@ Every implementer subagent must follow [../references/tdd-core.md](../references
 
 On test failures or unexpected behavior, use [../skills/systematic-debugging/SKILL.md](../skills/systematic-debugging/SKILL.md) before proposing fixes.
 
-**Test strategy:** [../references/test-strategy.md](../references/test-strategy.md) — tier 1 (scoped TDD) + tier 2 (narrow task evidence) during implement; **tier 3 (full workspace) runs once at verify**, not per task.
+**Test strategy:** [../references/test-strategy.md](../references/test-strategy.md) — tier 1 (scoped TDD) + tier 2 (narrow task evidence) during implement; **tier 3 (full workspace) runs once per workspace at verify**, not per task. At each group close you also run the **group tier** (step 9 below).
 
 **Pace:** Read `resolvedPace` / effective knobs from `forge status` (or [../references/pace.md](../references/pace.md)). After each **work unit** (below), decide whether to dispatch a reviewer via `review.perTask` + hard floor:
 
@@ -207,7 +207,8 @@ where Forge's input tokens go.
    range. Do **not** paste `range` during a pre-checkpoint review — it is
    empty until the group lands. Without checkpoints, every reviewer after task
    1 re-reads all previous tasks' diffs.
-9. Repeat.
+9. **Group tier — tests for the group's diff.** At each group close, run the tests related to the group's diff, not the full suite — Jest `--changedSince=<base>`, Vitest `run --changed <base>`. `<base>` is `session.baseCommit` for the outer repo, `session.nestedBaseCommits[<repo>]` for a nested git repo, or the last checkpoint sha when checkpoints are on. Stamp it: `forge evidence --tier3 --scope group -- <cmd>` (never changes the `proven.tier3` verdict). If the group's diff touches test harness, setup files, runner config, package manifests or lockfiles, do **not** run the full suite here — note it in `group-review.md`; verify's single full run covers it. Runner blind spots (locale/translation files Vitest can't trace, name-registered model lists Jest can't see): add explicit test paths; projects list theirs in `AGENTS.md`. Details: [test-strategy.md](../references/test-strategy.md).
+10. Repeat.
 
 **Unit sizing:** the rules live in [subagent-driven-development](../skills/subagent-driven-development/SKILL.md#work-units-what-one-implementer-dispatch-covers). One group per dispatch by default; at most 4 tasks; split when a later task needs an earlier one's *review* verdict or when the tasks share no files or spec. **Never put a money/auth/contract/migration task in a multi-task unit** — those keep a 1:1 implementer dispatch, whatever the pace says. Their review is still the group's review at group close.
 
