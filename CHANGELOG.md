@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.66 — 2026-10-23
 
 - **Tier 3 is serialized across sessions and worktrees.** A `full` tier-3 run
   takes a lock at `<git-common-dir>/forge/tier3.lock` (`.forge/tier3.lock`
@@ -24,10 +24,12 @@
 - **Nested base commits.** `forge new` records `session.nestedBaseCommits`
   (`{ "<rel/path>": "<sha>" }`, nested git repos up to two levels deep) next to
   `baseCommit`, so the group tier has a base for each repo.
-- **Cache heals keep the seal current.** `forge status`, the reminder hook and
-  `forge score` rewrite `session.json` when `tasks.md` progress or the cached
-  score drifts; they now refresh the integrity seal too, so ticking a task box
-  no longer makes the next `forge phase` refuse as tampering.
+- **No more false "tampered" refusals from Forge's own writes.** `forge status`,
+  the reminder hook and `forge score` rewrite `session.json` when `tasks.md`
+  progress or the cached score drifts; `forge e2e run` and `forge gate check`
+  write their results files; `forge spine|e2e init --force` overwrite session
+  copies. All of them now refresh the integrity seal, so ticking a task box or
+  running the product loop no longer makes the next `forge phase` refuse.
 - **Seal refresh retries.** The integrity seal is written atomically and retries
   up to three times on EBUSY/EPERM/EACCES, fixing a false tamper failure under
   load.
