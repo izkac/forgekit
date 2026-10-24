@@ -39,6 +39,7 @@ import { spawn } from 'node:child_process';
 import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { REPO_ROOT, resolveSessionOrExit, sessionPath } from './lib.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 function usage() {
   process.stderr.write(
@@ -156,6 +157,7 @@ function main() {
   const gate = resolveCallerExecGate({ command: 'forge tdd run', cmdArgv });
   if (!gate.allowed) {
     process.stderr.write(gate.message ?? 'forge tdd run: execution refused\n');
+    recordGateFire('exec-gate', { sessionId, cwd: REPO_ROOT, detail: task });
     process.exit(1);
   }
 
@@ -191,6 +193,7 @@ function main() {
       process.stderr.write(
         `forge tdd run: contradicted expectation — expected ${expect}, command ${outcome}\n`,
       );
+      recordGateFire('tdd-expectation', { sessionId, cwd: REPO_ROOT, detail: `${task} expected ${expect}` });
     }
     process.exit(ok ? 0 : 1);
   });

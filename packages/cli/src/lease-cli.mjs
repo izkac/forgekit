@@ -23,6 +23,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { acquireLease, isValidLeaseName, LeaseBusyError, leaseChildEnv, listLeases } from './lib/lease.mjs';
 import { matchLease, readLeaseConfig, SUBCOMMAND_NAMES } from './lib/lease-config.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 const DEFAULT_WAIT_MS = 540000;
 const EXIT_BUSY = 75;
@@ -169,6 +170,7 @@ function runLease(args, cwd) {
     process.stderr.write(
       `[forge] lease ${name} busy — held by ${h?.slug || h?.sessionId || h?.pid || 'unknown'} (pid ${h?.pid ?? 'unknown'}, since ${h?.startedAt ?? 'unknown'}); retry later or run in background\n`,
     );
+    recordGateFire('lease-busy', { sessionId, cwd, detail: name });
     return EXIT_BUSY;
   }
   try {
@@ -242,6 +244,10 @@ function runCheck(args, cwd) {
         reason: prefix + advice,
       }
     : { action: 'none' };
+  // The guard hook's deny is decided here, so its Gate fire is logged here.
+  // ponytail: a hand-run `forge lease check` that matches counts too — rare, and
+  // overcounting can only keep a gate alive at the fire review, never cut one.
+  if (hit) recordGateFire('lease-guard', { sessionId: activeSession(cwd).sessionId, cwd, detail: hit.name });
   process.stdout.write(json ? `${JSON.stringify(result)}\n` : `${result.action === 'deny' ? result.reason : 'none'}\n`);
   return 0;
 }

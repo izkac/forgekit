@@ -26,6 +26,7 @@ import { isReviewUnit, reviewLabel } from './review-label.mjs';
 import { resolveModel, TIERS } from './resolve-model.mjs';
 import { collectPrecheck } from './review-precheck.mjs';
 import { writeStamp } from './review-stamp.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 const args = process.argv.slice(2);
 if (args[0] === '--help' || args[0] === '-h') {
@@ -110,6 +111,7 @@ if (resolved0.id === null || resolved0.ambiguous) {
       ? sessionAmbiguityMessage(resolved0, 'forge review-label final')
       : 'No active session. Run forge new first.\n',
   );
+  recordGateFire('review-label', { detail: 'session not resolved' });
   process.exit(1);
 }
 sessionId = resolved0.id;
@@ -150,6 +152,7 @@ if (unit === 'final' && resolved.resolvedCeremony === 'combined') {
       'This session resolved ceremony `combined`: one standard-tier closer pass replaces the full verify+review tail (see phases/close.md).\n' +
         'A capable-tier final reviewer is the full tail under another name. If that is a deliberate choice, re-run with --full-tail.\n',
     );
+    recordGateFire('review-label', { sessionId, detail: 'capable tier on combined ceremony' });
     process.exit(1);
   }
 } else if (unit === 'final' && !tierExplicit) {

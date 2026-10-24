@@ -52,6 +52,7 @@ import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
 import { acquireLease, ancestorHeldLeases, LeaseBusyError, leaseChildEnv } from './lib/lease.mjs';
 import { matchingLeases, readLeaseConfig } from './lib/lease-config.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
 export const TIER3_LABEL = '3 (full workspace)';
@@ -647,6 +648,13 @@ function main() {
       console.log(result.message);
     } else {
       console.error(result.message);
+      // ponytail: every refusal counts, usage mistakes included — overcounting
+      // can only keep a gate alive at the fire review, never cut one.
+      // 75 is a busy lease (see busyResult) — the lease refused, not the evidence gate.
+      recordGateFire(result.exitCode === 75 ? 'lease-busy' : 'evidence', {
+        sessionId: opts.session,
+        detail: result.message.split('\n')[0],
+      });
     }
     process.exit(result.exitCode);
   } catch (err) {

@@ -1,0 +1,33 @@
+{
+  "change": "escape-tracking",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "session-lifecycle: commit range recorded at done",
+      "library": "packages/cli/src/set-phase.mjs, packages/cli/src/ledger.mjs (appendSessionDigest), packages/cli/src/lib/fleet.mjs (registerSession)",
+      "runtimeOwner": "forge phase done (CLI)",
+      "writes": "session.json commitRange; .forge/sessions.jsonl commitRange; fleet registry entry commitRange",
+      "reads": "session.baseCommit; git rev-parse HEAD",
+      "uiConsumer": "forge escapes (reads the range)",
+      "evidence": "commit-range.test.mjs; e2e escape-tracking step"
+    },
+    {
+      "capability": "escape-tracking: candidates, decisions ledger, escape rate report",
+      "library": "packages/cli/src/escapes.mjs",
+      "runtimeOwner": "forge escapes [list|confirm|dismiss|report] (escapes-cli.mjs)",
+      "writes": ".forge/escapes.jsonl",
+      "reads": ".forge/sessions.jsonl; fleet registry; git log/diff/blame",
+      "uiConsumer": "forge escapes list/report output",
+      "evidence": "escapes.test.mjs, escapes-ledger.test.mjs, escapes-cli.test.mjs; e2e escape-tracking step"
+    },
+    {
+      "capability": "gate-fires: refusal log and per-gate report",
+      "library": "packages/cli/src/gate-fires.mjs",
+      "runtimeOwner": "every gate refusal (forge phase, integrity-check, guard check, enforce-model, evidence, tdd run, review-label, gate check, checkpoint); forge fires (fires-cli.mjs)",
+      "writes": "<fleet home>/gate-fires.jsonl",
+      "reads": "<fleet home>/gate-fires.jsonl",
+      "uiConsumer": "forge fires output",
+      "evidence": "gate-fires*.test.mjs, fires-cli.test.mjs; e2e escape-tracking step"
+    }
+  ]
+}

@@ -18,6 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   appendPhaseHistory,
   loadSession,
@@ -37,6 +38,7 @@ import { isArchivedLeftover, resolveChangeDir, runIntegrityChecks } from './inte
 import { overlayPlanProgress, readPlanTaskProgress } from './plan-progress.mjs';
 import { writeSessionScorecard } from './score.mjs';
 import { appendSessionDigest } from './ledger.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 import { bindHost } from './metrics/host.mjs';
 import { collectMetrics, writeMetrics } from './metrics/collect.mjs';
 import { reviewEvidence } from './metrics/review-evidence.mjs';
@@ -164,6 +166,9 @@ sessionId = resolveSessionOrExit(sessionId, {
 
 const { dir, session } = loadSession(sessionId);
 
+/** Log a Gate fire for a refusal about to happen — advisory, never changes the exit. */
+const fire = (gate, detail) => recordGateFire(gate, { sessionId, detail });
+
 // Phase-boundary seal: untracked session.json / active.json / session-dir
 // artifacts a `git diff` cannot see. Missing seal is not a finding (older
 // fixtures); a mismatch fails closed here so implement→verify cannot carry
@@ -174,6 +179,7 @@ if (sealCheck.problems.length > 0) {
     `Cannot enter phase "${phase}": session/test-guard integrity failed\n` +
       `${sealCheck.problems.map((p) => `  - ${p}`).join('\n')}\n`,
   );
+  fire('integrity-seal', sealCheck.problems[0]);
   process.exit(1);
 }
 
@@ -508,6 +514,7 @@ function enforceBriefGate() {
       'Write the brief (see forge references/operator-brief.md), forge brief stamp, ' +
       'or pass --allow-incomplete "<reason>".\n',
   );
+  fire('brief', briefProblem(result));
   process.exit(1);
 }
 
@@ -544,6 +551,7 @@ function enforceBrainstormNotesGate() {
       `Write the brainstorm ledger (${notesPath}) with a "## Assumptions" section, ` +
       'or pass --notes-waived "<reason>".\n',
   );
+  fire('brainstorm-notes', missing);
   process.exit(1);
 }
 
@@ -569,6 +577,7 @@ function enforceOpenSpecVerifyGate() {
         'Do not dispatch the final reviewer until leftover findings are fixed.\n' +
         'Or pass --allow-incomplete "<reason>".\n',
     );
+    fire('leftover-sweep', result.problem);
     process.exit(1);
   }
 }
@@ -594,6 +603,7 @@ function enforceSpecVerifyGate() {
         'Do not dispatch the final reviewer until leftover findings are fixed.\n' +
         'Or pass --allow-incomplete "<reason>".\n',
     );
+    fire('leftover-sweep', result.problem);
     process.exit(1);
   }
 }
@@ -620,8 +630,16 @@ function enforceDoneGate() {
   const tasksDone = total === 0 || complete === total;
 
   const problems = [];
-  if (!hasEvidence) problems.push('missing verify-evidence.md');
-  if (!tasksDone) problems.push(`tasks incomplete (${complete}/${total})`);
+  // Gate-fire ids of the sub-checks that failed — one fires-log line each.
+  const failed = new Set();
+  if (!hasEvidence) {
+    problems.push('missing verify-evidence.md');
+    failed.add('done:verify-evidence');
+  }
+  if (!tasksDone) {
+    problems.push(`tasks incomplete (${complete}/${total})`);
+    failed.add('done:tasks');
+  }
 
   // Combined ceremony: the closer IS the final reviewer, so a combined session
   // with no reviews/final-review.md has skipped its only review. Cohort 4
@@ -635,6 +653,7 @@ function enforceDoneGate() {
     problems.push(
       'combined ceremony: missing reviews/final-review.md — dispatch the closer (phases/close.md) and save its report',
     );
+    failed.add('done:combined-review');
   }
 
   // Archive gate: finish.md documents confirm tasks complete → archive the
@@ -664,6 +683,7 @@ function enforceDoneGate() {
           ? 'openspec archive'
           : `forge change archive ${session.openspecChange}`;
       problems.push(`change not archived: ${liveChangeDir} still exists on the live path — run \`${remedy}\``);
+      failed.add('done:archive');
     }
   }
   // F131: no `else { delete session.archiveWaived }` here. A waiver on the
@@ -679,17 +699,24 @@ function enforceDoneGate() {
     sessionDir: dir,
     session,
   });
-  if (osVerify.required && !osVerify.ok) problems.push(osVerify.problem);
+  if (osVerify.required && !osVerify.ok) {
+    problems.push(osVerify.problem);
+    failed.add('leftover-sweep');
+  }
 
   const specVerify = checkSpecVerifyArtifact({
     cwd: process.cwd(),
     sessionDir: dir,
     session,
   });
-  if (specVerify.required && !specVerify.ok) problems.push(specVerify.problem);
+  if (specVerify.required && !specVerify.ok) {
+    problems.push(specVerify.problem);
+    failed.add('leftover-sweep');
+  }
 
   const integrity = runIntegrityChecks({ sessionDir: dir, session });
   problems.push(...integrity.problems);
+  if (integrity.problems.length > 0) failed.add('done:integrity');
 
   if (problems.length === 0) {
     delete session.incompleteReason;
@@ -705,6 +732,7 @@ function enforceDoneGate() {
     `Cannot enter phase "${phase}":\n${problems.map((p) => `  - ${p}`).join('\n')}\n` +
       `Fix the above (forge integrity-check to re-run), or pass --allow-incomplete "<reason>".\n`,
   );
+  for (const gate of failed) fire(gate);
   process.exit(1);
 }
 
@@ -777,6 +805,7 @@ function enforceFinalReviewFloor() {
       '  - Dispatch an independent final reviewer (forge resolve-model --tier capable), then save reviews/final-review.md\n' +
       '  - Or record the refusal: --final-review-waived "<reason>" (kept on the session and in .forge/sessions.jsonl)\n',
   );
+  fire('final-review-floor');
   process.exit(1);
 }
 
@@ -807,6 +836,7 @@ function enforceReopenFloor() {
       `${blocking.map((finding) => `  - ${finding.id}`).join('\n')}\n` +
       'Resolve the findings, or record the decision: --reopen-waived "<reason>".\n',
   );
+  fire('reopen-floor', blocking.map((finding) => finding.id).join(','));
   process.exit(1);
 }
 
@@ -993,6 +1023,14 @@ freezeReviewVerdict();
 enforceFinalReviewFloor();
 enforceReopenFloor();
 enforceDoneGate();
+
+// Commit range (CONTEXT.md): the commits `forge escapes` blames later fixes
+// against. Below every gate, so a refused done records none; no baseCommit or
+// no git means no range rather than half of one.
+if (phase === 'done' && session.baseCommit) {
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' });
+  if (head.status === 0) session.commitRange = { base: session.baseCommit, head: head.stdout.trim() };
+}
 
 // Host telemetry on finish/done, and it has to happen *here* — before the
 // scorecard, which is what appends the sessions.jsonl digest, and the digest

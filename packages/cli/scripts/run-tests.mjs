@@ -44,7 +44,8 @@ const result = spawnSync(process.execPath, ['--test', ...files], {
     ...process.env,
     // Keep saveSession's fleet-registry mirroring away from ~/.forgekit
     // when tests exercise session saves with scratch projects.
-    FORGEKIT_FLEET_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-test-fleet-')),
+    // `<tmp>/sessions`, so the gate-fires log beside it stays in this run's dir.
+    FORGEKIT_FLEET_DIR: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-test-fleet-')), 'sessions'),
   },
 });
 process.exit(result.status ?? 1);

@@ -450,6 +450,8 @@ export function appendSessionDigest(opts) {
       briefStamps: session.briefStamps ?? null,
       briefRestampsAfterImplement: session.briefRestampsAfterImplement ?? null,
       brainstorm: readBrainstormSignals(sessionDir),
+      // The change's commits, recorded at done — what `forge escapes` reads.
+      commitRange: session.commitRange ?? null,
     };
     return appendLines(
       path.join(forgeDirOf(opts, sessionDir), 'sessions.jsonl'),

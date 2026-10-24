@@ -325,6 +325,19 @@ forge finding list|resolve|link|reopen
                                   # list defaults to open bugs; status shows stale/reopened
                                   # Rules: fix beats file; re-check dependents; corpus before narrowing heuristics
 forge fleet report [--json]       # cross-project trend from the durable ledgers
+forge escapes [list] [--json] [--rev <ref>]
+                                  # Escape candidates: later commits (≤14 days after done) that rewrite
+                                  # or delete lines a done session's Commit range added (git blame on the
+                                  # commit's parent). Bare, on a terminal: one keystroke each —
+                                  # c confirm / d dismiss / s skip / q quit
+forge escapes confirm <session> <commit> [--test <path>]
+                                  # confirm needs a replay test: the fix commit's own, or one you name
+forge escapes dismiss <session> <commit> [--reason "<why>"]
+                                  # decisions → .forge/escapes.jsonl
+forge escapes report [--json]     # Escape rate per month of done, across the fleet (OPEN = window running)
+forge fires [--json] [--since <iso>]
+                                  # Gate fire counts per gate across the fleet, zeros included
+                                  # (log: ~/.forgekit/fleet/gate-fires.jsonl, one line per gate refusal)
 forge e2e run --repeat 5 [--record-baseline]
                                   # measure harness flakiness; write e2e.baseline
 forge cleanup [--dry-run]         # prune sessions >14 days or finished

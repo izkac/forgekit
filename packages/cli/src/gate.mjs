@@ -26,6 +26,7 @@ import { loadSession, resolveSessionOrExit, readJson, writeJson } from './lib.mj
 import { loadProjectConfig } from './config.mjs';
 import { resolveChangeDir, runE2eSteps } from './integrity.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 const GATES_FILE = 'gates.json';
 const GATE_RESULTS_FILE = 'gate-results.json';
@@ -240,6 +241,7 @@ if (sub === 'check') {
   // gate-results.json is sealed: a legitimate write must not read as tampering at the next phase boundary.
   refreshIntegritySeal({ sessionDir: dir });
   process.stdout.write(`${allOk ? 'GREEN' : 'FAILED'} — results: ${resultsFile}\n`);
+  if (!allOk) recordGateFire('task-gate', { sessionId, detail: outGroups.filter((g) => !g.ok).map((g) => g.id).join(',') });
   process.exit(allOk ? 0 : 1);
 }
 

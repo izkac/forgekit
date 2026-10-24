@@ -54,6 +54,8 @@ const COMMANDS = {
   'review-label': { script: 'review-label-cli.mjs' },
   'review-precheck': { script: 'review-precheck-cli.mjs', aliases: ['precheck'] },
   analyze: { script: 'analyze-cli.mjs', aliases: ['analyse'] },
+  escapes: { script: 'escapes-cli.mjs', aliases: ['escape'] },
+  fires: { script: 'fires-cli.mjs' },
 };
 
 function printHelp() {
@@ -101,6 +103,8 @@ Commands:
   review-label [<unit>]   Exact Task description for a reviewer dispatch (+ dispatch stamp)
   review-precheck [--json] Machine-verified facts block for a reviewer packet (exit 1 on integrity problems)
   analyze [--json]        Coverage, per-model/phase totals, policy skip rate
+  escapes [list|confirm|dismiss|report]  Escape candidates after done; operator confirms/dismisses; Escape rate
+  fires [--json] [--since <iso>]  Gate fire counts per gate across the fleet (zeros included)
 
 Prefer \`forgekit install\` to pick multiple skills + agents at once.
 

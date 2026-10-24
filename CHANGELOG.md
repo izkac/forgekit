@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **Commit range at done.** `forge phase done` records `commitRange: { base, head }`
+  (the session's `baseCommit` .. HEAD) on the session, its `.forge/sessions.jsonl`
+  row and its fleet registry entry. A refused done records none.
+- **`forge escapes`.** For each done session of the repository (digest rows plus
+  fleet entries, so deleted worktrees count), lists later commits within 14 days
+  that rewrite or delete lines the change added, found with `git blame` on the
+  commit's parent. Same-session and plan-dir commits are skipped. Older sessions
+  get a range inferred from their `forge(<slug>):` commits. Confirm or dismiss
+  with one keystroke or `forge escapes confirm|dismiss`. A confirm needs a replay
+  test (the fix commit's own or `--test <path>`). Decisions go to
+  `.forge/escapes.jsonl`. `forge escapes report` gives the Escape rate per month
+  across the fleet.
+- **Gate fires.** Every gate refusal (phase gates, done-gate sub-checks,
+  integrity-check, test guard, model policy, evidence, tdd exec/expectation,
+  review-label, task gates, checkpoint, lease guard, busy lease) appends `{gate, sessionId, project, at}`
+  to `~/.forgekit/fleet/gate-fires.jsonl`. `forge fires` lists counts per gate
+  across the fleet, including gates that never fired.
+
 ## 0.3.66 — 2026-10-23
 
 - **Tier 3 is serialized across sessions and worktrees.** A `full` tier-3 run
