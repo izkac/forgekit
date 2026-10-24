@@ -41,6 +41,8 @@ export const GATE_IDS = [
   'review-label',
   'task-gate',
   'checkpoint',
+  'lease-guard',
+  'lease-busy',
 ];
 
 export function firesLogPath() {

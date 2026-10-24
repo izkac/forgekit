@@ -650,7 +650,11 @@ function main() {
       console.error(result.message);
       // ponytail: every refusal counts, usage mistakes included — overcounting
       // can only keep a gate alive at the fire review, never cut one.
-      recordGateFire('evidence', { sessionId: opts.session, detail: result.message.split('\n')[0] });
+      // 75 is a busy lease (see busyResult) — the lease refused, not the evidence gate.
+      recordGateFire(result.exitCode === 75 ? 'lease-busy' : 'evidence', {
+        sessionId: opts.session,
+        detail: result.message.split('\n')[0],
+      });
     }
     process.exit(result.exitCode);
   } catch (err) {

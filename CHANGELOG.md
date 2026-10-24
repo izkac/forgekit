@@ -16,7 +16,7 @@
   across the fleet.
 - **Gate fires.** Every gate refusal (phase gates, done-gate sub-checks,
   integrity-check, test guard, model policy, evidence, tdd exec/expectation,
-  review-label, task gates, checkpoint) appends `{gate, sessionId, project, at}`
+  review-label, task gates, checkpoint, lease guard, busy lease) appends `{gate, sessionId, project, at}`
   to `~/.forgekit/fleet/gate-fires.jsonl`. `forge fires` lists counts per gate
   across the fleet, including gates that never fired.
 

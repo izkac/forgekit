@@ -83,14 +83,14 @@ test('summary counts per gate, lists every known gate at zero, keeps unknown ids
     { gate: 'test-guard', sessionId: 'a', at: '2026-10-01T00:00:00.000Z' },
     { gate: 'test-guard', sessionId: 'a', at: '2026-10-02T00:00:00.000Z' },
     { gate: 'test-guard', sessionId: 'b', at: '2026-10-03T00:00:00.000Z' },
-    { gate: 'lease-guard', sessionId: 'c', at: '2026-10-04T00:00:00.000Z' },
+    { gate: 'some-future-gate', sessionId: 'c', at: '2026-10-04T00:00:00.000Z' },
   ];
   const rows = summarizeGateFires(fires);
   const byGate = Object.fromEntries(rows.map((r) => [r.gate, r]));
   assert.equal(byGate['test-guard'].fires, 3);
   assert.equal(byGate['test-guard'].sessions, 2);
   assert.equal(byGate['test-guard'].lastAt, '2026-10-03T00:00:00.000Z');
-  assert.equal(byGate['lease-guard'].fires, 1, 'ids not in GATE_IDS still appear');
+  assert.equal(byGate['some-future-gate'].fires, 1, 'ids not in GATE_IDS still appear');
   for (const id of GATE_IDS.filter((g) => g !== 'test-guard')) {
     assert.equal(byGate[id].fires, 0, `${id} listed at zero`);
   }
