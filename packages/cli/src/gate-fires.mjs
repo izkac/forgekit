@@ -7,8 +7,9 @@
  * the 2027-04-24 review ("cut gates with zero fires across the fleet") would
  * read a log that had lost most of its lines.
  *
- * Kept light on purpose — fs only, no ledger.mjs — because the test-guard and
- * model-policy hooks import it and run on every tool call.
+ * No ledger.mjs import (its review/metrics graph is heavy), because the
+ * test-guard and model-policy hooks import this on every tool call. It does
+ * import lib/fleet.mjs, for the registry location and the scratch-project rule.
  */
 
 import fs from 'node:fs';

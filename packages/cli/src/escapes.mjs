@@ -108,33 +108,56 @@ export function inferCommitRange({ cwd, slug, rev = 'HEAD' }) {
 }
 
 /**
- * Parse `git diff -U0 -M` into the old-side line ranges each hunk removes or
- * rewrites, keyed by old path, plus the renames it performed.
+ * What commit `c` did to each file: `[status, oldPath, newPath]`, from
+ * `--name-status -z`, so paths arrive raw — no quoting, no `a/` prefix, no
+ * trailing tab for a path with a space (all of which a parsed patch header
+ * gets wrong, and silently: a lost path is a lost Escape).
  *
- * @param {string} diff
+ * @param {string} cwd
+ * @param {string} c
+ * @returns {Array<[string, string, string]>}
  */
-function oldSideHunks(diff) {
-  /** @type {Map<string, Array<[number, number]>>} */
-  const hunks = new Map();
-  /** @type {Array<[string, string]>} */
-  const renames = [];
-  let oldPath = null;
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('diff --git ')) oldPath = null;
-    else if (line.startsWith('rename from ')) oldPath = line.slice('rename from '.length);
-    else if (line.startsWith('rename to ') && oldPath) renames.push([oldPath, line.slice('rename to '.length)]);
-    else if (line.startsWith('--- ')) oldPath = line === '--- /dev/null' ? null : line.slice('--- a/'.length);
-    else if (line.startsWith('@@ ') && oldPath) {
-      const m = /^@@ -(\d+)(?:,(\d+))? \+/.exec(line);
-      const count = m ? (m[2] === undefined ? 1 : Number(m[2])) : 0;
-      if (m && count > 0) {
-        if (!hunks.has(oldPath)) hunks.set(oldPath, []);
-        /** @type {Array<[number, number]>} */ (hunks.get(oldPath)).push([Number(m[1]), count]);
-      }
+function changedFiles(cwd, c) {
+  const tokens = (git(cwd, ['diff', '--name-status', '-z', '-M', '--no-ext-diff', `${c}^`, c]) ?? '').split('\0');
+  /** @type {Array<[string, string, string]>} */
+  const out = [];
+  for (let i = 0; i < tokens.length && tokens[i]; ) {
+    const status = tokens[i];
+    if (status.startsWith('R') || status.startsWith('C')) {
+      out.push([status[0], tokens[i + 1], tokens[i + 2]]);
+      i += 3;
+    } else {
+      out.push([status[0], tokens[i + 1], tokens[i + 1]]);
+      i += 2;
     }
   }
-  return { hunks, renames };
+  return out;
 }
+
+/**
+ * Old-side `[start, count]` ranges that commit `c` removes or rewrites in one
+ * file. Only `@@` lines are read: every body line of a patch starts with `-`,
+ * `+`, ` ` or `\`, so a removed `-- comment` can never pass for a header.
+ *
+ * @param {string} cwd
+ * @param {string} c
+ * @param {string[]} paths the old path, plus the new one for a rename
+ * @returns {Array<[number, number]>}
+ */
+function oldSideRanges(cwd, c, paths) {
+  /** @type {Array<[number, number]>} */
+  const ranges = [];
+  const diff = git(cwd, ['diff', '-U0', '-M', '--no-color', '--no-ext-diff', `${c}^`, c, '--', ...paths]) ?? '';
+  for (const line of diff.split('\n')) {
+    const m = /^@@ -(\d+)(?:,(\d+))? \+/.exec(line);
+    const count = m ? (m[2] === undefined ? 1 : Number(m[2])) : 0;
+    if (m && count > 0) ranges.push([Number(m[1]), count]);
+  }
+  return ranges;
+}
+
+/** @param {string} cwd @param {string} sha @param {string} rev */
+const isAncestor = (cwd, sha, rev) => spawnSync('git', ['merge-base', '--is-ancestor', sha, rev], { cwd }).status === 0;
 
 /**
  * Escape candidates for one done session.
@@ -147,15 +170,26 @@ function oldSideHunks(diff) {
  */
 export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
   let range = session.commitRange?.base && session.commitRange?.head ? session.commitRange : null;
-  const inferred = !range;
-  if (!range) range = inferCommitRange({ cwd, slug: session.slug ?? null, rev });
+  let inferred = false;
+  // A recorded head that is not on `rev` was rebased (or squashed) on its way
+  // in; its `forge(<slug>):` subjects survive a rebase, so try those first.
+  if (!range || !isAncestor(cwd, range.head, rev)) {
+    const guess = inferCommitRange({ cwd, slug: session.slug ?? null, rev });
+    if (guess || !range) {
+      range = guess;
+      inferred = true;
+    }
+  }
   const result = { sessionId: session.sessionId, range, inferred, skipped: null, candidates: [] };
   if (!range) return { ...result, skipped: 'no commit range (none recorded, no forge(<slug>) commits)' };
-  if (spawnSync('git', ['merge-base', '--is-ancestor', range.head, rev], { cwd }).status !== 0) {
+  if (!isAncestor(cwd, range.head, rev)) {
     return { ...result, skipped: `head ${range.head.slice(0, 7)} not on ${rev} (unmerged or squash-merged)` };
   }
 
-  const changeCommits = new Set(lines(git(cwd, ['rev-list', `${range.base}..${range.head}`])));
+  // First parent only: a `git merge main` mid-session brings other sessions'
+  // commits into base..head, and their lines are not this change's. Blame
+  // credits those lines to their own commits, which this set then excludes.
+  const changeCommits = new Set(lines(git(cwd, ['rev-list', '--first-parent', `${range.base}..${range.head}`])));
   let planDir = 'openspec';
   try {
     planDir = normalizePlanDir(resolveProjectPlanEngine(cwd).dir);
@@ -179,24 +213,22 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
 
   const ownPrefix = session.slug ? `forge(${session.slug})` : null;
   for (const c of later) {
-    const diff = git(cwd, ['diff', '-U0', '-M', '--no-color', `${c.commit}^`, c.commit]);
-    if (diff === null) continue;
-    const { hunks, renames } = oldSideHunks(diff);
     const sameSession = changeCommits.has(c.commit) || (ownPrefix && c.subject.startsWith(ownPrefix));
     let hit = 0;
     const files = [];
-    if (!sameSession) {
-      for (const [file, ranges] of hunks) {
-        if (!tracked.has(file)) continue;
-        const blame = git(cwd, ['blame', '--porcelain', ...ranges.flatMap(([a, n]) => ['-L', `${a},+${n}`]), `${c.commit}^`, '--', file]);
-        const n = lines(blame).filter((l) => changeCommits.has(SHA_LINE.exec(l)?.[1] ?? '')).length;
-        if (n > 0) {
-          hit += n;
-          files.push(file);
-        }
+    for (const [status, from, to] of changedFiles(cwd, c.commit)) {
+      if (!tracked.has(from) || status === 'A' || status === 'C') continue;
+      if (status === 'R' && isCode(to)) tracked.add(to);
+      if (sameSession) continue;
+      const ranges = oldSideRanges(cwd, c.commit, status === 'R' ? [from, to] : [from]);
+      if (ranges.length === 0) continue;
+      const blame = git(cwd, ['blame', '--porcelain', ...ranges.flatMap(([a, n]) => ['-L', `${a},+${n}`]), `${c.commit}^`, '--', from]);
+      const n = lines(blame).filter((l) => changeCommits.has(SHA_LINE.exec(l)?.[1] ?? '')).length;
+      if (n > 0) {
+        hit += n;
+        files.push(from);
       }
     }
-    for (const [from, to] of renames) if (tracked.has(from) && isCode(to)) tracked.add(to);
     if (hit > 0) result.candidates.push({ commit: c.commit, subject: c.subject, at: c.at, files, lines: hit });
   }
   return result;
@@ -248,9 +280,21 @@ export function decide({ cwd, sessionId, slug = null, commit, decision, replayTe
     if (!test) {
       return { ok: false, error: `commit ${sha.slice(0, 7)} touched no test — confirm with --test <path> to a replay test you wrote` };
     }
+    // Repo-relative, posix — the replay will run it from this repository.
+    const rel = path.relative(path.resolve(cwd), path.resolve(cwd, test));
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+      return { ok: false, error: `replay test must be a file inside this repository: ${test}` };
+    }
+    test = rel.split(path.sep).join('/');
     const inCommit = spawnSync('git', ['cat-file', '-e', `${sha}:${test}`], { cwd }).status === 0;
-    if (!inCommit && !fs.existsSync(path.resolve(cwd, test))) {
-      return { ok: false, error: `replay test not found in ${sha.slice(0, 7)} or on disk: ${test}` };
+    let onDisk = false;
+    try {
+      onDisk = fs.statSync(path.resolve(cwd, test)).isFile();
+    } catch {
+      // not on disk
+    }
+    if (!inCommit && !onDisk) {
+      return { ok: false, error: `replay test not found as a file in ${sha.slice(0, 7)} or on disk: ${test}` };
     }
   }
   const entry = {

@@ -90,6 +90,14 @@ const fix = commit(
   later,
 );
 commit({ 'README.md': 'docs\n' }, 'docs: unrelated', later);
+// Same file, a line the change did not add: file overlap alone must not make a candidate.
+commit(
+  {
+    'src/price.js': 'export const round = (x) => Math.round(x);\nexport const total = (a, b) => Number(a) + Number(b);\n',
+  },
+  'refactor: round',
+  later,
+);
 
 const listed = JSON.parse(forge(['escapes', 'list', '--json']).stdout);
 const candidates = listed.sessions.flatMap((s) => s.candidates.map((c) => c.commit));
