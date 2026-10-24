@@ -40,6 +40,15 @@
             "statusMessage": "Checking test-guard policy"
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-lease-guard.mjs\""
+          }
+        ]
       }
     ],
     "Stop": [
