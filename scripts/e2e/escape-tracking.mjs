@@ -5,11 +5,15 @@
  * Drives the SHIPPED binary against a scratch git project, with the fleet
  * registry (and so the gate-fires log beside it) pointed at a scratch home:
  *
- *   forge new → change commit → refused `forge phase done` (a Gate fire)
+ *   forge new → change commit (code + a plan doc naming price.js + a swept-in NOTES.md line)
+ *   → refused `forge phase done` (a Gate fire)
  *   → `forge phase done --allow-incomplete` (records the Commit range)
- *   → fix commit rewriting a change line → `forge escapes list --json` names it
- *   → `forge escapes confirm` (replay test from the fix commit) → ledger line
- *   → `forge escapes report --json` rate 1 → `forge fires --json` counts the refusal.
+ *   → fix commit rewriting a change line, and a later commit rewriting the swept-in line
+ *   → `forge escapes list --json` names both: the fix has outsidePlan [], the sweep ['NOTES.md'] (F16)
+ *   → `forge escapes confirm` the fix (replay test from the fix commit) → ledger line
+ *   → `forge escapes dismiss` the sweep → nothing left undecided
+ *   → `forge escapes report --json` rate 1, one byPace entry (the session's pace)
+ *   → `forge fires --json` counts the refusal.
  *
  * Prints ESCAPE TRACKING GREEN on success; exits 1 with the failing assertion otherwise.
  */
@@ -63,7 +67,17 @@ commit({ 'src/price.js': 'export const round = (x) => x;\n' }, 'base');
 
 const created = JSON.parse(forge(['new', 'loop']).stdout);
 const sessionId = created.sessionId;
-const head = commit({ 'src/price.js': 'export const round = (x) => x;\nexport const total = (a, b) => a + b;\n' }, 'feat: total');
+// Pin the plan dir (the user's default would otherwise decide it); written after `forge new`.
+fs.writeFileSync(path.join(project, '.forge', 'config.json'), '{"plan":{"engine":"specs","dir":"specs"}}\n');
+const head = commit(
+  {
+    'src/price.js': 'export const round = (x) => x;\nexport const total = (a, b) => a + b;\n',
+    // the change's own plan names price.js, not NOTES.md
+    'specs/changes/loop/tasks.md': '- [x] 1.1 add total to src/price.js\n',
+    'NOTES.md': 'swept in: unrelated scratch line\n',
+  },
+  'feat: total',
+);
 
 // A refused done is a Gate fire.
 const refused = forge(['phase', 'done'], { ok: false });
@@ -99,20 +113,29 @@ commit(
   later,
 );
 
+// A later rewrite of the swept-in line, in a file the plan never names.
+const sweep = commit({ 'NOTES.md': 'swept in: rewritten scratch line\n' }, 'chore: notes', later);
+
 const listed = JSON.parse(forge(['escapes', 'list', '--json']).stdout);
-const candidates = listed.sessions.flatMap((s) => s.candidates.map((c) => c.commit));
-assert.deepEqual(candidates, [fix], 'only the fix is an Escape candidate');
+const found = listed.sessions.flatMap((s) => s.candidates);
+assert.deepEqual(found.map((c) => c.commit).sort(), [fix, sweep].sort(), 'only the fix and the sweep are Escape candidates');
+assert.deepEqual(found.find((c) => c.commit === fix).outsidePlan, [], 'the fix hits a file the plan names');
+assert.deepEqual(found.find((c) => c.commit === sweep).outsidePlan, ['NOTES.md'], 'the sweep hits only a file the plan never names');
 
 forge(['escapes', 'confirm', sessionId, fix.slice(0, 8)]);
 const decision = JSON.parse(fs.readFileSync(path.join(project, '.forge', 'escapes.jsonl'), 'utf8').trim());
 assert.equal(decision.decision, 'confirmed');
 assert.equal(decision.replayTest, 'test/price.test.js');
+forge(['escapes', 'dismiss', sessionId, sweep.slice(0, 8), '--reason', 'F16 sweep']);
 assert.deepEqual(JSON.parse(forge(['escapes', 'list', '--json']).stdout).sessions.flatMap((s) => s.candidates), []);
 
 const report = JSON.parse(forge(['escapes', 'report', '--json']).stdout);
 assert.equal(report.total.done, 1);
 assert.equal(report.total.escaped, 1);
 assert.equal(report.total.rate, 1);
+assert.equal(report.byPace.length, 1, 'one pace recorded');
+assert.equal(report.byPace[0].pace, row.pace || 'unknown', "byPace carries the digest row's pace");
+assert.deepEqual([report.byPace[0].done, report.byPace[0].escaped, report.byPace[0].rate], [1, 1, 1]);
 
 const fires = JSON.parse(forge(['fires', '--json']).stdout);
 const doneFires = fires.gates.find((g) => g.gate === 'done:verify-evidence');

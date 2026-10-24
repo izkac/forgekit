@@ -330,11 +330,14 @@ forge escapes [list] [--json] [--rev <ref>]
                                   # or delete lines a done session's Commit range added (git blame on the
                                   # commit's parent). Bare, on a terminal: one keystroke each —
                                   # c confirm / d dismiss / s skip / q quit
+                                  # A candidate whose hit files the change's own plan never names is
+                                  # marked `outside plan … possible sweep (F16)` (a label, not a filter)
 forge escapes confirm <session> <commit> [--test <path>]
                                   # confirm needs a replay test: the fix commit's own, or one you name
 forge escapes dismiss <session> <commit> [--reason "<why>"]
                                   # decisions → .forge/escapes.jsonl
-forge escapes report [--json]     # Escape rate per month of done, across the fleet (OPEN = window running)
+forge escapes report [--json]     # Escape rate per month and per pace (`unknown` if none recorded) of done,
+                                  # across the fleet (OPEN = window running)
 forge fires [--json] [--since <iso>]
                                   # Gate fire counts per gate across the fleet, zeros included
                                   # (log: ~/.forgekit/fleet/gate-fires.jsonl, one line per gate refusal)
