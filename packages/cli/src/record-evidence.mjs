@@ -50,7 +50,7 @@ import { pathToFileURL } from 'node:url';
 import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
-import { acquireLease, LeaseBusyError, leaseChildEnv } from './lib/lease.mjs';
+import { acquireLease, ancestorHeldLeases, LeaseBusyError, leaseChildEnv } from './lib/lease.mjs';
 import { matchingLeases, readLeaseConfig } from './lib/lease-config.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
@@ -206,8 +206,9 @@ export function executeCommand(cmdArgv, cwd, env) {
 }
 
 /**
- * Take every configured lease whose `match` pattern hits the command (name
- * order, each bounded by its `waitMs`), then `tier3` when asked (unbounded).
+ * Take `tier3` when asked (full scope, unbounded) — it is always the outermost
+ * lease — then every configured lease whose `match` pattern hits the command
+ * (name order, each bounded by its `waitMs`).
  * A busy lease releases whatever was already taken and is returned, not thrown.
  *
  * @param {{ cwd: string, command: string, sessionId: string, sessionDir: string, tier3: boolean }} args
@@ -232,13 +233,13 @@ function takeLeases({ cwd, command, sessionId, sessionDir, tier3 }) {
     while (releases.length > 0) /** @type {() => void} */ (releases.pop())();
   };
   try {
-    for (const lease of matchingLeases(command, config)) {
-      releases.push(acquireLease({ cwd, name: lease.name, sessionId, slug, waitMs: lease.waitMs }));
-      names.push(lease.name);
-    }
     if (tier3) {
       releases.push(acquireLease({ cwd, name: 'tier3', sessionId, slug }));
       names.push('tier3');
+    }
+    for (const lease of matchingLeases(command, config)) {
+      releases.push(acquireLease({ cwd, name: lease.name, sessionId, slug, waitMs: lease.waitMs }));
+      names.push(lease.name);
     }
   } catch (err) {
     release();
@@ -440,8 +441,23 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     // line, not a task file: verify-evidence.md stays the coordinator's prose
     // and this is the executed fact it must cite.
     const scope = opts.scope ?? 'full';
-    // Configured leases the command matches come first (name order), then tier3.
-    // Only a full run takes tier3: it is serialized across sessions; scoped runs are cheap.
+    // tier3 first (it is always the outermost lease), then the configured leases the command
+    // matches in name order. Only a full run takes tier3: it is serialized across sessions;
+    // scoped runs are cheap.
+    if (scope === 'full') {
+      // A caller already holding a named lease would make this take tier3 inside it — the reverse of
+      // the order a full run uses — so refuse before acquiring or running anything.
+      const outer = ancestorHeldLeases({ cwd }).filter((n) => n !== 'tier3');
+      if (outer.length > 0) {
+        return {
+          exitCode: 2,
+          message:
+            `forge evidence --tier3 (full scope) cannot run inside lease ${outer.join(', ')}: tier3 must be taken before any other lease. ` +
+            'Run "forge evidence --tier3 -- <cmd>" directly (not wrapped in forge lease) and let the configured match patterns take the lease; ' +
+            'nothing was run or recorded.',
+        };
+      }
+    }
     const taken = takeLeases({ cwd, command: opts.cmdArgv.join(' '), sessionId, sessionDir, tier3: scope === 'full' });
     if (taken.busy) return busyResult(taken.busy);
     const startedAt = now().toISOString();

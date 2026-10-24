@@ -33,10 +33,16 @@ release-only-own-lock, exit backstop. Addition: `waitMs` (default ∞ for direct
 `LeaseBusyError`. Lease names match `^[a-z0-9][a-z0-9-]*$`; `_`-prefixed names are internal
 (`_slots`); `tier3` is reserved. Exclusive only — `max: N` is deferred.
 
-### D4 — Lock order
-`forge evidence` takes matching configured leases sorted by name, then `tier3`. `forge lease` takes
-one lease. Hook-blocked commands are rerun through `forge lease`, which takes one lease. No path takes
-leases in another order, so there are no cycles.
+### D4 — Lock order (revised after the final review)
+`tier3` is always the outermost lease: `forge evidence` takes `tier3` first (full scope), then the
+matching configured leases sorted by name. A full-scope `forge evidence --tier3` started while its
+caller already holds another lease (`FORGE_LEASES_HELD`, live holder) refuses with exit 2 — that
+nesting (`forge lease tests -- forge evidence --tier3 …`) was the one path that took a named lease
+before `tier3` (final review, Important 3: a cycle with a full run whose script wraps
+`forge lease tests`, broken only by `waitMs` and misread as a red full run). `tier3` therefore never
+takes part in a cycle. Named leases acquired by nested scripts can still interleave in different
+orders across sessions; such cycles are bounded by `waitMs` (exit 75), never permanent.
+`forge lease` takes one lease.
 
 ### D5 — Hook fast path
 The hook reads `.forge/config.json` directly and exits silently when no lease has `match` entries.

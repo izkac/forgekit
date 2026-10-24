@@ -98,10 +98,14 @@ function activeSession(cwd) {
  * @returns {number}
  */
 function runCommand(cmdArgv, env) {
+  // bin/forge.mjs runs this script from the project root and records where the
+  // user actually was; the wrapped command belongs there (e.g. packages/api).
+  const invokedFrom = process.env.FORGE_INVOKED_FROM;
+  const cwd = invokedFrom && fs.existsSync(invokedFrom) ? invokedFrom : process.cwd();
   const res =
     process.platform === 'win32'
-      ? spawnSync(buildWindowsCommand(cmdArgv), { stdio: 'inherit', shell: true, env })
-      : spawnSync(cmdArgv[0], cmdArgv.slice(1), { stdio: 'inherit', shell: false, env });
+      ? spawnSync(buildWindowsCommand(cmdArgv), { stdio: 'inherit', shell: true, env, cwd })
+      : spawnSync(cmdArgv[0], cmdArgv.slice(1), { stdio: 'inherit', shell: false, env, cwd });
   if (res.error) {
     process.stderr.write(`forge lease: could not run ${cmdArgv[0]}: ${res.error.message}\n`);
     return 1;
@@ -218,15 +222,24 @@ function runCheck(args, cwd) {
   const config = readLeaseConfig(cwd);
   for (const warning of config.warnings) process.stderr.write(`${warning}\n`);
   const hit = matchLease(command, config);
+  // ponytail: a plain substring test, so an operator inside quotes also counts as a chain; the
+  // advice is then merely more cautious than needed. Upgrade: tokenise the shell line.
+  const chained = /&&|\|\||;|\|/.test(command);
+  const prefix = hit ? `This command matches lease "${hit.name}" (pattern ${hit.pattern}), so it must not run alongside other sessions. ` : '';
+  const advice = hit
+    ? chained
+      ? `Blocked command: \`${command}\`. It is a shell chain, and \`forge lease ${hit.name} -- <whole chain>\` would lease only its first command. ` +
+        `Wrap only the part that needs the lease as \`forge lease ${hit.name} -- <that part>\`, or move the chain into a project script and wrap that. ` +
+        'Use a tool timeout of at least 10 minutes, or run it in the background.'
+      : `Rerun it as: forge lease ${hit.name} -- ${command} — with a tool timeout of at least 10 minutes, or in the background.`
+    : '';
   /** @type {{ action: 'none' } | { action: 'deny', lease: string, pattern: string, reason: string }} */
   const result = hit
     ? {
         action: 'deny',
         lease: hit.name,
         pattern: hit.pattern,
-        reason:
-          `This command matches lease "${hit.name}" (pattern ${hit.pattern}), so it must not run alongside other sessions. ` +
-          `Rerun it as: forge lease ${hit.name} -- ${command} — with a tool timeout of at least 10 minutes, or in the background.`,
+        reason: prefix + advice,
       }
     : { action: 'none' };
   process.stdout.write(json ? `${JSON.stringify(result)}\n` : `${result.action === 'deny' ? result.reason : 'none'}\n`);

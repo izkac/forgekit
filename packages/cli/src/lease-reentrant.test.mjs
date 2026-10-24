@@ -211,7 +211,7 @@ test('forge evidence exports the leases it holds: a script it runs that wraps it
   const o = t.read(t.outerOut);
   assert.equal(o.status, 0, 'the inner forge lease db waited on evidence, which holds db for the same command');
   const p = t.read(t.probeOut);
-  assert.ok(o.elapsed < 2000, `inner took ${o.elapsed}ms: it waited`);
+  // Exit 0 already proves it did not wait out its 2000 ms wait (that would be 75); wall time is load-dependent.
   assert.equal(typeof o.evidencePid, 'number', 'evidence holds db while the command runs');
   assert.equal(p.pid, o.evidencePid, 'the inner call must leave db.lock naming evidence');
   assert.equal(p.held, `db:${o.evidencePid}`, 'a group-scope run holds db only');
@@ -223,11 +223,32 @@ test('a full-scope evidence run lists tier3 as well, and the task-evidence path 
   assert.equal(full.res.status, 0, full.res.stderr + full.res.stdout);
   const fo = full.read(full.outerOut);
   assert.equal(fo.status, 0);
-  assert.equal(full.read(full.probeOut).held, `db:${fo.evidencePid},tier3:${fo.evidencePid}`);
+  assert.equal(full.read(full.probeOut).held, `tier3:${fo.evidencePid},db:${fo.evidencePid}`);
 
   const task = evidenceThenInnerLease(['--task', '01-reentrant']);
   assert.equal(task.res.status, 0, task.res.stderr + task.res.stdout);
   const to = task.read(task.outerOut);
   assert.equal(to.status, 0, 'task-evidence path: the inner forge lease db waited on evidence');
   assert.equal(task.read(task.probeOut).held, `db:${to.evidencePid}`);
+});
+
+test('a full-scope evidence run nested inside another lease is refused with exit 2; a group-scope one still runs', () => {
+  const { dir, tier3Lock } = (() => {
+    const p = makeProject();
+    return { ...p, tier3Lock: leasePathFor(p.dir, 'tier3') };
+  })();
+  const marker = path.join(dir, 'ran');
+  const cmd = [process.execPath, '-e', `require('fs').writeFileSync(process.env.MARKER,'ran')`];
+
+  const full = forge(dir, ['lease', 'tests', '--', process.execPath, BIN, 'evidence', '--tier3', '--', ...cmd], { MARKER: marker });
+  assert.equal(full.status, 2, full.stderr + full.stdout);
+  assert.match(full.stderr, /tests/, 'the refusal names the lease the caller holds');
+  assert.match(full.stderr, /forge evidence --tier3/, 'and tells the operator to run it directly');
+  assert.equal(fs.existsSync(marker), false, 'the command must not run');
+  assert.equal(fs.existsSync(tier3Lock), false, 'tier3 must not be left taken');
+  assert.equal(fs.existsSync(path.join(dir, '.forge', 'sessions', SESSION, 'verify-runs.jsonl')), false, 'nothing stamped');
+
+  const group = forge(dir, ['lease', 'tests', '--', process.execPath, BIN, 'evidence', '--tier3', '--scope', 'group', '--', ...cmd], { MARKER: marker });
+  assert.equal(group.status, 0, group.stderr + group.stdout);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'ran');
 });

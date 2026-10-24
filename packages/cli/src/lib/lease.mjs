@@ -144,15 +144,39 @@ function takeOver(lock) {
  * @param {NodeJS.ProcessEnv} env
  */
 function heldByAncestor(lock, name, env) {
+  return heldEntries(env).some((e) => e.name === name && isLiveHolder(lock, e.pid));
+}
+
+/** @param {NodeJS.ProcessEnv} env @returns {{ name: string, pid: number }[]} */
+function heldEntries(env) {
   const raw = env?.[HELD_ENV];
-  if (typeof raw !== 'string' || raw === '') return false;
-  for (const entry of raw.split(',')) {
+  if (typeof raw !== 'string' || raw === '') return [];
+  return raw.split(',').flatMap((entry) => {
     const at = entry.lastIndexOf(':');
-    if (at < 0 || entry.slice(0, at) !== name) continue;
     const pid = Number(entry.slice(at + 1));
-    if (Number.isInteger(pid) && pid > 0 && isAlive(pid) && readHolder(lock)?.pid === pid) return true;
+    return at > 0 && Number.isInteger(pid) && pid > 0 ? [{ name: entry.slice(0, at), pid }] : [];
+  });
+}
+
+/** The pid is alive and the lock file currently names it. */
+function isLiveHolder(lock, pid) {
+  return isAlive(pid) && readHolder(lock)?.pid === pid;
+}
+
+/**
+ * Names of the leases an ancestor of this process really holds: listed in
+ * FORGE_LEASES_HELD under a live pid that the lock file still names.
+ *
+ * @param {{ cwd: string, env?: NodeJS.ProcessEnv }} args
+ * @returns {string[]}
+ */
+export function ancestorHeldLeases({ cwd, env = process.env }) {
+  const names = [];
+  for (const { name, pid } of heldEntries(env)) {
+    if (!isValidLeaseName(name) || names.includes(name)) continue;
+    if (isLiveHolder(leasePathFor(cwd, name), pid)) names.push(name);
   }
-  return false;
+  return names;
 }
 
 /**

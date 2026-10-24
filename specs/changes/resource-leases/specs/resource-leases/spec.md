@@ -41,8 +41,9 @@ holder's identity. `forge lease` SHALL exit with code 75 in that case and SHALL 
 - AND the command did not run
 
 ### Requirement: Lease CLI runs a command under a lease
-`forge lease <name> [--wait-ms N] -- <cmd…>` SHALL acquire the lease, run the command through the
-platform shell with inherited stdio, release the lease, and exit with the command's exit code.
+`forge lease <name> [--wait-ms N] -- <cmd…>` SHALL acquire the lease, run the command with inherited
+stdio **in the directory `forge lease` was invoked from** (argv on POSIX; a quoted cmd.exe string on
+Windows so `.cmd` shims resolve), release the lease, and exit with the command's exit code.
 Without `--wait-ms`, the wait SHALL be the configured `waitMs` for that lease, else 540000 ms. An
 unconfigured name SHALL be accepted as an ad-hoc lease. `forge lease list [--json]` SHALL list every
 lease file with its holder and whether the holder is alive.
@@ -52,6 +53,11 @@ lease file with its holder and whether the holder is alive.
 - WHEN `forge lease tests -- node -e "process.exit(3)"` runs
 - THEN it exits 3
 - AND `tests.lock` no longer exists
+
+#### Scenario: Wrapped script in a workspace package
+- GIVEN a repository with `.forge/` at its root and a package directory `packages/api`
+- WHEN `forge lease db -- node -e "console.log(process.cwd())"` runs from `packages/api`
+- THEN the command prints the `packages/api` path
 
 #### Scenario: List shows the holder
 - GIVEN process A holds lease `db`
@@ -96,7 +102,9 @@ the system SHALL take no leases except `tier3`.
 when a configured `match` pattern hits the command and the command does not contain `forge lease`
 or `forge evidence`, and `{ "action": "none" }` otherwise. The deny reason SHALL tell the agent to
 rerun the command as `forge lease <name> -- <cmd>` with a tool timeout of at least 10 minutes or in
-the background. When several leases match, it SHALL name the first in lease-name order.
+the background. When the command contains a shell chain or pipe (`&&`, `||`, `;`, `|`), the reason
+SHALL instead tell the agent to wrap only the part that needs the lease, or move the chain into a
+project script and wrap that, since the shell would otherwise lease only the first command. When several leases match, it SHALL name the first in lease-name order.
 
 #### Scenario: Unwrapped matching command
 - GIVEN `leases.db.match` is `["prisma migrate"]`
@@ -140,7 +148,7 @@ other non-2 exit codes as fail-open. It SHALL apply whether or not a Forge sessi
 - THEN it outputs `{"permission":"deny", "agent_message": …}`
 
 #### Scenario: Broken input fails open
-- GIVEN unparseable stdin
+- GIVEN a project with at least one lease that has `match` entries, and unparseable stdin
 - WHEN the hook runs in Claude Code format
 - THEN it exits 0 with no output and one stderr warning line
 - AND in Cursor format it exits 1 with no output and one stderr warning line

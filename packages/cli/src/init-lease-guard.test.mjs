@@ -46,7 +46,7 @@ test('claude init: settings register the lease guard under PreToolUse with match
     assert.equal(leaves[0].matcher, 'Bash|PowerShell');
     assert.equal(leaves[0].type, 'command');
     assert.equal(leaves[0].command, `node "\${CLAUDE_PROJECT_DIR}/.claude/hooks/${HOOK}"`);
-    assert.equal(leaves[0].statusMessage, 'Checking resource leases');
+    assert.equal(leaves[0].statusMessage, undefined, 'no status flash on every shell call');
     assert.ok(fs.existsSync(path.join(cwd, '.claude', 'hooks', HOOK)), 'hook file copied next to resolve-forge.mjs');
     assert.ok(fs.existsSync(path.join(cwd, '.claude', 'hooks', 'resolve-forge.mjs')));
 
@@ -153,5 +153,22 @@ test('cursor init: existing preToolUse hooks survive', () => {
     const pre = readJson(path.join(cwd, '.cursor', 'hooks.json')).hooks.preToolUse;
     assert.ok(pre.some((h) => h.command === 'echo mine' && h.matcher === 'Write'));
     assert.equal(pre.filter((h) => String(h.command).includes(HOOK)).length, 1);
+  });
+});
+
+test('claude init: a project wired with the old statusMessage entry is not given a second lease guard', () => {
+  withProject('forgekit-lease-guard-oldstatus-', (cwd) => {
+    init(cwd, ['claude']);
+    const settingsPath = path.join(cwd, '.claude', 'settings.json');
+    const settings = readJson(settingsPath);
+    for (const group of settings.hooks.PreToolUse) {
+      for (const hook of group.hooks) if (String(hook.command).includes(HOOK)) hook.statusMessage = 'Checking resource leases';
+    }
+    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}
+`, 'utf8');
+
+    init(cwd, ['claude']);
+    const leaves = leaseGuardLeaves(readJson(settingsPath));
+    assert.equal(leaves.length, 1, 'deduped by command string, not by the whole entry');
   });
 });

@@ -1,4 +1,4 @@
-<!-- forge-brief-specs-hash:bed8de7ec04e21c6 -->
+<!-- forge-brief-specs-hash:586ce1696e93e829 -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -41,7 +41,8 @@ settings.</p>
 <h2>How it works</h2>
 <p>A lease is a small lock file in the repository's shared git folder, so every worktree sees it. Holding one
 needs a running process, which is why commands run <em>through</em> <code>forge lease</code>. The hook only
-watches for agents skipping that step; when no leases are configured it does nothing at all.</p>
+watches for agents skipping that step; when no leases are configured it exits straight away without starting <code>forge</code> (in Cursor
+by exiting with code 1, which Cursor documents as "let the command through").</p>
 <pre class="mermaid">
 flowchart TD
   A[Agent runs a shell command] --> H{Guard hook: matches a configured lease and isn't wrapped?}
@@ -53,15 +54,17 @@ flowchart TD
   L -- held --> Q[Wait up to 9 min] --> L
   Q -- timed out --> B[Exit 75: busy, held by session X]
 </pre>
-<p>Because the hook only ever <em>blocks</em>, it can't get around a permission system: your allow rules,
-auto mode and T3 Code's approval modes all keep the final say.</p>
+<p>Because the hook only ever <em>blocks</em>, it can't get around a permission system: auto mode and
+T3 Code's approval modes keep the final say. One side effect: a wrapped command
+(<code>forge lease db -- …</code>) no longer matches permission rules written for the bare command, so an
+allow rule may prompt again, and a deny rule for the bare command won't catch the wrapped form.</p>
 
 <h2>What changes for you</h2>
 <ul>
   <li>Nothing, until you add <code>leases</code> or <code>slots</code> to <code>.forge/config.json</code>. Both are opt-in.</li>
   <li>New commands: <code>forge lease</code>, <code>forge lease list</code>, <code>forge lease check</code>, <code>forge slot</code>, <code>forge slot env</code>.</li>
   <li><code>forge init</code> adds one more hook (shell commands, Claude Code and Cursor). It does not add any permission rules.</li>
-  <li>When you configure a <code>db</code> lease, <code>forge evidence</code> runs that touch the database also take turns.</li>
+  <li>When you configure a <code>db</code> lease, <code>forge evidence</code> runs that touch the database also take turns. A full test run always takes the <code>tier3</code> lease first and refuses to start from inside another lease, so the locks can't wait on each other in a circle.</li>
 </ul>
 
 <h2>Risks and open questions</h2>
@@ -87,7 +90,7 @@ auto mode and T3 Code's approval modes all keep the final say.</p>
   <tr><td>2. Lease CLI + evidence</td><td><code>forge lease</code> / <code>list</code> / <code>check</code>; evidence runs take matching leases</td><td>3 tasks</td></tr>
   <tr><td>3. Guard hook + wiring</td><td>Block-only hook for Claude Code and Cursor, init wiring, doctor check</td><td>4 tasks</td></tr>
   <tr><td>4. Worktree slots</td><td>Slot numbers, env templates, <code>.forge/slot.env</code></td><td>3 tasks</td></tr>
-  <tr><td>5. Docs + product loop</td><td>Usage docs incl. orchestrator note; end-to-end run on a scratch project</td><td>2 tasks</td></tr>
+  <tr><td>5. Docs + product loop</td><td>Usage docs incl. orchestrator note; end-to-end run on a scratch project; nesting fix; final-review fixes (working directory, lock order, chained commands)</td><td>6 tasks</td></tr>
 </table>
 
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>

@@ -525,7 +525,6 @@ export function ensureClaudeHookHints(cwd, opts) {
             {
               type: 'command',
               command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-lease-guard.mjs"',
-              statusMessage: 'Checking resource leases',
             },
           ],
         },

@@ -45,9 +45,13 @@ proceed unlocked with a warning. Runs with any other scope SHALL NOT take the `t
 ## ADDED Requirements
 
 ### Requirement: Evidence runs take matching configured leases
-`forge evidence` SHALL take every configured lease whose `match` pattern hits its command, in lease
-name order, before taking `tier3`, and SHALL release them when the command exits. These waits use
-each lease's `waitMs`; on expiry the run SHALL fail without stamping and name the busy lease.
+`forge evidence` SHALL take `tier3` first (full-scope runs only), then every configured lease whose
+`match` pattern hits its command in lease name order, and SHALL release them when the command
+exits. These configured-lease waits use each lease's `waitMs`; on expiry the run SHALL fail without
+stamping and name the busy lease. `tier3` is therefore always the outermost lease: a full-scope
+`forge evidence --tier3` started while its caller already holds any other lease (listed in
+`FORGE_LEASES_HELD` and currently held by that live pid) SHALL refuse with exit 2 before acquiring
+or running anything, telling the operator to run it directly and let `match` take the lease.
 
 #### Scenario: Evidence command touches the database
 - GIVEN `leases.db.match` is `["db:migrate"]` and process A holds lease `db`
@@ -59,3 +63,9 @@ each lease's `waitMs`; on expiry the run SHALL fail without stamping and name th
 - WHEN `forge evidence --tier2 -- npm run db:migrate` runs
 - THEN it exits non-zero naming lease `db`
 - AND no evidence stamp is written
+
+#### Scenario: Full run nested inside another lease is refused
+- GIVEN the caller runs `forge lease tests -- forge evidence --tier3 -- npm test`
+- WHEN the inner `forge evidence --tier3` (scope full) starts
+- THEN it exits 2 naming lease `tests` and telling the operator to run `forge evidence --tier3` directly
+- AND it neither takes `tier3` nor runs `npm test`

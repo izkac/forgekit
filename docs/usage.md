@@ -609,8 +609,9 @@ of them share: one database, a full test run that eats the machine, the dev
 server port. **Leases** make sessions take turns on those; **slots** give each
 worktree its own number so ports and database names do not collide.
 
-Both are opt-in. With no `leases` / `slots` config nothing is locked, blocked or
-written (`forge slot` still prints the number).
+Both are opt-in. With no `leases` / `slots` config, only full tier-3 runs lock
+(the built-in `tier3` lease); nothing is blocked or written (`forge slot` still
+prints the number).
 
 ### Leases
 
@@ -653,7 +654,8 @@ forge lease db --wait-ms 30000 -- <cmd>      # give up sooner
 forge lease list                             # who holds what (--json for scripts)
 ```
 
-`forge lease` exits with the command's own exit code. If the lease is still
+`forge lease` runs the command in the directory you invoked it from, so a script
+wrapped in a workspace package runs in that package. It exits with the command's own exit code. If the lease is still
 busy after the wait it exits **75** and the command never ran — retry later or
 run it in the background. A holder that died is taken over automatically.
 
@@ -673,10 +675,22 @@ initialised (`forge init --cursor`). When an agent types a command that matches 
 lease's `match` and is not already wrapped, the hook blocks it and says to rerun
 it as `forge lease <name> -- <cmd>`. It only ever denies: it never approves,
 never rewrites the command, and so never touches your permission prompts or an
-orchestrator's approval mode. It is inert until `leases` has at least one
+orchestrator's approval mode. If the blocked command is a shell chain (`&&`, `||`,
+`;` or `|`), the message tells the agent to wrap only the part that needs the
+lease, or to move the chain into a project script and wrap that — otherwise the
+shell would lease only the first command. A wrapped command
+(`forge lease db -- …`) no longer matches permission rules written for the bare
+command: an allow rule may prompt again, and a deny rule for the bare command
+won't catch the wrapped form, so write rules for the wrapped form if you rely on
+them. The hook is inert until `leases` has at least one
 `match`, and any hook error lets the command through. `forge evidence` takes
-the matching leases itself (in name order, then `tier3` — only for full-scope runs); if one stays busy past
-its `waitMs` the run exits 75 and nothing is recorded.
+the matching leases itself: `tier3` first (full-scope runs only — it is always the
+outermost lease), then the matching configured leases in name order. If one stays
+busy past its `waitMs` the run exits 75 and nothing is recorded. A full run
+started from inside another lease (`forge lease tests -- forge evidence --tier3 …`)
+is refused with exit 2: run `forge evidence --tier3` directly and let `match`
+take the lease. Named leases taken by nested scripts can still wait on each other
+across sessions, but that is bounded by `waitMs` (exit 75), never permanent.
 
 ### Slots
 

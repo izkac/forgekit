@@ -387,7 +387,7 @@ forge lease list|check                       # holders / would a lease guard thi
 forge slot [env --shell dotenv|bash|powershell]  # worktree slot number and slots.env assignments
 ```
 
-If a shell command is denied by the lease guard, rerun it exactly as the deny message says (`forge lease <name> -- <cmd>`) with a long tool timeout or in the background; never route around it. The guard only denies — it never approves or rewrites a command.
+If a shell command is denied by the lease guard, rerun it exactly as the deny message says (`forge lease <name> -- <cmd>`) with a long tool timeout or in the background; never route around it; if the command is a shell chain, wrap only the part that needs the lease (or move the chain into a project script and wrap that). `forge lease` runs the command in the directory it was invoked from. The guard only denies — it never approves or rewrites a command.
 
 Meta install (skills × agents):
 

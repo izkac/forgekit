@@ -9,7 +9,7 @@
       "writes": "<git-common-dir>/forge/leases/<name>.lock (held during the command); exit 75 on busy",
       "reads": "git common dir; holder pid liveness; .forge/config.json leases.waitMs",
       "uiConsumer": "CLI stderr waiting/busy notices; forge lease list",
-      "evidence": "lease.test.mjs, lease-cli.test.mjs; e2e resource-leases step"
+      "evidence": "lease.test.mjs, lease-cli.test.mjs, lease-reentrant.test.mjs; e2e resource-leases step"
     },
     {
       "capability": "resource-leases: deny-only guard hook for unwrapped matching commands",
@@ -18,7 +18,7 @@
       "writes": "host deny decision only (never allow / updatedInput)",
       "reads": ".forge/config.json leases.match; hook stdin payload",
       "uiConsumer": "agent-visible deny reason with the forge lease rerun instruction",
-      "evidence": "lease-config.test.mjs, lease-guard-hook.test.mjs, init.test.mjs; e2e resource-leases step"
+      "evidence": "lease-config.test.mjs, lease-guard-hook.test.mjs, init-lease-guard.test.mjs; e2e resource-leases step"
     },
     {
       "capability": "test-runs: tier3 and matching configured leases around forge evidence",
@@ -27,7 +27,7 @@
       "writes": "leases/<name>.lock and leases/tier3.lock during the run; verify-runs stamp only when leases were obtained",
       "reads": ".forge/config.json leases",
       "uiConsumer": "CLI stderr waiting notice naming the holder",
-      "evidence": "record-evidence-lock.test.mjs, record-evidence-lease.test.mjs"
+      "evidence": "record-evidence-lock.test.mjs, record-evidence-lease.test.mjs, lease-reentrant.test.mjs"
     },
     {
       "capability": "worktree-slots: stable per-worktree slot and env",
@@ -45,7 +45,7 @@
       "writes": "N/A (report only)",
       "reads": "hook resolver result; PATH",
       "uiConsumer": "forge doctor output",
-      "evidence": "doctor.test.mjs"
+      "evidence": "doctor-forge-resolvable.test.mjs"
     }
   ]
 }

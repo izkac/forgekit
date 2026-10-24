@@ -68,7 +68,7 @@ Tier 3 is the integration/regression gate. Cite this file when claiming the impl
 
 Full runs take a cross-session lock, so a second session's full run waits instead of competing for the machine. Scoped runs never wait.
 
-`forge evidence` also takes every configured lease (`.forge/config.json → leases`) whose `match` pattern hits its command — in lease-name order, before `tier3` (full-scope runs only) — and releases them when the command exits. If one is still busy after its `waitMs`, the run exits **75** with nothing run and nothing stamped; retry later, don't treat it as a test failure.
+`forge evidence` also takes every configured lease (`.forge/config.json → leases`) whose `match` pattern hits its command — in lease-name order, after `tier3` (full-scope runs only; `tier3` is always the outermost lease) — and releases them when the command exits. If one is still busy after its `waitMs`, the run exits **75** with nothing run and nothing stamped; retry later, don't treat it as a test failure. A full run started from inside another lease (`forge lease tests -- forge evidence --tier3 …`) is refused with exit 2: run `forge evidence --tier3` directly and let `match` take the lease.
 
 **Do not** re-run tier 2 narrow commands at verify — audit them instead.
 

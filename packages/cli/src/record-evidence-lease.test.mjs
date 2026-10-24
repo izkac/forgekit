@@ -65,7 +65,7 @@ function holdFromChild(dir, name, releasedAt, probeLock = null) {
     import(${JSON.stringify(MODULE_URL)}).then(({ acquireLease }) => {
       const release = acquireLease({ name: ${JSON.stringify(name)}, cwd: ${JSON.stringify(dir)}, sessionId: 'other-sess', slug: 'other-slug', pollMs: 25, notify: () => {} });
       console.log('held');
-      ${probeLock ? `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(`${releasedAt}.probe`)}, String(require('node:fs').existsSync(${JSON.stringify(probeLock)}))), ${HOLD_MS / 2});` : ''}
+      ${probeLock ? `setTimeout(() => { const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(`${releasedAt}.probe`)}, String(fs.existsSync(${JSON.stringify(probeLock)}))); let pid = ''; try { pid = String(JSON.parse(fs.readFileSync(${JSON.stringify(probeLock)}, 'utf8')).pid); } catch {} fs.writeFileSync(${JSON.stringify(`${releasedAt}.probepid`)}, pid); }, ${HOLD_MS / 2});` : ''}
       setTimeout(() => {
         require('node:fs').writeFileSync(${JSON.stringify(releasedAt)}, String(Date.now()));
         release();
@@ -202,5 +202,18 @@ test('leases are taken in name order: alpha is already held while the run waits 
   const res = runRecordEvidence(opts({ tag: 'both-guarded', marker, tier3: true, scope: 'group' }), dir, FIXED_NOW);
   assert.equal(res.exitCode, 0, res.message);
   assert.equal(fs.readFileSync(`${releasedAt}.probe`, 'utf8'), 'true', 'alpha was not held while waiting for db: wrong acquisition order');
+  assert.equal(await exited, 0);
+});
+
+test('a full run takes tier3 before the matching leases: tier3 is already held (by the run) while it waits on db', async () => {
+  const { dir } = makeFixture({ db: { match: ['db-guarded'] } });
+  const marker = path.join(dir, 'ran');
+  const releasedAt = path.join(dir, 'released');
+  const { held, exited } = holdFromChild(dir, 'db', releasedAt, leasePathFor(dir, 'tier3'));
+  await held;
+  const res = runRecordEvidence(opts({ tag: 'db-guarded', marker, tier3: true, scope: 'full' }), dir, FIXED_NOW);
+  assert.equal(res.exitCode, 0, res.message);
+  assert.equal(fs.readFileSync(`${releasedAt}.probe`, 'utf8'), 'true', 'tier3 was not held while waiting for db: tier3 must be taken first');
+  assert.equal(fs.readFileSync(`${releasedAt}.probepid`, 'utf8'), String(process.pid), 'tier3.lock names the evidence run');
   assert.equal(await exited, 0);
 });

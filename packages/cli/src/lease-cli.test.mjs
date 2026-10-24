@@ -321,3 +321,51 @@ test('args with trailing backslashes, backslash-quote runs and quotes reach the 
   assert.equal(res.status, 0, res.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), args);
 });
+
+test('the wrapped command runs in the directory forge lease was invoked from, while the lease stays at the project root', () => {
+  const dir = makeProject();
+  const pkg = path.join(dir, 'packages', 'api');
+  fs.mkdirSync(pkg, { recursive: true });
+  const out = path.join(dir, 'where.json');
+  const lock = leasePathFor(dir, 'db');
+  const probe = [
+    process.execPath,
+    '-e',
+    `const fs=require('fs');fs.writeFileSync(process.env.OUT,JSON.stringify({cwd:process.cwd(),lockExists:fs.existsSync(process.env.LOCK)}))`,
+  ];
+  const norm = (p) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
+
+  const fromPkg = forge(pkg, ['lease', 'db', '--', ...probe], { OUT: out, LOCK: lock });
+  assert.equal(fromPkg.status, 0, fromPkg.stderr);
+  const seen = JSON.parse(fs.readFileSync(out, 'utf8'));
+  assert.equal(norm(seen.cwd), norm(pkg), 'the command must run in packages/api, not at the repo root');
+  assert.equal(seen.lockExists, true, 'the lease lives under the root git common dir (.git/forge/leases)');
+  assert.equal(fs.existsSync(path.join(pkg, '.forge')), false, 'no stray .forge in the package');
+  assert.equal(fs.existsSync(lock), false);
+
+  const fromRoot = forge(dir, ['lease', 'db', '--', ...probe], { OUT: out, LOCK: lock });
+  assert.equal(fromRoot.status, 0, fromRoot.stderr);
+  assert.equal(norm(JSON.parse(fs.readFileSync(out, 'utf8')).cwd), norm(dir));
+});
+
+test('lease check on a chained command says to wrap only the part that needs the lease, not the whole chain', () => {
+  const dir = makeProject({ leases: { db: { match: ['prisma migrate'] } } });
+  for (const command of ['npm ci && npx prisma migrate dev', 'npx prisma migrate dev; echo done', 'echo x | npx prisma migrate dev', 'false || npx prisma migrate dev']) {
+    const res = check(dir, command, ['--json']);
+    assert.equal(res.status, 0, res.stderr);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.action, 'deny', command);
+    assert.equal(out.lease, 'db');
+    assert.ok(!out.reason.includes(`forge lease db -- ${command}`), `must not tell the agent to lease the whole chain: ${out.reason}`);
+    assert.match(out.reason, /only the part/i, command);
+    assert.ok(out.reason.includes(command), `the reason must quote the blocked command verbatim: ${out.reason}`);
+    assert.match(out.reason, /script/i, command);
+    assert.match(out.reason, /forge lease db -- </, 'shows the wrapping form');
+    assert.match(out.reason, /10 minutes/);
+    assert.match(out.reason, /background/);
+  }
+  // A plain command keeps the rerun-the-whole-command reason.
+  const plain = JSON.parse(check(dir, 'npx prisma migrate dev', ['--json']).stdout);
+  assert.ok(plain.reason.includes('forge lease db -- npx prisma migrate dev'), plain.reason);
+  assert.doesNotMatch(plain.reason, /only the part/i);
+});
