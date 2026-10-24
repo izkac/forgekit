@@ -317,3 +317,20 @@ test('listLeases reports every *.lock with its holder and liveness, and ignores 
   assert.equal(byName.broken.alive, false);
   assert.equal(await exited, 0);
 });
+
+test('an already-expired wait throws LeaseBusyError without printing a waiting notice', async () => {
+  const dir = tmp('forge-lease-expired-');
+  const { child, held, exited } = holdFromChild(dir, 'expired-holder', 'db');
+  await held;
+  const notes = [];
+  let err;
+  try {
+    acquireLease({ cwd: dir, name: 'db', sessionId: 'p', slug: 'p', waitMs: 0, pollMs: POLL_MS, notify: (m) => notes.push(m) });
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err instanceof LeaseBusyError, `expected LeaseBusyError, got ${err}`);
+  assert.equal(err.holder.pid, child.pid);
+  assert.deepEqual(notes, [], 'no "waiting" line when the deadline had already passed');
+  assert.equal(await exited, 0);
+});

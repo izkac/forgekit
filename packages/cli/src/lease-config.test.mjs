@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { readLeaseConfig, matchLease, hasMatchPatterns } from './lib/lease-config.mjs';
+import { readLeaseConfig, matchLease, matchingLeases, hasMatchPatterns } from './lib/lease-config.mjs';
 
 const DEFAULT_WAIT_MS = 540000;
 
@@ -164,4 +164,48 @@ test('matchLease: a command already wrapped in forge lease or forge evidence nev
   assert.equal(matchLease('forge evidence --tier3 -- npm test', cfg), null);
   // Only the exact wrappers exempt a command, not look-alikes.
   assert.deepEqual(matchLease('forge status && npm test', cfg), { name: 'db', pattern: 'npm' });
+});
+
+test('matchingLeases: every lease with a hitting pattern, in name order, with its waitMs and first hitting pattern', () => {
+  const cfg = readLeaseConfig(
+    project({
+      leases: {
+        zeta: { match: ['no-hit', 'shared'], waitMs: 111 },
+        alpha: { match: ['shared'], waitMs: 222 },
+        mid: { match: ['unrelated'] },
+        beta: { match: ['(', 'thing$', 'shared'] },
+      },
+    }),
+  );
+  assert.deepEqual(matchingLeases('run shared thing', cfg), [
+    { name: 'alpha', pattern: 'shared', waitMs: 222 },
+    { name: 'beta', pattern: 'thing$', waitMs: DEFAULT_WAIT_MS },
+    { name: 'zeta', pattern: 'shared', waitMs: 111 },
+  ]);
+  assert.deepEqual(matchingLeases('echo unrelated only', cfg), [{ name: 'mid', pattern: 'unrelated', waitMs: DEFAULT_WAIT_MS }]);
+  assert.deepEqual(matchingLeases('echo nada', cfg), []);
+  assert.deepEqual(matchingLeases('anything', { leases: [], warnings: [] }), []);
+});
+
+test('matchingLeases has no already-wrapped exemption: the evidence inner command is what matters', () => {
+  const cfg = readLeaseConfig(project({ leases: { db: { match: ['psql'] } } }));
+  assert.equal(matchLease('forge lease db -- psql -c 1', cfg), null, 'matchLease still exempts a wrapped command');
+  assert.deepEqual(matchingLeases('forge lease db -- psql -c 1', cfg), [{ name: 'db', pattern: 'psql', waitMs: DEFAULT_WAIT_MS }]);
+  assert.deepEqual(matchingLeases('forge evidence --tier3 -- psql -c 1', cfg), [{ name: 'db', pattern: 'psql', waitMs: DEFAULT_WAIT_MS }]);
+});
+
+test('list and check are reserved lease names: skipped with a warning naming them, other leases still read', () => {
+  const cfg = readLeaseConfig(
+    project({ leases: { list: { match: ['x'] }, check: { match: ['y'] }, good: { match: ['g'] } } }),
+  );
+  assert.deepEqual(
+    cfg.leases.map((l) => l.name),
+    ['good'],
+  );
+  assert.equal(cfg.warnings.length, 2);
+  for (const n of ['list', 'check']) {
+    assert.ok(cfg.warnings.some((w) => w.includes(`"${n}"`) && /reserved/.test(w)), `no reserved warning for ${n}: ${cfg.warnings}`);
+  }
+  // A skipped reserved lease can never match: the guard cannot tell the agent to run `forge lease list -- …`.
+  assert.equal(matchLease('x y', cfg), null);
 });

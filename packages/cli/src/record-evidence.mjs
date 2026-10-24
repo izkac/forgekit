@@ -50,7 +50,8 @@ import { pathToFileURL } from 'node:url';
 import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
-import { acquireLease } from './lib/lease.mjs';
+import { acquireLease, LeaseBusyError } from './lib/lease.mjs';
+import { matchingLeases, readLeaseConfig } from './lib/lease-config.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
 export const TIER3_LABEL = '3 (full workspace)';
@@ -200,6 +201,47 @@ export function executeCommand(cmdArgv, cwd) {
   const lines = out.split(/\r?\n/).filter((l) => l.trim() !== '');
   const tail = lines.slice(-TAIL_LINES).join('\n').slice(-4000);
   return { command, exit: res.status, tail, error: null };
+}
+
+/**
+ * Take every configured lease whose `match` pattern hits the command (name
+ * order, each bounded by its `waitMs`), then `tier3` when asked (unbounded).
+ * A busy lease releases whatever was already taken and is returned, not thrown.
+ *
+ * @param {{ cwd: string, command: string, sessionId: string, sessionDir: string, tier3: boolean }} args
+ * @returns {{ release: () => void, busy: null } | { release: () => void, busy: LeaseBusyError }}
+ */
+function takeLeases({ cwd, command, sessionId, sessionDir, tier3 }) {
+  let slug = null;
+  try {
+    slug = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'))?.slug ?? null;
+  } catch {
+    // no readable session.json — the holder just won't carry a slug
+  }
+  const config = readLeaseConfig(cwd);
+  for (const warning of config.warnings) process.stderr.write(`${warning}
+`);
+  /** @type {(() => void)[]} */
+  const releases = [];
+  const release = () => {
+    while (releases.length > 0) /** @type {() => void} */ (releases.pop())();
+  };
+  try {
+    for (const lease of matchingLeases(command, config)) {
+      releases.push(acquireLease({ cwd, name: lease.name, sessionId, slug, waitMs: lease.waitMs }));
+    }
+    if (tier3) releases.push(acquireLease({ cwd, name: 'tier3', sessionId, slug }));
+  } catch (err) {
+    release();
+    if (err instanceof LeaseBusyError) return { release: () => {}, busy: err };
+    throw err;
+  }
+  return { release, busy: null };
+}
+
+/** @param {LeaseBusyError} busy */
+function busyResult(busy) {
+  return { exitCode: 75, message: `${busy.message}; nothing was run or recorded — retry later` };
 }
 
 /**
@@ -387,24 +429,17 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     // line, not a task file: verify-evidence.md stays the coordinator's prose
     // and this is the executed fact it must cite.
     const scope = opts.scope ?? 'full';
-    // Only a full run is serialized across sessions; scoped runs are cheap.
-    let release = () => {};
-    if (scope === 'full') {
-      let slug = null;
-      try {
-        slug = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'))?.slug ?? null;
-      } catch {
-        // no readable session.json — the holder just won't carry a slug
-      }
-      release = acquireLease({ cwd, name: 'tier3', sessionId, slug });
-    }
+    // Configured leases the command matches come first (name order), then tier3.
+    // Only a full run takes tier3: it is serialized across sessions; scoped runs are cheap.
+    const taken = takeLeases({ cwd, command: opts.cmdArgv.join(' '), sessionId, sessionDir, tier3: scope === 'full' });
+    if (taken.busy) return busyResult(taken.busy);
     const startedAt = now().toISOString();
     const t0 = Date.now();
     let run;
     try {
       run = executeCommand(opts.cmdArgv, cwd);
     } finally {
-      release();
+      taken.release();
     }
     const stamp = {
       scope,
@@ -453,7 +488,14 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
   let summary = opts.summary;
   let outputTail = null;
   if (executed) {
-    const run = executeCommand(opts.cmdArgv, cwd);
+    const taken = takeLeases({ cwd, command: opts.cmdArgv.join(' '), sessionId, sessionDir, tier3: false });
+    if (taken.busy) return busyResult(taken.busy);
+    let run;
+    try {
+      run = executeCommand(opts.cmdArgv, cwd);
+    } finally {
+      taken.release();
+    }
     if (run.error) {
       return { exitCode: 1, message: `failed to execute ${opts.cmdArgv[0]}: ${run.error} (nothing recorded)` };
     }

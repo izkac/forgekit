@@ -57,9 +57,11 @@ only when `slots.env` is configured. `CLAUDE_ENV_FILE` was rejected: on Windows 
 values containing `/` or `\`.
 
 ### D8 — `forge lease` execution
-`spawnSync(cmd, { shell: true, stdio: 'inherit' })` after the lease is taken: cmd.exe on Windows,
-`/bin/sh` elsewhere. The command is the caller's own; it isn't untrusted hook input. Exit code
-passthrough; busy after the wait → exit 75 (`EX_TEMPFAIL`) with holder slug/pid/start time; the
+After the lease is taken: on POSIX `spawnSync(argv[0], argv.slice(1), { shell: false, stdio: 'inherit' })`
+so the caller's argv is never re-parsed; on Windows a single quoted command string with `shell: true`
+(cmd.exe) so `.cmd` shims such as `npm` resolve. The command is the caller's own, typed into the
+host's shell tool and visible to its permission system, so it does not go through the exec gate.
+Exit code passthrough; busy after the wait → exit 75 (`EX_TEMPFAIL`) with holder slug/pid/start time; the
 command never ran.
 
 ## Risks
@@ -67,5 +69,8 @@ command never ran.
   ceiling; the notice names the lock file to delete by hand.
 - Regex patterns written by users can over-match (e.g. `test`). Mitigation: docs recommend
   word-boundary patterns; the deny message names the matching lease and pattern.
+- Nesting a matching evidence run inside its own lease (`forge lease db -- forge evidence -- <db cmd>`)
+  makes the inner run wait for the lease its parent holds, until `waitMs`, then exit 75. This follows
+  from evidence having no wrapped-command exemption (D4); run `forge evidence` directly instead.
 - "Already wrapped" detection is substring-based (`forge lease`, `forge evidence`); a chained command
   containing either is treated as wrapped as a whole. Accepted.

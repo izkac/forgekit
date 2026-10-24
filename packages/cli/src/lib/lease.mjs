@@ -216,6 +216,9 @@ export function acquireLease({
       }
     }
 
+    // An already-expired wait fails before any "waiting" notice.
+    const waited = Date.now() - waitStart;
+    if (waited >= waitMs) throw new LeaseBusyError(name, holder);
     const now = Date.now();
     if (now - lastNotice >= NOTICE_EVERY_MS) {
       lastNotice = now;
@@ -224,8 +227,6 @@ export function acquireLease({
         `[forge] lease ${name} held by ${who} (pid ${holder?.pid ?? 'unknown'}, since ${holder?.startedAt ?? 'unknown'}) — waiting; lease file ${lock}`,
       );
     }
-    const waited = Date.now() - waitStart;
-    if (waited >= waitMs) throw new LeaseBusyError(name, holder);
     sleep(Math.min(pollMs, waitMs - waited));
   }
 }

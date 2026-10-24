@@ -15,6 +15,9 @@ import { isValidLeaseName } from './lease.mjs';
 
 const DEFAULT_WAIT_MS = 540000;
 
+/** `forge lease` subcommands: a lease with one of these names could not be run as `forge lease <name> -- <cmd>`. */
+export const SUBCOMMAND_NAMES = Object.freeze(['list', 'check']);
+
 /**
  * @typedef {{ name: string, match: RegExp[], patterns: string[], waitMs: number }} LeaseSpec
  * @typedef {{ leases: LeaseSpec[], warnings: string[] }} LeaseConfig
@@ -56,6 +59,10 @@ export function readLeaseConfig(cwd) {
   for (const name of Object.keys(section).sort()) {
     if (name === 'tier3') {
       warnings.push('[forge] Warning: lease "tier3" is built in (forge evidence) and cannot be configured — ignored');
+      continue;
+    }
+    if (SUBCOMMAND_NAMES.includes(name)) {
+      warnings.push(`[forge] Warning: lease name "${name}" is reserved (a forge lease subcommand) — ignored`);
       continue;
     }
     if (!isValidLeaseName(name)) {
@@ -120,6 +127,26 @@ export function matchLease(command, config) {
     }
   }
   return null;
+}
+
+/**
+ * Every configured lease (name order) with at least one pattern hitting
+ * `command`. Unlike `matchLease` there is no already-wrapped exemption: the
+ * caller (`forge evidence`) passes the command it is about to execute, and that
+ * inner command is what needs the lease.
+ *
+ * @param {string} command
+ * @param {LeaseConfig} config
+ * @returns {{ name: string, pattern: string, waitMs: number }[]} `pattern` is the first one that hit
+ */
+export function matchingLeases(command, config) {
+  /** @type {{ name: string, pattern: string, waitMs: number }[]} */
+  const hits = [];
+  for (const lease of config.leases) {
+    const i = lease.match.findIndex((re) => re.test(command));
+    if (i >= 0) hits.push({ name: lease.name, pattern: lease.patterns[i], waitMs: lease.waitMs });
+  }
+  return hits;
 }
 
 /**

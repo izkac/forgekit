@@ -41,6 +41,7 @@ const COMMANDS = {
   gate: { script: 'gate.mjs' },
   guard: { script: 'guard-cli.mjs' },
   'test-allow': { script: 'test-allow-cli.mjs' },
+  lease: { script: 'lease-cli.mjs' },
   tdd: { script: 'tdd-run.mjs' },
   defer: { script: 'defer.mjs' },
   'integrity-check': { script: 'integrity-check.mjs', aliases: ['integrity'] },
@@ -86,6 +87,7 @@ Commands:
   gate init|check|status  Opt-in per-group executable gates (gates.json; .forge/config.json → gates.enabled)
   guard check --file <path> [--json]  Guarded-file check (used by the test-guard hook)
   test-allow <path> --reason "<why>"  Record a guard allowance (escape hatch)
+  lease <name> [--wait-ms N] -- <cmd>  Run <cmd> while holding a named exclusive lease (exit 75 if busy); lease list [--json]
   tdd run --task <nn-slug> --expect fail|pass [--] <cmd>  Execute + stamp red/green evidence (same exec opt-in as evidence)
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)

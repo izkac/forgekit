@@ -6,9 +6,9 @@
 - [x] 1.3 Create `packages/cli/src/lib/lease-config.mjs`: `readLeaseConfig(cwd)` → `{ leases, warnings }` (invalid regex skipped, `tier3`/invalid names ignored, default `waitMs` 540000) and `matchLease(command, config)` with already-wrapped detection (`forge lease`, `forge evidence`) and lease-name order. Verify: `node --test packages/cli/src/lease-config.test.mjs`
 
 ## 2. Lease CLI and evidence integration
-- [ ] 2.1 `packages/cli/src/lease-cli.mjs` + `bin/forge.mjs` wiring: `forge lease <name> [--wait-ms N] -- <cmd…>` (shell spawn, stdio inherit, exit passthrough, 75 on busy, invalid name refused) and `forge lease list [--json]`. Verify: `node --test packages/cli/src/lease-cli.test.mjs`
-- [ ] 2.2 `forge lease check --command <cmd> [--json]` returning `{action, lease, pattern, reason}` with the rerun instruction. Verify: `node --test packages/cli/src/lease-cli.test.mjs`
-- [ ] 2.3 `record-evidence.mjs` takes matching configured leases in name order before `tier3`; on busy it fails without stamping. Verify: `node --test packages/cli/src/record-evidence-lease.test.mjs`
+- [x] 2.1 `packages/cli/src/lease-cli.mjs` + `bin/forge.mjs` wiring: `forge lease <name> [--wait-ms N] -- <cmd…>` (shell spawn, stdio inherit, exit passthrough, 75 on busy, invalid name refused) and `forge lease list [--json]`. Verify: `node --test packages/cli/src/lease-cli.test.mjs`
+- [x] 2.2 `forge lease check --command <cmd> [--json]` returning `{action, lease, pattern, reason}` with the rerun instruction. Verify: `node --test packages/cli/src/lease-cli.test.mjs`
+- [x] 2.3 `record-evidence.mjs` takes matching configured leases in name order before `tier3`; on busy it fails without stamping. Verify: `node --test packages/cli/src/record-evidence-lease.test.mjs`
 
 ## 3. Guard hook and wiring
 - [ ] 3.1 `templates/project/claude/hooks/forge-lease-guard.mjs` (+ byte-identical `.claude/hooks/` copy): config fast path, `node <forge.mjs> lease check` via `resolve-forge.mjs` with `shell: false`, Claude deny JSON, never allow/updatedInput, fail open. Verify: `node --test packages/cli/src/lease-guard-hook.test.mjs`
