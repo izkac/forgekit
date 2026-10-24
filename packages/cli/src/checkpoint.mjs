@@ -79,10 +79,15 @@ function gitOutRaw(cwd, args) {
   return r.stdout;
 }
 
+/** The session `runCli` resolved, for the Gate fire a refusal logs. */
+let firingSessionId = null;
+
 function fail(message, payload = null) {
   process.stderr.write(`${message}\n`);
   // Only the policy refusals are Gate fires; usage and git errors are not.
-  if (message.startsWith('Refusing')) recordGateFire('checkpoint', { sessionId, cwd: REPO_ROOT, detail: payload?.reason });
+  if (message.startsWith('Refusing')) {
+    recordGateFire('checkpoint', { sessionId: firingSessionId, cwd: REPO_ROOT, detail: payload?.reason });
+  }
   if (payload) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   process.exit(1);
 }
@@ -412,6 +417,7 @@ sessionId = resolveSessionOrExit(sessionId, {
   command: 'forge checkpoint',
   strict: !dryRun && !rangeOnly,
 });
+firingSessionId = sessionId;
 const { dir: sessionDir, session } = loadSession(sessionId);
 
 const checkpoints = Array.isArray(session.checkpoints) ? session.checkpoints : [];

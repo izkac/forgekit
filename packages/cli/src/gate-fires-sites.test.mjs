@@ -114,3 +114,16 @@ test('a model-policy deny logs a model-policy fire', async () => {
   }
   assert.deepEqual(gates(f), ['model-policy']);
 });
+
+test('a checkpoint refused on the default branch logs a checkpoint fire', () => {
+  const f = fixture();
+  git(f.dir, 'checkout', '-q', '-B', 'main');
+  fs.writeFileSync(path.join(f.dir, '.forge', 'config.json'), '{"git":{"checkpoint":"per-group"}}\n');
+  fs.writeFileSync(path.join(f.dir, 'b.js'), 'b\n');
+  const r = run(f, 'checkpoint.mjs', ['--group', '01-x']);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /Refusing to checkpoint on the default branch/);
+  assert.doesNotMatch(r.stderr, /ReferenceError/);
+  assert.deepEqual(gates(f), ['checkpoint']);
+  assert.equal(readGateFires(f.log)[0].sessionId, f.id);
+});
