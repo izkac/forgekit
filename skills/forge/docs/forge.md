@@ -333,7 +333,7 @@ forge evidence --task <nn>-<slug> [--no-tdd --reason "…"] -- <cmd> [args…]
 forge evidence --tier3 [--scope full|failed-only|fix|group] -- <cmd>
                                   # execute the tier-3 run; stamp <session>/verify-runs.jsonl
                                   # default scope full; --scope needs --tier3
-                                  # full takes a cross-session lock (<git-common-dir>/forge/tier3.lock;
+                                  # full takes a cross-session lock (<git-common-dir>/forge/leases/tier3.lock;
                                   # a second session waits, a dead holder is taken over); scoped runs never wait
                                   # status proven.tier3 = last full stamp; red + green failed-only = ok "via failed-only";
                                   # fix/group stamps never change the verdict

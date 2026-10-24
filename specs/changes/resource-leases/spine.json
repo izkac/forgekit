@@ -1,0 +1,51 @@
+{
+  "change": "resource-leases",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "resource-leases: named exclusive leases with bounded wait",
+      "library": "packages/cli/src/lib/lease.mjs (acquireLease, listLeases, leasePathFor)",
+      "runtimeOwner": "forge lease <name> -- <cmd> (lease-cli.mjs via bin/forge.mjs)",
+      "writes": "<git-common-dir>/forge/leases/<name>.lock (held during the command); exit 75 on busy",
+      "reads": "git common dir; holder pid liveness; .forge/config.json leases.waitMs",
+      "uiConsumer": "CLI stderr waiting/busy notices; forge lease list",
+      "evidence": "lease.test.mjs, lease-cli.test.mjs; e2e resource-leases step"
+    },
+    {
+      "capability": "resource-leases: deny-only guard hook for unwrapped matching commands",
+      "library": "packages/cli/src/lib/lease-config.mjs (readLeaseConfig, matchLease); lease-cli.mjs check",
+      "runtimeOwner": "templates/project/{claude,cursor}/hooks/forge-lease-guard.mjs (PreToolUse Bash|PowerShell / preToolUse Shell), wired by forge init",
+      "writes": "host deny decision only (never allow / updatedInput)",
+      "reads": ".forge/config.json leases.match; hook stdin payload",
+      "uiConsumer": "agent-visible deny reason with the forge lease rerun instruction",
+      "evidence": "lease-config.test.mjs, lease-guard-hook.test.mjs, init.test.mjs; e2e resource-leases step"
+    },
+    {
+      "capability": "test-runs: tier3 and matching configured leases around forge evidence",
+      "library": "packages/cli/src/lib/lease.mjs, lib/lease-config.mjs",
+      "runtimeOwner": "forge evidence (record-evidence.mjs)",
+      "writes": "leases/<name>.lock and leases/tier3.lock during the run; verify-runs stamp only when leases were obtained",
+      "reads": ".forge/config.json leases",
+      "uiConsumer": "CLI stderr waiting notice naming the holder",
+      "evidence": "record-evidence-lock.test.mjs, record-evidence-lease.test.mjs"
+    },
+    {
+      "capability": "worktree-slots: stable per-worktree slot and env",
+      "library": "packages/cli/src/lib/slots.mjs (slotFor, renderSlotEnv)",
+      "runtimeOwner": "forge slot / forge slot env (slot-cli.mjs); forge new; forge reminder (SessionStart hook)",
+      "writes": "<git-common-dir>/forge/slots.json; .forge/slot.env",
+      "reads": "git worktree list --porcelain; .forge/config.json slots.env",
+      "uiConsumer": "project tooling loading .forge/slot.env; forge slot env output",
+      "evidence": "slots.test.mjs, slot-cli.test.mjs, slot-env-file.test.mjs; e2e resource-leases step"
+    },
+    {
+      "capability": "project-wiring: doctor reports whether hooks can resolve forge",
+      "library": "templates/project/claude/hooks/resolve-forge.mjs",
+      "runtimeOwner": "forge doctor (doctor.mjs)",
+      "writes": "N/A (report only)",
+      "reads": "hook resolver result; PATH",
+      "uiConsumer": "forge doctor output",
+      "evidence": "doctor.test.mjs"
+    }
+  ]
+}

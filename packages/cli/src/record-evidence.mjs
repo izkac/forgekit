@@ -50,7 +50,7 @@ import { pathToFileURL } from 'node:url';
 import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
-import { acquireTier3Lock } from './tier3-lock.mjs';
+import { acquireLease } from './lib/lease.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
 export const TIER3_LABEL = '3 (full workspace)';
@@ -396,7 +396,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
       } catch {
         // no readable session.json — the holder just won't carry a slug
       }
-      release = acquireTier3Lock({ cwd, sessionId, slug });
+      release = acquireLease({ cwd, name: 'tier3', sessionId, slug });
     }
     const startedAt = now().toISOString();
     const t0 = Date.now();

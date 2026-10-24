@@ -3458,7 +3458,7 @@ if (phase === 'boot') {
 
   const stampsA = makeTier3Checkout(repo, 'sa', 'alpha');
   const stampsB = makeTier3Checkout(wt, 'sb', 'beta');
-  const lockFile = path.join(path.resolve(repo, git(repo, 'rev-parse', '--git-common-dir')), 'forge', 'tier3.lock');
+  const lockFile = path.join(path.resolve(repo, git(repo, 'rev-parse', '--git-common-dir')), 'forge', 'leases', 'tier3.lock');
   const readHolder = () => {
     try {
       return JSON.parse(fs.readFileSync(lockFile, 'utf8'));
@@ -3494,10 +3494,10 @@ if (phase === 'boot') {
       `alpha ${s1.startedAt} +${s1.durationMs}ms, beta ${s2.startedAt} +${s2.durationMs}ms`,
     );
   }
-  if (!r2.stderr.includes('tier-3 lock held by') || !r2.stderr.includes('alpha')) {
-    fail('the waiting run did not print the "tier-3 lock held by alpha" line', r2.out);
+  if (!r2.stderr.includes('lease tier3 held by') || !r2.stderr.includes('alpha')) {
+    fail('the waiting run did not print the "lease tier3 held by alpha" line', r2.out);
   }
-  if (r1.stderr.includes('tier-3 lock held by')) {
+  if (r1.stderr.includes('lease tier3 held by')) {
     fail('the run that took the lock first also reported waiting', r1.out);
   }
   if (fs.existsSync(lockFile)) fail('the tier-3 lock file survived both runs', lockFile);
@@ -3520,7 +3520,7 @@ if (phase === 'boot') {
   if (scopedMs >= HELD_SLEEP_MS) {
     fail(`the --scope group run took ${scopedMs} ms, as long as the held lock`, scoped.out);
   }
-  if (scoped.out.includes('waiting') || scoped.out.includes('tier-3 lock held by')) {
+  if (scoped.out.includes('waiting') || scoped.out.includes('lease tier3 held by')) {
     fail('the --scope group run reported waiting on the lock', scoped.out);
   }
   if (heldRes.code !== 0) fail(`the lock holder exited ${heldRes.code}`, heldRes.out);

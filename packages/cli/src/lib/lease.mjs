@@ -1,22 +1,25 @@
 /**
- * Cross-session lock for full tier-3 runs.
+ * Named, exclusive, cross-worktree leases.
  *
- * Two sessions running the whole workspace suite at once only slow each other
- * down, so `forge evidence --tier3` (scope full) takes this lock for the
- * duration of the spawned command. It lives under the git common dir
- * (`<common>/forge/tier3.lock`) so every worktree of one repository shares it,
- * and at `<project>/.forge/tier3.lock` outside git.
+ * A lease serializes a scarce resource (the full tier-3 suite, a database, a
+ * port) across every session and worktree of one repository. It lives under the
+ * git common dir (`<common>/forge/leases/<name>.lock`) so all worktrees share
+ * it, and at `<project>/.forge/leases/<name>.lock` outside git. `forge evidence
+ * --tier3` (scope full) holds the built-in `tier3` lease through this module.
  *
- * The lock saves time and guards nothing: any failure to create it proceeds
+ * Names match `^[a-z0-9][a-z0-9-]*$`; internal names are `_` + that pattern.
+ *
+ * A lease saves time and guards nothing: any failure to create it proceeds
  * unlocked with a warning.
  *
  * ponytail: two waiters racing on the same dead holder can both take over and
  * both run once. Perf only, never correctness. Upgrade: rename-and-verify
  * ownership of the renamed file before unlinking it.
  * Second ceiling: a crashed holder whose pid is reused by an unrelated live
- * process looks alive, so waiters wait without a timeout. The "held by …"
- * notice repeats every 60 s naming the pid and the lock path's holder; delete
- * the lock file by hand. Upgrade: compare the holder's process start time.
+ * process looks alive, so waiters wait without a timeout unless the caller
+ * passes `waitMs`. The "held by …" notice repeats every 60 s naming the pid and
+ * the lease path's holder; delete the lease file by hand. Upgrade: compare the
+ * holder's process start time.
  */
 
 import fs from 'node:fs';
@@ -29,16 +32,63 @@ const STALE_UNPARSEABLE_MS = 30_000;
 const NOTICE_EVERY_MS = 60_000;
 const DEFAULT_POLL_MS = 5000;
 
+const PUBLIC_NAME = /^[a-z0-9][a-z0-9-]*$/;
+const INTERNAL_NAME = /^_[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * @param {unknown} name
+ * @param {{ internal?: boolean }} [opts] internal → the `_`-prefixed form; otherwise the public form
+ * @returns {boolean}
+ */
+export function isValidLeaseName(name, { internal = false } = {}) {
+  return typeof name === 'string' && (internal ? INTERNAL_NAME : PUBLIC_NAME).test(name);
+}
+
+/** @param {unknown} name @param {boolean} internal */
+function assertValidName(name, internal) {
+  if (!isValidLeaseName(name, { internal })) {
+    throw new Error(
+      `Invalid lease name ${JSON.stringify(name)}: use lowercase letters, digits and "-" (${internal ? '"_" + name for internal leases' : 'must start with a letter or digit'})`,
+    );
+  }
+}
+
+/** Thrown by `acquireLease` when `waitMs` passes while a live process keeps the lease. */
+export class LeaseBusyError extends Error {
+  /**
+   * @param {string} lease
+   * @param {{ pid?: number, sessionId?: string | null, slug?: string | null, startedAt?: string } | null} holder
+   */
+  constructor(lease, holder) {
+    const who = holder?.slug || holder?.sessionId || 'unknown';
+    super(`lease ${lease} is busy: held by ${who} (pid ${holder?.pid ?? 'unknown'}, since ${holder?.startedAt ?? 'unknown'})`);
+    this.name = 'LeaseBusyError';
+    this.lease = lease;
+    this.holder = holder;
+  }
+}
+
 /**
  * @param {string} cwd
  * @returns {string}
  */
-export function lockPathFor(cwd) {
+function leasesDirFor(cwd) {
   const res = spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd, encoding: 'utf8' });
   const out = res.status === 0 && typeof res.stdout === 'string' ? res.stdout.trim() : '';
   // git may print a path relative to cwd (`.git`), so resolve it against cwd.
-  if (out) return path.join(path.resolve(cwd, out), 'forge', 'tier3.lock');
-  return path.join(cwd, '.forge', 'tier3.lock');
+  if (out) return path.join(path.resolve(cwd, out), 'forge', 'leases');
+  return path.join(cwd, '.forge', 'leases');
+}
+
+/**
+ * @param {string} cwd
+ * @param {string} name
+ * @param {{ internal?: boolean }} [opts]
+ * @returns {string}
+ */
+export function leasePathFor(cwd, name, { internal = false } = {}) {
+  assertValidName(name, internal);
+  return path.join(leasesDirFor(cwd), `${name}.lock`);
 }
 
 function sleep(ms) {
@@ -78,20 +128,25 @@ function takeOver(lock) {
 }
 
 /**
- * Take the tier-3 lock, waiting while a live process holds it.
+ * Take the named lease, waiting while a live process holds it.
  *
- * @param {{ cwd: string, sessionId?: string | null, slug?: string | null, pollMs?: number, notify?: (message: string) => void }} args
- * @returns {() => void} release — removes the lock only if it still names this process; idempotent
+ * @param {{ cwd: string, name: string, internal?: boolean, sessionId?: string | null, slug?: string | null, waitMs?: number, pollMs?: number, notify?: (message: string) => void }} args
+ *   `waitMs` (default unbounded) caps the wait for a live holder; past it a `LeaseBusyError` is thrown.
+ * @returns {() => void} release — removes the lease file only if it still names this process; idempotent
  */
-export function acquireTier3Lock({
+export function acquireLease({
   cwd,
+  name,
+  internal = false,
   sessionId = null,
   slug = null,
+  waitMs = Infinity,
   pollMs = DEFAULT_POLL_MS,
   notify = (m) => process.stderr.write(`${m}\n`),
 }) {
-  const lock = lockPathFor(cwd);
+  const lock = leasePathFor(cwd, name, { internal });
   const noop = () => {};
+  const waitStart = Date.now();
   let lastNotice = -Infinity;
   // Windows refuses `wx` with EPERM/EACCES while a released lock's delete is
   // still pending. ponytail: a few short retries before failing open; a real
@@ -99,7 +154,7 @@ export function acquireTier3Lock({
   let busyRetries = 5;
 
   const unlocked = (err) => {
-    notify(`[forge] Warning: could not create tier-3 lock ${lock} (${/** @type {Error} */ (err).message}) — running unlocked`);
+    notify(`[forge] Warning: could not create lease ${name} at ${lock} (${/** @type {Error} */ (err).message}) — running unlocked`);
     return noop;
   };
 
@@ -125,7 +180,7 @@ export function acquireTier3Lock({
     }
     if (fd !== undefined) {
       try {
-        fs.writeSync(fd, JSON.stringify({ pid: process.pid, sessionId, slug, cwd, startedAt: new Date().toISOString() }));
+        fs.writeSync(fd, JSON.stringify({ name, pid: process.pid, sessionId, slug, cwd, startedAt: new Date().toISOString() }));
       } catch (err) {
         fs.closeSync(fd);
         try {
@@ -133,7 +188,7 @@ export function acquireTier3Lock({
         } catch {
           // best effort
         }
-        notify(`[forge] Warning: could not write tier-3 lock ${lock} (${/** @type {Error} */ (err).message}) — running unlocked`);
+        notify(`[forge] Warning: could not write lease ${name} at ${lock} (${/** @type {Error} */ (err).message}) — running unlocked`);
         return noop;
       }
       fs.closeSync(fd);
@@ -166,10 +221,12 @@ export function acquireTier3Lock({
       lastNotice = now;
       const who = holder?.slug || holder?.sessionId || 'unknown';
       notify(
-        `[forge] tier-3 lock held by ${who} (pid ${holder?.pid ?? 'unknown'}, since ${holder?.startedAt ?? 'unknown'}) — waiting; lock file ${lock}`,
+        `[forge] lease ${name} held by ${who} (pid ${holder?.pid ?? 'unknown'}, since ${holder?.startedAt ?? 'unknown'}) — waiting; lease file ${lock}`,
       );
     }
-    sleep(pollMs);
+    const waited = Date.now() - waitStart;
+    if (waited >= waitMs) throw new LeaseBusyError(name, holder);
+    sleep(Math.min(pollMs, waitMs - waited));
   }
 }
 
@@ -194,4 +251,28 @@ function makeRelease(lock) {
   }
   process.once('exit', onExit);
   return release;
+}
+
+/**
+ * Every lease file under the shared leases dir, sorted by name.
+ *
+ * @param {string} cwd
+ * @returns {{ name: string, path: string, holder: object | null, alive: boolean }[]}
+ */
+export function listLeases(cwd) {
+  const dir = leasesDirFor(cwd);
+  let files;
+  try {
+    files = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return files
+    .filter((f) => f.endsWith('.lock'))
+    .map((f) => {
+      const file = path.join(dir, f);
+      const holder = readHolder(file);
+      return { name: f.slice(0, -'.lock'.length), path: file, holder, alive: holder ? isAlive(holder.pid) : false };
+    })
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
