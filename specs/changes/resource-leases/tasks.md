@@ -11,10 +11,10 @@
 - [x] 2.3 `record-evidence.mjs` takes matching configured leases in name order before `tier3`; on busy it fails without stamping. Verify: `node --test packages/cli/src/record-evidence-lease.test.mjs`
 
 ## 3. Guard hook and wiring
-- [ ] 3.1 `templates/project/claude/hooks/forge-lease-guard.mjs` (+ byte-identical `.claude/hooks/` copy): config fast path, `node <forge.mjs> lease check` via `resolve-forge.mjs` with `shell: false`, Claude deny JSON, never allow/updatedInput, fail open. Verify: `node --test packages/cli/src/lease-guard-hook.test.mjs`
-- [ ] 3.2 Cursor support in the same script (`--format cursor` → `{permission:"deny", agent_message}`) and `templates/project/cursor/hooks/forge-lease-guard.mjs` copy. Verify: `node --test packages/cli/src/lease-guard-hook.test.mjs`
-- [ ] 3.3 `init.mjs`: register the guard (Claude PreToolUse `Bash|PowerShell`; Cursor `preToolUse` `Shell`), install hook files, add no allow rule; extend the hooks snippet comment. Verify: `node --test packages/cli/src/init.test.mjs`
-- [ ] 3.4 `forge doctor` (`doctor.mjs`): check the hook resolver finds `forge.mjs`; report inert hooks plus the PATH fix for service-hosted orchestrators. Verify: `node --test packages/cli/src/doctor.test.mjs`
+- [x] 3.1 `templates/project/claude/hooks/forge-lease-guard.mjs` (+ byte-identical `.claude/hooks/` copy): config fast path, `node <forge.mjs> lease check` via `resolve-forge.mjs` with `shell: false`, Claude deny JSON, never allow/updatedInput, fail open. Verify: `node --test packages/cli/src/lease-guard-hook.test.mjs`
+- [x] 3.2 Cursor support in the same script (`--format cursor` → `{permission:"deny", agent_message}`) and `templates/project/cursor/hooks/forge-lease-guard.mjs` copy. Verify: `node --test packages/cli/src/lease-guard-hook.test.mjs`
+- [x] 3.3 `init.mjs`: register the guard (Claude PreToolUse `Bash|PowerShell`; Cursor `preToolUse` `Shell`), install hook files, add no allow rule; extend the hooks snippet comment. Verify: `node --test packages/cli/src/init.test.mjs`
+- [x] 3.4 `forge doctor` (`doctor.mjs`): check the hook resolver finds `forge.mjs`; report inert hooks plus the PATH fix for service-hosted orchestrators. Verify: `node --test packages/cli/src/doctor.test.mjs`
 
 ## 4. Worktree slots
 - [ ] 4.1 `packages/cli/src/lib/slots.mjs`: `slotFor(cwd)` (main/non-git = 0, lowest free ≥ 1, under lease `_slots`, prune via `git worktree list --porcelain`, atomic write, rebuild on corrupt). Verify: `node --test packages/cli/src/slots.test.mjs` (real temp repo + worktrees)

@@ -476,7 +476,7 @@ export function ensureClaudeHookHints(cwd, opts) {
   const notePath = path.join(cwd, '.claude', 'forge-hooks.snippet.json');
   const snippet = {
     _comment:
-      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit + PreToolUse + Stop). Paths assume forge CLI is on PATH. The model-policy PreToolUse hook is inert until .forge/models.local.json exists; the test-guard PreToolUse hook is inert without an active Forge session in implement/verify/review/finish; the Stop hook is inert without an active Forge session claiming completion.',
+      'Merge these hooks into .claude/settings.json (SessionStart + UserPromptSubmit + PreToolUse + Stop). Paths assume forge CLI is on PATH. The model-policy PreToolUse hook is inert until .forge/models.local.json exists; the test-guard PreToolUse hook is inert without an active Forge session in implement/verify/review/finish; the lease-guard PreToolUse hook is inert until .forge/config.json has a `leases` entry with `match` patterns; the Stop hook is inert without an active Forge session claiming completion.',
     hooks: {
       SessionStart: [
         {
@@ -519,6 +519,16 @@ export function ensureClaudeHookHints(cwd, opts) {
             },
           ],
         },
+        {
+          matcher: 'Bash|PowerShell',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PROJECT_DIR}/.claude/hooks/forge-lease-guard.mjs"',
+              statusMessage: 'Checking resource leases',
+            },
+          ],
+        },
       ],
       Stop: [
         {
@@ -558,12 +568,17 @@ export function ensureCursorHookHints(cwd, opts) {
   const forgeStart = {
     command: 'node .cursor/hooks/forge-session-start.mjs',
   };
+  const leaseGuard = {
+    command: 'node .cursor/hooks/forge-lease-guard.mjs --format cursor',
+    matcher: 'Shell',
+  };
   const snippet = {
     _comment:
-      'Also written into .cursor/hooks.json by forge init. Requires Node on PATH.',
+      'Also written into .cursor/hooks.json by forge init. Requires Node on PATH. The lease-guard preToolUse hook is inert until .forge/config.json has a `leases` entry with `match` patterns.',
     version: 1,
     hooks: {
       sessionStart: [forgeStart],
+      preToolUse: [leaseGuard],
     },
   };
   fs.mkdirSync(path.dirname(notePath), { recursive: true });
@@ -591,6 +606,9 @@ export function ensureCursorHookHints(cwd, opts) {
   );
   if (!hasForge) starts.push(forgeStart);
   hooksDoc.hooks.sessionStart = starts;
+  const preTool = Array.isArray(hooksDoc.hooks.preToolUse) ? [...hooksDoc.hooks.preToolUse] : [];
+  if (!preTool.some((h) => String(h?.command ?? '').includes('forge-lease-guard'))) preTool.push(leaseGuard);
+  hooksDoc.hooks.preToolUse = preTool;
   fs.writeFileSync(hooksPath, `${JSON.stringify(hooksDoc, null, 2)}\n`, 'utf8');
 
   return { snippet: notePath, hooks: hooksPath };

@@ -92,12 +92,15 @@ the background. When several leases match, it SHALL name the first in lease-name
 ### Requirement: Guard hook only ever denies
 The shipped `forge-lease-guard.mjs` hook SHALL run as a Claude Code PreToolUse hook (matcher
 `Bash|PowerShell`) and a Cursor `preToolUse` hook (matcher `Shell`). When `.forge/config.json` has
-no lease with `match` entries it SHALL exit 0 with no output and without spawning `forge`. Otherwise
+no lease with `match` entries it SHALL pass the command through (see below) with no output and
+without spawning `forge`. Otherwise
 it SHALL run `forge lease check` and, on `deny`, emit the host's deny shape: Claude
 `hookSpecificOutput.permissionDecision: "deny"` with the reason; Cursor `permission: "deny"` with
 `agent_message`. It SHALL NEVER emit an allow decision, `updatedInput` or `updated_input`. On any
-internal error it SHALL exit 0 with no decision and one stderr warning. It SHALL apply whether or not
-a Forge session is active.
+internal error it SHALL make no decision and write one stderr warning. Every non-deny outcome SHALL
+let the command through without approving it: in Claude Code by exiting 0 with no output; in Cursor
+by exiting 1 with no output, because Cursor treats exit 0 without valid JSON as a block and documents
+other non-2 exit codes as fail-open. It SHALL apply whether or not a Forge session is active.
 
 #### Scenario: Orchestrator permission mode is preserved
 - GIVEN a configured lease that does not match `ls -la`
@@ -118,5 +121,12 @@ a Forge session is active.
 
 #### Scenario: Broken input fails open
 - GIVEN unparseable stdin
-- WHEN the hook runs
-- THEN it exits 0 with no decision and one stderr warning line
+- WHEN the hook runs in Claude Code format
+- THEN it exits 0 with no output and one stderr warning line
+- AND in Cursor format it exits 1 with no output and one stderr warning line
+
+#### Scenario: Cursor pass-through approves nothing
+- GIVEN a configured lease that does not match `ls -la`
+- WHEN the hook runs in Cursor format with a `Shell` payload for `ls -la`
+- THEN it exits 1 with no stdout
+- AND it never prints `permission: "allow"`

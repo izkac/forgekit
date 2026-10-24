@@ -18,7 +18,7 @@ import {
   OPENSPEC_INSTALL_CMD,
   resolveProjectPlanEngine,
 } from './plan-engine.mjs';
-import { ensureClaudeHookHints, ensureCursorHookHints } from './init.mjs';
+import { ensureClaudeHookHints, ensureCursorHookHints, resolveTemplatesRoot } from './init.mjs';
 import { readInstallStamp, skillInstallStatus } from './install.mjs';
 import { collectHookCommands, isCommandReferenced, RETIRED_CLAUDE_HOOK_BASENAMES } from './hooks.mjs';
 
@@ -192,6 +192,75 @@ export function checkAgentsSkill(opts) {
 const FORGE_HOOK_FILE_RE = /^forge-.*\.mjs$/;
 
 /**
+ * The resolver the shipped hooks run, loaded from the templates `forge init`
+ * copies into projects. Reused rather than re-implemented so doctor can never
+ * disagree with the hooks about what "resolvable" means, and taken from the
+ * templates (not a project's `.claude/hooks/` copy, which may be stale or
+ * absent). Loaded once with top-level await so the doctor checks stay
+ * synchronous; null when the templates cannot be found.
+ * @type {{ resolveForgeMjs: (opts?: { path?: string }) => string | null, parseQuotedCommand: (override: unknown) => { cmd: string, baseArgs: string[] } | null } | null}
+ */
+const hookResolver = await (async () => {
+  try {
+    const file = path.join(resolveTemplatesRoot(), 'claude', 'hooks', 'resolve-forge.mjs');
+    return await import(pathToFileURL(file).href);
+  } catch {
+    return null;
+  }
+})();
+
+/**
+ * Can the shipped hooks find `forge.mjs`? They resolve it from
+ * `FORGE_HOOK_FORGE_CMD`, else from the PATH of the process that launched the
+ * agent — which for a background-service orchestrator is often not the PATH of
+ * the shell `forge doctor` runs in. Not resolvable means every forge hook is
+ * inert (the lease guard fails open and allows). Reported as a warning: `ok`
+ * is false but it does not feed the overall doctor verdict, because this
+ * process's PATH is only a proxy for the agent's.
+ * @param {{ env?: { PATH?: string, FORGE_HOOK_FORGE_CMD?: string } }} [opts] injected environment; defaults to process.env
+ */
+export function checkHookForgeResolvable(opts = {}) {
+  const env = opts.env ?? process.env;
+  const id = 'hook-forge-resolvable';
+  if (!hookResolver) {
+    return {
+      id,
+      ok: false,
+      warning: true,
+      resolved: null,
+      message:
+        'could not load the shipped hook resolver (templates/project/claude/hooks/resolve-forge.mjs) — hooks cannot be checked',
+    };
+  }
+  const override = hookResolver.parseQuotedCommand(env.FORGE_HOOK_FORGE_CMD);
+  if (override) {
+    const command = [override.cmd, ...override.baseArgs].join(' ');
+    return {
+      id,
+      ok: true,
+      warning: false,
+      resolved: command,
+      message: `hooks run forge through FORGE_HOOK_FORGE_CMD: ${command}`,
+    };
+  }
+  const resolved = hookResolver.resolveForgeMjs({ path: env.PATH ?? '' });
+  if (resolved) {
+    return { id, ok: true, warning: false, resolved, message: `hooks resolve forge to ${resolved}` };
+  }
+  return {
+    id,
+    ok: false,
+    warning: true,
+    resolved: null,
+    message:
+      'hooks cannot find forge.mjs, so they (including the lease guard) are inert and allow everything — ' +
+      'put `forge` on the PATH of the process that launches the agent ' +
+      '(a background-service orchestrator, e.g. one installed as a service, often starts with a minimal PATH), ' +
+      'or set FORGE_HOOK_FORGE_CMD to `"node" "/path/to/forge.mjs"`',
+  };
+}
+
+/**
  * Detect forge hook files on disk that are not referenced by the host
  * surface's wiring (settings.json / settings.local.json for Claude,
  * hooks.json for Cursor). Does not integrate into runDoctorChecks.
@@ -358,12 +427,14 @@ function installUnwiredHooks(cwd, hooks) {
  *   readFileSync?: typeof fs.readFileSync,
  *   readdirSync?: typeof fs.readdirSync,
  *   runCommand?: Function,
+ *   env?: { PATH?: string, FORGE_HOOK_FORGE_CMD?: string },
  * }} [opts]
  */
 export function runDoctorChecks(opts = {}) {
   const cwd = opts.cwd ?? process.cwd();
   const engine = resolveProjectPlanEngine(cwd, { useUserDefault: false });
   const agentsSkill = checkAgentsSkill({ cwd, existsSync: opts.existsSync });
+  const hookForge = checkHookForgeResolvable({ env: opts.env });
 
   if (engine.engine === 'specs') {
     const project = checkSpecsProject({
@@ -396,7 +467,7 @@ export function runDoctorChecks(opts = {}) {
     return {
       ok: project.ok && cli.ok && hooks.ok,
       engine: engine.engine,
-      checks: { project, cli, hooks, ...(agentsSkill ? { agentsSkill } : {}) },
+      checks: { project, cli, hooks, hookForge, ...(agentsSkill ? { agentsSkill } : {}) },
       installCommand: OPENSPEC_INSTALL_CMD,
       actions: [],
     };
@@ -460,7 +531,7 @@ export function runDoctorChecks(opts = {}) {
   return {
     ok,
     engine: engine.engine,
-    checks: { project, cli, hooks, ...(agentsSkill ? { agentsSkill } : {}) },
+    checks: { project, cli, hooks, hookForge, ...(agentsSkill ? { agentsSkill } : {}) },
     installCommand: OPENSPEC_INSTALL_CMD,
     actions,
   };
@@ -476,6 +547,7 @@ export function runDoctorChecks(opts = {}) {
  *   readFileSync?: typeof fs.readFileSync,
  *   readdirSync?: typeof fs.readdirSync,
  *   runCommand?: Function,
+ *   env?: { PATH?: string, FORGE_HOOK_FORGE_CMD?: string },
  * }} [io]
  */
 export function runDoctor(argv, io = {}) {
@@ -504,16 +576,18 @@ export function runDoctor(argv, io = {}) {
     readFileSync: io.readFileSync,
     readdirSync: io.readdirSync,
     runCommand: io.runCommand,
+    env: io.env,
   });
 
   if (opts.json) {
     stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
-    const { project, cli, hooks, agentsSkill } = report.checks;
+    const { project, cli, hooks, hookForge, agentsSkill } = report.checks;
     stdout.write(`Forge doctor (plan engine: ${report.engine ?? 'openspec'})\n`);
     stdout.write(`  [${project.ok ? 'ok' : 'FAIL'}] ${project.message}\n`);
     stdout.write(`  [${cli.ok ? 'ok' : 'FAIL'}] ${cli.message}\n`);
     stdout.write(`  [${hooks.ok ? 'ok' : 'FAIL'}] ${hooks.message}\n`);
+    stdout.write(`  [${hookForge.ok ? 'ok' : 'warn'}] ${hookForge.message}\n`);
     if (agentsSkill) {
       stdout.write(`  [${agentsSkill.warning ? 'warn' : 'ok'}] ${agentsSkill.message}\n`);
     }
