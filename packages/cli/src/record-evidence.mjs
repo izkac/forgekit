@@ -51,6 +51,7 @@ import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
 import { acquireTier3Lock } from './tier3-lock.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
 export const TIER3_LABEL = '3 (full workspace)';
@@ -578,6 +579,9 @@ function main() {
       console.log(result.message);
     } else {
       console.error(result.message);
+      // ponytail: every refusal counts, usage mistakes included — overcounting
+      // can only keep a gate alive at the fire review, never cut one.
+      recordGateFire('evidence', { sessionId: opts.session, detail: result.message.split('\n')[0] });
     }
     process.exit(result.exitCode);
   } catch (err) {

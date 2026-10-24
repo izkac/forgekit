@@ -47,6 +47,7 @@ import {
   loadMergedConfig,
 } from './resolve-model.mjs';
 import { appendDispatch } from './metrics/dispatches.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 /** Host tool names that dispatch a subagent. */
 export const SUBAGENT_TOOLS = Object.freeze(['Agent', 'Task']);
@@ -426,6 +427,7 @@ export async function runEnforceModel(argv, io = {}) {
 
   const out = hookOutput(result.decision, result.toolInput);
   if (out) stdout.write(`${JSON.stringify(out)}\n`);
+  if (result.decision?.action === 'deny') recordGateFire('model-policy', { cwd: io.cwd ?? process.cwd() });
 
   // Deliberately after the decision is out the door, and deliberately not
   // gated on the overlay: "how often is forge resolve-model skipped" is most

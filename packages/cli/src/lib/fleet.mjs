@@ -112,7 +112,7 @@ export function detectEngine(env = process.env) {
  * directly so fleet watch need not launch git for every row on every refresh.
  * Ordinary projects, submodules and unreadable metadata retain their name.
  */
-function projectNameFor(projectRoot) {
+export function projectNameFor(projectRoot) {
   try {
     const pointer = fs.readFileSync(path.join(projectRoot, '.git'), 'utf8').trim();
     const match = /^gitdir:\s*(.+)$/.exec(pointer);
@@ -142,7 +142,7 @@ function projectNameFor(projectRoot) {
  * @param {string} projectRoot
  * @returns {boolean}
  */
-function underTempDir(projectRoot) {
+export function underTempDir(projectRoot) {
   const real = (p) => {
     try {
       return fs.realpathSync(p);
@@ -270,6 +270,7 @@ export function registerSession(projectRoot, session, { engine = detectEngine() 
       tasksComplete: session.tasksComplete ?? 0,
       pace: session.resolvedPace ?? session.pace ?? null,
       engine: engine ?? session.engine ?? prev.engine ?? null,
+      commitRange: session.commitRange ?? null,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastSeen: new Date().toISOString(),

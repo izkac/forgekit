@@ -13,6 +13,7 @@
 import { REPO_ROOT, loadSession, resolveSessionId, unfinishedSessions } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { classifyGuarded, findAllowance, loadAllowances, makeGitLsTree, resolveFile } from './guard.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 /** D8: fast-allow outside this window. Everything not in this set allows —
  * including an unrecognized/missing phase, which fails open rather than
@@ -287,6 +288,7 @@ function emitDeny(denial, json) {
     { decision: 'deny', reason: 'guarded', rule: denial.rule, file: rel, sessionId: denial.id, message },
     json,
   );
+  recordGateFire('test-guard', { sessionId: denial.id, cwd: REPO_ROOT, detail: rel });
   process.exit(2);
 }
 

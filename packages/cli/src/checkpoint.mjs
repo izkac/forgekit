@@ -30,6 +30,7 @@ import { spawnSync } from 'node:child_process';
 import { loadSession, resolveSessionOrExit, REPO_ROOT, saveSession, unfinishedSessions } from './lib.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { resolveProjectPlanEngine } from './plan-engine.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 const MODES = ['off', 'per-group', 'per-task'];
 const DEFAULT_BRANCHES = new Set(['main', 'master']);
@@ -80,6 +81,8 @@ function gitOutRaw(cwd, args) {
 
 function fail(message, payload = null) {
   process.stderr.write(`${message}\n`);
+  // Only the policy refusals are Gate fires; usage and git errors are not.
+  if (message.startsWith('Refusing')) recordGateFire('checkpoint', { sessionId, cwd: REPO_ROOT, detail: payload?.reason });
   if (payload) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   process.exit(1);
 }

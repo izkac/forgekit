@@ -1,0 +1,80 @@
+<!-- forge-brief-specs-hash:57ffe7210cd4af63 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escape tracking brief</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#5f6368; --line:#e3e3e3; --accent:#2457c5; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181c; --fg:#e8e8ea; --muted:#9aa0a6; --line:#2c2f35; --accent:#7aa7ff; } }
+  body { background:var(--bg); color:var(--fg); font:16px/1.55 system-ui, sans-serif; max-width:760px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:1.6rem; margin-bottom:.2rem; } h2 { font-size:1.15rem; margin-top:2rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+  code { background:color-mix(in srgb, var(--fg) 8%, transparent); padding:1px 5px; border-radius:4px; font-size:.92em; }
+  .muted { color:var(--muted); } table { border-collapse:collapse; width:100%; } td, th { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });</script>
+</head>
+<body>
+<h1>Escape tracking</h1>
+<p class="muted">Operator brief — what this change builds, in plain language.</p>
+
+<h2>TL;DR</h2>
+<p>Forge will start measuring whether its work actually holds up. When a session finishes it remembers which commits it made; later, <code>forge escapes</code> finds the commits that went back and changed that work within two weeks, and you mark each one as a real escape or not. Separately, every time a Forge gate refuses something, that refusal is counted, so in April we can see which gates never fire.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Every finished session records the commits it made (start and end), kept in the session ledger and the machine-wide fleet list, so it survives worktree deletion.</li>
+  <li><code>forge escapes</code> lists, per finished session, later commits within 14 days that rewrite or delete lines that session added. Its own commits are ignored.</li>
+  <li>You confirm or dismiss each one with a single key (or a flag). Confirming needs a test that would catch the bug: the fix commit's own test, or one you name.</li>
+  <li><code>forge escapes report</code> shows the escape rate per month, across every project on this machine.</li>
+  <li><code>forge fires</code> shows how often each gate refused something, across every project, including gates that never fired.</li>
+  <li>Works on old history too: sessions finished before this change get their commits worked out from their checkpoint commits.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>At done, the session's start commit and the current HEAD are saved. Later, for every commit after that window opens, Forge asks git who wrote the lines that commit removes or rewrites. If any of those lines came from the session's commits, the commit is a candidate.</p>
+<div class="mermaid">
+flowchart LR
+  A[forge phase done] -->|saves start..end commits| L[(sessions ledger + fleet list)]
+  L --> E[forge escapes]
+  G[(git history)] -->|later commits, 14 days, blame| E
+  E -->|candidate| O{you: confirm / dismiss}
+  O -->|confirm + replay test| X[(.forge/escapes.jsonl)]
+  X --> R[forge escapes report: rate per month]
+  F[any gate refusal] --> FL[(machine-wide gate-fires log)]
+  FL --> FR[forge fires: count per gate]
+</div>
+
+<h2>What changes for you</h2>
+<table>
+  <tr><th>Command</th><th>What it does</th></tr>
+  <tr><td><code>forge escapes</code></td><td>Lists candidates; in a terminal, steps through them one key at a time (c confirm, d dismiss, s skip, q quit).</td></tr>
+  <tr><td><code>forge escapes confirm &lt;session&gt; &lt;commit&gt; [--test path]</code></td><td>Marks a real escape; refuses without a replay test.</td></tr>
+  <tr><td><code>forge escapes dismiss &lt;session&gt; &lt;commit&gt;</code></td><td>Marks it not an escape; it won't be shown again.</td></tr>
+  <tr><td><code>forge escapes report</code></td><td>Escape rate per month across the fleet.</td></tr>
+  <tr><td><code>forge fires</code></td><td>Gate refusal counts per gate across the fleet.</td></tr>
+</table>
+<p>Nothing else changes: gates refuse exactly as before; they now also leave one log line.</p>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>Squash-merged work can't be traced back by git and is skipped with a reason.</li>
+  <li>Old sessions without checkpoint commits have no known commits and are skipped, not guessed.</li>
+  <li>Candidates are suggestions: refactors and follow-up features also rewrite lines. That's why you decide.</li>
+  <li>The lease guard hook from the resource-leases branch is not counted yet; it gets wired after that branch merges.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul><li>Turning confirmed escapes into replay eval tasks under <code>evals/harbor</code> — a later change.</li></ul>
+
+<h2>Work overview</h2>
+<ol>
+  <li>Record commits at done, plus the gate-fire log and its hooks in phase transitions (3 tasks).</li>
+  <li>Hook the remaining gates and add <code>forge fires</code> (2 tasks).</li>
+  <li>Escape candidates, the decisions ledger, and the <code>forge escapes</code> command with its report (3 tasks).</li>
+  <li>Docs, an end-to-end run, and a check against this repo's real history (3 tasks).</li>
+</ol>
+</body>
+</html>

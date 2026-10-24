@@ -15,6 +15,7 @@
 
 import { loadSession, resolveSessionOrExit } from './lib.mjs';
 import { runIntegrityChecks } from './integrity.mjs';
+import { recordGateFire } from './gate-fires.mjs';
 
 const args = process.argv.slice(2);
 if (args[0] === '--help') {
@@ -56,4 +57,5 @@ process.stdout.write(
   ),
 );
 process.stdout.write('\n');
+if (!result.ok) recordGateFire('integrity-check', { sessionId, detail: result.problems[0] });
 process.exit(result.ok ? 0 : 1);
