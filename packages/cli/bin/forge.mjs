@@ -42,6 +42,7 @@ const COMMANDS = {
   guard: { script: 'guard-cli.mjs' },
   'test-allow': { script: 'test-allow-cli.mjs' },
   lease: { script: 'lease-cli.mjs' },
+  slot: { script: 'slot-cli.mjs' },
   tdd: { script: 'tdd-run.mjs' },
   defer: { script: 'defer.mjs' },
   'integrity-check': { script: 'integrity-check.mjs', aliases: ['integrity'] },
@@ -88,6 +89,7 @@ Commands:
   guard check --file <path> [--json]  Guarded-file check (used by the test-guard hook)
   test-allow <path> --reason "<why>"  Record a guard allowance (escape hatch)
   lease <name> [--wait-ms N] -- <cmd>  Run <cmd> while holding a named exclusive lease (exit 75 if busy); lease list [--json]
+  slot [env [--shell dotenv|bash|powershell]]  Print this checkout's worktree slot (0 = main), or the slots.env assignments for it
   tdd run --task <nn-slug> --expect fail|pass [--] <cmd>  Execute + stamp red/green evidence (same exec opt-in as evidence)
   defer add|resolve|list  Deferral registry (deferred wiring = tracked debt)
   integrity-check         Mechanical integrity gate (runs at phase done)

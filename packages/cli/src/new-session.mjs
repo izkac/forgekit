@@ -29,6 +29,7 @@ import { warnIfDoctorFails } from './doctor.mjs';
 import { liveOverlaps, queueMessage, sessionDirFor } from './lib/fleet.mjs';
 import { matchingOpenBugs } from './findings.mjs';
 import { loadProjectConfig } from './config.mjs';
+import { writeSlotEnvFile } from './lib/slots.mjs';
 
 function usage() {
   process.stderr.write(
@@ -154,6 +155,7 @@ try {
 }
 
 saveSession(dir, session);
+writeSlotEnvFile(REPO_ROOT); // no-op unless .forge/config.json configures slots.env
 writeActive(sessionId);
 
 // Fleet coordination: another live session in this working tree risks

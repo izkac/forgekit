@@ -17,9 +17,9 @@
 - [x] 3.4 `forge doctor` (`doctor.mjs`): check the hook resolver finds `forge.mjs`; report inert hooks plus the PATH fix for service-hosted orchestrators. Verify: `node --test packages/cli/src/doctor.test.mjs`
 
 ## 4. Worktree slots
-- [ ] 4.1 `packages/cli/src/lib/slots.mjs`: `slotFor(cwd)` (main/non-git = 0, lowest free ≥ 1, under lease `_slots`, prune via `git worktree list --porcelain`, atomic write, rebuild on corrupt). Verify: `node --test packages/cli/src/slots.test.mjs` (real temp repo + worktrees)
-- [ ] 4.2 `renderSlotEnv(config, slot)` (`{slot}`, `{N+slot}`, others verbatim with warning; `FORGE_SLOT` always) and `forge slot` / `forge slot env [--shell dotenv|bash|powershell]` in `slot-cli.mjs` + `bin/forge.mjs`. Verify: `node --test packages/cli/src/slot-cli.test.mjs`
-- [ ] 4.3 Write `.forge/slot.env` on change only, when `slots.env` is configured, from `forge slot`, `forge new` and the SessionStart reminder. Verify: `node --test packages/cli/src/slot-env-file.test.mjs` (drives `forge slot`, `forge new` and `forge reminder` in a temp project)
+- [x] 4.1 `packages/cli/src/lib/slots.mjs`: `slotFor(cwd)` (main/non-git = 0, lowest free ≥ 1, under lease `_slots`, prune via `git worktree list --porcelain`, atomic write, rebuild on corrupt). Verify: `node --test packages/cli/src/slots.test.mjs` (real temp repo + worktrees)
+- [x] 4.2 `renderSlotEnv(config, slot)` (`{slot}`, `{N+slot}`, others verbatim with warning; `FORGE_SLOT` always) and `forge slot` / `forge slot env [--shell dotenv|bash|powershell]` in `slot-cli.mjs` + `bin/forge.mjs`. Verify: `node --test packages/cli/src/slot-cli.test.mjs`
+- [x] 4.3 Write `.forge/slot.env` on change only, when `slots.env` is configured, from `forge slot`, `forge new` and the SessionStart reminder. Verify: `node --test packages/cli/src/slot-env-file.test.mjs` (drives `forge slot`, `forge new` and `forge reminder` in a temp project)
 
 ## 5. Docs and product loop
 - [ ] 5.1 `docs/usage.md`: leases + slots section (config example, script-wrapping recipe, word-boundary regex advice, an "Orchestrators (T3 Code, …)" note); `skills/forge/references/test-strategy.md`: `forge evidence` takes leases. Verify: docs drift tests `node --test packages/cli/src/pace-doc-drift.test.mjs`
