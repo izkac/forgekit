@@ -69,8 +69,16 @@ command never ran.
   ceiling; the notice names the lock file to delete by hand.
 - Regex patterns written by users can over-match (e.g. `test`). Mitigation: docs recommend
   word-boundary patterns; the deny message names the matching lease and pattern.
-- Nesting a matching evidence run inside its own lease (`forge lease db -- forge evidence -- <db cmd>`)
-  makes the inner run wait for the lease its parent holds, until `waitMs`, then exit 75. This follows
-  from evidence having no wrapped-command exemption (D4); run `forge evidence` directly instead.
+- Nesting (`forge lease db -- forge evidence -- <db cmd>`, or a guard-wrapped `npm run db:migrate`
+  whose script itself calls `forge lease db`) would make the inner acquisition wait on its own parent.
+  D9 makes such nested acquisitions re-entrant.
+
+### D9 — Re-entrant nested leases (added during implement, group-5 review)
+`forge lease` exports `FORGE_LEASES_HELD=<name>:<pid>[,…]` to its child. A nested `forge lease` /
+`forge evidence` acquisition of a listed lease proceeds without waiting only if the lock file
+currently names that pid and the pid is alive — a stale or copied variable falls back to normal
+acquisition. The nested call never releases the parent's lease. Alternatives rejected: documenting
+"don't match your own wrapped scripts" (a trap the guard itself walks agents into), and exempting
+`npm run` commands in the guard (too broad).
 - "Already wrapped" detection is substring-based (`forge lease`, `forge evidence`); a chained command
   containing either is treated as wrapped as a whole. Accepted.

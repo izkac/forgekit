@@ -12,6 +12,11 @@
  * A lease saves time and guards nothing: any failure to create it proceeds
  * unlocked with a warning.
  *
+ * Re-entrant for descendants: `forge lease` exports `FORGE_LEASES_HELD`
+ * (`<name>:<pid>,…`) to its command, and an `acquireLease` of a listed lease
+ * returns a no-op release when the lock file still names that live pid. A stale
+ * or copied value falls back to normal acquisition.
+ *
  * ponytail: two waiters racing on the same dead holder can both take over and
  * both run once. Perf only, never correctness. Upgrade: rename-and-verify
  * ownership of the renamed file before unlinking it.
@@ -31,6 +36,9 @@ const STALE_UNPARSEABLE_MS = 30_000;
 /** How often the "waiting" notice repeats while the holder keeps the lock. */
 const NOTICE_EVERY_MS = 60_000;
 const DEFAULT_POLL_MS = 5000;
+
+/** Env var a lease holder exports so its descendants can re-enter the leases it holds. */
+export const HELD_ENV = 'FORGE_LEASES_HELD';
 
 const PUBLIC_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const INTERNAL_NAME = /^_[a-z0-9][a-z0-9-]*$/;
@@ -128,11 +136,47 @@ function takeOver(lock) {
 }
 
 /**
+ * Whether `env` lists lease `name` under a pid that is alive and that the lock
+ * file currently names — i.e. an ancestor of this process really holds it.
+ *
+ * @param {string} lock
+ * @param {string} name
+ * @param {NodeJS.ProcessEnv} env
+ */
+function heldByAncestor(lock, name, env) {
+  const raw = env?.[HELD_ENV];
+  if (typeof raw !== 'string' || raw === '') return false;
+  for (const entry of raw.split(',')) {
+    const at = entry.lastIndexOf(':');
+    if (at < 0 || entry.slice(0, at) !== name) continue;
+    const pid = Number(entry.slice(at + 1));
+    if (Number.isInteger(pid) && pid > 0 && isAlive(pid) && readHolder(lock)?.pid === pid) return true;
+  }
+  return false;
+}
+
+/**
+ * The environment a command runs with while this process holds lease `name`:
+ * `env` with `<name>:<pid>` appended to FORGE_LEASES_HELD. Unchanged when the
+ * lock file does not name this process (re-entered, or running unlocked).
+ *
+ * @param {{ cwd: string, name: string, internal?: boolean, env?: NodeJS.ProcessEnv }} args
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function leaseChildEnv({ cwd, name, internal = false, env = process.env }) {
+  if (readHolder(leasePathFor(cwd, name, { internal }))?.pid !== process.pid) return { ...env };
+  const prior = env[HELD_ENV];
+  return { ...env, [HELD_ENV]: [typeof prior === 'string' && prior !== '' ? prior : null, `${name}:${process.pid}`].filter(Boolean).join(',') };
+}
+
+/**
  * Take the named lease, waiting while a live process holds it.
  *
- * @param {{ cwd: string, name: string, internal?: boolean, sessionId?: string | null, slug?: string | null, waitMs?: number, pollMs?: number, notify?: (message: string) => void }} args
+ * @param {{ cwd: string, name: string, internal?: boolean, sessionId?: string | null, slug?: string | null, waitMs?: number, pollMs?: number, notify?: (message: string) => void, env?: NodeJS.ProcessEnv }} args
  *   `waitMs` (default unbounded) caps the wait for a live holder; past it a `LeaseBusyError` is thrown.
- * @returns {() => void} release — removes the lease file only if it still names this process; idempotent
+ *   `env` (default process.env) is read for FORGE_LEASES_HELD: a lease an ancestor holds is not taken again.
+ * @returns {() => void} release — removes the lease file only if it still names this process; idempotent.
+ *   A no-op when an ancestor already holds the lease.
  */
 export function acquireLease({
   cwd,
@@ -143,9 +187,11 @@ export function acquireLease({
   waitMs = Infinity,
   pollMs = DEFAULT_POLL_MS,
   notify = (m) => process.stderr.write(`${m}\n`),
+  env = process.env,
 }) {
   const lock = leasePathFor(cwd, name, { internal });
   const noop = () => {};
+  if (heldByAncestor(lock, name, env)) return noop;
   const waitStart = Date.now();
   let lastNotice = -Infinity;
   // Windows refuses `wx` with EPERM/EACCES while a released lock's delete is

@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { acquireLease, isValidLeaseName, LeaseBusyError, listLeases } from './lib/lease.mjs';
+import { acquireLease, isValidLeaseName, LeaseBusyError, leaseChildEnv, listLeases } from './lib/lease.mjs';
 import { matchLease, readLeaseConfig, SUBCOMMAND_NAMES } from './lib/lease-config.mjs';
 
 const DEFAULT_WAIT_MS = 540000;
@@ -94,13 +94,14 @@ function activeSession(cwd) {
  * shell tool, so the host's permission system has already seen it.
  *
  * @param {string[]} cmdArgv
+ * @param {NodeJS.ProcessEnv} env  what the command inherits (carries FORGE_LEASES_HELD)
  * @returns {number}
  */
-function runCommand(cmdArgv) {
+function runCommand(cmdArgv, env) {
   const res =
     process.platform === 'win32'
-      ? spawnSync(buildWindowsCommand(cmdArgv), { stdio: 'inherit', shell: true })
-      : spawnSync(cmdArgv[0], cmdArgv.slice(1), { stdio: 'inherit', shell: false });
+      ? spawnSync(buildWindowsCommand(cmdArgv), { stdio: 'inherit', shell: true, env })
+      : spawnSync(cmdArgv[0], cmdArgv.slice(1), { stdio: 'inherit', shell: false, env });
   if (res.error) {
     process.stderr.write(`forge lease: could not run ${cmdArgv[0]}: ${res.error.message}\n`);
     return 1;
@@ -167,7 +168,7 @@ function runLease(args, cwd) {
     return EXIT_BUSY;
   }
   try {
-    return runCommand(cmdArgv);
+    return runCommand(cmdArgv, leaseChildEnv({ cwd, name }));
   } finally {
     release();
   }

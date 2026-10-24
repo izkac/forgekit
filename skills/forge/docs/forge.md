@@ -379,6 +379,16 @@ forge init […]                    # wire project commands / hooks / rules
 forge install […]                 # alias → forgekit install --skills forge
 ```
 
+Resource leases and worktree slots (opt-in; see `docs/usage.md` §7a):
+
+```bash
+forge lease <name> [--wait-ms N] -- <cmd…>   # run <cmd> holding a named exclusive lease (exit 75 = busy)
+forge lease list|check                       # holders / would a lease guard this command
+forge slot [env --shell dotenv|bash|powershell]  # worktree slot number and slots.env assignments
+```
+
+If a shell command is denied by the lease guard, rerun it exactly as the deny message says (`forge lease <name> -- <cmd>`) with a long tool timeout or in the background; never route around it. The guard only denies — it never approves or rewrites a command.
+
 Meta install (skills × agents):
 
 ```bash

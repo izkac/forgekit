@@ -1,4 +1,4 @@
-<!-- forge-brief-specs-hash:f8774f28aa226b0f -->
+<!-- forge-brief-specs-hash:bed8de7ec04e21c6 -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -32,6 +32,7 @@ settings.</p>
   <li>Run anything one-at-a-time across all worktrees: <code>forge lease db -- npm run db:migrate</code>. A second session waits, then runs; if it waits too long (9 min by default) it stops and says who holds the lease.</li>
   <li>Wrap your own scripts once (<code>"test": "forge lease tests -- vitest run"</code>) and every tool and every person running them takes turns automatically.</li>
   <li>If an agent runs a contended command directly, Forge blocks it and tells the agent the wrapped command to use. It never approves or rewrites anything.</li>
+  <li>Nesting is safe: a wrapped script run under the same lease, or <code>forge evidence</code> inside <code>forge lease</code>, runs immediately instead of waiting on its own parent. (Added during implementation after a review found the trap.)</li>
   <li>The existing "only one full test run at a time" rule keeps working; it's now just the built-in lease <code>tier3</code>.</li>
   <li>Each worktree gets a stable slot number (main checkout = 0, others 1, 2, …). With templates like <code>"PORT": "{3000+slot}"</code>, Forge writes <code>.forge/slot.env</code> for your tooling to load.</li>
   <li><code>forge lease list</code> shows who holds what; <code>forge doctor</code> warns when hooks can't find <code>forge</code> (common when an orchestrator runs as a background service).</li>

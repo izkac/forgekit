@@ -50,7 +50,7 @@ import { pathToFileURL } from 'node:url';
 import { CALLER_EXEC_SPAWN, resolveCallerExecGate } from './exec-gate.mjs';
 import { refreshIntegritySeal } from './integrity-seal.mjs';
 import { unfinishedSessions } from './lib.mjs';
-import { acquireLease, LeaseBusyError } from './lib/lease.mjs';
+import { acquireLease, LeaseBusyError, leaseChildEnv } from './lib/lease.mjs';
 import { matchingLeases, readLeaseConfig } from './lib/lease-config.mjs';
 
 export const DEFAULT_TIER = '2 (task-scoped — not full workspace unless noted)';
@@ -184,13 +184,15 @@ export function buildEvidence({
  *
  * @param {string[]} cmdArgv
  * @param {string} cwd
+ * @param {NodeJS.ProcessEnv} [env]  what the command inherits; omitted → this process's environment
  * @returns {{ command: string, exit: number | null, tail: string, error: string | null }}
  */
-export function executeCommand(cmdArgv, cwd) {
+export function executeCommand(cmdArgv, cwd, env) {
   const [cmd, ...args] = cmdArgv;
   const command = cmdArgv.join(' ');
   const res = spawnSync(cmd, args, {
     cwd,
+    ...(env ? { env } : {}),
     ...CALLER_EXEC_SPAWN,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
@@ -209,7 +211,9 @@ export function executeCommand(cmdArgv, cwd) {
  * A busy lease releases whatever was already taken and is returned, not thrown.
  *
  * @param {{ cwd: string, command: string, sessionId: string, sessionDir: string, tier3: boolean }} args
- * @returns {{ release: () => void, busy: null } | { release: () => void, busy: LeaseBusyError }}
+ * @returns {{ release: () => void, busy: null, env: NodeJS.ProcessEnv } | { release: () => void, busy: LeaseBusyError }}
+ *   `env` is what the command runs with: FORGE_LEASES_HELD lists every lease this process
+ *   actually holds, so a nested `forge lease` of the same name re-enters instead of waiting.
  */
 function takeLeases({ cwd, command, sessionId, sessionDir, tier3 }) {
   let slug = null;
@@ -219,8 +223,9 @@ function takeLeases({ cwd, command, sessionId, sessionDir, tier3 }) {
     // no readable session.json — the holder just won't carry a slug
   }
   const config = readLeaseConfig(cwd);
-  for (const warning of config.warnings) process.stderr.write(`${warning}
-`);
+  for (const warning of config.warnings) process.stderr.write(`${warning}\n`);
+  /** @type {string[]} */
+  const names = [];
   /** @type {(() => void)[]} */
   const releases = [];
   const release = () => {
@@ -229,14 +234,20 @@ function takeLeases({ cwd, command, sessionId, sessionDir, tier3 }) {
   try {
     for (const lease of matchingLeases(command, config)) {
       releases.push(acquireLease({ cwd, name: lease.name, sessionId, slug, waitMs: lease.waitMs }));
+      names.push(lease.name);
     }
-    if (tier3) releases.push(acquireLease({ cwd, name: 'tier3', sessionId, slug }));
+    if (tier3) {
+      releases.push(acquireLease({ cwd, name: 'tier3', sessionId, slug }));
+      names.push('tier3');
+    }
   } catch (err) {
     release();
     if (err instanceof LeaseBusyError) return { release: () => {}, busy: err };
     throw err;
   }
-  return { release, busy: null };
+  // leaseChildEnv lists a lease only when its lock file names this process, so a re-entered one is not duplicated.
+  const env = names.reduce((acc, name) => leaseChildEnv({ cwd, name, env: acc }), process.env);
+  return { release, busy: null, env };
 }
 
 /** @param {LeaseBusyError} busy */
@@ -437,7 +448,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     const t0 = Date.now();
     let run;
     try {
-      run = executeCommand(opts.cmdArgv, cwd);
+      run = executeCommand(opts.cmdArgv, cwd, taken.env);
     } finally {
       taken.release();
     }
@@ -492,7 +503,7 @@ export function runRecordEvidence(opts, cwd = process.cwd(), now = () => new Dat
     if (taken.busy) return busyResult(taken.busy);
     let run;
     try {
-      run = executeCommand(opts.cmdArgv, cwd);
+      run = executeCommand(opts.cmdArgv, cwd, taken.env);
     } finally {
       taken.release();
     }

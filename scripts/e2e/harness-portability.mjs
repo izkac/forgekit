@@ -3558,13 +3558,256 @@ if (phase === 'boot') {
   spawnSync('git', ['worktree', 'prune'], { cwd: repo });
   rmBase();
   process.stdout.write('TIER3 LOCK GREEN\n');
+} else if (phase === 'resource-leases') {
+  // RESOURCE LEASES AND WORKTREE SLOTS, AGAINST THE SHIPPED BINARY: a scratch
+  // repo wired by `forge init`, a configured `db` lease and `slots.env`.
+  //   - `forge lease check` and the INSTALLED guard hook deny an unwrapped
+  //     matching command and stay silent (and approve nothing) otherwise;
+  //   - `forge lease db -- <cmd>` really runs the command under the lease;
+  //   - a held lease makes a bounded wait exit 75 without running the command;
+  //   - `forge evidence` waits for a lease its command matches;
+  //   - a linked worktree is slot 1 and gets its slot env.
+  const HOLD_MS = 4000;
+  const LOCK_APPEAR_MS = 15_000;
+  const execEnv = { FORGEKIT_ALLOW_EXEC: '1' };
+  // Forward slashes survive both the POSIX argv path and the cmd.exe command line forge lease builds on Windows.
+  const fwd = (p) => p.replace(/\\/g, '/');
+  const writeMarker = (file) => ['node', '-e', `require('fs').writeFileSync('${fwd(file)}','x')`];
+
+  const base = `${SCRATCH}-resource-leases`;
+  const repo = path.join(base, 'main');
+  const wt = path.join(base, 'wt1');
+  const rmBase = () => fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  rmBase();
+  fs.mkdirSync(repo, { recursive: true });
+
+  git(repo, 'init', '-q', '-b', 'work');
+  git(repo, 'config', 'user.email', 'e2e@example.com');
+  git(repo, 'config', 'user.name', 'E2E Harness');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'resource leases fixture\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'base');
+
+  // --- 1. init through the binary, then add leases + slots to the config init wrote ---
+  const init = forge(repo, ['init', '--claude']);
+  if (init.code !== 0) fail(`forge init --claude exited ${init.code}`, tail(init.out, 30));
+  const hook = path.join(repo, '.claude', 'hooks', 'forge-lease-guard.mjs');
+  if (!fs.existsSync(hook)) fail('forge init did not install .claude/hooks/forge-lease-guard.mjs', tail(init.out, 30));
+  const settings = fs.readFileSync(path.join(repo, '.claude', 'settings.json'), 'utf8');
+  if (!settings.includes('forge-lease-guard')) fail('forge init did not wire the lease guard into .claude/settings.json', settings);
+  const sessionRes = forge(repo, ['new', 'leases-demo']);
+  if (sessionRes.code !== 0) fail(`forge new exited ${sessionRes.code}`, tail(sessionRes.out, 30));
+
+  const configPath = path.join(repo, '.forge', 'config.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  if (!config.plan) fail('forge init wrote no plan block to .forge/config.json', JSON.stringify(config));
+  config.leases = { db: { match: ['\\bprisma migrate\\b'] } };
+  config.slots = { env: { PORT: '{3000+slot}' } };
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  // .forge/config.json is the one tracked file under .forge/, so the linked worktree below inherits it.
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'leases config');
+
+  const commonDir = path.resolve(repo, git(repo, 'rev-parse', '--git-common-dir'));
+  const lockFile = path.join(commonDir, 'forge', 'leases', 'db.lock');
+  const hasHolder = () => fs.existsSync(lockFile);
+  // A holder that records, inside the lease, when its command ended — so "released at" is not a poll-time guess.
+  const startHolder = async (endFile, what) => {
+    const holder = forgeAsync(
+      repo,
+      ['lease', 'db', '--', 'node', '-e', `setTimeout(()=>{require('fs').writeFileSync('${fwd(endFile)}',String(Date.now()))},${HOLD_MS})`],
+      execEnv,
+    );
+    if (!(await waitFor(hasHolder, LOCK_APPEAR_MS))) {
+      holder.child.kill();
+      fail(`the db lease holder never took the lease for ${what}`, lockFile);
+    }
+    return holder;
+  };
+
+  // --- 2. forge lease check denies the unwrapped matching command ---
+  const check = forge(repo, ['lease', 'check', '--command', 'npx prisma migrate dev', '--json']);
+  let checked;
+  try {
+    checked = JSON.parse(check.stdout);
+  } catch {
+    fail('forge lease check --json did not print JSON', check.out);
+  }
+  if (checked.action !== 'deny' || checked.lease !== 'db') fail('forge lease check did not deny "npx prisma migrate dev" for lease db', check.stdout);
+  const checkNone = forge(repo, ['lease', 'check', '--command', 'ls -la', '--json']);
+  if (JSON.parse(checkNone.stdout || '{}').action !== 'none') fail('forge lease check denied "ls -la"', checkNone.out);
+
+  // --- 3. the INSTALLED guard hook: deny a match, stay silent otherwise, approve nothing ---
+  const runHook = (payload, extraArgs = []) => {
+    const r = spawnSync(process.execPath, [hook, ...extraArgs], {
+      cwd: repo,
+      input: JSON.stringify(payload),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: repo,
+        CURSOR_PROJECT_DIR: repo,
+        FORGE_HOOK_FORGE_CMD: `"${process.execPath}" "${FORGE_BIN}"`,
+      },
+    });
+    return { code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+  };
+  // Structural: parse the hook's JSON and refuse any approval or rewrite, wherever it nests.
+  const noApproval = (stdout, label) => {
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      fail(`${label} stdout is not JSON`, stdout);
+    }
+    const walk = (node) => {
+      if (node === null || typeof node !== 'object') return;
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'updatedInput' || key === 'updated_input') fail(`${label} carried a ${key} rewrite`, stdout);
+        if (key === 'permissionDecision' && value !== 'deny') fail(`${label} carried permissionDecision ${JSON.stringify(value)}`, stdout);
+        if (key === 'permission' && value !== 'deny') fail(`${label} carried permission ${JSON.stringify(value)}`, stdout);
+        walk(value);
+      }
+    };
+    walk(parsed);
+  };
+  const denied = runHook({ tool_name: 'Bash', tool_input: { command: 'npx prisma migrate dev' } });
+  let decision;
+  try {
+    decision = JSON.parse(denied.stdout);
+  } catch {
+    fail('the guard hook printed no JSON deny for "npx prisma migrate dev"', JSON.stringify(denied));
+  }
+  const hso = decision.hookSpecificOutput ?? {};
+  if (denied.code !== 0 || hso.permissionDecision !== 'deny' || !String(hso.permissionDecisionReason).includes('forge lease db --')) {
+    fail('the guard hook did not deny with a reason naming "forge lease db --"', JSON.stringify(denied));
+  }
+  noApproval(denied.stdout, 'the guard hook deny');
+  const silent = runHook({ tool_name: 'Bash', tool_input: { command: 'ls -la' } });
+  if (silent.code !== 0 || silent.stdout !== '') fail('the guard hook was not silent (exit 0, empty stdout) for "ls -la"', JSON.stringify(silent));
+  const cursorSilent = runHook({ tool_name: 'Shell', tool_input: { command: 'ls -la' } }, ['--format', 'cursor']);
+  if (cursorSilent.code !== 1 || cursorSilent.stdout !== '') {
+    fail('the cursor-format guard hook did not exit 1 with empty stdout for "ls -la"', JSON.stringify(cursorSilent));
+  }
+  const cursorDeny = runHook({ tool_name: 'Shell', tool_input: { command: 'npx prisma migrate dev' } }, ['--format', 'cursor']);
+  let cursorDecision;
+  try {
+    cursorDecision = JSON.parse(cursorDeny.stdout);
+  } catch {
+    fail('the cursor-format guard hook printed no JSON deny for "npx prisma migrate dev"', JSON.stringify(cursorDeny));
+  }
+  if (cursorDecision.permission !== 'deny') fail('the cursor-format guard hook did not deny "npx prisma migrate dev"', JSON.stringify(cursorDeny));
+  noApproval(cursorDeny.stdout, 'the cursor guard hook deny');
+
+  // --- 4. forge lease runs the command under the lease ---
+  const marker1 = path.join(base, 'marker1');
+  const ran = forge(repo, ['lease', 'db', '--', ...writeMarker(marker1)]);
+  if (ran.code !== 0) fail(`forge lease db -- <cmd> exited ${ran.code}`, ran.out);
+  if (!fs.existsSync(marker1)) fail('the command under forge lease db never ran', ran.out);
+  if (hasHolder()) fail('db.lock survived a finished forge lease run', lockFile);
+
+  // --- 5. contention: a bounded wait exits 75, names the lease, and does not run the command ---
+  const holder1 = await startHolder(path.join(base, 'holder-end-1'), 'the contention check');
+  const marker2 = path.join(base, 'marker2');
+  const busy = forge(repo, ['lease', 'db', '--wait-ms', '500', '--', ...writeMarker(marker2)]);
+  const heldAtEnd = hasHolder();
+  const liveList = forge(repo, ['lease', 'list', '--json']);
+  let liveLeases;
+  try {
+    liveLeases = JSON.parse(liveList.stdout);
+  } catch {
+    fail('forge lease list --json (holder running) did not print JSON', liveList.out);
+  }
+  const liveDb = liveLeases.find((l) => l.name === 'db');
+  const holder1Res = await holder1.done;
+  if (!liveDb || liveDb.alive !== true) fail('forge lease list --json did not show db with alive: true while the holder was running', liveList.stdout);
+  if (!heldAtEnd) fail('the lease was already released when the bounded wait finished — the check proved nothing', busy.out);
+  if (busy.code !== 75) fail(`forge lease db --wait-ms 500 against a held lease exited ${busy.code}, not 75`, busy.out);
+  if (!busy.out.includes('lease db')) fail('the busy message did not name lease db', busy.out);
+  if (fs.existsSync(marker2)) fail('the command ran although the lease was busy (marker2 exists)', busy.out);
+  if (holder1Res.code !== 0) fail(`the lease holder exited ${holder1Res.code}`, holder1Res.out);
+  const listed = forge(repo, ['lease', 'list', '--json']);
+  let leases;
+  try {
+    leases = JSON.parse(listed.stdout);
+  } catch {
+    fail('forge lease list --json did not print JSON', listed.out);
+  }
+  if (leases.some((l) => l.name === 'db' && l.alive)) fail('forge lease list still shows a live db holder after it exited', listed.stdout);
+
+  // --- 6. forge evidence takes the lease its command matches, and waits for the holder ---
+  const holderEnd2 = path.join(base, 'holder-end-2');
+  const holder2 = await startHolder(holderEnd2, 'the evidence check');
+  const marker3 = path.join(base, 'marker3');
+  const evidence = forgeAsync(
+    repo,
+    ['evidence', '--tier3', '--scope', 'group', '--', 'node', '-e', `/* prisma migrate */ require('fs').writeFileSync('${fwd(marker3)}',String(Date.now()))`],
+    execEnv,
+  );
+  const [holder2Res, evidenceRes] = await Promise.all([holder2.done, evidence.done]);
+  if (holder2Res.code !== 0) fail(`the second lease holder exited ${holder2Res.code}`, holder2Res.out);
+  if (evidenceRes.code !== 0) fail(`forge evidence exited ${evidenceRes.code}`, evidenceRes.out);
+  if (!fs.existsSync(marker3)) fail('the evidence command never ran', evidenceRes.out);
+  const holderReleased = Number(fs.readFileSync(holderEnd2, 'utf8'));
+  const evidenceRan = Number(fs.readFileSync(marker3, 'utf8'));
+  if (!(evidenceRan >= holderReleased)) {
+    fail(
+      'forge evidence ran its db command while the db lease was still held — it did not take the lease',
+      `holder finished at ${holderReleased}, evidence command ran at ${evidenceRan}`,
+    );
+  }
+  if (!evidenceRes.stderr.includes('lease db')) fail('forge evidence did not report waiting on lease db', evidenceRes.out);
+  if (hasHolder()) fail('db.lock survived the evidence run', lockFile);
+
+  // --- 6b. re-entrancy: a wrapped script that leases the same name runs at once under its parent's lease ---
+  // Without it the inner `forge lease db` waits on the outer one (its own parent) until --wait-ms, then exits 75.
+  const marker4 = path.join(base, 'marker4');
+  const reenter = path.join(base, 'reenter.mjs');
+  fs.writeFileSync(
+    reenter,
+    [
+      "import { spawnSync } from 'node:child_process';",
+      `const r = spawnSync(process.execPath, [${JSON.stringify(FORGE_BIN)}, 'lease', 'db', '--wait-ms', '2000', '--', ...${JSON.stringify(writeMarker(marker4))}], { stdio: 'inherit' });`,
+      'process.exit(r.status ?? 1);',
+      '',
+    ].join('\n'),
+  );
+  // No timing assertion: without re-entrancy the inner --wait-ms expires and it
+  // exits 75, so the exit code alone discriminates (a wall-clock bound only adds flake).
+  const nested = forge(repo, ['lease', 'db', '--', 'node', fwd(reenter)]);
+  if (nested.code !== 0) fail(`a forge lease db nested inside forge lease db exited ${nested.code} (re-entrancy missing?)`, nested.out);
+  if (!fs.existsSync(marker4)) fail('the command under the nested forge lease db never ran', nested.out);
+  if (hasHolder()) fail('db.lock survived the nested lease run', lockFile);
+
+  // --- 7. slots: a linked worktree is slot 1 and gets its slot env ---
+  git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt1');
+  const mainSlot = forge(repo, ['slot']);
+  if (mainSlot.stdout.trim() !== '0') fail('forge slot in the main checkout did not print 0', mainSlot.out);
+  const slotRes = forge(wt, ['slot']);
+  if (slotRes.code !== 0 || slotRes.stdout.trim() !== '1') fail('forge slot in the linked worktree did not print 1', slotRes.out);
+  const slot = Number(slotRes.stdout.trim());
+  const slotEnv = forge(wt, ['slot', 'env', '--shell', 'bash']);
+  const wantPort = `export PORT='${3000 + slot}'`;
+  if (slotEnv.code !== 0 || !slotEnv.stdout.includes(wantPort)) fail(`forge slot env --shell bash did not contain ${wantPort}`, slotEnv.out);
+  const slotEnvFile = path.join(wt, '.forge', 'slot.env');
+  if (!fs.existsSync(slotEnvFile)) fail('.forge/slot.env was not written in the linked worktree', slotEnv.out);
+  const slotEnvBody = fs.readFileSync(slotEnvFile, 'utf8').split(/\r?\n/);
+  for (const want of [`FORGE_SLOT=${slot}`, `PORT=${3000 + slot}`]) {
+    if (!slotEnvBody.includes(want)) fail(`.forge/slot.env does not contain ${want}`, slotEnvBody.join('\n'));
+  }
+
+  // --- 8. clean up (a failure above exits earlier and leaves the scratch for debugging) ---
+  spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: repo });
+  spawnSync('git', ['worktree', 'prune'], { cwd: repo });
+  rmBase();
+  process.stdout.write('RESOURCE LEASES GREEN\n');
 } else {
   process.stderr.write(
     'Usage: harness-portability.mjs all|boot|record|show|red-run|quiet-cases|telemetry-collect|' +
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'brainstorm-gate|init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target|tier3-lock\n',
+      'brainstorm-gate|init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target|tier3-lock|resource-leases\n',
   );
   process.exit(1);
 }

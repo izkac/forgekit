@@ -58,6 +58,26 @@ lease file with its holder and whether the holder is alive.
 - WHEN `forge lease list --json` runs
 - THEN the output contains `db` with A's pid and `alive: true`
 
+### Requirement: Nested acquisition by a descendant is re-entrant
+While `forge lease <name>` or `forge evidence` runs its command, it SHALL export `FORGE_LEASES_HELD`
+to the child, listing every lease that process holds (comma-separated `<name>:<pid>` entries,
+appended to any inherited value). A `forge lease` or
+`forge evidence` acquisition of a lease that appears in `FORGE_LEASES_HELD` SHALL proceed without
+waiting and without taking or releasing the lease **only when** that lease's lock file currently
+names the listed pid and that pid is alive; otherwise it SHALL acquire normally. Leases are a
+coordination aid, not a security boundary, so a spoofed variable only affects the caller itself.
+
+#### Scenario: Wrapped script matched by its own lease
+- GIVEN `leases.db.match` matches `npm run db:migrate` and the `db:migrate` script is `forge lease db -- <cmd>`
+- WHEN the agent runs `forge lease db -- npm run db:migrate`
+- THEN the inner `forge lease db` runs `<cmd>` immediately
+- AND `db.lock` still names the outer process until the outer command exits
+
+#### Scenario: Stale variable does not bypass a real holder
+- GIVEN `FORGE_LEASES_HELD=db:<pid of a dead process>` and process A holds `db`
+- WHEN `forge lease db --wait-ms 500 -- <cmd>` runs
+- THEN it exits 75 and `<cmd>` does not run
+
 ### Requirement: Opt-in lease configuration
 `.forge/config.json` MAY contain `leases`, an object from lease name to `{ match?: string[], waitMs?: number }`.
 Each `match` entry SHALL be a JavaScript regular-expression source tested against the whole command
