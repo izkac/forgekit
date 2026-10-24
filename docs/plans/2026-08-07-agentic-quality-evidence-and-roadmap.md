@@ -2,6 +2,10 @@
 
 Status: Proposed; R1/R2/R12 shipped 2026-08-08. The unshipped built-in R4
 in-place mutator was retired 2026-08-09; external-tool R4 remains proposed.
+**Gated 2026-10-24:** after resource-leases and escape tracking (commit range +
+`forge escapes`) ship, an R-item is built only when it cites a confirmed Escape or
+eval failure it would have prevented. Outside evidence alone no longer schedules
+work. Terms: `CONTEXT.md`.
 Date: 2026-08-07
 Companion: `2026-08-07-close-the-scorecard-gaps.md` (this doc endorses and extends it)
 Full evidence survey with all sources: `docs/research/2026-08-07-agentic-code-quality-evidence.md`

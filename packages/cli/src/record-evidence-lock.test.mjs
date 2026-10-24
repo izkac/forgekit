@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runRecordEvidence } from './record-evidence.mjs';
-import { lockPathFor } from './tier3-lock.mjs';
+import { leasePathFor } from './lib/lease.mjs';
 
-const MODULE_URL = pathToFileURL(fileURLToPath(new URL('./tier3-lock.mjs', import.meta.url))).href;
+const MODULE_URL = pathToFileURL(fileURLToPath(new URL('./lib/lease.mjs', import.meta.url))).href;
 const FIXED_NOW = () => new Date('2026-06-05T15:04:22.000Z');
 const SESSION = 'sess-lock';
 const SLUG = 'lock-slug';
@@ -52,8 +52,8 @@ function tier3Opts(overrides, marker, exitCode = 0) {
 /** Another process holds the lock for HOLD_MS, writes its release time to `releasedAt`, then releases. */
 function holdFromChild(dir, releasedAt) {
   const code = `
-    import(${JSON.stringify(MODULE_URL)}).then(({ acquireTier3Lock }) => {
-      const release = acquireTier3Lock({ cwd: ${JSON.stringify(dir)}, sessionId: 'other-sess', slug: 'other-slug', pollMs: 25, notify: () => {} });
+    import(${JSON.stringify(MODULE_URL)}).then(({ acquireLease }) => {
+      const release = acquireLease({ name: 'tier3', cwd: ${JSON.stringify(dir)}, sessionId: 'other-sess', slug: 'other-slug', pollMs: 25, notify: () => {} });
       console.log('held');
       setTimeout(() => {
         require('node:fs').writeFileSync(${JSON.stringify(releasedAt)}, String(Date.now()));
@@ -82,7 +82,7 @@ test('scope group does not take the lock: it runs while another process holds it
   const elapsed = Date.now() - t0;
   assert.equal(res.exitCode, 0, res.message);
   assert.ok(elapsed < HOLD_MS / 2, `scoped run took ${elapsed}ms; it must not wait for the lock`);
-  assert.equal(JSON.parse(fs.readFileSync(lockPathFor(dir), 'utf8')).pid, child.pid, 'holder is untouched');
+  assert.equal(JSON.parse(fs.readFileSync(leasePathFor(dir, 'tier3'), 'utf8')).pid, child.pid, 'holder is untouched');
   assert.equal(JSON.parse(fs.readFileSync(ledger, 'utf8').trim()).scope, 'group');
   assert.equal(await exited, 0);
 });
@@ -104,7 +104,7 @@ test('scope full waits for the holder, runs after it releases, stamps, and frees
   const stamp = JSON.parse(fs.readFileSync(ledger, 'utf8').trim());
   assert.equal(stamp.scope, 'full');
   assert.equal(stamp.ok, true);
-  assert.equal(fs.existsSync(lockPathFor(dir)), false, 'lock is released after the run');
+  assert.equal(fs.existsSync(leasePathFor(dir, 'tier3')), false, 'lock is released after the run');
   assert.equal(await exited, 0);
 });
 
@@ -119,7 +119,7 @@ test('the default scope is full and locks; a failing command still releases the 
   assert.ok(Date.now() - t0 >= HOLD_MS / 2, 'default (full) scope must wait');
   assert.equal(res.exitCode, 1);
   assert.equal(JSON.parse(fs.readFileSync(ledger, 'utf8').trim()).ok, false);
-  assert.equal(fs.existsSync(lockPathFor(dir)), false, 'lock is released after a failing run');
+  assert.equal(fs.existsSync(leasePathFor(dir, 'tier3')), false, 'lock is released after a failing run');
   await exited;
 });
 
@@ -127,7 +127,7 @@ test('the lock holder names the session slug read from session.json', async () =
   const { dir } = makeFixture();
   const marker = path.join(dir, 'ran-holder');
   // The command itself reads the lock while the run holds it.
-  const lock = lockPathFor(dir);
+  const lock = leasePathFor(dir, 'tier3');
   const seen = path.join(dir, 'holder-seen.json');
   const opts = tier3Opts({}, marker);
   opts.cmdArgv = [

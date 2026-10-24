@@ -1,0 +1,12 @@
+{
+  "change": "resource-leases",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "resource-leases: lease check denies unwrapped db command; forge lease runs it; concurrent bounded wait exits 75; guard hook denies a Claude payload and stays silent otherwise; linked worktree gets slot 1 and slot.env",
+      "cmd": "node scripts/e2e/harness-portability.mjs resource-leases",
+      "expect": "RESOURCE LEASES GREEN",
+      "timeoutMs": 180000
+    }
+  ]
+}

@@ -23,6 +23,7 @@ import { sessionHealth } from './health.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
 import { e2eSkipState } from './integrity.mjs';
 import { provenFacts, provenLine } from './proven.mjs';
+import { writeSlotEnvFile } from './lib/slots.mjs';
 
 function getActiveSessionInfo() {
   // Resolved the same way `forge phase` resolves it, and reported the same way:
@@ -194,6 +195,9 @@ for (let i = 0; i < args.length; i += 1) {
     i += 1;
   }
 }
+
+// Session start only: the per-prompt path must not pay for `git worktree list`.
+if (format === 'claude-session-start' || format === 'cursor') writeSlotEnvFile(REPO_ROOT);
 
 const info = getActiveSessionInfo();
 if (!info) {

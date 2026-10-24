@@ -346,7 +346,7 @@ forge evidence --task <nn>-<slug> [--no-tdd --reason "…"] -- <cmd> [args…]
 forge evidence --tier3 [--scope full|failed-only|fix|group] -- <cmd>
                                   # execute the tier-3 run; stamp <session>/verify-runs.jsonl
                                   # default scope full; --scope needs --tier3
-                                  # full takes a cross-session lock (<git-common-dir>/forge/tier3.lock;
+                                  # full takes a cross-session lock (<git-common-dir>/forge/leases/tier3.lock;
                                   # a second session waits, a dead holder is taken over); scoped runs never wait
                                   # status proven.tier3 = last full stamp; red + green failed-only = ok "via failed-only";
                                   # fix/group stamps never change the verdict
@@ -391,6 +391,16 @@ forge overlay                     # re-apply OpenSpec vendor overlays in this pr
 forge init […]                    # wire project commands / hooks / rules
 forge install […]                 # alias → forgekit install --skills forge
 ```
+
+Resource leases and worktree slots (opt-in; see `docs/usage.md` §7a):
+
+```bash
+forge lease <name> [--wait-ms N] -- <cmd…>   # run <cmd> holding a named exclusive lease (exit 75 = busy)
+forge lease list|check                       # holders / would a lease guard this command
+forge slot [env --shell dotenv|bash|powershell]  # worktree slot number and slots.env assignments
+```
+
+If a shell command is denied by the lease guard, rerun it exactly as the deny message says (`forge lease <name> -- <cmd>`) with a long tool timeout or in the background; never route around it; if the command is a shell chain, wrap only the part that needs the lease (or move the chain into a project script and wrap that). `forge lease` runs the command in the directory it was invoked from. The guard only denies — it never approves or rewrites a command.
 
 Meta install (skills × agents):
 

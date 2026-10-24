@@ -1,0 +1,99 @@
+<!-- forge-brief-specs-hash:586ce1696e93e829 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resource leases and worktree slots</title>
+<style>
+  body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1d1d1f; background: #fff; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .2rem; }
+  code { background: #f3f3f3; padding: 0 .25rem; border-radius: 3px; font-size: .92em; }
+  .sub { color: #555; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #eee; vertical-align: top; }
+</style>
+</head>
+<body>
+<h1>Resource leases and worktree slots</h1>
+<p class="sub">Forge change <code>resource-leases</code> · operator brief</p>
+
+<h2>TL;DR</h2>
+<p>When several agent sessions work on one repository, even in separate worktrees, they still fight over
+shared things: the database, full test runs, dev-server ports. After this change, a project can name those
+resources once; Forge then makes sessions take turns on them and gives each worktree its own number, so
+database names and ports can differ per worktree instead of colliding. It works the same in the terminal,
+Claude Code, Cursor, Codex and orchestrators such as T3 Code, and it never overrides anyone's permission
+settings.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>Run anything one-at-a-time across all worktrees: <code>forge lease db -- npm run db:migrate</code>. A second session waits, then runs; if it waits too long (9 min by default) it stops and says who holds the lease.</li>
+  <li>Wrap your own scripts once (<code>"test": "forge lease tests -- vitest run"</code>) and every tool and every person running them takes turns automatically.</li>
+  <li>If an agent runs a contended command directly, Forge blocks it and tells the agent the wrapped command to use. It never approves or rewrites anything.</li>
+  <li>Nesting is safe: a wrapped script run under the same lease, or <code>forge evidence</code> inside <code>forge lease</code>, runs immediately instead of waiting on its own parent. (Added during implementation after a review found the trap.)</li>
+  <li>The existing "only one full test run at a time" rule keeps working; it's now just the built-in lease <code>tier3</code>.</li>
+  <li>Each worktree gets a stable slot number (main checkout = 0, others 1, 2, …). With templates like <code>"PORT": "{3000+slot}"</code>, Forge writes <code>.forge/slot.env</code> for your tooling to load.</li>
+  <li><code>forge lease list</code> shows who holds what; <code>forge doctor</code> warns when hooks can't find <code>forge</code> (common when an orchestrator runs as a background service).</li>
+</ul>
+
+<h2>How it works</h2>
+<p>A lease is a small lock file in the repository's shared git folder, so every worktree sees it. Holding one
+needs a running process, which is why commands run <em>through</em> <code>forge lease</code>. The hook only
+watches for agents skipping that step; when no leases are configured it exits straight away without starting <code>forge</code> (in Cursor
+by exiting with code 1, which Cursor documents as "let the command through").</p>
+<pre class="mermaid">
+flowchart TD
+  A[Agent runs a shell command] --> H{Guard hook: matches a configured lease and isn't wrapped?}
+  H -- no --> P[Host's normal permission flow decides] --> R[Command runs]
+  H -- yes --> D[Blocked, with: rerun as forge lease db -- cmd]
+  D --> W[Agent runs forge lease db -- cmd]
+  W --> P2[Host's normal permission flow decides] --> L{Lease free?}
+  L -- yes --> X[Run, then release]
+  L -- held --> Q[Wait up to 9 min] --> L
+  Q -- timed out --> B[Exit 75: busy, held by session X]
+</pre>
+<p>Because the hook only ever <em>blocks</em>, it can't get around a permission system: auto mode and
+T3 Code's approval modes keep the final say. One side effect: a wrapped command
+(<code>forge lease db -- …</code>) no longer matches permission rules written for the bare command, so an
+allow rule may prompt again, and a deny rule for the bare command won't catch the wrapped form.</p>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Nothing, until you add <code>leases</code> or <code>slots</code> to <code>.forge/config.json</code>. Both are opt-in.</li>
+  <li>New commands: <code>forge lease</code>, <code>forge lease list</code>, <code>forge lease check</code>, <code>forge slot</code>, <code>forge slot env</code>.</li>
+  <li><code>forge init</code> adds one more hook (shell commands, Claude Code and Cursor). It does not add any permission rules.</li>
+  <li>When you configure a <code>db</code> lease, <code>forge evidence</code> runs that touch the database also take turns. A full test run always takes the <code>tier3</code> lease first and refuses to start from inside another lease, so the locks can't wait on each other in a circle.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>During an upgrade, a session on the old Forge version and one on the new version won't wait for each other on full test runs (the lock file moved). They're only slower, never wrong.</li>
+  <li>Loose patterns like <code>test</code> can block more than intended. The docs recommend precise patterns, and the block message names the pattern that matched.</li>
+  <li>Codex has no project hooks, so there the protection comes only from wrapped scripts and <code>forge evidence</code>.</li>
+  <li>A lease guarantees taking turns, not safety: if a holder crashes mid-migration, the next one runs anyway.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Sessions messaging each other (the T3 Code style).</li>
+  <li>Creating or migrating a database per slot; your project's setup does that using the slot env.</li>
+  <li>Letting more than one session hold a lease at once.</li>
+  <li>T3's own subagent tool bypassing Forge's model policy (logged separately as a finding).</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What</th><th>Size</th></tr>
+  <tr><td>1. Lease core</td><td>Turn the tier-3 lock into named leases with a time limit; read lease config</td><td>3 tasks</td></tr>
+  <tr><td>2. Lease CLI + evidence</td><td><code>forge lease</code> / <code>list</code> / <code>check</code>; evidence runs take matching leases</td><td>3 tasks</td></tr>
+  <tr><td>3. Guard hook + wiring</td><td>Block-only hook for Claude Code and Cursor, init wiring, doctor check</td><td>4 tasks</td></tr>
+  <tr><td>4. Worktree slots</td><td>Slot numbers, env templates, <code>.forge/slot.env</code></td><td>3 tasks</td></tr>
+  <tr><td>5. Docs + product loop</td><td>Usage docs incl. orchestrator note; end-to-end run on a scratch project; nesting fix; final-review fixes (working directory, lock order, chained commands)</td><td>6 tasks</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

@@ -545,7 +545,7 @@ do — but they are the mechanism:
 | `forge guard check --file <path> [--json]` | What the test-guard hook runs before every Edit/Write: exit 0 allow, 2 deny, 1 internal error (fails open, never treated as deny) |
 | `forge test-allow <path> --reason "<why>"` | Escape hatch — records an allowance for a guarded file into `.forge/sessions/<id>/guard-allowances.json`; only the coordinator should run this, with a reason a reviewer will judge |
 | `forge tdd run --task <nn-slug> --expect fail\|pass -- <cmd…>` | Runs your test command and stamps `tasks/<id>/tdd-runs.jsonl` — every session created by this version requires a red stamp before a green one per task (older sessions are exempt); `forge evidence --task <nn-slug> --no-tdd --reason "<why>"` declares a task exempt when no test cycle applies |
-| `forge evidence --tier3 [--scope full\|failed-only\|fix\|group] -- <cmd…>` | Runs a verify-phase test command and stamps `verify-runs.jsonl`. A `full` run (the default) takes a lock shared by every worktree of the repo, so a second session's full run prints `tier-3 lock held by <slug> (pid N, since T) — waiting` and starts when the first finishes. `forge status` judges tier 3 by the last full run; a red one is rescued only by a green `failed-only` re-run of its failing files |
+| `forge evidence --tier3 [--scope full\|failed-only\|fix\|group] -- <cmd…>` | Runs a verify-phase test command and stamps `verify-runs.jsonl`. A `full` run (the default) takes a lock shared by every worktree of the repo, so a second session's full run prints `lease tier3 held by <slug> (pid N, since T) — waiting` and starts when the first finishes. `forge status` judges tier 3 by the last full run; a red one is rescued only by a green `failed-only` re-run of its failing files |
 
 ---
 
@@ -599,6 +599,149 @@ poke it in its own window.
 Viewing fidelity: Claude Code sessions get a live transcript tail (their
 `~/.claude/projects/…` jsonl); other engines show forge status, tasks, and
 evidence instead.
+
+---
+
+## 7a. Shared resources across sessions — leases and slots
+
+Worktrees keep sessions' *files* apart. They do not keep apart the things all
+of them share: one database, a full test run that eats the machine, the dev
+server port. **Leases** make sessions take turns on those; **slots** give each
+worktree its own number so ports and database names do not collide.
+
+Both are opt-in. With no `leases` / `slots` config, only full tier-3 runs lock
+(the built-in `tier3` lease); nothing is blocked or written (`forge slot` still
+prints the number).
+
+### Leases
+
+Declare them in `.forge/config.json`:
+
+```json
+{
+  "leases": {
+    "db":    { "match": ["\\bprisma migrate\\b", "\\bdb:migrate\\b"], "waitMs": 300000 },
+    "tests": { "waitMs": 600000 }
+  }
+}
+```
+
+- `match` — regex sources tested against the whole command string. Use precise,
+  word-boundary patterns (`\\bprisma migrate\\b`, not `migrate` or `test`); a
+  loose pattern blocks commands you never meant to serialize. A pattern that
+  does not compile is skipped with a warning.
+- `waitMs` — how long to wait for a busy lease (default 540000 = 9 minutes).
+- A lease without `match` (like `tests`) is only taken when something asks for it by name.
+- Lease names match `^[a-z0-9][a-z0-9-]*$`. `tier3`, `_`-prefixed names, `list` and `check` are reserved.
+
+**Primary recipe — wrap the script.** Put the lease in the project's own
+scripts. This works the same on every host, including Codex and a plain terminal:
+
+```json
+{
+  "scripts": {
+    "test": "forge lease tests -- vitest run",
+    "db:migrate": "forge lease db -- prisma migrate deploy"
+  }
+}
+```
+
+Run one by hand any time:
+
+```bash
+forge lease db -- npx prisma migrate dev     # waits its turn, runs, releases
+forge lease db --wait-ms 30000 -- <cmd>      # give up sooner
+forge lease list                             # who holds what (--json for scripts)
+```
+
+`forge lease` runs the command in the directory you invoked it from, so a script
+wrapped in a workspace package runs in that package. It exits with the command's own exit code. If the lease is still
+busy after the wait it exits **75** and the command never ran — retry later or
+run it in the background. A holder that died is taken over automatically.
+
+**Nesting is safe.** A wrapped script can be matched by its own lease: with
+`db:migrate` as above, an agent told to run `forge lease db -- npm run db:migrate`
+does not deadlock. While a command runs under a lease, `forge lease` and
+`forge evidence` pass `FORGE_LEASES_HELD` to it, and a nested `forge lease` or
+`forge evidence` of the *same* lease then runs immediately, without taking or
+releasing it. This only applies while the outer process really holds the lease
+(its lock file names that live pid); a stale or copied variable waits as normal.
+It also needs the variable to reach the nested call: a launcher that scrubs the
+environment (`sudo`, some container runners) makes the nested call wait instead.
+
+**The guard hook.** `forge init` wires `forge-lease-guard.mjs` for Claude Code
+(`Bash|PowerShell`), and for Cursor (`Shell`) when the Cursor surface is
+initialised (`forge init --cursor`). When an agent types a command that matches a
+lease's `match` and is not already wrapped, the hook blocks it and says to rerun
+it as `forge lease <name> -- <cmd>`. It only ever denies: it never approves,
+never rewrites the command, and so never touches your permission prompts or an
+orchestrator's approval mode. If the blocked command is a shell chain (`&&`, `||`,
+`;` or `|`), the message tells the agent to wrap only the part that needs the
+lease, or to move the chain into a project script and wrap that — otherwise the
+shell would lease only the first command. A wrapped command
+(`forge lease db -- …`) no longer matches permission rules written for the bare
+command: an allow rule may prompt again, and a deny rule for the bare command
+won't catch the wrapped form, so write rules for the wrapped form if you rely on
+them. The hook is inert until `leases` has at least one
+`match`, and any hook error lets the command through. `forge evidence` takes
+the matching leases itself: `tier3` first (full-scope runs only — it is always the
+outermost lease), then the matching configured leases in name order. If one stays
+busy past its `waitMs` the run exits 75 and nothing is recorded. A full run
+started from inside another lease (`forge lease tests -- forge evidence --tier3 …`)
+is refused with exit 2: run `forge evidence --tier3` directly and let `match`
+take the lease. Named leases taken by nested scripts can still wait on each other
+across sessions, but that is bounded by `waitMs` (exit 75), never permanent.
+
+### Slots
+
+Every checkout has a slot number: **0** for the main checkout, **1, 2, …** for
+linked worktrees (the lowest free number; a removed worktree frees its number).
+
+```bash
+forge slot                 # prints this checkout's slot
+```
+
+Turn the number into per-worktree settings with `slots.env` templates —
+`{slot}` and `{N+slot}` are the only expressions supported:
+
+```json
+{
+  "slots": {
+    "env": {
+      "PORT": "{3000+slot}",
+      "DATABASE_URL": "postgres://localhost/app_{slot}"
+    }
+  }
+}
+```
+
+`FORGE_SLOT` is always included. With `slots.env` set, `forge slot`, `forge new`
+and the SessionStart reminder keep `.forge/slot.env` (dotenv syntax, gitignored)
+up to date. Load it where your tooling expects:
+
+```bash
+node --env-file=.forge/slot.env server.js    # Node
+# docker compose:  env_file: .forge/slot.env
+# or any dotenv loader pointed at .forge/slot.env
+eval "$(forge slot env --shell bash)"        # export in a bash session
+forge slot env --shell powershell | Invoke-Expression   # PowerShell
+```
+
+Forge sets up the numbers; creating a per-slot database is up to your scripts.
+
+### Orchestrators (T3 Code and similar)
+
+Forge's hooks load under orchestrators that load the project's settings. The
+guard never makes a permission decision, so the orchestrator's approval mode
+stays in charge. If the orchestrator runs as a background service, run
+`forge doctor`: its `hook-forge-resolvable` check tells you when hooks cannot
+find `forge`. Hosts without project hooks (Codex) rely on the wrapped scripts above.
+
+### Known limits
+
+- On Windows, `forge lease` passes the command through cmd.exe, which expands
+  `%VAR%` even inside quotes — put such commands in a project script and lease the script.
+- The guard fails open for commands over about 32K characters on Windows.
 
 ---
 
@@ -1044,6 +1187,14 @@ forge fleet list
 forge fleet watch
 forge fleet view my-feature --transcript 20
 forge fleet send my-feature "pause and report"
+
+# Shared resources across sessions
+forge lease db -- <cmd>           # run <cmd> holding lease "db"; exit 75 = still busy after the wait
+forge lease db --wait-ms 30000 -- <cmd>
+forge lease list                  # who holds what
+forge lease check --command "<cmd>"   # would a configured lease guard this? (what the guard hook runs)
+forge slot                        # this checkout's slot: 0 main, 1, 2, … linked worktrees
+forge slot env --shell bash       # slots.env assignments (dotenv | bash | powershell)
 ```
 
 In the agent:
