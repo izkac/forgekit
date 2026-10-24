@@ -34,11 +34,22 @@ The base..head commits recorded for a change when its session reaches done.
 **Escape rate**:
 The share of done **Forge sessions** with at least one **Escape**; the primary measure of the **Promise**.
 
+**Escape replay**:
+A local eval task built from one confirmed **Escape**: the change's base commit and spec as input, and a hidden test that fails on the escaped code and passes on the fixed code.
+_Avoid_: regression task, synthetic task
+
+**Gate fire**:
+One refusal by a Forge gate that forces a correction, logged with gate, session and time.
+_Avoid_: gate hit, block
+
 ## Relationships
 
 - The **Promise** compares **Forge sessions** with **Plain sessions** only in evals; real use has no **Plain session** baseline, only the **Escape rate** trend
 - A **Broken change** is judged by the eval verifier (controlled) or by **Escapes** (real use); the **Escape rate** is primary
 - One done **Forge session** can have zero or more **Escapes**
+- Confirming an **Escape** includes supplying its replay test: the fix commit's test if it has one, otherwise one written by the operator
+- Each confirmed **Escape** yields one **Escape replay**; replays are where evals compare **Forge sessions** with **Plain sessions**
+- A gate with no **Gate fire** across the fleet by 2027-04-24 is cut or moved behind thorough pace; zero **Escapes** alone never justifies a cut, since a working gate prevents them
 - A **Commit range** yields zero or more **Escape candidates**; the operator confirms or dismisses each one
 
 ## Flagged ambiguities
