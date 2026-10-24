@@ -18,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { readLedger, withLedgerLock, writeLedger } from './ledger.mjs';
 import { listFleet, projectNameFor } from './lib/fleet.mjs';
 import { normalizePlanDir, resolveProjectPlanEngine } from './plan-engine.mjs';
+import { CONCRETE_PACES } from './preferences.mjs';
 
 export const WINDOW_DAYS = 14;
 const WINDOW_MS = WINDOW_DAYS * 86400000;
@@ -166,7 +167,7 @@ const isAncestor = (cwd, sha, rev) => spawnSync('git', ['merge-base', '--is-ance
  *   commitRange?: { base: string, head: string } | null }, rev?: string }} opts
  * @returns {{ sessionId: string, range: { base: string, head: string } | null, inferred: boolean,
  *   skipped: string | null, candidates: Array<{ commit: string, subject: string, at: string,
- *   files: string[], lines: number }> }}
+ *   files: string[], lines: number, outsidePlan: string[] }> }}
  */
 export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
   let range = session.commitRange?.base && session.commitRange?.head ? session.commitRange : null;
@@ -201,6 +202,14 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
   const tracked = new Set(lines(git(cwd, ['diff', '--name-only', '--no-renames', range.base, range.head])).filter(isCode));
   if (tracked.size === 0) return result;
 
+  // F16 (a sweep is an unrelated edit that rode along on a checkpoint): the
+  // change's own plan documents, read at head, say which files it meant to touch.
+  // ponytail: basename substring match, so a common basename (`index.ts`) reads
+  // as named and the flag can miss a sweep. It labels a candidate; it never hides one.
+  const planFiles = lines(git(cwd, ['diff', '--name-only', '--diff-filter=d', range.base, range.head, '--', `${planDir}/`]));
+  const { head } = range;
+  const planText = planFiles.length ? (git(cwd, ['show', ...planFiles.map((f) => `${head}:${f}`)]) ?? '') : '';
+
   const doneMs = Date.parse(session.doneAt ?? '') || Date.parse(git(cwd, ['show', '-s', '--format=%cI', range.head])?.trim() ?? '');
   const since = new Date(doneMs).toISOString();
   const until = new Date(doneMs + WINDOW_MS).toISOString();
@@ -229,7 +238,10 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
         files.push(from);
       }
     }
-    if (hit > 0) result.candidates.push({ commit: c.commit, subject: c.subject, at: c.at, files, lines: hit });
+    if (hit > 0) {
+      const outsidePlan = planFiles.length ? files.filter((f) => !planText.includes(path.posix.basename(f))) : [];
+      result.candidates.push({ commit: c.commit, subject: c.subject, at: c.at, files, lines: hit, outsidePlan });
+    }
   }
   return result;
 }
@@ -334,48 +346,65 @@ export function pendingCandidates({ cwd, rev = 'HEAD' }) {
 }
 
 /**
- * Escape rate per month of done, across the fleet: this project plus every
- * registry project still on disk (`forge fleet report`'s discovery), and the
- * registry's own done entries — the only trace a deleted worktree leaves.
- * A session counts as escaped once any project's ledger confirms an Escape for
- * it; `open` counts sessions whose 14-day window has not closed, so a recent
- * month's rate is provisional.
+ * Escape rate per month of done and per pace, across the fleet: this project
+ * plus every registry project still on disk (`forge fleet report`'s discovery),
+ * and the registry's own done entries — the only trace a deleted worktree
+ * leaves. A session counts as escaped once any project's ledger confirms an
+ * Escape for it; `open` counts sessions whose 14-day window has not closed, so
+ * a recent bucket's rate is provisional. A session's pace is the one recorded
+ * at done (digest row, else registry entry), else `unknown`; `byPace` runs
+ * thorough..lite, then other recorded values alphabetically, `unknown` last.
  *
  * @param {{ cwd: string, now?: number }} opts
  */
 export function escapeReport({ cwd, now = Date.now() }) {
   const fleet = listFleet();
   const roots = new Set([path.resolve(cwd), ...fleet.filter((e) => !e.missing).map((e) => path.resolve(e.project))]);
-  /** @type {Map<string, string>} sessionId → doneAt */
+  /** @type {Map<string, { at: string, pace: string | null }>} sessionId → done time and pace */
   const done = new Map();
   const escaped = new Set();
   for (const root of roots) {
     for (const row of readLedger(path.join(root, '.forge', 'sessions.jsonl'))) {
-      if (row.phase === 'done' && row.sessionId && row.endedAt) done.set(row.sessionId, row.endedAt);
+      if (row.phase === 'done' && row.sessionId && row.endedAt) done.set(row.sessionId, { at: row.endedAt, pace: row.pace ?? null });
     }
     for (const d of readDecisions(root)) if (d.decision === 'confirmed') escaped.add(d.sessionId);
   }
   for (const e of fleet) {
-    if (e.phase === 'done' && e.sessionId && e.updatedAt && !done.has(e.sessionId)) done.set(e.sessionId, e.updatedAt);
+    if (e.phase !== 'done' || !e.sessionId || !e.updatedAt) continue;
+    const known = done.get(e.sessionId);
+    if (!known) done.set(e.sessionId, { at: e.updatedAt, pace: e.pace ?? null });
+    else known.pace ??= e.pace ?? null;
   }
 
   /** @type {Map<string, { month: string, done: number, escaped: number, rate: number, open: number }>} */
   const months = new Map();
+  /** @type {Map<string, { pace: string, done: number, escaped: number, rate: number, open: number }>} */
+  const paces = new Map();
   const total = { done: 0, escaped: 0, rate: 0, open: 0 };
-  for (const [id, at] of done) {
+  for (const [id, { at, pace }] of done) {
     const month = at.slice(0, 7);
+    const paceKey = pace || 'unknown';
     if (!months.has(month)) months.set(month, { month, done: 0, escaped: 0, rate: 0, open: 0 });
+    if (!paces.has(paceKey)) paces.set(paceKey, { pace: paceKey, done: 0, escaped: 0, rate: 0, open: 0 });
     const m = /** @type {NonNullable<ReturnType<typeof months.get>>} */ (months.get(month));
-    for (const bucket of [m, total]) {
+    const p = /** @type {NonNullable<ReturnType<typeof paces.get>>} */ (paces.get(paceKey));
+    for (const bucket of [m, p, total]) {
       bucket.done += 1;
       if (escaped.has(id)) bucket.escaped += 1;
       if (now - Date.parse(at) < WINDOW_MS) bucket.open += 1;
     }
   }
-  for (const bucket of [...months.values(), total]) bucket.rate = bucket.done ? bucket.escaped / bucket.done : 0;
+  for (const bucket of [...months.values(), ...paces.values(), total]) bucket.rate = bucket.done ? bucket.escaped / bucket.done : 0;
+  /** @param {string} pace */
+  const paceRank = (pace) => (pace === 'unknown' ? 2 : CONCRETE_PACES.includes(pace) ? 0 : 1);
   return {
     projects: [...roots],
     months: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)),
+    byPace: [...paces.values()].sort(
+      (a, b) =>
+        paceRank(a.pace) - paceRank(b.pace) ||
+        (paceRank(a.pace) === 0 ? CONCRETE_PACES.indexOf(a.pace) - CONCRETE_PACES.indexOf(b.pace) : a.pace.localeCompare(b.pace)),
+    ),
     total,
   };
 }

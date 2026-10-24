@@ -1,0 +1,15 @@
+{
+  "change": "escape-pace-f16",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "escape-tracking: Escape rate by pace; outside-plan flag on candidates",
+      "library": "packages/cli/src/escapes.mjs (escapeReport, escapeCandidates)",
+      "runtimeOwner": "forge escapes [list|report] (escapes-cli.mjs)",
+      "writes": "N/A (read-only report and listing; decisions ledger unchanged)",
+      "reads": ".forge/sessions.jsonl pace; fleet registry pace; plan-dir files in the commit range at head",
+      "uiConsumer": "forge escapes list / report text and --json output",
+      "evidence": "escapes-pace.test.mjs, escapes-outside-plan.test.mjs; e2e escape-tracking step"
+    }
+  ]
+}

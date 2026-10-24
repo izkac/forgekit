@@ -1,0 +1,12 @@
+{
+  "change": "escape-pace-f16",
+  "notApplicable": null,
+  "steps": [
+    {
+      "name": "escape-tracking: done records a range, a later fix is a candidate (with outsidePlan), confirm lands in the ledger and the rate report (with byPace), a refused gate is counted by forge fires",
+      "cmd": "node scripts/e2e/escape-tracking.mjs",
+      "expect": "ESCAPE TRACKING GREEN",
+      "timeoutMs": 180000
+    }
+  ]
+}
