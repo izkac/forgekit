@@ -11,8 +11,10 @@ const MODULE_URL = pathToFileURL(fileURLToPath(new URL('./lib/lease.mjs', import
 const HOLD_MS = 1500;
 const POLL_MS = 25;
 
+// `.native` expands Windows 8.3 short names (CI's TEMP is C:\Users\RUNNER~1\…) the way git does;
+// plain realpathSync keeps them, so expected paths would not match git's output.
 function tmp(prefix) {
-  return fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), prefix)));
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(tmpdir(), prefix)));
 }
 
 function git(cwd, ...args) {
