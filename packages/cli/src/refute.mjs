@@ -14,6 +14,7 @@
  *   forge refute add --task <nn-slug> --claim "<what was believed>" --actual "<what the evidence showed>"
  *                    [--source reviewer|gate|e2e|tier3|tdd|operator] [--session <id>]
  *   forge refute list [--task <nn-slug>] [--all] [--json|--md] [--session <id>]
+ *   forge refute list --md --for-diff <range> [--session <id>]   (what a reviewer of <range> should see)
  *
  * Ledger: `.forge/sessions/<id>/known-false.jsonl`. At `forge score --write`
  * (phase done) the session's lines are promoted to `.forge/known-false.jsonl`
@@ -22,6 +23,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { FORGE_DIR, resolveSessionOrExit, sessionPath } from './lib.mjs';
 
@@ -108,6 +110,51 @@ export function listRefutations(sessionDir, opts = {}) {
   return opts.task ? all.filter((r) => r.task === opts.task) : all;
 }
 
+/** Most carried entries a diff-scoped listing adds to this session's own. */
+export const FOR_DIFF_CARRIED_CAP = 20;
+
+/**
+ * Basenames of the files `git diff --name-only <range>` lists, run in `cwd`.
+ * ponytail: exactly what `git diff --name-only` returns — a working-tree range
+ * (e.g. `HEAD`) lists tracked changes only, never untracked files.
+ * @param {string} range
+ * @param {string} [cwd]
+ * @returns {string[]}
+ */
+export function changedBasenames(range, cwd = process.cwd()) {
+  const r = spawnSync('git', ['diff', '--name-only', range], { cwd, encoding: 'utf8' });
+  if (r.status !== 0) {
+    throw new Error(`git diff --name-only ${range} failed: ${(r.stderr || r.error?.message || '').trim()}`);
+  }
+  const files = r.stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+  return [...new Set(files.map((f) => path.basename(f)))];
+}
+
+/**
+ * Refutations a reviewer of a diff should see: every one from this session,
+ * plus up to `FOR_DIFF_CARRIED_CAP` carried project entries (other sessions)
+ * whose `claim` or `actual` mentions, case-insensitively, a changed file's
+ * basename — most recent first by `at` (an entry with no `at` counts as oldest).
+ * @param {string} sessionDir
+ * @param {{ forgeDir: string, basenames: string[], task?: string | null }} opts
+ */
+export function listRefutationsForDiff(sessionDir, opts) {
+  const names = opts.basenames.filter(Boolean).map((b) => b.toLowerCase());
+  const mine = readRefutations(sessionDir);
+  const thisSession = path.basename(sessionDir);
+  const mentions = (/** @type {Record<string, any>} */ r) => {
+    const text = `${r.claim ?? ''}\n${r.actual ?? ''}`.toLowerCase();
+    return names.some((n) => text.includes(n));
+  };
+  const at = (/** @type {Record<string, any>} */ r) => (typeof r.at === 'string' ? r.at : '');
+  const carried = readProjectRefutations(opts.forgeDir)
+    .filter((r) => r.sessionId !== thisSession && mentions(r))
+    .sort((a, b) => at(b).localeCompare(at(a)))
+    .slice(0, FOR_DIFF_CARRIED_CAP);
+  const all = [...mine, ...carried];
+  return opts.task ? all.filter((r) => r.task === opts.task) : all;
+}
+
 /**
  * The block a coordinator pastes into an implementer brief's `{KNOWN_FALSE}`.
  * Carried entries name the change they were learned in.
@@ -129,17 +176,22 @@ function usage() {
   forge refute add --task <nn-slug> --claim "<what was believed>" --actual "<what the evidence showed>" [--source ${SOURCES.join('|')}] [--session <id>]
   forge refute list [--task <nn-slug>] [--all] [--json|--md] [--session <id>]
     --all   also list refutations carried from finished sessions (.forge/known-false.jsonl)
+  forge refute list --md --for-diff <range> [--session <id>]
+    --for-diff   this session's refutations + up to ${FOR_DIFF_CARRIED_CAP} carried ones mentioning a file changed in <range>
 `,
   );
 }
 
 /** @param {string[]} argv */
 export function parseArgs(argv) {
-  const opts = { sub: argv[0] ?? null, task: null, claim: null, actual: null, source: null, session: null, all: false, json: false, md: false, help: false };
+  const opts = { sub: argv[0] ?? null, task: null, claim: null, actual: null, source: null, session: null, all: false, forDiff: null, json: false, md: false, help: false };
   for (let i = 1; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--all') opts.all = true;
-    else if (a === '--task') opts.task = argv[++i];
+    else if (a === '--for-diff') {
+      opts.forDiff = argv[++i];
+      if (!opts.forDiff) throw new Error('--for-diff needs a git range');
+    } else if (a === '--task') opts.task = argv[++i];
     else if (a === '--claim') opts.claim = argv[++i];
     else if (a === '--actual') opts.actual = argv[++i];
     else if (a === '--source') opts.source = argv[++i];
@@ -182,7 +234,13 @@ function main() {
       process.stdout.write(`${record.id} recorded in ${knownFalsePath(sessionDir)}\n`);
       return;
     }
-    const entries = listRefutations(sessionDir, { task: opts.task, forgeDir: opts.all ? FORGE_DIR : null });
+    const entries = opts.forDiff
+      ? listRefutationsForDiff(sessionDir, {
+          forgeDir: FORGE_DIR,
+          basenames: changedBasenames(opts.forDiff),
+          task: opts.task,
+        })
+      : listRefutations(sessionDir, { task: opts.task, forgeDir: opts.all ? FORGE_DIR : null });
     if (opts.json) process.stdout.write(`${JSON.stringify(entries, null, 2)}\n`);
     else process.stdout.write(`${renderKnownFalseMd(entries)}\n`);
   } catch (err) {

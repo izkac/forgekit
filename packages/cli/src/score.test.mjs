@@ -674,7 +674,7 @@ test('review depth: a recorded rejection round scores as evidence the review had
     const { sessionDir, session, taskDir } = makeReviewFixture(root);
     fs.writeFileSync(
       path.join(taskDir, 'group-review.md'),
-      '# Group 6 review\n\n**Verdict: APPROVED** (opus reviewer 9f2, after one fix round)\n\n## Round 1 — REJECTED\n\nOne blocker, four majors.\n',
+      '# Group 6 review\n\n**Verdict: APPROVED** (opus reviewer 9f2, after one fix round)\n\n## Round 1 — REJECTED\n\nOne blocker, four majors.\n\n## Important\n\n- Broken.\n  Command: npm test -- a → exit 1\n',
       'utf8',
     );
     const withReject = reviewCheck(scoreSession({ cwd: root, sessionDir, session }));

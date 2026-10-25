@@ -53,6 +53,7 @@ const COMMANDS = {
   metrics: { script: 'metrics-cli.mjs' },
   'review-label': { script: 'review-label-cli.mjs' },
   'review-precheck': { script: 'review-precheck-cli.mjs', aliases: ['precheck'] },
+  'review-check': { script: 'review-check-cli.mjs' },
   analyze: { script: 'analyze-cli.mjs', aliases: ['analyse'] },
   escapes: { script: 'escapes-cli.mjs', aliases: ['escape'] },
   fires: { script: 'fires-cli.mjs' },
@@ -102,6 +103,7 @@ Commands:
   metrics collect         Harvest host transcripts → session metrics.json
   review-label [<unit>]   Exact Task description for a reviewer dispatch (+ dispatch stamp)
   review-precheck [--json] Machine-verified facts block for a reviewer packet (exit 1 on integrity problems)
+  review-check <file> [--json]  Blocking review items: backed by evidence or downgraded to Minor; effective verdict
   analyze [--json]        Coverage, per-model/phase totals, policy skip rate
   escapes [list|confirm|dismiss|report]  Escape candidates after done; operator confirms/dismisses; Escape rate
   fires [--json] [--since <iso>]  Gate fire counts per gate across the fleet (zeros included)

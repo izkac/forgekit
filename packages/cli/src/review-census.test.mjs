@@ -246,9 +246,9 @@ test('rejection rounds are still counted, on either kind of review', () => {
   const dir = sessionWith(
     {
       '01-a/group-review.md':
-        '**Verdict: APPROVED** (opus reviewer 9f2)\n\n## Round 1 — REJECTED\n',
+        '**Verdict: APPROVED** (opus reviewer 9f2)\n\n## Round 1 — REJECTED\n\n## Important\n\n- Broken.\n  Command: npm test -- a → exit 1\n',
     },
-    '# Final review\n\nA self-review.\n\nRound 1 REJECTED.\n',
+    '# Final review\n\nA self-review.\n\nRound 1 REJECTED.\n\n## Important\n\n- Broken.\n  Command: npm test -- a → exit 1\n',
   );
   const census = reviewCensus(dir);
   assert.equal(census.rejections, 2);
@@ -268,7 +268,7 @@ test('instructional REJECT if prose with APPROVED does not count as a rejection'
 
   const realRound = sessionWith({
     '01-a/group-review.md':
-      '# Group review\n\n**Verdict: APPROVED**\n\n## Round 1 — REJECTED\n',
+      '# Group review\n\n**Verdict: APPROVED**\n\n## Round 1 — REJECTED\n\n## Important\n\n- Broken.\n  Command: npm test -- a → exit 1\n',
   });
   assert.equal(reviewCensus(realRound).rejections, 1);
 });

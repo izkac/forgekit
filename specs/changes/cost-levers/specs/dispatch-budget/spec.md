@@ -26,7 +26,8 @@ SHALL NOT refuse the transition because of the budget.
 - THEN the projection is one implementer plus the final review and no warning is printed
 
 ### Requirement: The running count is visible
-The running count SHALL be the number of `decision: "allow"` lines in the session's existing
+The running count SHALL be the number of `decision: "allow"` or `decision: "rewrite"` lines (a
+rewritten dispatch still runs) in the session's existing
 `dispatches.jsonl` (written today by the model hook; this change adds no hook behavior and
 the budget never causes a denial).
 

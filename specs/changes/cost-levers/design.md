@@ -27,13 +27,12 @@ the coordinator. A third saves rework: fewer false reviewer claims to refute.
   host cannot tell them apart.
 - **`forge group close`** composes existing functions (checkpoint, range, precheck, label)
   in-process; it adds no new rules.
-- **Short default output** only for `forge phase` and `forge status`; `--json` keeps the full
-  object.
+- **Short output is opt-in (`--brief`)** for `forge phase` and `forge status`; JSON stays the
+  default. Changed during implement: 6 test files and 3 e2e scripts parse the default JSON,
+  and short output saves ~1% of a request's context — not worth a breaking change.
 
 ## Risks
 - Reviewers may pad evidence lines to avoid downgrades. Mitigation: `review-check` requires
   a structural match (argv + exit code, or quote + file reference, or scenario + file:line),
   and the census keeps counting refuted claims, so padding shows up as refutations.
-- Callers parsing `forge phase` / `forge status` stdout break. Mitigation: grep the repo and
-  templates for parsers; switch them to `--json` in the same change; CHANGELOG notes it.
 - The 10-line reply limit is advisory; the new metrics show whether it holds.

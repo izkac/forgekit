@@ -18,15 +18,15 @@ and the resolved tier. A failing step SHALL stop the sequence and name the step.
 - WHEN `forge group close` runs
 - THEN it stops after the precheck and names it as the failing step
 
-### Requirement: Short output by default
-`forge phase` and `forge status` SHALL print a short human summary by default and the full
-JSON object with `--json`.
+### Requirement: Short output on request
+`forge phase` and `forge status` SHALL print a short human summary with `--brief` and keep
+printing the full JSON object by default (existing scripts and tests parse it).
 
-#### Scenario: Default status
+#### Scenario: Brief status
 - GIVEN an active session
-- WHEN `forge status` runs without flags
+- WHEN `forge status --brief` runs
 - THEN it prints a short summary of a few lines including health, phase, tasks and dispatches
 
-#### Scenario: JSON status
-- WHEN `forge status --json` runs
+#### Scenario: Default status unchanged
+- WHEN `forge status` runs without flags
 - THEN it prints the same JSON object as before this change

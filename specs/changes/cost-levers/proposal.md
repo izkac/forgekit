@@ -26,7 +26,7 @@ reviews.
 - **Coordinator context:** metrics split coordinator from subagent requests per task group
   and record mean context per coordinator request; subagents reply with a status line plus
   ≤10 lines; new `forge group close` replaces four group-boundary calls with one;
-  `forge phase` and `forge status` print a short summary unless `--json`.
+  `forge phase` and `forge status` print a short summary with `--brief` (JSON stays the default).
 
 ## Capabilities
 - `dispatch-budget`: new — projection, silent dispatch log, budget display — delta at `specs/dispatch-budget/spec.md`
@@ -40,6 +40,6 @@ reviews.
   `metrics/dispatches.mjs`, new `review-check.mjs` and `group-close.mjs`, `bin/forge.mjs`.
 - Hooks: no behavior change.
 - Skill prose: `phases/implement.md`, `phases/review.md`, `subagents/*-prompt.md`.
-- Output-format change: callers that parse `forge phase` / `forge status` stdout must pass
-  `--json`; the repo's own hooks and scripts are updated in this change.
+- No output-format break: `--brief` is opt-in (decided during implement: 6 test files and 3 e2e
+  scripts parse the default JSON, and short output saves only ~1% of a request's context).
 - Brisk pace is out of scope; tracked as a finding until escape rate by pace exists.

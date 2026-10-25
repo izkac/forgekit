@@ -6,15 +6,15 @@
 - [x] 1.3 `dispatches n/<budget>` in `session-status.mjs` and `session-reminder.mjs`, counting `decision: "allow"` lines of the existing `<session>/dispatches.jsonl` (reuse `metrics/dispatches.mjs` reader), `?` for an unreadable log, one warning line over budget; digest field `dispatchBudget` in `ledger.mjs`; tests
 
 ## 2. Review claims
-- [ ] 2.1 `packages/cli/src/review-check.mjs` parser: blocking items, three evidence forms, downgrade to Minor, effective verdict; `review-check.test.mjs` covering every scenario in the delta
-- [ ] 2.2 `forge review-check <file>` command in `bin/forge.mjs` with `--json`; CLI test
-- [ ] 2.3 `review-census.mjs` counts a rejection only with ≥1 backed blocking item; tests that floors still require the dispatch
-- [ ] 2.4 `forge refute list --md --for-diff <range>` in `refute.mjs`: session entries + ≤20 basename matches from `.forge/known-false.jsonl`, most recent first; tests for match and cap
+- [x] 2.1 `packages/cli/src/review-check.mjs` parser: blocking items, three evidence forms, downgrade to Minor, effective verdict; `review-check.test.mjs` covering every scenario in the delta
+- [x] 2.2 `forge review-check <file>` command in `bin/forge.mjs` with `--json`; CLI test
+- [x] 2.3 `review-census.mjs` counts a rejection only with ≥1 backed blocking item; tests that floors still require the dispatch
+- [x] 2.4 `forge refute list --md --for-diff <range>` in `refute.mjs`: session entries + ≤20 basename matches from `.forge/known-false.jsonl`, most recent first; tests for match and cap
 
 ## 3. Coordinator context
-- [ ] 3.1 `metrics/collect.mjs` + `metrics/dispatches.mjs`: coordinator vs subagent requests, per-group split, mean context per coordinator request, `null` when not separable; tests with `test-host-tree.mjs` fixtures
+- [ ] 3.1 `metrics/collect.mjs` + `metrics/dispatches.mjs`: carry the existing `breakdown.parent` / `breakdown.subagents` split into the `sessions.jsonl` digest, add a per-group split and mean context per coordinator request, `null` when not separable; the running dispatch count also counts `decision: "rewrite"` lines (they run); tests with `test-host-tree.mjs` fixtures
 - [ ] 3.2 `packages/cli/src/group-close.mjs` + `forge group close --group <name>`: checkpoint (when enabled) → range → precheck → label, one short block, stop on failing step; tests
-- [ ] 3.3 Short default output for `forge phase` and `forge status`, `--json` keeps the full object; switch every in-repo and template parser (hooks, scripts, e2e harness) to `--json`; tests
+- [ ] 3.3 `--brief` short output for `forge phase` and `forge status` (default JSON unchanged); tests
 
 ## 4. Prompts, docs and product loop
 - [ ] 4.1 `skills/forge/subagents/task-reviewer-prompt.md`, `final-reviewer-prompt.md`, `closer-prompt.md`: Evidence line rules and `{KNOWN_FALSE}`; implementer and reviewer prompts end with the short-reply rule (docs-only, `--no-tdd`)
