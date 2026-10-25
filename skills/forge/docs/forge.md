@@ -341,12 +341,33 @@ forge escapes [list] [--json] [--rev <ref>]
                                   # c confirm / d dismiss / s skip / q quit
                                   # A candidate whose hit files the change's own plan never names is
                                   # marked `outside plan … possible sweep (F16)` (a label, not a filter)
+                                  # Ranges are per repository: a candidate names its repo (nested repos
+                                  # included); older sessions get an `inferred` time-window range
 forge escapes confirm <session> <commit> [--test <path>]
                                   # confirm needs a replay test: the fix commit's own, or one you name
 forge escapes dismiss <session> <commit> [--reason "<why>"]
                                   # decisions → .forge/escapes.jsonl
-forge escapes report [--json]     # Escape rate per month and per pace (`unknown` if none recorded) of done,
-                                  # across the fleet (OPEN = window running)
+forge escapes verify [--all | <session> <commit>] [--json]
+                                  # replay the fix commit's test on the fix's parent (fix's test copied in)
+                                  # and on the fix, in throwaway worktrees under the temp dir; your working
+                                  # tree is untouched. Needs an `escapes.replay` rule + the exec opt-in.
+                                  # old fails + fix passes → auto-confirmed (`auto: true` in the ledger).
+                                  # Otherwise tagged, never dismissed: `environment` (fix run fails, or old
+                                  # run died on a missing module/syntax error), `not-reproduced` (test passes
+                                  # on old code), or undecided with a reason (no-test, no-rule, timeout,
+                                  # no-exit, cannot-start, error)
+forge escapes report [--by version] [--json]
+                                  # Escape rate per month and per pace (`unknown` if none recorded) of done,
+                                  # across the fleet (OPEN = window running); --by version adds a row per
+                                  # forgekit release (`unknown` for sessions without one)
+                                  # Replay rules (.forge/config.json), first match wins; `match` globs the
+                                  # root-relative test path, `{file}` is relative to `cwd`:
+                                  #   "escapes": { "replay": [ { "match": "volo_web/server/**",
+                                  #     "cwd": "volo_web/server",
+                                  #     "command": "node node_modules/jest/bin/jest.js {file}" } ],
+                                  #     "replayTimeoutSec": 300 }          # default 300 per run
+                                  # No shell: on Windows name a real executable (`node …`), not an
+                                  # `npm`/`npx` .cmd shim
 forge fires [--json] [--since <iso>]
                                   # Gate fire counts per gate across the fleet, zeros included
                                   # (log: ~/.forgekit/fleet/gate-fires.jsonl, one line per gate refusal)

@@ -1064,6 +1064,7 @@ const ALL_ROSTER = [
   'checkpoint-scope',
   'budget',
   'group-close',
+  'escape-replay',
 ];
 
 if (phase === 'all') {
@@ -3392,6 +3393,113 @@ if (phase === 'boot') {
   }
 
   process.stdout.write(`GROUP CLOSE GREEN — checkpoint ${headAfter.slice(0, 7)} committed; ${closed.stdout.split('\n').find((l) => l.startsWith('reviewTarget')) ?? 'reviewTarget printed'}\n`);
+} else if (phase === 'escape-replay') {
+  // `forge escapes verify` AGAINST THE SHIPPED BINARY, in a nested repository: a
+  // session whose change commits a buggy line in `app/` reaches done, a later
+  // fix there adds a test that fails on the buggy code, and verify must replay it
+  // in throwaway worktrees and auto-confirm — leaving no worktree and the nested
+  // repo's working tree exactly as it was.
+  const dir = `${SCRATCH}-escape-replay`;
+  fs.rmSync(dir, { recursive: true, force: true });
+  const appDir = path.join(dir, 'app');
+  fs.mkdirSync(appDir, { recursive: true });
+
+  const gitAt = (cwd, at, ...args) => {
+    const when = new Date(at).toISOString();
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} (in ${cwd}): ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  const commitIn = (cwd, files, subject, at) => {
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true });
+      fs.writeFileSync(path.join(cwd, rel), text);
+    }
+    gitAt(cwd, at, 'add', '-A');
+    gitAt(cwd, at, 'commit', '-q', '-m', subject);
+    return gitAt(cwd, at, 'rev-parse', 'HEAD');
+  };
+  const initRepo = (cwd) => {
+    gitAt(cwd, Date.now(), 'init', '-q');
+    gitAt(cwd, Date.now(), 'config', 'user.email', 'e2e@example.com');
+    gitAt(cwd, Date.now(), 'config', 'user.name', 'E2E Harness');
+    gitAt(cwd, Date.now(), 'config', 'core.autocrlf', 'false');
+  };
+
+  // Root repo (code lives in the nested repo, as in Volo) and the nested repo `app`.
+  initRepo(dir);
+  commitIn(dir, { '.gitignore': '.forge/\napp/\n', 'README.md': 'root\n' }, 'root', Date.now() - 86400000);
+  initRepo(appDir);
+  commitIn(appDir, { 'package.json': '{"type":"module"}\n', 'README.md': 'app\n' }, 'base', Date.now() - 86400000);
+
+  const created = forge(dir, ['new', 'replay']);
+  if (created.code !== 0) fail('forge new exited non-zero', created.out);
+  let sessionId;
+  try {
+    sessionId = JSON.parse(created.stdout).sessionId;
+  } catch {
+    fail('forge new did not print JSON', created.out);
+  }
+  // Pin the plan dir and the replay rule; written after `forge new`.
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' }, escapes: { replay: [{ match: 'app/**', cwd: 'app', command: 'node --test {file}' }] } }, null, 2)}\n`,
+  );
+
+  // The change commits a buggy line in the nested repo; the session reaches done on a waiver.
+  commitIn(appDir, { 'src/add.js': 'export const add = (a, b) => a - b;\n// pad one\n// pad two\n' }, 'feat: add', Date.now());
+  const done = forge(dir, ['phase', 'done', '--allow-incomplete', 'e2e: escape-replay product loop']);
+  if (done.code !== 0) fail('forge phase done --allow-incomplete exited non-zero', done.out);
+
+  // A later fix corrects the line and adds a test that fails on the buggy code.
+  const fixTest = [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "import { add } from '../src/add.js';",
+    '',
+    "test('add sums', () => {",
+    '  assert.equal(add(2, 3), 5);',
+    '});',
+    '',
+  ].join('\n');
+  const fix = commitIn(
+    appDir,
+    { 'src/add.js': 'export const add = (a, b) => a + b;\n// pad one\n// pad two\n', 'test/add.test.js': fixTest },
+    'fix: add sums',
+    Date.now() + 60000,
+  );
+
+  const statusBefore = gitAt(appDir, Date.now(), 'status', '--porcelain');
+  const verified = forge(dir, ['escapes', 'verify', '--all', '--json']);
+  if (verified.code !== 0) fail('forge escapes verify --all exited non-zero', verified.out);
+  let report;
+  try {
+    report = JSON.parse(verified.stdout);
+  } catch {
+    fail('forge escapes verify --all --json did not print JSON', verified.out);
+  }
+  const hit = (report.results ?? []).find((r) => r.commit === fix);
+  if (!hit) fail(`forge escapes verify did not report the fix commit ${fix.slice(0, 7)}`, verified.stdout);
+  if (hit.repo !== 'app') fail(`the candidate is reported for repo "${hit.repo}", not "app"`, verified.stdout);
+  if (hit.outcome !== 'confirmed') fail(`the candidate was not auto-confirmed (outcome ${hit.outcome}${hit.reason ? `: ${hit.reason}` : ''})`, verified.stdout);
+
+  const ledger = fs
+    .readFileSync(path.join(dir, '.forge', 'escapes.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l))
+    .filter((l) => l.commit === fix && l.decision === 'confirmed');
+  if (ledger.length !== 1 || ledger[0].auto !== true) fail('the escapes ledger has no single auto: true confirmation for the fix commit', JSON.stringify(ledger));
+
+  const worktrees = gitAt(appDir, Date.now(), 'worktree', 'list', '--porcelain')
+    .split('\n')
+    .filter((l) => l.startsWith('worktree '));
+  if (worktrees.length !== 1) fail('git worktree list in the nested repo shows leftover worktrees', worktrees.join('\n'));
+  const statusAfter = gitAt(appDir, Date.now(), 'status', '--porcelain');
+  if (statusAfter !== statusBefore) fail("the nested repo's working tree changed during verify", `before:\n${statusBefore}\nafter:\n${statusAfter}`);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  process.stdout.write(`ESCAPE REPLAY GREEN — ${fix.slice(0, 7)} in app auto-confirmed; no worktree left, working tree unchanged\n`);
 } else if (phase === 'retire-triage-hook') {
   const dir = `${SCRATCH}-retire-triage-hook`;
   fs.rmSync(dir, { recursive: true, force: true });
@@ -3908,7 +4016,7 @@ if (phase === 'boot') {
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'brainstorm-gate|init-preserves-config|checkpoint-scope|budget|group-close|retire-triage-hook|agents-target|tier3-lock|resource-leases\n',
+      'brainstorm-gate|init-preserves-config|checkpoint-scope|budget|group-close|escape-replay|retire-triage-hook|agents-target|tier3-lock|resource-leases\n',
   );
   process.exit(1);
 }

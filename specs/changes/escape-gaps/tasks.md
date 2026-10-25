@@ -16,5 +16,5 @@
 - [x] 3.2 `forge escapes report --by version`; tests
 
 ## 4. Docs and product loop
-- [ ] 4.1 `CONTEXT.md` **Commit range** per repository (+ inferred note); `docs/usage.md` and `skills/forge/docs/forge.md`: `escapes.replay`, `forge escapes verify`, `--by version`; CHANGELOG (docs-only, `--no-tdd`)
-- [ ] 4.2 Product loop: `scripts/e2e/harness-portability.mjs` phase `escape-replay` — scratch project with a nested repo, a done session whose change added a line, a later fix commit with a test that fails before the fix, a replay rule; `forge escapes verify --all` must auto-confirm it; session `forge e2e run` green
+- [x] 4.1 `CONTEXT.md` **Commit range** per repository (+ inferred note); `docs/usage.md` and `skills/forge/docs/forge.md`: `escapes.replay`, `forge escapes verify`, `--by version`; CHANGELOG (docs-only, `--no-tdd`)
+- [x] 4.2 Product loop: `scripts/e2e/harness-portability.mjs` phase `escape-replay` — scratch project with a nested repo, a done session whose change added a line, a later fix commit with a test that fails before the fix, a replay rule; `forge escapes verify --all` must auto-confirm it; session `forge e2e run` green

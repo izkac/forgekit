@@ -29,7 +29,7 @@ A later commit, within 14 days of done, that modifies or deletes lines the chang
 _Avoid_: suspected bug
 
 **Commit range**:
-The base..head commits recorded for a change when its session reaches done.
+The base..head commits recorded for a change in each repository it touched; for sessions recorded before per-repository ranges, inferred from the session's time window.
 
 **Escape rate**:
 The share of done **Forge sessions** with at least one **Escape**; the primary measure of the **Promise**.
@@ -50,7 +50,7 @@ _Avoid_: gate hit, block
 - Confirming an **Escape** includes supplying its replay test: the fix commit's test if it has one, otherwise one written by the operator
 - Each confirmed **Escape** yields one **Escape replay**; replays are where evals compare **Forge sessions** with **Plain sessions**
 - A gate with no **Gate fire** across the fleet by 2027-04-24 is cut or moved behind thorough pace; zero **Escapes** alone never justifies a cut, since a working gate prevents them
-- A **Commit range** yields zero or more **Escape candidates**; the operator confirms or dismisses each one
+- A **Commit range** (per repository) yields zero or more **Escape candidates**; the operator confirms or dismisses each one
 
 ## Flagged ambiguities
 
