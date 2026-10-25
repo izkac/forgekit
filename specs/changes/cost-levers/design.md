@@ -25,8 +25,10 @@ the coordinator. A third saves rework: fewer false reviewer claims to refute.
 - **Measure coordinator context before deeper cuts.** Split coordinator vs subagent requests
   per group from host transcripts (sidechain transcripts are separate files); `null` when the
   host cannot tell them apart.
-- **`forge group close`** composes existing functions (checkpoint, range, precheck, label)
-  in-process; it adds no new rules.
+- **`forge group close`** composes the existing steps (checkpoint, range, precheck, label) and adds
+  no new review rules. Range and precheck run in-process; checkpoint and label are spawned as their
+  own CLIs (both are `process.exit` scripts and the label step stamps the dispatch). It validates the
+  unit name and precheck before committing, and a retry keeps the group's whole range.
 - **Short output is opt-in (`--brief`)** for `forge phase` and `forge status`; JSON stays the
   default. Changed during implement: 6 test files and 3 e2e scripts parse the default JSON,
   and short output saves ~1% of a request's context — not worth a breaking change.
