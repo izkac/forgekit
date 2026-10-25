@@ -1,0 +1,68 @@
+<!-- forge-brief-specs-hash:40cc94c23a542b9e -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escape rate by pace brief</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#5f6368; --line:#e3e3e3; --accent:#2457c5; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181c; --fg:#e8e8ea; --muted:#9aa0a6; --line:#2c2f35; --accent:#7aa7ff; } }
+  body { background:var(--bg); color:var(--fg); font:16px/1.55 system-ui, sans-serif; max-width:760px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:1.6rem; margin-bottom:.2rem; } h2 { font-size:1.15rem; margin-top:2rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+  code { background:color-mix(in srgb, var(--fg) 8%, transparent); padding:1px 5px; border-radius:4px; font-size:.92em; }
+  .muted { color:var(--muted); } table { border-collapse:collapse; width:100%; } td, th { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });</script>
+</head>
+<body>
+<h1>Escape rate by pace, and a sweep label</h1>
+<p class="muted">Operator brief — what this change builds, in plain language.</p>
+
+<h2>TL;DR</h2>
+<p>The Escape rate report will show the rate per pace (thorough, standard, brisk, lite) next to the per-month view, so you can see whether standard-pace process actually leads to fewer escapes than brisk. And when an escape candidate touches a file the change's plan never mentions — the sign that someone else's edit got swept into the change's commit (finding F16) — the listing says so, so you can dismiss it fast.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li><code>forge escapes report</code> prints a second table: done sessions, escapes, rate and open windows per pace. Sessions with no recorded pace show as <code>unknown</code>.</li>
+  <li><code>forge escapes</code> marks a candidate with <em>outside plan: &lt;files&gt; — possible sweep (F16)</em> when the files it hit are never named in the change's own plan.</li>
+  <li>Both appear in <code>--json</code> too (<code>byPace</code>, <code>outsidePlan</code>). Nothing existing changes shape.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>Each finished session already records its pace. The report now counts every done session three ways — by month, by pace, and in total. For the label, Forge reads the plan documents the change itself committed (proposal, design, tasks, specs) and checks whether each file a candidate touched is named there.</p>
+<pre class="mermaid">
+flowchart LR
+  A[later commit rewrites a change line] --> B{file named in the change's plan?}
+  B -- yes --> C[candidate, no label]
+  B -- no --> D[candidate + 'outside plan — possible sweep']
+  C --> E[you confirm or dismiss]
+  D --> E
+</pre>
+
+<h2>What changes for you</h2>
+<p>No new commands. The report has one more table; some candidates carry a label. You still decide every candidate yourself — the label never hides one.</p>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>The label is a hint, not proof. On this repo's real history it marks both swept-in files from F16, and wrongly marks one legitimate file out of eleven (<code>docs/usage.md</code>). That is why it labels and never filters.</li>
+  <li>F16 itself stays open: <code>forge checkpoint</code> can still sweep in unrelated edits, because Forge has no record of who edited what. This change only stops those sweeps from costing you more than a quick dismiss.</li>
+  <li>With 11 done sessions so far (9 standard, 2 brisk), the by-pace numbers will be thin for a while.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Changing <code>forge checkpoint</code>.</li>
+  <li>Other noise in the candidate list: release commits that rewrite CHANGELOG lines, and commits on the same branch after done. Both get filed as findings.</li>
+  <li>Escape replay eval tasks.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>Size</th></tr>
+  <tr><td>Rate by pace, and the outside-plan label (code + new tests)</td><td>2 tasks</td></tr>
+  <tr><td>Docs, the end-to-end check, and a run against this repo's real history</td><td>2 tasks</td></tr>
+</table>
+</body>
+</html>

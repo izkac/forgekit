@@ -14,6 +14,11 @@
   test (the fix commit's own or `--test <path>`). Decisions go to
   `.forge/escapes.jsonl`. `forge escapes report` gives the Escape rate per month
   across the fleet.
+- **Escape rate per pace.** `forge escapes report` also splits the Escape rate by
+  the session's pace (`unknown` when none was recorded).
+- **Outside-plan label.** `forge escapes` marks a candidate `outside plan … possible
+  sweep (F16)` when the files it hit are never named in the change's own plan. A
+  label only; it never filters a candidate.
 - **Gate fires.** Every gate refusal (phase gates, done-gate sub-checks,
   integrity-check, test guard, model policy, evidence, tdd exec/expectation,
   review-label, task gates, checkpoint, lease guard, busy lease) appends `{gate, sessionId, project, at}`

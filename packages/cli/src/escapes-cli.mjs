@@ -8,7 +8,7 @@
  *                                                  (bare, on a terminal: decide one keystroke each)
  *   forge escapes confirm <session> <commit> [--test <path>]
  *   forge escapes dismiss <session> <commit> [--reason <text>]
- *   forge escapes report [--json]                  Escape rate per month of done, fleet-wide
+ *   forge escapes report [--json]                  Escape rate per month of done and per pace, fleet-wide
  */
 
 import readline from 'node:readline';
@@ -74,7 +74,7 @@ function printReport() {
   }
   const pct = (r) => `${(r * 100).toFixed(0)}%`.padStart(5);
   const lines = [
-    `Escape rate — done Forge sessions with ≥1 confirmed Escape, by month of done (${report.projects.length} project(s))`,
+    `Escape rate — done Forge sessions with ≥1 confirmed Escape, by month of done and by pace (${report.projects.length} project(s))`,
     '',
     'MONTH     DONE  ESCAPED  RATE  OPEN',
     ...report.months.map(
@@ -82,10 +82,18 @@ function printReport() {
     ),
     `total     ${String(report.total.done).padStart(4)}  ${String(report.total.escaped).padStart(7)}  ${pct(report.total.rate)}  ${String(report.total.open).padStart(4)}`,
     '',
+    'PACE      DONE  ESCAPED  RATE  OPEN',
+    ...report.byPace.map(
+      (p) => `${p.pace.padEnd(10)}${String(p.done).padStart(4)}  ${String(p.escaped).padStart(7)}  ${pct(p.rate)}  ${String(p.open).padStart(4)}`,
+    ),
+    '',
     `OPEN = ${WINDOW_DAYS}-day window still running; that month's rate can still rise.`,
   ];
   process.stdout.write(`${lines.join('\n')}\n`);
 }
+
+/** F16: hit files the change's own plan never names. @param {string[]} files */
+const sweepLine = (files) => `  outside plan: ${files.join(', ')} — possible sweep (F16)`;
 
 /** @param {ReturnType<typeof pendingCandidates>} sessions */
 function printList(sessions) {
@@ -101,6 +109,7 @@ function printList(sessions) {
     for (const c of s.candidates) {
       count += 1;
       out.push(`  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}  [${c.lines} line(s): ${c.files.join(', ')}]`);
+      if (c.outsidePlan.length) out.push(sweepLine(c.outsidePlan));
     }
   }
   out.push('', `${count} undecided candidate(s). Decide: forge escapes confirm|dismiss <session> <commit>`);
@@ -147,6 +156,7 @@ async function interactive(sessions) {
       `\n[${n}/${queue.length}] ${s.sessionId} (${s.slug ?? '?'}, done ${String(s.doneAt).slice(0, 10)})\n` +
         `  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}\n` +
         `  rewrites ${c.lines} line(s) the change added: ${c.files.join(', ')}\n` +
+        (c.outsidePlan.length ? `${sweepLine(c.outsidePlan)}\n` : '') +
         '  [c]onfirm Escape  [d]ismiss  [s]kip  [q]uit > ',
     );
     for (;;) {
