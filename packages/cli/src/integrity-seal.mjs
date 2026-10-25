@@ -29,6 +29,21 @@ export const SEAL_VERSION = 1;
 
 const CONTROL_RELS = Object.freeze(['.forge/active.json', '.forge/config.json']);
 
+/** Phases before the plan is approved; `forge phase implement` is the approval point. */
+const PLANNING_PHASES = new Set(['triage', 'brainstorm', 'plan']);
+/** Session-dir artifacts the agent authors during planning. */
+const PLAN_ARTIFACTS = Object.freeze(['spine.json', 'e2e.json']);
+
+/** @param {string} sessionDir @returns {string | null} — null when unreadable (fail closed: not planning). */
+function readPhase(sessionDir) {
+  try {
+    const phase = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'))?.phase;
+    return typeof phase === 'string' ? phase : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Basenames whose session-dir copies are sealed (control + integrity
  * artifacts). Duplicated from `guard.mjs`'s `INTEGRITY_ARTIFACTS` plus
@@ -258,7 +273,18 @@ export function checkIntegritySeal({ cwd, sessionDir, repoRoot }) {
     };
   }
 
+  // Plan artifacts are hand-authored after `forge spine init` / `forge e2e init`
+  // scaffold them, so they stay editable until the plan is approved; entering
+  // implement saves the session, which seals them (F19). The phase comes from
+  // the live session.json, which is itself sealed — flipping it back to `plan`
+  // is caught as a session.json mutation.
+  const sessionRel = path.relative(root, sessionDir).split(path.sep).join('/');
+  const planEditable = PLANNING_PHASES.has(readPhase(sessionDir))
+    ? new Set(PLAN_ARTIFACTS.map((b) => `${sessionRel}/${b}`))
+    : new Set();
+
   for (const [rel, expected] of Object.entries(seal.files)) {
+    if (planEditable.has(rel)) continue;
     if (typeof expected !== 'string' || !expected) {
       problems.push(`integrity-seal.json has a non-hash entry for ${rel} — fail closed`);
       continue;

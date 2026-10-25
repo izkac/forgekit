@@ -126,6 +126,54 @@ test('checkIntegritySeal: untracked session artifact (spine.json) mutation is ca
   assert.ok(problems.some((p) => p.includes('spine.json')));
 });
 
+/** A sealed session in `phase`, as `forge spine init` / `forge e2e init` leave it during planning. */
+function makePlanningSession(cwd, phase = 'plan') {
+  const sessionDir = makeSealedSession(cwd);
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify({ id: 's1', slug: 'x', phase }, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(path.join(sessionDir, 'e2e.json'), '{"steps":[{"name":"<boot>","cmd":"<cmd>"}]}\n', 'utf8');
+  refreshIntegritySeal({ sessionDir, repoRoot: cwd });
+  return sessionDir;
+}
+
+for (const phase of ['triage', 'brainstorm', 'plan']) {
+  test(`checkIntegritySeal: authoring spine.json and e2e.json during ${phase} is not a finding (F19)`, () => {
+    const cwd = tmp('seal-plan-');
+    const sessionDir = makePlanningSession(cwd, phase);
+    fs.writeFileSync(path.join(sessionDir, 'spine.json'), '{"rows":[{"capability":"x"}],"notApplicable":null}\n', 'utf8');
+    fs.writeFileSync(path.join(sessionDir, 'e2e.json'), '{"steps":[{"name":"boot","cmd":"node boot.mjs"}]}\n', 'utf8');
+    assert.deepEqual(checkIntegritySeal({ cwd, sessionDir }).problems, []);
+  });
+}
+
+test('checkIntegritySeal: during planning, other sealed artifacts are still caught', () => {
+  const cwd = tmp('seal-plan-other-');
+  const sessionDir = makePlanningSession(cwd);
+  fs.writeFileSync(path.join(sessionDir, 'verify-runs.jsonl'), '{"exit":0}\n', 'utf8');
+  refreshIntegritySeal({ sessionDir, repoRoot: cwd });
+  fs.writeFileSync(path.join(sessionDir, 'verify-runs.jsonl'), '{"exit":0,"forged":true}\n', 'utf8');
+  const { problems } = checkIntegritySeal({ cwd, sessionDir });
+  assert.ok(problems.some((p) => p.includes('verify-runs.jsonl')), problems.join('\n'));
+});
+
+test('checkIntegritySeal: flipping session.json back to plan does not unlock spine.json', () => {
+  const cwd = tmp('seal-plan-flip-');
+  const sessionDir = makeSealedSession(cwd); // sealed in implement
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify({ id: 's1', slug: 'x', phase: 'plan' }, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(path.join(sessionDir, 'spine.json'), '{"rows":[],"notApplicable":"pwned"}\n', 'utf8');
+  const { problems } = checkIntegritySeal({ cwd, sessionDir });
+  assert.ok(problems.some((p) => p.includes('session.json')), problems.join('\n'));
+});
+
+test('checkIntegritySeal: once implement starts, spine.json and e2e.json edits are caught again', () => {
+  const cwd = tmp('seal-impl-');
+  const sessionDir = makePlanningSession(cwd);
+  fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify({ id: 's1', slug: 'x', phase: 'implement' }, null, 2)}\n`, 'utf8');
+  refreshIntegritySeal({ sessionDir, repoRoot: cwd }); // what saveSession does on entering implement
+  fs.writeFileSync(path.join(sessionDir, 'e2e.json'), '{"steps":[]}\n', 'utf8');
+  const { problems } = checkIntegritySeal({ cwd, sessionDir });
+  assert.ok(problems.some((p) => p.includes('e2e.json')), problems.join('\n'));
+});
+
 test('checkIntegritySeal: deleting a sealed path fails closed', () => {
   const cwd = tmp('seal-del-');
   const sessionDir = makeSealedSession(cwd);
