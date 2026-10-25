@@ -51,7 +51,7 @@ const lines = (text) => (text ?? '').split('\n').filter(Boolean);
  *
  * @param {{ cwd: string }} opts
  * @returns {Array<{ sessionId: string, slug: string | null, startedAt: string | null, doneAt: string | null,
- *   commitRange: { base: string, head: string } | null,
+ *   forgekitVersion: string | null, commitRange: { base: string, head: string } | null,
  *   nestedCommitRanges: Record<string, { base: string, head: string }> | null, project: string }>}
  */
 export function doneSessions({ cwd }) {
@@ -65,6 +65,7 @@ export function doneSessions({ cwd }) {
       slug: row.slug ?? null,
       startedAt: row.startedAt ?? null,
       doneAt: row.endedAt ?? null,
+      forgekitVersion: row.forgekitVersion ?? null,
       commitRange: row.commitRange ?? null,
       nestedCommitRanges: row.nestedCommitRanges ?? null,
       project: root,
@@ -86,6 +87,7 @@ export function doneSessions({ cwd }) {
       slug: e.slug ?? null,
       startedAt: e.createdAt ?? null,
       doneAt: e.updatedAt ?? null,
+      forgekitVersion: null, // the registry does not record the release
       commitRange: e.commitRange ?? null,
       nestedCommitRanges: e.nestedCommitRanges ?? null,
       project: e.project,
@@ -577,12 +579,16 @@ export function candidateOrigin({ cwd, sessionId, commit, rev = 'HEAD' }) {
  * at done (digest row, else registry entry), else `unknown`; `byPace` runs
  * thorough..lite, then other recorded values alphabetically, `unknown` last.
  *
- * @param {{ cwd: string, now?: number }} opts
+ * With `by: 'version'` the report also carries `byVersion`: the same columns per
+ * `forgekitVersion` recorded on the digest row (the registry does not record
+ * one), oldest release first, `unknown` for sessions without one, last.
+ *
+ * @param {{ cwd: string, now?: number, by?: 'version' | null }} opts
  */
-export function escapeReport({ cwd, now = Date.now() }) {
+export function escapeReport({ cwd, now = Date.now(), by = null }) {
   const fleet = listFleet();
   const roots = new Set([path.resolve(cwd), ...fleet.filter((e) => !e.missing).map((e) => path.resolve(e.project))]);
-  /** @type {Map<string, { at: string, pace: string | null }>} sessionId → done time and pace */
+  /** @type {Map<string, { at: string, pace: string | null, version: string | null }>} sessionId → done time, pace and forgekit version */
   const done = new Map();
   const escaped = new Set();
   /** Sessions whose every confirmed Escape came from an inferred range. */
@@ -590,7 +596,9 @@ export function escapeReport({ cwd, now = Date.now() }) {
   const notInferred = new Set();
   for (const root of roots) {
     for (const row of readLedger(path.join(root, '.forge', 'sessions.jsonl'))) {
-      if (row.phase === 'done' && row.sessionId && row.endedAt) done.set(row.sessionId, { at: row.endedAt, pace: row.pace ?? null });
+      if (row.phase === 'done' && row.sessionId && row.endedAt) {
+        done.set(row.sessionId, { at: row.endedAt, pace: row.pace ?? null, version: row.forgekitVersion ?? null });
+      }
     }
     for (const d of readDecisions(root)) {
       if (d.decision !== 'confirmed') continue;
@@ -601,7 +609,7 @@ export function escapeReport({ cwd, now = Date.now() }) {
   for (const e of fleet) {
     if (e.phase !== 'done' || !e.sessionId || !e.updatedAt) continue;
     const known = done.get(e.sessionId);
-    if (!known) done.set(e.sessionId, { at: e.updatedAt, pace: e.pace ?? null });
+    if (!known) done.set(e.sessionId, { at: e.updatedAt, pace: e.pace ?? null, version: null });
     else known.pace ??= e.pace ?? null;
   }
 
@@ -610,20 +618,27 @@ export function escapeReport({ cwd, now = Date.now() }) {
   /** @type {Map<string, { pace: string, done: number, escaped: number, rate: number, open: number }>} */
   const paces = new Map();
   const total = { done: 0, escaped: 0, rate: 0, open: 0 };
-  for (const [id, { at, pace }] of done) {
+  /** @type {Map<string, { version: string, done: number, escaped: number, rate: number, open: number }>} */
+  const versions = new Map();
+  for (const [id, { at, pace, version }] of done) {
     const month = at.slice(0, 7);
     const paceKey = pace || 'unknown';
+    const versionKey = version || 'unknown';
     if (!months.has(month)) months.set(month, { month, done: 0, escaped: 0, rate: 0, open: 0 });
     if (!paces.has(paceKey)) paces.set(paceKey, { pace: paceKey, done: 0, escaped: 0, rate: 0, open: 0 });
+    if (!versions.has(versionKey)) versions.set(versionKey, { version: versionKey, done: 0, escaped: 0, rate: 0, open: 0 });
     const m = /** @type {NonNullable<ReturnType<typeof months.get>>} */ (months.get(month));
     const p = /** @type {NonNullable<ReturnType<typeof paces.get>>} */ (paces.get(paceKey));
-    for (const bucket of [m, p, total]) {
+    const v = /** @type {NonNullable<ReturnType<typeof versions.get>>} */ (versions.get(versionKey));
+    for (const bucket of [m, p, v, total]) {
       bucket.done += 1;
       if (escaped.has(id)) bucket.escaped += 1;
       if (now - Date.parse(at) < WINDOW_MS) bucket.open += 1;
     }
   }
-  for (const bucket of [...months.values(), ...paces.values(), total]) bucket.rate = bucket.done ? bucket.escaped / bucket.done : 0;
+  for (const bucket of [...months.values(), ...paces.values(), ...versions.values(), total]) {
+    bucket.rate = bucket.done ? bucket.escaped / bucket.done : 0;
+  }
   // Of the escaped sessions, those resting only on inferred ranges (time-window guesses).
   const inferred = { escaped: [...done.keys()].filter((id) => inferredOnly.has(id) && !notInferred.has(id)).length };
   /** @param {string} pace */
@@ -636,6 +651,15 @@ export function escapeReport({ cwd, now = Date.now() }) {
         paceRank(a.pace) - paceRank(b.pace) ||
         (paceRank(a.pace) === 0 ? CONCRETE_PACES.indexOf(a.pace) - CONCRETE_PACES.indexOf(b.pace) : a.pace.localeCompare(b.pace)),
     ),
+    ...(by === 'version'
+      ? {
+          byVersion: [...versions.values()].sort(
+            (a, b) =>
+              (a.version === 'unknown') - (b.version === 'unknown') ||
+              a.version.localeCompare(b.version, 'en', { numeric: true }),
+          ),
+        }
+      : {}),
     total,
     inferred,
   };

@@ -34,10 +34,21 @@ export const ENVIRONMENT_SIGNATURES = new RegExp(
     'ModuleNotFoundError|ImportError',
     // vitest / vite, esbuild
     'Failed to resolve import|Could not resolve',
-    // go
-    'undefined: \\w|cannot find package',
+    // go — `undefined:` only in Go's own `<file>.go:<line>:<col>:` shape, so JS text like "expected undefined: 5" stays a failure
+    '\\.go:\\d+:\\d+: undefined: \\w|cannot find package|no required module provides package',
+    // typescript
+    '\\bTS(?:2304|2307)\\b',
+    // rust
+    'error\\[E0432\\]',
+    // java
+    'cannot find symbol',
+    // ruby
+    'LoadError',
   ].join('|'),
 );
+
+/** Windows reports a crashed process as an NTSTATUS exit code (0xC0000005 = access violation), not `null`. */
+const FIRST_NTSTATUS_EXIT = 0xc0000000;
 
 /** Output kept per run, from the end — a failing test prints its reason last. */
 const OUTPUT_KEEP = 1024 * 1024;
@@ -279,7 +290,7 @@ export function classifyReplay({ old, fix }) {
   if (old.timedOut || fix.timedOut) return { outcome: 'undecided', reason: 'timeout' };
   if (old.error && fix.error) return { outcome: 'undecided', reason: `cannot-start: ${old.error}` };
   if (fix.exit !== 0) return { outcome: 'environment' };
-  if (old.exit === null) return { outcome: 'undecided', reason: 'no-exit' };
+  if (old.exit === null || old.exit >= FIRST_NTSTATUS_EXIT) return { outcome: 'undecided', reason: 'no-exit' };
   if (old.exit === 0) return { outcome: 'not-reproduced' };
   return { outcome: ENVIRONMENT_SIGNATURES.test(old.output) ? 'environment' : 'confirmed' };
 }

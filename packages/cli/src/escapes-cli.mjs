@@ -11,7 +11,8 @@
  *   forge escapes verify [--all | <session> <commit>] [--json]
  *                                                  replay each candidate's fix test on the fix's parent and on
  *                                                  the fix (needs an `escapes.replay` rule and the exec opt-in)
- *   forge escapes report [--json]                  Escape rate per month of done and per pace, fleet-wide
+ *   forge escapes report [--by version] [--json]   Escape rate per month of done and per pace, fleet-wide
+ *                                                  (--by version adds one row per forgekit release)
  */
 
 import path from 'node:path';
@@ -26,7 +27,7 @@ const USAGE = `Usage:
   forge escapes confirm <session> <commit> [--test <path>]
   forge escapes dismiss <session> <commit> [--reason <text>]
   forge escapes verify [--all | <session> <commit>] [--json]
-  forge escapes report [--json]
+  forge escapes report [--by version] [--json]
 `;
 
 const args = process.argv.slice(2);
@@ -40,7 +41,7 @@ const flag = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? (args[i + 1] ?? null) : null;
 };
-const positional = args.filter((a, i) => !a.startsWith('--') && !['--rev', '--test', '--reason'].includes(args[i - 1]));
+const positional = args.filter((a, i) => !a.startsWith('--') && !['--rev', '--test', '--reason', '--by'].includes(args[i - 1]));
 const [sub = null, ...rest] = positional;
 
 /** @param {string} needle */
@@ -79,7 +80,12 @@ function record(session, commit, decision, extra = {}, candidate = undefined) {
 }
 
 function printReport() {
-  const report = escapeReport({ cwd });
+  const by = flag('--by');
+  if (by !== null && by !== 'version') {
+    process.stderr.write(`Unknown --by "${by}": only "version" is supported.\n${USAGE}`);
+    process.exit(1);
+  }
+  const report = escapeReport({ cwd, by });
   if (json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     return;
@@ -98,6 +104,15 @@ function printReport() {
     ...report.byPace.map(
       (p) => `${p.pace.padEnd(10)}${String(p.done).padStart(4)}  ${String(p.escaped).padStart(7)}  ${pct(p.rate)}  ${String(p.open).padStart(4)}`,
     ),
+    ...(report.byVersion
+      ? [
+          '',
+          'VERSION   DONE  ESCAPED  RATE  OPEN',
+          ...report.byVersion.map(
+            (v) => `${v.version.padEnd(10)}${String(v.done).padStart(4)}  ${String(v.escaped).padStart(7)}  ${pct(v.rate)}  ${String(v.open).padStart(4)}`,
+          ),
+        ]
+      : []),
     '',
     `Inferred (time-window, sessions recorded before per-repository ranges): ${report.inferred.escaped} of the ${report.total.escaped} escaped session(s) rest only on inferred ranges.`,
     `OPEN = ${WINDOW_DAYS}-day window still running; that month's rate can still rise.`,

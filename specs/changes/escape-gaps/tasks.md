@@ -11,8 +11,9 @@
 - [x] 2.3 `forge escapes verify [--all | <session> <commit>]` in `escapes-cli.mjs`, behind the exec opt-in (same gate as `forge evidence`); per-candidate output line + summary; tests that spawn the bin
 
 ## 3. Version and models
-- [ ] 3.1 Digest gains `forgekitVersion` and `models: { coordinator, subagents }` (from parent vs sidecar transcripts in `metrics/collect.mjs`; `null` when not separable); tests
-- [ ] 3.2 `forge escapes report --by version`; tests
+- [x] 3.0 `escapes-replay.mjs` hardening from the group 2 review: Windows crash exit codes (NTSTATUS ≥ 0xC0000000) on the old run → `undecided: no-exit`; `ENVIRONMENT_SIGNATURES` adds TypeScript `TS2304`/`TS2307`, Rust `E0432`, Java `cannot find symbol`, Ruby `LoadError`, Go `no required module provides package`; anchor Go `undefined:` to `.go:<line>:<col>: undefined:`; tests
+- [x] 3.1 Digest gains `forgekitVersion` and `models: { coordinator, subagents }` (from parent vs sidecar transcripts in `metrics/collect.mjs`; `null` when not separable); tests
+- [x] 3.2 `forge escapes report --by version`; tests
 
 ## 4. Docs and product loop
 - [ ] 4.1 `CONTEXT.md` **Commit range** per repository (+ inferred note); `docs/usage.md` and `skills/forge/docs/forge.md`: `escapes.replay`, `forge escapes verify`, `--by version`; CHANGELOG (docs-only, `--no-tdd`)

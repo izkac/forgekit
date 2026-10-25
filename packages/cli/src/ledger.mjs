@@ -25,6 +25,13 @@ import { frozenReviewVerdict } from './review-verdict.mjs';
 import { sessionHealth } from './health.mjs';
 import { readRefutations } from './refute.mjs';
 import { dispatchBudgetState } from './metrics/dispatches.mjs';
+import { readVersion } from './version.mjs';
+
+/** The version in this CLI's own package.json (resolved from the module, not the cwd); null when unreadable. */
+const forgekitVersion = () => {
+  const version = readVersion();
+  return version === 'unknown' ? null : version;
+};
 
 /** @param {string} forgeDir */
 export function projectKnownFalsePath(forgeDir) {
@@ -223,6 +230,24 @@ function requestSplitFacts(doc) {
 }
 
 /**
+ * The models the coordinator and the subagents ran on, as measured. Both `null`
+ * wherever the host could not separate the sides (`coordinator: null`), the
+ * metrics were not collected, or the document predates the lists — an unknown,
+ * never an empty list.
+ *
+ * @param {unknown} doc a parsed metrics.json — or anything at all
+ * @returns {{ coordinator: string[] | null, subagents: string[] | null }}
+ */
+function modelsFacts(doc) {
+  const none = { coordinator: null, subagents: null };
+  if (!doc || typeof doc !== 'object' || doc.available !== true || !doc.coordinator) return none;
+  const names = (value) => (Array.isArray(value) && value.every((m) => typeof m === 'string') ? value : null);
+  const coordinator = names(doc.coordinator.models);
+  const subagents = names(doc.subagentModels);
+  return coordinator && subagents ? { coordinator, subagents } : none;
+}
+
+/**
  * What the dispatch ledger contributes to the digest, from a document that may
  * be able to say nothing else.
  *
@@ -401,6 +426,10 @@ export function appendSessionDigest(opts) {
       dispatches: dispatch.table,
       metrics,
       requestSplit: requestSplitFacts(metricsDoc),
+      // Which release wrote this line (`forge escapes report --by version`), and
+      // the models each side ran on — read, like the rest, before the session dir is cleaned.
+      forgekitVersion: forgekitVersion(),
+      models: modelsFacts(metricsDoc),
       reviews: {
         total: census.total,
         independent: census.independent,

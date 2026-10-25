@@ -594,7 +594,11 @@ export function collectMetrics(options) {
         parent: { requests: parentSummary.requests, tokens: parentSummary.tokens },
         subagents: { requests: sidecarSummary.requests, tokens: sidecarSummary.tokens },
       },
-      coordinator: separable ? { meanContextTokens: meanContextTokens(parentEntries) } : null,
+      coordinator: separable
+        ? { meanContextTokens: meanContextTokens(parentEntries), models: Object.keys(parentSummary.byModel).sort() }
+        : null,
+      // Sibling of `coordinator` (`breakdown` is pinned): the models subagents ran on, null when not separable.
+      subagentModels: separable ? Object.keys(sidecarSummary.byModel).sort() : null,
       groups: separable ? splitByGroup(parentEntries, sidecarEntries, session) : null,
     };
   } catch (error) {
