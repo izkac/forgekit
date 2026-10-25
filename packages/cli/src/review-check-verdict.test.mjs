@@ -62,3 +62,63 @@ test('REJECTED inside instructional prose is not a verdict', () => {
   const r = checkReview(review('Verdict: **APPROVED**', { prose }));
   assert.equal(r.originalVerdict, 'APPROVED');
 });
+
+// ---- 4.1b-verdict-heading: heading forms, fences, blockquotes, `or` alternatives ----
+
+const rejected = (md) => checkReview(md).originalVerdict === 'REJECTED';
+const withItem = (head) => `Reviewer: opus (task-reviewer)\n\n${head}\n\n## Important\n\n${BACKED_ITEM}\n`;
+
+test('a "## Verdict: REJECTED" heading is a rejection', () => {
+  assert.equal(rejected(withItem('## Verdict: REJECTED')), true);
+  assert.equal(rejected(withItem('## **Verdict:** **REJECTED**')), true);
+  assert.equal(rejected(withItem('### Verdict: REJECTED')), true);
+});
+
+test('a "## Verdict" heading followed by REJECTED on the next non-blank line is a rejection', () => {
+  assert.equal(rejected(withItem('## Verdict\n\nREJECTED')), true);
+  assert.equal(rejected(withItem('## Verdict\n**REJECTED**')), true);
+  assert.equal(rejected(withItem('## Verdict\n\n- **REJECTED** — missing the retry path')), true);
+  assert.equal(rejected(withItem('## Verdict:\n\n**REJECTED**')), true);
+});
+
+test('a "## Verdict" heading followed by APPROVED stays APPROVED', () => {
+  assert.equal(rejected(withItem('## Verdict\n\nAPPROVED')), false);
+  assert.equal(rejected(withItem('## Verdict\n\n**APPROVED**')), false);
+  assert.equal(rejected(withItem('## Verdict: APPROVED')), false);
+});
+
+test('a "## Verdict" heading with REJECTED only further down is not a verdict', () => {
+  assert.equal(rejected(withItem('## Verdict\n\nAPPROVED\n\nREJECTED would apply if the spec were missing.')), false);
+});
+
+test('REJECTED/APPROVED alternatives written as instructions are not a verdict', () => {
+  for (const line of [
+    'Verdict: **REJECTED** or **APPROVED**',
+    '**Verdict:** **REJECTED** or **APPROVED**',
+    'Verdict: REJECTED / APPROVED',
+    'Verdict: REJECTED|APPROVED',
+    'Verdict: **REJECTED** | **APPROVED**',
+    'Verdict: REJECTED or APPROVED',
+  ]) {
+    assert.equal(rejected(withItem(line)), false, line);
+  }
+  assert.equal(rejected(withItem('## Verdict\n\nREJECTED or APPROVED')), false);
+  assert.equal(rejected(withItem('## Verdict\n\n**REJECTED** / **APPROVED**')), false);
+});
+
+test('a verdict inside a code fence is not a verdict', () => {
+  const quoted = '```\nVerdict: REJECTED\n```\n\n**Verdict: APPROVED**';
+  assert.equal(rejected(withItem(quoted)), false);
+  assert.equal(rejected(withItem('~~~\n## Verdict\nREJECTED\n~~~\n\nVerdict: APPROVED')), false);
+});
+
+test('a verdict inside a blockquote is not a verdict', () => {
+  assert.equal(rejected(withItem('> Verdict: REJECTED\n\nVerdict: APPROVED')), false);
+  assert.equal(rejected(withItem('> **Verdict: REJECTED**\n\n**Verdict: APPROVED**')), false);
+  assert.equal(rejected(withItem('## Verdict\n> REJECTED')), false);
+});
+
+test('a real verdict after a fenced or quoted one still counts', () => {
+  assert.equal(rejected(withItem('```\nVerdict: APPROVED\n```\n\nVerdict: **REJECTED**')), true);
+  assert.equal(rejected(withItem('> Verdict: APPROVED\n\n## Verdict: REJECTED')), true);
+});

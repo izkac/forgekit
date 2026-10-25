@@ -312,13 +312,22 @@ OpenSpec commands remain available standalone (OpenSpec-engine projects):
 
 ```bash
 forge new <slug> [--signal "…"]   # new session + set active (resolves pace; warn-only doctor)
-forge status                      # active session JSON (+ effective pace + health verdict)
-forge phase <phase> […]           # update phase / openspec / task counters
+forge status [--brief]            # active session JSON (+ effective pace + health verdict, dispatches n/<budget>);
+                                  # --brief prints a few lines instead (the low-context read)
+forge phase <phase> […] [--brief] # update phase / openspec / task counters; `implement --tasks-total N` warns
+                                  # when the plan projects more dispatches than .forge/config.json budget.subagents
+                                  # (default 15; warning only, never blocks)
 forge checkpoint --group <name> [--tasks <ids>]
                                   # commit this group's work (opt-in; never pushes)
 forge checkpoint --dry-run        # what a checkpoint would commit
 forge checkpoint --range [--last] # diff range for a reviewer brief ({DIFF_RANGE})
+forge group close --group <nn>-<slug> [--tasks <ids>]
+                                  # group boundary in one call: checkpoint (when enabled), review range
+                                  # (reviewTarget), precheck verdict, review label; stops at the first failing step
 forge review-precheck [--json]    # machine-verified facts for a reviewer packet ({PRECHECK}); exit 1 on integrity problems
+forge review-check <review.md> [--json]
+                                  # which Critical/Important items carry evidence; unbacked ones are downgraded to
+                                  # Minor; prints the effective verdict (only backed items make REJECTED stand)
 forge finding add "<text>" --kind <bug|debt|tradeoff|idea|process> --severity <blocker|major|minor|note> [--change <slug>]
                                   # findings ledger (.forge/findings.jsonl); kind+severity required
 forge finding list|resolve|link|reopen
@@ -356,6 +365,9 @@ forge refute add --task <nn>-<slug> --claim "<believed>" --actual "<evidence sho
 forge refute list [--task <id>] [--all] [--md|--json]
                                   # known-false ledger (session); --md is the {KNOWN_FALSE} brief block;
                                   # --all adds entries carried from finished sessions (.forge/known-false.jsonl)
+forge refute list --md --for-diff <range>
+                                  # reviewer-brief block: this session's refutations plus up to 20 project
+                                  # entries that mention files changed in <range>
 forge --version                   # forge <version> — which installed copy is answering
 forge resolve-model --tier <fast|standard|capable>
                                   # JSON model resolution (included billing by default)

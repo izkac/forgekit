@@ -54,11 +54,40 @@ verbatim as the session's final review and `forge score` reads it. Keep
 `self-check` / `self-review` / `self-audit` / `self-authored` out of your opening
 two paragraphs — those phrases mark a report as the coordinator's own.
 
+## Known false (refuted claims — do not raise these again)
+
+{KNOWN_FALSE}   <!-- coordinator: paste `forge refute list --md --for-diff <range>` for the diff range above, or `none recorded`. Each line is a claim already contradicted by evidence. -->
+
+## Finding format (required)
+
+Write each finding as **one list item** under a `## Critical`, `## Important`
+or `## Minor` heading; spec gaps and integrity failures go under Critical or
+Important. `forge review-check` reads only list items under those headings — a
+NOT READY review with none is still treated as REJECTED, but it cannot be
+checked, so the coordinator cannot tell which finding to fix.
+
+Every Critical and Important item carries **one** evidence line:
+
+- `Command: <argv> → exit <n>` plus the key output lines; or
+- `Spec: "<quoted requirement>"` plus `Missing at: <path[:line]>` (or `<file>: no <symbol>`); or
+- `Scenario: <input/state>` plus `At: <path>:<line>`, `Expected: …` and `Actual: …`.
+
+An item without one is downgraded to Minor by `forge review-check` — still
+reported, never blocking. A concern you cannot back belongs under `## Minor`.
+
 ## Verdict
 
 - **READY** — spec met, evidence real, tests green, no integrity gaps
 - **NOT READY** — findings first (spec gaps and integrity failures before
   quality), each with file and line
 
+Also write the verdict as **one line near the top** of the review, in exactly
+this shape — `forge review-check` reads nothing else: `**Verdict: APPROVED**`
+for READY, `**Verdict: REJECTED**` for NOT READY.
+
 End with the verdict word, your tier-3 command and exit code, and per-task
 one-line confirmations.
+
+## Reply
+
+Return the full review text — it is saved verbatim. Do not summarise it.

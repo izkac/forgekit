@@ -18,10 +18,55 @@
 
 /** A round that sent work back: proof the review was not a rubber stamp. */
 export const REJECTION_RE =
-  /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*|^[ \t>]*(?:[-*+][ \t]+)?[*_]*Verdict[ \t]*[*_]*:[ \t]*[*_]*[ \t]*[*_]*REJECTED\b(?!\s+or\b))/im;
-// The last alternative is a line-anchored verdict line in any bolding —
-// `Verdict: **REJECTED**`, `**Verdict:** REJECTED`, `Verdict: REJECTED` — and not
-// the instruction "Verdict: REJECTED or APPROVED" or REJECTED inside a sentence.
+  /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*(?![ \t]*(?:or\b|[/|]))|^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?[*_]*Verdict[ \t]*[*_]*:[ \t]*[*_]*[ \t]*[*_]*REJECTED\b(?![*_]*[ \t]*(?:or\b|[/|])))/im;
+// The last alternative is a line-anchored verdict line in any bolding or as a
+// heading — `Verdict: **REJECTED**`, `**Verdict:** REJECTED`, `## Verdict: REJECTED` —
+// and not the instruction "Verdict: REJECTED or APPROVED" (also `/` and `|`) or
+// REJECTED inside a sentence. This regex is line-local; `isRejected` below is the
+// full reader (skips code fences and blockquotes, reads a `## Verdict` heading
+// followed by REJECTED) and is what the verdict is decided by.
+
+const VERDICT_HEADING_RE = /^[ \t]*#{1,6}[ \t]+[*_]*Verdict[*_]*[ \t]*:?[ \t]*#*[ \t]*$/i;
+const VERDICT_WORD_LINE_RE = /^[ \t]*(?:[-*+][ \t]+)?[*_]*REJECTED\b(?![*_]*[ \t]*(?:or\b|[/|]))/i;
+const BLOCKQUOTE_RE = /^[ \t]*>/;
+
+/**
+ * Does the review's verdict read REJECTED? Lines inside code fences and
+ * blockquotes (`> …`, a quoted earlier review) never count. Besides the
+ * single-line forms in `REJECTION_RE`, a `## Verdict` heading whose next
+ * non-blank line starts with REJECTED / `**REJECTED**` is a rejection; the same
+ * heading followed by APPROVED (or anything else) is not.
+ * @param {string} markdown
+ */
+export function isRejected(markdown) {
+  const text = typeof markdown === 'string' ? markdown : '';
+  /** @type {(string | null)[]} null = a fenced or quoted line, invisible to the verdict reader */
+  const lines = [];
+  let inFence = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      lines.push(null);
+    } else if (inFence || BLOCKQUOTE_RE.test(line)) {
+      lines.push(null);
+    } else {
+      lines.push(line);
+    }
+  }
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line === null) continue;
+    if (REJECTION_RE.test(line)) return true;
+    if (!VERDICT_HEADING_RE.test(line)) continue;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const next = lines[j];
+      if (next !== null && next.trim() === '') continue;
+      if (next !== null && VERDICT_WORD_LINE_RE.test(next)) return true;
+      break;
+    }
+  }
+  return false;
+}
 
 const BLOCKING_HEADING_RE = /critical|important|spec gap|runtime[- ]integrity/i;
 const MINOR_HEADING_RE = /minor/i;
@@ -93,7 +138,7 @@ export const UNPARSED_NOTE =
  */
 export function checkReview(markdown) {
   const text = typeof markdown === 'string' ? markdown : '';
-  const originalVerdict = REJECTION_RE.test(text) ? 'REJECTED' : 'APPROVED';
+  const originalVerdict = isRejected(text) ? 'REJECTED' : 'APPROVED';
 
   /** @type {{ level: number, title: string }[]} */
   const stack = [];

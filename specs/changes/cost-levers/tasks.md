@@ -17,6 +17,7 @@
 - [x] 3.3 `--brief` short output for `forge phase` and `forge status` (default JSON unchanged); tests
 
 ## 4. Prompts, docs and product loop
-- [ ] 4.1 `skills/forge/subagents/task-reviewer-prompt.md`, `final-reviewer-prompt.md`, `closer-prompt.md`: Evidence line rules and `{KNOWN_FALSE}`; implementer and reviewer prompts end with the short-reply rule (docs-only, `--no-tdd`)
-- [ ] 4.2 `phases/implement.md` / `phases/review.md` / `references/pace.md`: `forge group close`, `forge review-check` (only backed items start a fix round), budget warning, `refute list --for-diff` in reviewer briefs; `docs/forge.md` and CHANGELOG note the output change (docs-only, `--no-tdd`)
-- [ ] 4.3 Product loop: extend `scripts/e2e/harness-portability.mjs` with steps that trip the budget warning on a scratch plan and run `forge group close` end to end; record in the session `e2e.json` and get a green `forge e2e run`
+- [x] 4.1 `skills/forge/subagents/task-reviewer-prompt.md`, `final-reviewer-prompt.md`, `closer-prompt.md`: Evidence line rules and `{KNOWN_FALSE}`; implementer and reviewer prompts end with the short-reply rule (docs-only, `--no-tdd`)
+- [x] 4.1b `review-check.mjs` verdict detection: `## Verdict: REJECTED` and a `## Verdict` heading followed by REJECTED read as REJECTED; skip fenced/blockquoted lines; `REJECTED or/ /| APPROVED` does not match; tests in `review-check-verdict.test.mjs`
+- [x] 4.2 `phases/implement.md` / `phases/review.md` / `references/pace.md`: `forge group close`, `forge review-check` (only backed items start a fix round), budget warning, `refute list --for-diff` in reviewer briefs; `docs/forge.md` and CHANGELOG note the output change (docs-only, `--no-tdd`)
+- [x] 4.3 Product loop: extend `scripts/e2e/harness-portability.mjs` with steps that trip the budget warning on a scratch plan and run `forge group close` end to end; record in the session `e2e.json` and get a green `forge e2e run`

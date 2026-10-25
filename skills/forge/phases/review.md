@@ -123,13 +123,20 @@ floor.
 Do NOT hand-pick a model slug for the final reviewer — not even "the most capable" from the host's model list. Resolver output only. On dispatch failure, re-resolve; do not substitute a slug yourself.
 </HARD-GATE>
 
+Fill `{KNOWN_FALSE}` for the final reviewer from `forge refute list --md --for-diff <range>` (the `{DIFF_RANGE}` above), or `none recorded`.
+
 Save output to `.forge/sessions/<id>/reviews/final-review.md`.
+
+Then run `forge review-check .forge/sessions/<id>/reviews/final-review.md`.
+**Only backed blocking items count:** an unbacked Critical/Important item is
+downgraded to Minor, and a rejection counts only when at least one backed item
+remains. A REJECTED review with no parseable list items stays REJECTED.
 
 ```bash
 forge phase review
 ```
 
-Address Critical and Important findings before finish.
+Address backed Critical and Important findings before finish.
 
 If this session ran OpenSpec verify, leftover files outside the original
 task list should already be in the diff. Do not start this phase while

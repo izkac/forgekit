@@ -11,6 +11,12 @@ declares stays on the full tail even when it qualifies for the combined close
 (ceremony fails closed to `full` at the done gate) — two cohort-5 trials paid
 the full ceremony on small changes for exactly this omission.
 
+The same call projects the plan's subagent dispatches from `tasks.md` and warns
+on stderr when the projection exceeds `budget.subagents` (default 15) — merge or
+trim groups then, before dispatching. It never blocks. `forge status` and the
+session reminder show the running count (`dispatches n/<budget>`); `forge status
+--brief` is the low-context status read.
+
 Read and follow [../skills/subagent-driven-development/SKILL.md](../skills/subagent-driven-development/SKILL.md).
 
 Every implementer subagent must follow [../references/tdd-core.md](../references/tdd-core.md) (condensed TDD rules — the brief includes the pointer; full skill only when stuck).
@@ -132,9 +138,11 @@ where Forge's input tokens go.
    - **`always` (explicit override):** dispatch after every unit → `task-review.md`.
    - **Docs-only groups get no dispatched reviewer, on every pace.** A group whose every task carries a valid docs-only `--no-tdd` declaration (instruction text, README, changelog — no handler, no test, no harness step) is reviewed by a coordinator self-check `group-review.md` (`Reviewer: coordinator — APPROVED (pace self-check)`). Measured: a full sonnet reviewer on a docs group read every line and found nothing. A group with even one behavior task, or any high-risk task, still gets its reviewer.
    - `{PRECHECK}` is **required** — run `forge review-precheck` and paste its output verbatim. It verifies every ledger pair, no-TDD declaration, allowance and integrity gate so the reviewer judges reasons instead of re-running suites; an exit 1 means fix the integrity problems before paying for a reviewer.
-   - `{DIFF_RANGE}` is **required** — the reviewer returns `NEEDS_CONTEXT` without it and you pay for the dispatch twice. Get it from `forge checkpoint --range --last` (`reviewTarget`), which also names the untracked files a diff hides.
+   - `{DIFF_RANGE}` is **required** — the reviewer returns `NEEDS_CONTEXT` without it and you pay for the dispatch twice. Get it from `forge checkpoint --range --last` (`reviewTarget`), which also names the untracked files a diff hides. At a group close, `forge group close` (step 8) prints it with the precheck and label.
+   - `{KNOWN_FALSE}` — fill from `forge refute list --md --for-diff <range>` (this session's refutations plus up to 20 project entries that mention the changed files), or `none recorded`.
    - If `review.depth` is `spec-only`, focus on spec + tests evidence. Fill `{TASK_EVIDENCE_TARGETS}` with one entry per reviewed task (task id, executed-evidence gate state, and exact session/task ledger path), plus `{DIFF_RANGE}`, `{CAPABILITY_SPEC_EXCERPT}`, and `{PRECHECK}` (`forge review-precheck` output — it carries the guard allowances) — read actual code, not the implementer's summary. **Model:** [../references/model-selection.md](../references/model-selection.md) — `forge resolve-model --tier standard` (or `capable` for money/auth/contracts; use `fast` when `models.bias` is `prefer-fast` and not high-risk). Honor `omitModel` / `model` literally. Do **not** skip high-risk tasks.
 5. Fix loop until the reviewer approves (max `review.maxRounds` from pace; then escalate to the human). For group reviews, fix any rejected task in the group before continuing to the next group.
+   **Run `forge review-check <group-review.md>` on the saved review first, and only backed blocking items start a fix round.** An unbacked Critical/Important item is downgraded to Minor (reported, not fixed in a round); a REJECTED review with no parseable list items stays REJECTED.
    **On REJECT, record what was refuted before re-dispatching:** for each concrete wrong assumption the review contradicted (a claimed behaviour, a data shape, a contract), run
    ```bash
    forge refute add --task <task-id> --claim "<what the implementer believed>" --actual "<what the review/evidence showed>" --source reviewer
@@ -190,7 +198,18 @@ where Forge's input tokens go.
    not acceptance: run `forge gate check --group <id>` yourself and require
    green **before** the next step ticks that group's boxes.
 7. Mark every task the unit finished complete in `tasks.md` (`- [ ]` → `- [x]`) — tick them from the implementer's per-task report, not from its overall status; a unit that stopped part way leaves the rest unticked. That checklist is the source of truth — fleet/status/health derive `tasksComplete` from it (and heal the session cache). Still run the progress command below when you want `--subagents` updated. Detect group boundary: next line in `tasks.md` is a new `##` heading, or no remaining tasks under the current heading.
-8. **Checkpoint** — when the project opts in (`.forge/config.json` → `git.checkpoint`):
+8. **Checkpoint** — when the project opts in (`.forge/config.json` → `git.checkpoint`).
+   **At a group close, make one call instead of four:**
+   ```bash
+   forge group close --group <nn>-<slug> --tasks <ids>
+   ```
+   It checkpoints (when enabled), computes the group's diff range, checks the
+   precheck and takes the review label, then prints one short block:
+   `reviewTarget` → `{DIFF_RANGE}`, the precheck verdict, and the `label` to use
+   as the reviewer's Task description. It stops at the first failing step. The
+   checkpoint comes first, so `reviewTarget` already covers exactly this group.
+   Paste the full `forge review-precheck` output into `{PRECHECK}` as before.
+   The single steps remain for a per-task checkpoint:
    ```bash
    forge checkpoint --group <nn>-<slug> --tasks <ids>   # per-group: at the boundary; per-task: after each task
    ```
@@ -199,7 +218,7 @@ where Forge's input tokens go.
    commit. Default is `off`: nothing is committed and reviewers read the
    working tree, as before.
 
-   **Reviewer scope (step 4).** The group review runs *before* this
+   **Reviewer scope (step 4), without `forge group close`.** The group review runs *before* this
    checkpoint, so fill `{DIFF_RANGE}` from `forge checkpoint --range --last` →
    its **`reviewTarget`** field. While the group is uncommitted that is
    `git diff <last checkpoint>` plus the untracked files named explicitly (a

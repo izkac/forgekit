@@ -101,12 +101,41 @@ reasoning behind labels and stamps is in
 [references/review-labels.md](../references/review-labels.md); you do not need
 it to review.
 
+## Known false (refuted claims — do not raise these again)
+
+{KNOWN_FALSE}   <!-- coordinator: paste `forge refute list --md --for-diff <range>` for the diff range above, or `none recorded`. Each line is a claim already contradicted by evidence. -->
+
+## Finding format (required)
+
+Write each finding as **one list item** under a `## Critical`, `## Important`
+or `## Minor` heading; spec gaps and runtime-integrity failures go under
+Critical or Important. `forge review-check` reads only list items under those
+headings — a NOT READY review with none is still treated as REJECTED, but it
+cannot be checked, so the coordinator cannot tell which finding to fix.
+
+Every Critical and Important item carries **one** evidence line:
+
+- `Command: <argv> → exit <n>` plus the key output lines; or
+- `Spec: "<quoted requirement>"` plus `Missing at: <path[:line]>` (or `<file>: no <symbol>`); or
+- `Scenario: <input/state>` plus `At: <path>:<line>`, `Expected: …` and `Actual: …`.
+
+An item without one is downgraded to Minor by `forge review-check` — still
+reported, never blocking. A concern you cannot back belongs under `## Minor`.
+
 ## Verdict
 
 - **READY** — every capability has a runtime owner, product loop evidenced, tests evidence real outcomes, no critical gaps
 - **NOT READY** — list blockers (prefer runtime-integrity and missing wiring first)
 
+Also write the verdict as **one line near the top** of the review, in exactly
+this shape — `forge review-check` reads nothing else: `**Verdict: APPROVED**`
+for READY, `**Verdict: REJECTED**` for NOT READY.
+
 Do not approve if the precheck shows integrity problems, a task with failed or
 missing evidence, tasks remain unchecked, or any claimed capability is
 library-only / stubbed / false-succeeding. Task checkboxes at 100% do **not**
 override a broken spine.
+
+## Reply
+
+Return the full review text — it is saved verbatim. Do not summarise it.
