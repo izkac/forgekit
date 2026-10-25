@@ -180,3 +180,23 @@ test('the digest split is null when no metrics were collected', () => {
 
   assert.equal(entry.requestSplit, null);
 });
+
+test('on a host that cannot separate the sides, the digest split is null throughout, breakdown included', () => {
+  const unmarked = (line) => {
+    const copy = { ...line };
+    delete copy.isSidechain;
+    return copy;
+  };
+  const doc = collect(plant(REQUESTS, unmarked));
+  assert.notEqual(doc.breakdown, null, 'fixture: metrics.json still holds the file-level breakdown');
+  const root = tmp('forge-split-digest-unmarked-');
+  const sessionDir = path.join(root, '.forge', 'sessions', 's1');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'metrics.json'), `${JSON.stringify(doc)}\n`, 'utf8');
+  const stored = { id: 's1', slug: 'demo', createdAt: doc.window.from, updatedAt: doc.collectedAt, phase: 'done' };
+
+  appendSessionDigest({ cwd: root, sessionDir, session: stored, card: { score: 90, grade: 'A' } });
+  const [entry] = readLedger(path.join(root, '.forge', 'sessions.jsonl'));
+
+  assert.deepEqual(entry.requestSplit, { breakdown: null, coordinator: null, groups: null });
+});

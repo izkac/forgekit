@@ -160,8 +160,9 @@ test('a failing checkpoint stops the sequence and names the step', () => {
   assert.equal(field(r.stdout, 'label'), undefined);
 });
 
-test('a precheck FAIL row stops the sequence after the precheck: committed, but no label', () => {
+test('a precheck FAIL row stops the sequence before anything is committed', () => {
   const { cwd, sessionDir } = makeProject();
+  const head = git(cwd, 'rev-parse', 'HEAD');
   const task = path.join(sessionDir, 'tasks', '1.1-unpaired');
   fs.mkdirSync(task, { recursive: true });
   // A green stamp with no red before it: the pairing the integrity gate demands is missing.
@@ -176,15 +177,17 @@ test('a precheck FAIL row stops the sequence after the precheck: committed, but 
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /step "precheck" failed/);
   assert.match(r.stderr, /1\.1-unpaired/);
-  assert.equal(readSession(sessionDir).checkpoints.length, 1, 'the checkpoint step ran first');
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), head, 'cheap checks run before the checkpoint commits');
+  assert.equal(readSession(sessionDir).checkpoints, undefined);
   assert.equal(stampsOf(sessionDir).length, 0, 'the label step never ran');
 });
 
-test('integrity problems alone are informational during implement and stop the sequence from verify on', () => {
+test('verify-only integrity problems are informational (and listed) during implement, and stop the sequence from verify on', () => {
   const implement = makeProject({ spine: false });
   const early = groupClose(implement.cwd, ['--group', 'group-01']);
   assert.equal(early.status, 0, early.stderr);
   assert.match(field(early.stdout, 'precheck'), /^PROBLEMS \(\d+, informational/);
+  assert.match(early.stdout, /^ {2}- spine\.json required/m, 'the informational problem is named, not only counted');
   assert.equal(field(early.stdout, 'label'), 'forge-review group-01 s1', 'the sequence went on to the label');
 
   const verify = makeProject({ spine: false, phase: 'verify' });
@@ -195,13 +198,70 @@ test('integrity problems alone are informational during implement and stop the s
   assert.equal(stampsOf(verify.sessionDir).length, 0);
 });
 
-test('a group name that is not a usable review unit fails at the label step', () => {
-  const { cwd } = makeProject();
+test('an integrity problem that is not verify-only stops the sequence during implement, before the commit', () => {
+  const { cwd, sessionDir } = makeProject();
+  const head = git(cwd, 'rev-parse', 'HEAD');
+  fs.writeFileSync(
+    path.join(sessionDir, 'deferrals.json'),
+    `${JSON.stringify({ deferrals: [{ task: '1.2', reason: 'wiring lands in group 4', createdAt: '2026-09-04T00:00:00.000Z' }] })}\n`,
+    'utf8',
+  );
+
+  const r = groupClose(cwd, ['--group', 'group-01']);
+
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /step "precheck" failed/);
+  assert.match(r.stderr, /unresolved deferrals/, 'the problem line is listed');
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), head);
+  assert.equal(stampsOf(sessionDir).length, 0);
+});
+
+test('a group name that is not a usable review unit is refused before the checkpoint commits', () => {
+  const { cwd, sessionDir } = makeProject();
+  const head = git(cwd, 'rev-parse', 'HEAD');
 
   const r = groupClose(cwd, ['--group', 'not a unit']);
 
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /step "label" failed/);
+  assert.equal(git(cwd, 'rev-parse', 'HEAD'), head, 'nothing was committed under a name that cannot be labelled');
+  assert.equal(readSession(sessionDir).checkpoints, undefined);
+});
+
+test('re-closing a group whose name the last checkpoint carries keeps the original work in range', () => {
+  const { cwd, sessionDir, baseSha } = makeProject();
+  assert.equal(groupClose(cwd, ['--group', 'group-01']).status, 0);
+  fs.writeFileSync(path.join(cwd, 'fix.mjs'), 'export const fixed = true;\n', 'utf8');
+
+  const retry = groupClose(cwd, ['--group', 'group-01']);
+
+  assert.equal(retry.status, 0, retry.stderr);
+  const [first, second] = readSession(sessionDir).checkpoints;
+  assert.equal(second.group, first.group, 'fixture: the retry is a second checkpoint of the same group');
+  const target = field(retry.stdout, 'reviewTarget');
+  assert.equal(target, `${baseSha}..${second.sha}`, 'from the first run’s base, not from its checkpoint');
+  assert.deepEqual(git(cwd, 'diff', '--name-only', target).split('\n').sort(), ['README.md', 'fix.mjs', 'new-module.mjs']);
+
+  // Nothing new to commit: still the group's whole range, not the empty last..HEAD.
+  const again = groupClose(cwd, ['--group', 'group-01']);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(field(again.stdout, 'reviewTarget'), `${baseSha}..HEAD`);
+});
+
+test('the reviewer tier is standard, and capable only when the precheck sees high-risk work', () => {
+  const plain = makeProject();
+  const plainOut = groupClose(plain.cwd, ['--group', 'group-01']);
+  assert.equal(plainOut.status, 0, plainOut.stderr);
+  assert.equal(field(plainOut.stdout, 'tier'), 'standard');
+  assert.equal(stampsOf(plain.sessionDir).find((s) => s.label === 'forge-review group-01 s1').model.tier, 'standard');
+
+  const risky = makeProject();
+  const sessionFile = path.join(risky.sessionDir, 'session.json');
+  const stored = readSession(risky.sessionDir);
+  fs.writeFileSync(sessionFile, `${JSON.stringify({ ...stored, slug: 'rotate-webhook-secret', paceSignal: 'rotate the webhook secret' })}\n`, 'utf8');
+  const riskyOut = groupClose(risky.cwd, ['--group', 'group-01']);
+  assert.equal(riskyOut.status, 0, riskyOut.stderr);
+  assert.equal(field(riskyOut.stdout, 'tier'), 'capable');
 });
 
 test('--group is required, and only the close subcommand exists', () => {

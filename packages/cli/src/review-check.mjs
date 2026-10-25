@@ -17,7 +17,11 @@
  */
 
 /** A round that sent work back: proof the review was not a rubber stamp. */
-export const REJECTION_RE = /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*)/i;
+export const REJECTION_RE =
+  /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*|^[ \t>]*(?:[-*+][ \t]+)?[*_]*Verdict[ \t]*[*_]*:[ \t]*[*_]*[ \t]*[*_]*REJECTED\b(?!\s+or\b))/im;
+// The last alternative is a line-anchored verdict line in any bolding —
+// `Verdict: **REJECTED**`, `**Verdict:** REJECTED`, `Verdict: REJECTED` — and not
+// the instruction "Verdict: REJECTED or APPROVED" or REJECTED inside a sentence.
 
 const BLOCKING_HEADING_RE = /critical|important|spec gap|runtime[- ]integrity/i;
 const MINOR_HEADING_RE = /minor/i;

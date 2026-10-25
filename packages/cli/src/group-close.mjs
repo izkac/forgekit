@@ -36,6 +36,7 @@ import { pendingEntries, reviewTargetFor } from './checkpoint.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { loadSession, REPO_ROOT, resolveSessionOrExit } from './lib.mjs';
 import { collectPrecheck } from './review-precheck.mjs';
+import { isReviewUnit } from './review-label.mjs';
 import { readStamps } from './review-stamp.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,38 @@ const USAGE = 'Usage: forge group close --group <name> [--tasks <ids>] [--sessio
 
 /** Phases where the product-loop gates must already be green (see review-precheck-cli.mjs). */
 const TAIL_PHASES = ['verify', 'review', 'finish', 'done'];
+
+/**
+ * The integrity problems that only the verify phase satisfies: the spine and
+ * e2e files are authored and the loop is run there, so during implement they are
+ * expected to be missing or not yet run. Matched against the problem strings
+ * `runIntegrityChecks` / `checkE2eGate` emit. Every other problem — a guarded
+ * file edited without an allowance, a tampered seal, an unresolved deferral, a
+ * malformed spine, a failed e2e run — is a real defect and stops a group close.
+ */
+export const VERIFY_ONLY_INTEGRITY = [
+  /^spine\.json required at /,
+  /^e2e\.json required at /,
+  /^e2e-results\.json missing\b/,
+  /^e2e-results\.json is stale\b/,
+];
+
+/**
+ * Judge a collected precheck.
+ *
+ * @param {ReturnType<typeof collectPrecheck>} pre
+ * @param {string} phase
+ * @returns {{ failRows: string[], blocking: string[], informational: string[], stop: boolean }}
+ */
+function judgePrecheck(pre, phase) {
+  const failRows = pre.tasks.filter((t) => !t.ok).map((t) => `${t.task}: ${t.detail}`);
+  const integrity = pre.integrity?.ok === false ? pre.integrity.problems : [];
+  const tail = TAIL_PHASES.includes(phase);
+  const isVerifyOnly = (/** @type {string} */ p) => VERIFY_ONLY_INTEGRITY.some((re) => re.test(p));
+  const blocking = integrity.filter((p) => tail || !isVerifyOnly(p));
+  const informational = integrity.filter((p) => !blocking.includes(p));
+  return { failRows, blocking, informational, stop: failRows.length > 0 || blocking.length > 0 };
+}
 
 /**
  * Run a sibling CLI script to completion from the project root.
@@ -79,6 +112,29 @@ export function closeGroup(opts) {
   /** @param {'checkpoint' | 'range' | 'precheck' | 'label'} step @param {string} detail */
   const fail = (step, detail) => ({ ok: /** @type {const} */ (false), step, detail });
 
+  // --- 0. the cheap checks, BEFORE anything is committed ---
+  // A commit is not undone by a later failure, and a retry's range would then
+  // start after it. So the inputs that can only fail the label or precheck step
+  // are judged first: a name the label cannot carry, and a precheck that stops.
+  if (!isReviewUnit(group)) {
+    return fail(
+      'label',
+      `not a usable review unit: ${JSON.stringify(group)} — units are letters, digits, dot, dash and underscore (e.g. group-03).`,
+    );
+  }
+  const first = loadSession(sessionId);
+  const early = precheckStep(cwd, first.dir, first.session);
+  if (!early.ok) return fail('precheck', early.detail);
+
+  // A retry: the last checkpoint already carries this group's name (an earlier
+  // run committed it, then a later step or a reviewer sent it back). Its work is
+  // part of this group, so the range starts where that checkpoint's did.
+  const earlier = Array.isArray(first.session.checkpoints) ? first.session.checkpoints : [];
+  let runStart = earlier.length;
+  while (runStart > 0 && earlier[runStart - 1].group === group) runStart -= 1;
+  const retryBase =
+    runStart < earlier.length ? (earlier[runStart - 1]?.sha ?? first.session.baseCommit ?? null) : null;
+
   // --- 1. checkpoint ---
   let committed = null;
   const mode = loadProjectConfig(cwd)?.git?.checkpoint ?? 'off';
@@ -108,11 +164,13 @@ export function closeGroup(opts) {
   const { dir: sessionDir, session } = loadSession(sessionId);
 
   // --- 2. range ---
-  if (committed) {
+  if (committed && retryBase) {
+    block.reviewTarget = `${retryBase}..${committed.sha}`;
+  } else if (committed) {
     block.reviewTarget = committed.groupRange;
   } else {
     const checkpoints = Array.isArray(session.checkpoints) ? session.checkpoints : [];
-    const base = checkpoints.length ? checkpoints[checkpoints.length - 1].sha : session.baseCommit;
+    const base = retryBase ?? (checkpoints.length ? checkpoints[checkpoints.length - 1].sha : session.baseCommit);
     if (!base) {
       return fail('range', 'no base commit recorded — this session started before checkpoints, so the reviewer reads the working tree (git diff).');
     }
@@ -126,36 +184,50 @@ export function closeGroup(opts) {
   }
 
   // --- 3. precheck ---
-  let pre;
-  try {
-    pre = collectPrecheck({ cwd, sessionDir, session });
-  } catch (err) {
-    return fail('precheck', `could not collect the precheck: ${err instanceof Error ? err.message : err}`);
-  }
-  const failRows = pre.tasks.filter((t) => !t.ok).map((t) => `${t.task}: ${t.detail}`);
-  const integrity = pre.integrity?.ok === false ? pre.integrity.problems : [];
-  const problems = [...failRows, ...integrity];
-  // Same rule as `forge review-precheck`'s exit code: integrity problems stop
-  // the sequence from verify on; during implement the e2e/spine gates cannot be
-  // green yet, so they are reported but do not stop a group from closing. A FAIL
-  // task row always stops it.
-  const stop = failRows.length > 0 || (integrity.length > 0 && TAIL_PHASES.includes(String(session.phase)));
-  if (stop) {
-    return fail('precheck', `PROBLEMS (${problems.length})\n${problems.map((p) => `  - ${p}`).join('\n')}`);
-  }
+  const checked = precheckStep(cwd, sessionDir, session);
+  if (!checked.ok) return fail('precheck', checked.detail);
+  const { pre, informational } = checked;
   block.precheck =
-    problems.length === 0 ? 'OK' : `PROBLEMS (${problems.length}, informational before verify)`;
+    informational.length === 0 ? 'OK' : `PROBLEMS (${informational.length}, informational before verify)`;
+  if (informational.length > 0) block.precheckNotes = informational.map((p) => `  - ${p}`).join('\n');
 
   // --- 4. label ---
-  const label = runSibling('review-label-cli.mjs', ['--session', sessionId, group], cwd);
+  // Group reviewers are standard tier; capable only for high-risk work (the
+  // precheck's own reading of the plan), as phases/implement.md has it.
+  const tier = pre.highRisk ? 'capable' : 'standard';
+  const label = runSibling('review-label-cli.mjs', ['--session', sessionId, '--tier', tier, group], cwd);
   if (label.status !== 0) return fail('label', whyFailed(label));
   block.label = label.stdout.trim();
   const stamp = readStamps(sessionDir)
     .reverse()
     .find((s) => s.label === block.label);
-  block.tier = stamp?.model?.tier ?? 'unknown (model could not be resolved)';
+  block.tier = stamp?.model?.tier ?? `${tier} (requested; the model could not be resolved)`;
 
   return { ok: true, block };
+}
+
+/**
+ * Collect and judge the precheck. A failure carries every problem line.
+ *
+ * @param {string} cwd
+ * @param {string} sessionDir
+ * @param {Record<string, any>} session
+ * @returns {{ ok: false, detail: string } |
+ *   { ok: true, pre: ReturnType<typeof collectPrecheck>, informational: string[] }}
+ */
+function precheckStep(cwd, sessionDir, session) {
+  let pre;
+  try {
+    pre = collectPrecheck({ cwd, sessionDir, session });
+  } catch (err) {
+    return { ok: false, detail: `could not collect the precheck: ${err instanceof Error ? err.message : err}` };
+  }
+  const judged = judgePrecheck(pre, String(session.phase));
+  if (judged.stop) {
+    const all = [...judged.failRows, ...judged.blocking, ...judged.informational];
+    return { ok: false, detail: `PROBLEMS (${all.length})\n${all.map((p) => `  - ${p}`).join('\n')}` };
+  }
+  return { ok: true, pre, informational: judged.informational };
 }
 
 /** @param {Record<string, string>} block */
@@ -164,6 +236,7 @@ function renderBlock(block) {
     `checkpoint:   ${block.checkpoint}`,
     `reviewTarget: ${block.reviewTarget}`,
     `precheck:     ${block.precheck}`,
+    ...(block.precheckNotes ? [block.precheckNotes] : []),
     `label:        ${block.label}`,
     `tier:         ${block.tier}`,
   ];

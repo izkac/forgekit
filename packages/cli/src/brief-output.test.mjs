@@ -165,3 +165,28 @@ test('forge phase without --brief still prints { sessionId, phase, session }', (
   assert.deepEqual(Object.keys(out), ['sessionId', 'phase', 'session']);
   assert.equal(out.phase, 'plan');
 });
+
+test('forge status --brief still flags that it picked one of several open sessions', () => {
+  const { root } = makeProject({ ran: 1 });
+  const other = path.join(root, '.forge', 'sessions', 's2');
+  fs.mkdirSync(other, { recursive: true });
+  const now = new Date().toISOString();
+  fs.writeFileSync(
+    path.join(other, 'session.json'),
+    `${JSON.stringify({ id: 's2', slug: 'other', createdAt: now, updatedAt: now, phase: 'implement', tasksTotal: 1, tasksComplete: 0 })}\n`,
+    'utf8',
+  );
+  const full = JSON.parse(forge(root, ['status']).stdout);
+  assert.ok(full.sessionAmbiguity, 'fixture: the default JSON reports the ambiguity');
+
+  const brief = forge(root, ['status', '--brief']);
+
+  assert.equal(brief.status, 0, brief.stderr);
+  const flag = lines(brief.stdout).find((l) => /pass --session/.test(l));
+  assert.ok(flag, `an ambiguity line is printed:\n${brief.stdout}`);
+  assert.match(flag, new RegExp(`1 of ${full.sessionAmbiguity.candidates.length}`));
+  assert.ok(lines(brief.stdout).length <= 7, 'still a few lines');
+
+  const alone = forge(makeProject({ ran: 1 }).root, ['status', '--brief']);
+  assert.doesNotMatch(alone.stdout, /pass --session/, 'no ambiguity, no line');
+});

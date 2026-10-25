@@ -214,7 +214,9 @@ function requestSplitFacts(doc) {
   if (!doc || typeof doc !== 'object' || doc.available !== true) return null;
   const obj = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
   return {
-    breakdown: obj(doc.breakdown),
+    // `coordinator: null` is the collector saying the host could not separate
+    // the sides, so its file-level breakdown is not a coordinator/subagent split.
+    breakdown: doc.coordinator === null ? null : obj(doc.breakdown),
     coordinator: obj(doc.coordinator),
     groups: Array.isArray(doc.groups) ? doc.groups : null,
   };

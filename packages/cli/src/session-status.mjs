@@ -107,7 +107,7 @@ const dispatches = {
 };
 
 if (brief) {
-  process.stdout.write(renderShortSummary({ health, session, dispatches, pace: pace.resolvedPace }));
+  process.stdout.write(renderShortSummary({ health, session, dispatches, pace: pace.resolvedPace, ambiguity }));
   process.exit(0);
 }
 
