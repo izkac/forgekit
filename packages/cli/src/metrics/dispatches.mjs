@@ -174,9 +174,10 @@ export function readDispatchesChecked(sessionDir) {
 /**
  * The running dispatch count against the budget, ready to print.
  *
- * The count is the session's `decision: "allow"` lines in `dispatches.jsonl`,
- * the log the model hook already writes — no hook changes, and nothing here can
- * deny a dispatch. `n` is null (shown `?`) when the log is unreadable, never 0.
+ * The count is the session's `decision: "allow"` and `decision: "rewrite"` lines in
+ * `dispatches.jsonl` (a rewritten dispatch still runs; a denied one does not), the
+ * log the model hook already writes — no hook changes, and nothing here can deny
+ * a dispatch. `n` is null (shown `?`) when the log is unreadable, never 0.
  *
  * @param {{ sessionDir: string, cwd?: string }} opts `cwd` is the project root holding `.forge/config.json`
  * @returns {{ n: number | null, budget: number, line: string, warning: string | null }}
@@ -184,7 +185,7 @@ export function readDispatchesChecked(sessionDir) {
 export function dispatchBudgetState(opts) {
   const budget = resolveDispatchBudget(opts.cwd);
   const { rows, readable } = readDispatchesChecked(opts.sessionDir);
-  const n = readable ? rows.filter((row) => row?.decision === 'allow').length : null;
+  const n = readable ? rows.filter((row) => row?.decision === 'allow' || row?.decision === 'rewrite').length : null;
   return {
     n,
     budget,

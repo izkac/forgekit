@@ -166,6 +166,83 @@ function attributeByPhase(entries, phaseHistory) {
 }
 
 /**
+ * Mean context size of the coordinator's requests: input + cacheRead +
+ * cacheCreate per request, output excluded (it is not context the next request
+ * has to carry). Taken from the deduplicated per-request entries, never by
+ * subtracting totals, so a subagent request cannot leak in.
+ *
+ * @param {ReturnType<typeof usageByRequest>} entries parent (coordinator) entries
+ * @returns {number | null} null when the coordinator made no request in the window
+ */
+function meanContextTokens(entries) {
+  if (entries.length === 0) return null;
+  let sum = 0;
+  for (const entry of entries) {
+    sum += (entry.usage?.input ?? 0) + (entry.usage?.cacheRead ?? 0) + (entry.usage?.cacheCreate ?? 0);
+  }
+  return Math.round(sum / entries.length);
+}
+
+/**
+ * Split coordinator and subagent requests by task group.
+ *
+ * A group's window is bounded by consecutive `session.checkpoints[]` times
+ * (`at`, written by `forge checkpoint`): checkpoint i owns
+ * (previous checkpoint, checkpoint i], so a request landing exactly on a
+ * checkpoint belongs to the group that checkpoint closes. The first window
+ * opens at the `implement` transition, inclusive — the same tie-break
+ * `attributeByPhase` uses. Requests after the last checkpoint land in
+ * `unattributed`; requests before `implement` in `preImplement` (only when
+ * the transition is known), so the rows always sum to the breakdown totals.
+ * A checkpoint with no parsable time is skipped rather than guessed at.
+ *
+ * @param {ReturnType<typeof usageByRequest>} parentEntries
+ * @param {ReturnType<typeof usageByRequest>} sidecarEntries
+ * @param {Record<string, any>} session
+ * @returns {{ group: string, sha?: string, tasks?: string | null,
+ *   parent: { requests: number }, subagents: { requests: number } }[] | null}
+ *   null when the session recorded no usable checkpoint
+ */
+function splitByGroup(parentEntries, sidecarEntries, session) {
+  const checkpoints = (Array.isArray(session.checkpoints) ? session.checkpoints : [])
+    .map((cp) => ({ cp, at: msOf(cp?.at) }))
+    .filter((row) => row.at !== null)
+    .sort((a, b) => a.at - b.at);
+  if (checkpoints.length === 0) return null;
+
+  const implementAt = (Array.isArray(session.phaseHistory) ? session.phaseHistory : [])
+    .filter((row) => row?.phase === 'implement')
+    .map((row) => msOf(row?.at))
+    .filter((at) => at !== null)
+    .sort((a, b) => a - b)[0] ?? null;
+
+  const cell = () => ({ parent: { requests: 0 }, subagents: { requests: 0 } });
+  const rows = checkpoints.map(({ cp }, i) => ({
+    group: typeof cp?.group === 'string' && cp.group ? cp.group : `checkpoint-${i + 1}`,
+    sha: cp?.sha ?? null,
+    tasks: cp?.tasks ?? null,
+    ...cell(),
+  }));
+  const unattributed = { group: 'unattributed', ...cell() };
+  const preImplement = { group: 'preImplement', ...cell() };
+
+  for (const [side, entries] of [['parent', parentEntries], ['subagents', sidecarEntries]]) {
+    for (const entry of entries) {
+      const ms = msOf(entry?.timestamp);
+      if (ms === null) continue;
+      let target;
+      if (implementAt !== null && ms < implementAt) target = preImplement;
+      else {
+        const index = checkpoints.findIndex((row) => ms <= row.at);
+        target = index === -1 ? unattributed : rows[index];
+      }
+      target[side].requests += 1;
+    }
+  }
+  return implementAt === null ? [...rows, unattributed] : [...rows, unattributed, preImplement];
+}
+
+/**
  * The host version written in the bound transcripts, ignoring the window.
  *
  * Only for the degraded paths: when nothing falls inside the window there are
@@ -455,6 +532,13 @@ export function collectMetrics(options) {
     const sidecarSummary = aggregateTokens(sidecarEntries);
     const total = aggregateTokens(allEntries);
     const tools = aggregateTools(parentLines.concat(sidecarLines));
+    // The host can tell coordinator from subagent only if it marks the
+    // difference: a Claude-format assistant line declares `isSidechain`. A
+    // host that does not leaves every request looking like the coordinator's,
+    // and the split is then `null` — an estimate would be a made-up number.
+    const separable = parentLines
+      .concat(sidecarLines)
+      .some((line) => line?.type === 'assistant' && typeof line.isSidechain === 'boolean');
 
     // The union of `unreadable` (sidecar-blocked *or* wholly unlocated — the
     // two shapes `findTranscripts`' own docs call out) and `readErrors`
@@ -510,6 +594,8 @@ export function collectMetrics(options) {
         parent: { requests: parentSummary.requests, tokens: parentSummary.tokens },
         subagents: { requests: sidecarSummary.requests, tokens: sidecarSummary.tokens },
       },
+      coordinator: separable ? { meanContextTokens: meanContextTokens(parentEntries) } : null,
+      groups: separable ? splitByGroup(parentEntries, sidecarEntries, session) : null,
     };
   } catch (error) {
     return degraded(

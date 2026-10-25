@@ -200,6 +200,27 @@ export function compactMetrics(doc) {
 }
 
 /**
+ * Coordinator-versus-subagent facts for the digest, copied from the metrics
+ * document as measured. Kept beside `metrics` rather than inside it: the
+ * compact block is a fixed shape other readers key on, and these three are
+ * independent measurements that are each `null` where the host could not
+ * separate the two sides — never estimated, never defaulted to zero.
+ *
+ * @param {unknown} doc a parsed metrics.json — or anything at all
+ * @returns {{ breakdown: object | null, coordinator: object | null,
+ *   groups: object[] | null } | null} null when no metrics were collected
+ */
+function requestSplitFacts(doc) {
+  if (!doc || typeof doc !== 'object' || doc.available !== true) return null;
+  const obj = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
+  return {
+    breakdown: obj(doc.breakdown),
+    coordinator: obj(doc.coordinator),
+    groups: Array.isArray(doc.groups) ? doc.groups : null,
+  };
+}
+
+/**
  * What the dispatch ledger contributes to the digest, from a document that may
  * be able to say nothing else.
  *
@@ -377,6 +398,7 @@ export function appendSessionDigest(opts) {
       dispatchesSkipped: dispatch.skipped,
       dispatches: dispatch.table,
       metrics,
+      requestSplit: requestSplitFacts(metricsDoc),
       reviews: {
         total: census.total,
         independent: census.independent,

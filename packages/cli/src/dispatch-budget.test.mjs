@@ -336,12 +336,17 @@ function dispatchSession(rows) {
 
 const ROW = { tool: 'Agent', agentType: 'general-purpose', modelRequested: 'sonnet', modelResolved: 'sonnet', reason: null };
 
-/** `allowed` allow rows mixed with rows that must not count (rewrite, deny, unclassified). */
-function mixedRows(allowed) {
+/** Rewrite rows in `mixedRows`: the dispatch still runs, so each counts toward the budget. */
+const REWRITES = 2;
+
+/**
+ * `ran` dispatches that ran (allow + rewrite lines) mixed with rows that must not count
+ * (a denied dispatch never ran; an unclassified row is nobody's to count).
+ */
+function mixedRows(ran) {
   return [
-    ...Array.from({ length: allowed }, () => ({ ...ROW, decision: 'allow' })),
-    { ...ROW, decision: 'rewrite' },
-    { ...ROW, decision: 'rewrite' },
+    ...Array.from({ length: ran - REWRITES }, () => ({ ...ROW, decision: 'allow' })),
+    ...Array.from({ length: REWRITES }, () => ({ ...ROW, decision: 'rewrite' })),
     { ...ROW, decision: 'deny' },
     { ...ROW, decision: null },
   ];
@@ -392,13 +397,13 @@ test('resolveDispatchBudget: config value, else the default for anything that is
   }
 });
 
-test('dispatchBudgetState: counts only decision "allow" lines and warns once past the budget', () => {
+test('dispatchBudgetState: counts allow and rewrite lines, not deny or unclassified, and warns once past the budget', () => {
   const allowed = DEFAULT_DISPATCH_BUDGET + 2;
   const { sessionDir, root } = dispatchSession(mixedRows(allowed));
 
   const state = dispatchBudgetState({ sessionDir, cwd: root });
 
-  assert.equal(state.n, allowed, 'rewrite, deny and unclassified rows are not allow lines');
+  assert.equal(state.n, allowed, 'allow and rewrite lines count (a rewritten dispatch still runs); deny and unclassified rows do not');
   assert.equal(state.budget, DEFAULT_DISPATCH_BUDGET);
   assert.equal(state.line, `dispatches ${allowed}/${DEFAULT_DISPATCH_BUDGET}`);
   assert.equal(typeof state.warning, 'string');

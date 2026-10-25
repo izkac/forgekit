@@ -4,7 +4,10 @@
  *
  * Usage:
  *   forge status
- *   forge status [--session <id>]
+ *   forge status [--session <id>] [--brief]
+ *
+ * `--brief` prints a few lines (health, phase, tasks, pace, dispatches) instead
+ * of the JSON object; without it the output is unchanged.
  */
 
 import fs from 'node:fs';
@@ -21,9 +24,11 @@ import { KINDS, openFindings, staleOpenBugs } from './findings.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
 import { provenFacts } from './proven.mjs';
 import { dispatchBudgetState } from './metrics/dispatches.mjs';
+import { renderShortSummary } from './short-summary.mjs';
 
 const args = process.argv.slice(2);
 let sessionId = null;
+const brief = args.includes('--brief');
 for (let i = 0; i < args.length; i += 1) {
   if (args[i] === '--session' && args[i + 1]) {
     sessionId = args[i + 1];
@@ -51,6 +56,10 @@ const ambiguity = resolvedSession.ambiguous
     }
   : null;
 if (!resolvedSession.id) {
+  if (brief) {
+    process.stdout.write(`${resolvedSession.problem ?? 'No active Forge session.'}\n`);
+    process.exit(0);
+  }
   process.stdout.write(
     JSON.stringify(
       resolvedSession.problem
@@ -90,6 +99,17 @@ const reopenedFindings = findings
   .filter((finding) => finding.reopenCount >= 1)
   .map(({ id, reopenCount, text }) => ({ id, reopenCount, text }));
 const staleFindings = staleOpenBugs(FORGE_DIR);
+const dispatches = {
+  // The running subagent count against budget.subagents, beside the figure
+  // projected when the plan was recorded. Warning only — nothing is blocked.
+  ...dispatchBudgetState({ sessionDir: dir, cwd: REPO_ROOT }),
+  projected: session.dispatchProjected ?? null,
+};
+
+if (brief) {
+  process.stdout.write(renderShortSummary({ health, session, dispatches, pace: pace.resolvedPace }));
+  process.exit(0);
+}
 
 process.stdout.write(
   JSON.stringify(
@@ -106,12 +126,7 @@ process.stdout.write(
       // Executed facts only, then the model-authored files by name — so a
       // resume reads what a tool proved apart from what an agent wrote.
       proven: provenFacts({ cwd: REPO_ROOT, sessionDir: dir, session }),
-      // The running subagent count against budget.subagents, beside the figure
-      // projected when the plan was recorded. Warning only — nothing is blocked.
-      dispatches: {
-        ...dispatchBudgetState({ sessionDir: dir, cwd: REPO_ROOT }),
-        projected: session.dispatchProjected ?? null,
-      },
+      dispatches,
       openFindings: {
         count: openBugs.length,
         byKind: findingsByKind,

@@ -3,7 +3,11 @@
  * Update Forge session phase and optional fields.
  *
  * Usage:
- *   forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"]
+ *   forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--brief]
+ *
+ * `--brief` prints a few lines (health, phase, tasks, pace, dispatches) instead
+ * of the JSON object once the transition is recorded; without it the output is
+ * unchanged.
  *
  * `--openspec <change>` names the change for both engines (openspec/changes/<change>
  * or specs/changes/<change>).
@@ -39,7 +43,9 @@ import {
   suggestPaceFromPlan,
 } from './plan-facts.mjs';
 import { CONCRETE_PACES, isHighRiskText, resolveEffectivePreferences } from './preferences.mjs';
-import { resolveDispatchBudget } from './metrics/dispatches.mjs';
+import { dispatchBudgetState, resolveDispatchBudget } from './metrics/dispatches.mjs';
+import { sessionHealth } from './health.mjs';
+import { renderShortSummary } from './short-summary.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { checkIntegritySeal } from './integrity-seal.mjs';
@@ -75,7 +81,7 @@ const args = process.argv.slice(2);
 const wantsHelp = args.includes('--help') || args.includes('-h');
 if (args.length === 0 || wantsHelp) {
   (wantsHelp ? process.stdout : process.stderr).write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--notes-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--notes-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>] [--brief]\n',
   );
   process.exit(wantsHelp ? 0 : 1);
 }
@@ -99,6 +105,7 @@ let reopenWaived = null;
 let notesWaived = null;
 let exitReason = null;
 let exitDeclined = null;
+let brief = false;
 
 for (let i = 1; i < args.length; i += 1) {
   const flag = args[i];
@@ -142,6 +149,8 @@ for (let i = 1; i < args.length; i += 1) {
   } else if (flag === '--allow-incomplete' && next) {
     allowIncomplete = next;
     i += 1;
+  } else if (flag === '--brief') {
+    brief = true;
   }
 }
 
@@ -1189,5 +1198,15 @@ if (!isTerminalPhase(phase) && readActive()?.sessionId !== sessionId) {
 }
 
 saveSession(dir, session);
-process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));
-process.stdout.write('\n');
+if (brief) {
+  process.stdout.write(
+    renderShortSummary({
+      health: sessionHealth({ cwd: REPO_ROOT, sessionDir: dir, session }),
+      session,
+      dispatches: dispatchBudgetState({ sessionDir: dir, cwd: REPO_ROOT }),
+    }),
+  );
+} else {
+  process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));
+  process.stdout.write('\n');
+}

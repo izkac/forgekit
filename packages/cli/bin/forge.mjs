@@ -22,6 +22,7 @@ const COMMANDS = {
   cleanup: { script: 'cleanup-sessions.mjs' },
   phase: { script: 'set-phase.mjs', aliases: ['set-phase'] },
   checkpoint: { script: 'checkpoint.mjs', aliases: ['ckpt'] },
+  group: { script: 'group-close.mjs' },
   prefs: { script: 'set-prefs.mjs' },
   models: { script: 'set-models.mjs' },
   'resolve-model': { script: 'resolve-model.mjs' },
@@ -70,6 +71,7 @@ Commands:
   status                  Show active session
   phase <phase>           Update session phase
   checkpoint              Commit the group's work (opt-in; never pushes)
+  group close --group <name> [--tasks <ids>]  Checkpoint + reviewer range + precheck + label in one call
   cleanup                 Prune old/finished sessions
   prefs [pace]            Get/set pace preferences
   models [lane]           Get/set subagent billing (included|metered)
