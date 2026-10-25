@@ -39,6 +39,11 @@ high-risk and final-review floors still require the dispatch.
 - WHEN the census counts rejections
 - THEN the review counts as approved with minor findings
 
+#### Scenario: Unparsed rejection fails safe
+- GIVEN a review whose verdict is REJECTED (or NOT READY) but which has no findings written as list items under a Critical, Important or Minor heading
+- WHEN `forge review-check` or the census reads it
+- THEN it stays REJECTED, with a note that its findings could not be checked — an unreadable review never turns into an approval
+
 ### Requirement: Reviewers see refuted claims
 Reviewer briefs SHALL include a `{KNOWN_FALSE}` block from
 `forge refute list --md --for-diff <range>`: every refutation from this session plus up to
