@@ -20,6 +20,7 @@ import { sessionHealth } from './health.mjs';
 import { KINDS, openFindings, staleOpenBugs } from './findings.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
 import { provenFacts } from './proven.mjs';
+import { dispatchBudgetState } from './metrics/dispatches.mjs';
 
 const args = process.argv.slice(2);
 let sessionId = null;
@@ -105,6 +106,12 @@ process.stdout.write(
       // Executed facts only, then the model-authored files by name — so a
       // resume reads what a tool proved apart from what an agent wrote.
       proven: provenFacts({ cwd: REPO_ROOT, sessionDir: dir, session }),
+      // The running subagent count against budget.subagents, beside the figure
+      // projected when the plan was recorded. Warning only — nothing is blocked.
+      dispatches: {
+        ...dispatchBudgetState({ sessionDir: dir, cwd: REPO_ROOT }),
+        projected: session.dispatchProjected ?? null,
+      },
       openFindings: {
         count: openBugs.length,
         byKind: findingsByKind,

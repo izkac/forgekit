@@ -20,6 +20,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
+  FORGE_DIR,
+  REPO_ROOT,
   appendPhaseHistory,
   loadSession,
   readActive,
@@ -29,8 +31,15 @@ import {
 } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
-import { COMBINED_TASKS, collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
-import { CONCRETE_PACES, isHighRiskText } from './preferences.mjs';
+import {
+  COMBINED_TASKS,
+  collectPlanFacts,
+  projectDispatches,
+  suggestCeremonyFromPlan,
+  suggestPaceFromPlan,
+} from './plan-facts.mjs';
+import { CONCRETE_PACES, isHighRiskText, resolveEffectivePreferences } from './preferences.mjs';
+import { resolveDispatchBudget } from './metrics/dispatches.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { checkIntegritySeal } from './integrity-seal.mjs';
@@ -412,6 +421,49 @@ function maybeResolveCeremonyFromPlan() {
   }
 }
 
+/** How many of the largest groups the budget warning names. */
+const BUDGET_WARNING_GROUPS = 3;
+
+/**
+ * Project the plan's subagent dispatches on the way into implement, keep the
+ * figure on the session, and warn when it exceeds `budget.subagents`.
+ *
+ * Warn, never block: a refused dispatch could be the review quality depends on,
+ * so this only prints (stderr) and never changes the exit code. Runs after pace
+ * is resolved, because group reviewers follow the resolved pace's
+ * `review.perTask`. An unreadable plan projects nothing and says nothing.
+ */
+function announceDispatchBudget() {
+  if (phase !== 'implement') return;
+  try {
+    const facts = collectPlanFacts({ session });
+    if (!facts.readable) return;
+    const { effective } = resolveEffectivePreferences({
+      forgeDir: FORGE_DIR,
+      session,
+      signalText: session.paceSignal || session.slug || '',
+    });
+    const projection = projectDispatches(facts, effective);
+    session.dispatchProjected = projection.total;
+    const budget = resolveDispatchBudget(REPO_ROOT);
+    if (projection.total <= budget) return;
+    const largest = [...projection.groups]
+      .sort((a, b) => b.total - a.total)
+      .slice(0, BUDGET_WARNING_GROUPS)
+      .map((g) => `"${g.title}" (${g.total})`)
+      .join(', ');
+    process.stderr.write(
+      `[forge] Dispatch budget: this plan projects ${projection.total} subagent dispatches ` +
+        `(${projection.implementers} implementers, ${projection.reviewers} group reviewers, 1 final review) against budget ${budget}.\n` +
+        `[forge] Largest: ${largest || 'n/a'}. Warning only — merge or trim groups, or raise budget.subagents in .forge/config.json.\n`,
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not project the dispatch budget: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
+
 /**
  * Say the combined-close instruction at the moment the tail starts.
  *
@@ -488,6 +540,7 @@ function announceSpecVerify() {
 maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
 maybeResolveCeremonyFromPlan();
+announceDispatchBudget();
 announceCombinedClose();
 announceOpenSpecVerify();
 announceSpecVerify();

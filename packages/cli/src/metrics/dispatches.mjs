@@ -25,6 +25,22 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadProjectConfig } from '../config.mjs';
+
+/** Subagent dispatches a plan may use before `forge phase implement` warns. */
+export const DEFAULT_DISPATCH_BUDGET = 15;
+
+/**
+ * `budget.subagents` from `.forge/config.json`, or the default when it is
+ * absent or not a positive integer — a typo must not turn the warning off.
+ *
+ * @param {string} [cwd]
+ * @returns {number}
+ */
+export function resolveDispatchBudget(cwd = process.cwd()) {
+  const value = /** @type {any} */ (loadProjectConfig(cwd))?.budget?.subagents;
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_DISPATCH_BUDGET;
+}
 
 /** A session that dispatched nothing has zero of each — not "no answer". */
 export const EMPTY_DISPATCHES = Object.freeze({
@@ -115,24 +131,69 @@ export function appendDispatch(row, opts = {}) {
  * @returns {Record<string, any>[]}
  */
 export function readDispatches(sessionDir) {
-  if (typeof sessionDir !== 'string' || !sessionDir) return [];
+  return readDispatchesChecked(sessionDir).rows;
+}
+
+/**
+ * `readDispatches` plus whether the answer can be trusted as a count.
+ *
+ * `readDispatches` folds "no log yet" and "log we could not read" into the same
+ * empty list, which is right for metrics (skip what you cannot use) and wrong
+ * for a budget: a missing log is a genuine zero dispatches, an unreadable or
+ * torn one is an unknown, and showing it as 0 would hide an overspend.
+ * `readable` is false for any read failure other than the file not existing and
+ * for any line that is not JSON; `rows` still holds every line that parsed.
+ *
+ * @param {string | null | undefined} sessionDir
+ * @returns {{ rows: Record<string, any>[], readable: boolean }}
+ */
+export function readDispatchesChecked(sessionDir) {
+  if (typeof sessionDir !== 'string' || !sessionDir) return { rows: [], readable: false };
   /** @type {Record<string, any>[]} */
   const rows = [];
   let text;
   try {
     text = fs.readFileSync(path.join(sessionDir, 'dispatches.jsonl'), 'utf8');
-  } catch {
-    return []; // no dispatches is the common case, not an error
+  } catch (err) {
+    // No dispatches is the common case, not an error.
+    return { rows: [], readable: /** @type {any} */ (err)?.code === 'ENOENT' };
   }
+  let readable = true;
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {
       rows.push(JSON.parse(line));
     } catch {
       // A half-written line from a killed hook must not hide the rest.
+      readable = false;
     }
   }
-  return rows;
+  return { rows, readable };
+}
+
+/**
+ * The running dispatch count against the budget, ready to print.
+ *
+ * The count is the session's `decision: "allow"` lines in `dispatches.jsonl`,
+ * the log the model hook already writes — no hook changes, and nothing here can
+ * deny a dispatch. `n` is null (shown `?`) when the log is unreadable, never 0.
+ *
+ * @param {{ sessionDir: string, cwd?: string }} opts `cwd` is the project root holding `.forge/config.json`
+ * @returns {{ n: number | null, budget: number, line: string, warning: string | null }}
+ */
+export function dispatchBudgetState(opts) {
+  const budget = resolveDispatchBudget(opts.cwd);
+  const { rows, readable } = readDispatchesChecked(opts.sessionDir);
+  const n = readable ? rows.filter((row) => row?.decision === 'allow').length : null;
+  return {
+    n,
+    budget,
+    line: `dispatches ${n ?? '?'}/${budget}`,
+    warning:
+      n !== null && n > budget
+        ? `[forge] Dispatch budget exceeded: ${n} dispatches against budget ${budget}. Warning only — nothing is blocked.`
+        : null,
+  };
 }
 
 /**

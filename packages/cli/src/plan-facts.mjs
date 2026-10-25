@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveChangeDir } from './integrity.mjs';
-import { isHighRiskText } from './preferences.mjs';
+import { expandPace, isHighRiskText } from './preferences.mjs';
 import { dropScaffoldLines } from './change.mjs';
 
 /** A tasks.md checkbox line. */
@@ -52,7 +52,8 @@ function stripFencedBlocks(body) {
  *
  * @param {{ cwd?: string, session: Record<string, any> }} opts
  * @returns {{ readable: boolean, tasks: number, groups: number, spineRows: number,
- *            spineNotApplicable: boolean, capabilities: number, highRisk: boolean, changeDir: string | null }}
+ *            spineNotApplicable: boolean, capabilities: number, highRisk: boolean, changeDir: string | null,
+ *            taskGroups: { title: string, tasks: number, highRiskTasks: number }[] }}
  */
 export function collectPlanFacts(opts) {
   const cwd = opts.cwd ?? process.cwd();
@@ -66,6 +67,7 @@ export function collectPlanFacts(opts) {
     capabilities: 0,
     highRisk: false,
     changeDir,
+    taskGroups: [],
   };
   if (!changeDir || !fs.existsSync(changeDir)) return facts;
 
@@ -74,9 +76,22 @@ export function collectPlanFacts(opts) {
   const designBody = readOrEmpty(path.join(changeDir, 'design.md'));
   facts.readable = Boolean(tasksBody || proposalBody);
 
+  // Tasks ahead of the first numbered heading are a unit of their own, kept
+  // only when a numbered group follows — a plan with no groups is a direct plan.
+  const lead = { title: '(before the first group)', tasks: 0, highRiskTasks: 0 };
+  let current = lead;
   for (const line of stripFencedBlocks(tasksBody).split('\n')) {
-    if (TASK_LINE_RE.test(line)) facts.tasks += 1;
-    else if (GROUP_RE.test(line)) facts.groups += 1;
+    if (TASK_LINE_RE.test(line)) {
+      facts.tasks += 1;
+      current.tasks += 1;
+      // The test the per-group review floor applies to a task line.
+      if (isHighRiskText(line.replace(TASK_LINE_RE, ''))) current.highRiskTasks += 1;
+    } else if (GROUP_RE.test(line)) {
+      facts.groups += 1;
+      if (facts.groups === 1 && lead.tasks > 0) facts.taskGroups.push(lead);
+      current = { title: line.replace(/^##\s+\d+[.)]\s+/, '').trim(), tasks: 0, highRiskTasks: 0 };
+      facts.taskGroups.push(current);
+    }
   }
 
   let spineBody = '';
@@ -302,4 +317,46 @@ export function suggestPaceFromPlan(facts) {
     pace: 'standard',
     reason: `${facts.tasks} tasks, ${facts.spineRows} spine row(s) — default`,
   };
+}
+
+/** A work unit holds at most this many tasks (forge.md: "≤4 tasks; high-risk = 1:1"). */
+const UNIT_MAX_TASKS = 4;
+
+/**
+ * Project how many subagents the plan will dispatch, from `tasks.md` alone.
+ *
+ * Work units are each numbered group cut into chunks of at most 4 tasks, with
+ * every high-risk task line its own unit and left out of the chunk. A group
+ * reviewer is counted per the pace's `review.perTask`: one per group on
+ * `per-group`/`always`, and under `high-risk-only`/`never` only for a group
+ * holding a high-risk task line (the hard floor). Plan facts cannot tell a
+ * docs-only group, so none is discounted — projecting high is the safe error.
+ * Plus one final review. A plan with no numbered groups is a direct plan: one
+ * implementer and the final review.
+ *
+ * @param {{ taskGroups?: { title: string, tasks: number, highRiskTasks: number }[] } | null | undefined} facts
+ * @param {string | { review?: { perTask?: string } }} pace a concrete pace name, or expanded preferences
+ *   (`resolveEffectivePreferences(...).effective`) so a `review.perTask` override is honoured
+ * @returns {{ total: number, implementers: number, reviewers: number, final: number,
+ *            groups: { title: string, units: number, reviewers: number, total: number }[] }}
+ */
+export function projectDispatches(facts, pace) {
+  /** @type {string | undefined} */
+  let perTask;
+  try {
+    perTask = typeof pace === 'string' ? expandPace({ pace }).review?.perTask : pace?.review?.perTask;
+  } catch {
+    perTask = undefined; // unknown pace: treated as per-group, i.e. the larger projection
+  }
+  const floorOnly = perTask === 'high-risk-only' || perTask === 'never';
+
+  const groups = (facts?.taskGroups ?? []).map(({ title, tasks, highRiskTasks }) => {
+    const units = highRiskTasks + Math.ceil((tasks - highRiskTasks) / UNIT_MAX_TASKS);
+    const reviewers = tasks > 0 && (!floorOnly || highRiskTasks > 0) ? 1 : 0;
+    return { title, units, reviewers, total: units + reviewers };
+  });
+  const direct = groups.length === 0;
+  const implementers = direct ? 1 : groups.reduce((n, g) => n + g.units, 0);
+  const reviewers = groups.reduce((n, g) => n + g.reviewers, 0);
+  return { total: implementers + reviewers + 1, implementers, reviewers, final: 1, groups };
 }

@@ -24,6 +24,7 @@ import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { sessionHealth } from './health.mjs';
 import { readRefutations } from './refute.mjs';
+import { dispatchBudgetState } from './metrics/dispatches.mjs';
 
 /** @param {string} forgeDir */
 export function projectKnownFalsePath(forgeDir) {
@@ -348,6 +349,7 @@ export function appendSessionDigest(opts) {
     const metrics = compactMetrics(metricsDoc);
     const dispatch = dispatchFacts(metricsDoc);
     const health = sessionHealth({ cwd: opts.cwd, sessionDir, session });
+    const budget = dispatchBudgetState({ sessionDir, cwd: path.dirname(forgeDirOf(opts, sessionDir)) });
     const started = new Date(session.createdAt ?? NaN).getTime();
     const ended = new Date(session.updatedAt ?? NaN).getTime();
     const durationHours =
@@ -441,6 +443,11 @@ export function appendSessionDigest(opts) {
       // recomputed here.
       paceSuppressed: session.paceSuppressed ?? null,
       exitDeclined: session.exitDeclined ?? null,
+      // What the plan projected at the implement transition (kept on the
+      // session, not recomputed from a plan that may have changed since), what
+      // the dispatch log counted, and the budget in force. `actual` is null
+      // for an unreadable log — an unknown, never a zero.
+      dispatchBudget: { projected: session.dispatchProjected ?? null, actual: budget.n, budget: budget.budget },
       durationHours,
       startedAt: session.createdAt ?? null,
       endedAt: session.updatedAt ?? null,

@@ -23,6 +23,7 @@ import { sessionHealth } from './health.mjs';
 import { healSessionProgress } from './plan-progress.mjs';
 import { e2eSkipState } from './integrity.mjs';
 import { provenFacts, provenLine } from './proven.mjs';
+import { dispatchBudgetState } from './metrics/dispatches.mjs';
 import { writeSlotEnvFile } from './lib/slots.mjs';
 
 function getActiveSessionInfo() {
@@ -123,6 +124,15 @@ export function buildForgeMessage(info) {
     const health = sessionHealth({ cwd: REPO_ROOT, sessionDir: info.dir, session });
     if (health.state === 'red' || health.state === 'stale') {
       lines.push(`Health: ${health.line}`);
+    }
+    // Subagents dispatched so far against budget.subagents; the warning line
+    // appears only past it. Advisory — it never blocks a dispatch.
+    try {
+      const budget = dispatchBudgetState({ sessionDir: info.dir, cwd: REPO_ROOT });
+      lines.push(budget.line);
+      if (budget.warning) lines.push(budget.warning);
+    } catch {
+      /* advisory */
     }
     // The hand-off label: established facts come from executed artifacts,
     // never from the prose a previous context wrote about them.
