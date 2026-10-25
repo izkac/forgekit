@@ -350,7 +350,10 @@ forge escapes dismiss <session> <commit> [--reason "<why>"]
 forge escapes verify [--all | <session> <commit>] [--json]
                                   # replay the fix commit's test on the fix's parent (fix's test copied in)
                                   # and on the fix, in throwaway worktrees under the temp dir; your working
-                                  # tree is untouched. Needs an `escapes.replay` rule + the exec opt-in.
+                                  # tree is untouched. Needs an `escapes.replay` rule (its command must
+                                  # contain {file}) + the exec opt-in. Several test files in the fix → the
+                                  # first one a rule covers. --rev <ref> scans another ref; `forge escapes
+                                  # list` shows the result as (verify: <tag>).
                                   # old fails + fix passes → auto-confirmed (`auto: true` in the ledger).
                                   # Otherwise tagged, never dismissed: `environment` (fix run fails, or old
                                   # run died on a missing module/syntax error), `not-reproduced` (test passes
