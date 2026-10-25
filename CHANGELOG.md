@@ -23,7 +23,8 @@
     checkpoint, range, precheck and label calls with one. `forge status --brief` and
     `forge phase --brief` print a few lines (JSON stays the default). Metrics split
     coordinator from subagent requests per group and record mean context per
-    coordinator request. Implementers and reviewers reply with a short status.
+    coordinator request. Implementers reply with a short status; reviewers return the
+    full review text.
 
 - **Commit range at done.** `forge phase done` records `commitRange: { base, head }`
   (the session's `baseCommit` .. HEAD) on the session, its `.forge/sessions.jsonl`

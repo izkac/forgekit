@@ -18,16 +18,17 @@
 
 /** A round that sent work back: proof the review was not a rubber stamp. */
 export const REJECTION_RE =
-  /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*(?![ \t]*(?:or\b|[/|]))|^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?[*_]*Verdict[ \t]*[*_]*:[ \t]*[*_]*[ \t]*[*_]*REJECTED\b(?![*_]*[ \t]*(?:or\b|[/|])))/im;
+  /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*(?:REJECTED|NOT[ \t]+READY)\*\*(?![ \t]*,?[ \t]*(?:or\b|[/|]))|^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?[*_]*Verdict[ \t]*[*_]*:[ \t]*[*_]*[ \t]*[*_]*(?:REJECTED|NOT[ \t]+READY)\b(?![*_]*[ \t]*,?[ \t]*(?:or\b|[/|])))/im;
 // The last alternative is a line-anchored verdict line in any bolding or as a
 // heading — `Verdict: **REJECTED**`, `**Verdict:** REJECTED`, `## Verdict: REJECTED` —
 // and not the instruction "Verdict: REJECTED or APPROVED" (also `/` and `|`) or
 // REJECTED inside a sentence. This regex is line-local; `isRejected` below is the
 // full reader (skips code fences and blockquotes, reads a `## Verdict` heading
-// followed by REJECTED) and is what the verdict is decided by.
+// followed by REJECTED) and is what the verdict is decided by. NOT READY (the
+// final reviewer and closer verdict word) counts exactly like REJECTED.
 
 const VERDICT_HEADING_RE = /^[ \t]*#{1,6}[ \t]+[*_]*Verdict[*_]*[ \t]*:?[ \t]*#*[ \t]*$/i;
-const VERDICT_WORD_LINE_RE = /^[ \t]*(?:[-*+][ \t]+)?[*_]*REJECTED\b(?![*_]*[ \t]*(?:or\b|[/|]))/i;
+const VERDICT_WORD_LINE_RE = /^[ \t]*(?:[-*+][ \t]+)?[*_]*(?:REJECTED|NOT[ \t]+READY)\b(?![*_]*[ \t]*,?[ \t]*(?:or\b|[/|]))/i;
 const BLOCKQUOTE_RE = /^[ \t]*>/;
 
 /**

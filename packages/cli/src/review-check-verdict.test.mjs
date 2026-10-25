@@ -122,3 +122,44 @@ test('a real verdict after a fenced or quoted one still counts', () => {
   assert.equal(rejected(withItem('```\nVerdict: APPROVED\n```\n\nVerdict: **REJECTED**')), true);
   assert.equal(rejected(withItem('> Verdict: APPROVED\n\n## Verdict: REJECTED')), true);
 });
+
+// ---- fix round 1: NOT READY is a rejection word; a comma does not defeat the `or` rule ----
+
+test('NOT READY reads as REJECTED in the same verdict-line forms as REJECTED', () => {
+  for (const head of [
+    '**Verdict: NOT READY**',
+    'Verdict: NOT READY',
+    'Verdict: **NOT READY**',
+    '**Verdict:** NOT READY',
+    '## Verdict: NOT READY',
+    '- **Verdict:** **NOT READY**',
+    '## Verdict\n\n**NOT READY**',
+    '## Verdict\n**NOT READY** — missing wiring',
+    '## Verdict\n\nNOT READY',
+    '## Verdict\n\n- **NOT READY** — blockers listed below',
+  ]) {
+    assert.equal(rejected(withItem(head)), true, head);
+  }
+});
+
+test('READY reads as approved, and NOT READY inside a fence, quote or instruction is not a verdict', () => {
+  for (const head of [
+    '**Verdict: READY**',
+    'Verdict: READY',
+    '## Verdict\n\n**READY**',
+    '```\nVerdict: NOT READY\n```\n\n**Verdict: READY**',
+    '> Verdict: NOT READY\n\nVerdict: READY',
+    'Verdict: **NOT READY** or **READY**',
+    'Verdict: NOT READY / READY',
+    '## Verdict\n\nNOT READY or READY',
+  ]) {
+    assert.equal(rejected(withItem(head)), false, head);
+  }
+});
+
+test('a comma before "or" does not make an instruction a verdict', () => {
+  assert.equal(rejected(withItem('Verdict: REJECTED, or APPROVED')), false);
+  assert.equal(rejected(withItem('Verdict: **REJECTED**, or **APPROVED**')), false);
+  assert.equal(rejected(withItem('Verdict: NOT READY, or READY')), false);
+  assert.equal(rejected(withItem('## Verdict\n\nREJECTED, or APPROVED')), false);
+});

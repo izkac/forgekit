@@ -59,7 +59,8 @@ review, it just fails the gate later.
    fix integrity first), `{DIFF_RANGE}` from `forge checkpoint --range` (whole session;
    plus untracked files by name), `{TASK_EVIDENCE_TARGETS}` one entry per task,
    `{AFFECTED_TEST_COMMAND}` the narrowest command covering the touched
-   workspace(s) (the precheck carries the guard allowances). **Model:** resolve via
+   workspace(s) (the precheck carries the guard allowances), `{KNOWN_FALSE}` from
+   `forge refute list --md --for-diff <range>` (or `none recorded`). **Model:** resolve via
    `forge resolve-model --tier standard` and honor `omitModel`/`model` literally.
 
 4. **Record.** Save the closer's report to
@@ -85,7 +86,10 @@ review, it just fails the gate later.
    forge phase review
    ```
 
-5. **Fix round (at most one).** `NOT READY` → fix the named findings (dispatch a
+5. **Fix round (at most one).** Run `forge review-check .forge/sessions/<id>/reviews/final-review.md`
+   first. **Only backed blocking items start a fix round:** an unbacked
+   Critical/Important item is downgraded to Minor, and a `NOT READY` / REJECTED
+   review with no parseable list items stays REJECTED. `NOT READY` → fix the named findings (dispatch a
    fix subagent for anything non-trivial), have the **same closer** re-check the
    changed files only (`--scope fix` for the tests they touch — never a second
    full run), and update both records. Still `NOT READY` → escalate to
