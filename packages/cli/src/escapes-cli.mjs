@@ -12,7 +12,7 @@
  */
 
 import readline from 'node:readline';
-import { decide, doneSessions, escapeReport, pendingCandidates, WINDOW_DAYS } from './escapes.mjs';
+import { candidateOrigin, decide, doneSessions, escapeReport, pendingCandidates, WINDOW_DAYS } from './escapes.mjs';
 
 const USAGE = `Usage:
   forge escapes [list] [--json] [--rev <ref>]
@@ -54,9 +54,13 @@ function findSession(needle) {
  * @param {string} commit
  * @param {'confirmed' | 'dismissed'} decision
  * @param {{ replayTest?: string | null, reason?: string | null }} [extra]
+ * @param {{ repo?: string, inferred?: string }} [candidate] the listed candidate, when the caller has it; else looked up
  */
-function record(session, commit, decision, extra = {}) {
-  const res = decide({ cwd, sessionId: session.sessionId, slug: session.slug, commit, decision, ...extra });
+function record(session, commit, decision, extra = {}, candidate = undefined) {
+  const { repo, inferred } = candidate
+    ? { repo: candidate.repo ?? '.', inferred: candidate.inferred ?? null }
+    : candidateOrigin({ cwd, sessionId: session.sessionId, commit });
+  const res = decide({ cwd, sessionId: session.sessionId, slug: session.slug, commit, decision, repo, inferred, ...extra });
   if (!res.ok) {
     process.stderr.write(`${res.error}\n`);
     return false;
@@ -87,10 +91,14 @@ function printReport() {
       (p) => `${p.pace.padEnd(10)}${String(p.done).padStart(4)}  ${String(p.escaped).padStart(7)}  ${pct(p.rate)}  ${String(p.open).padStart(4)}`,
     ),
     '',
+    `Inferred (time-window, sessions recorded before per-repository ranges): ${report.inferred.escaped} of the ${report.total.escaped} escaped session(s) rest only on inferred ranges.`,
     `OPEN = ${WINDOW_DAYS}-day window still running; that month's rate can still rise.`,
   ];
   process.stdout.write(`${lines.join('\n')}\n`);
 }
+
+/** Which repository a candidate lives in (empty for the root), and whether its range was inferred. @param {{ repo?: string, inferred?: string }} c */
+const repoTag = (c) => `${c.repo && c.repo !== '.' ? `repo ${c.repo}: ` : ''}${c.inferred ? `inferred ${c.inferred}: ` : ''}`;
 
 /** F16: hit files the change's own plan never names. @param {string[]} files */
 const sweepLine = (files) => `  outside plan: ${files.join(', ')} — possible sweep (F16)`;
@@ -104,11 +112,11 @@ function printList(sessions) {
       out.push(`${s.sessionId}: skipped — ${s.skipped}`);
       continue;
     }
-    const range = `${s.range?.base.slice(0, 7)}..${s.range?.head.slice(0, 7)}${s.inferred ? ' (inferred)' : ''}`;
+    const range = s.range ? `${s.range.base.slice(0, 7)}..${s.range.head.slice(0, 7)}${s.inferred ? ' (inferred)' : ''}` : 'nested repos only';
     out.push(`${s.sessionId} (${s.slug ?? '?'}, done ${String(s.doneAt).slice(0, 10)}, ${range}): ${s.candidates.length} candidate(s)`);
     for (const c of s.candidates) {
       count += 1;
-      out.push(`  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}  [${c.lines} line(s): ${c.files.join(', ')}]`);
+      out.push(`  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}  [${repoTag(c)}${c.lines} line(s): ${c.files.join(', ')}]`);
       if (c.outsidePlan.length) out.push(sweepLine(c.outsidePlan));
     }
   }
@@ -155,7 +163,7 @@ async function interactive(sessions) {
     process.stdout.write(
       `\n[${n}/${queue.length}] ${s.sessionId} (${s.slug ?? '?'}, done ${String(s.doneAt).slice(0, 10)})\n` +
         `  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}\n` +
-        `  rewrites ${c.lines} line(s) the change added: ${c.files.join(', ')}\n` +
+        `  rewrites ${c.lines} line(s) the change added: ${repoTag(c)}${c.files.join(', ')}\n` +
         (c.outsidePlan.length ? `${sweepLine(c.outsidePlan)}\n` : '') +
         '  [c]onfirm Escape  [d]ismiss  [s]kip  [q]uit > ',
     );
@@ -171,14 +179,14 @@ async function interactive(sessions) {
       }
       if (k === 'd') {
         process.stdout.write('\n');
-        record(s, c.commit, 'dismissed');
+        record(s, c.commit, 'dismissed', {}, c);
         break;
       }
       if (k === 'c') {
         process.stdout.write('\n');
-        if (record(s, c.commit, 'confirmed')) break;
+        if (record(s, c.commit, 'confirmed', {}, c)) break;
         const test = await ask('  replay test path (blank to skip): ');
-        if (test) record(s, c.commit, 'confirmed', { replayTest: test });
+        if (test) record(s, c.commit, 'confirmed', { replayTest: test }, c);
         break;
       }
     }

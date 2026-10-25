@@ -271,6 +271,7 @@ export function registerSession(projectRoot, session, { engine = detectEngine() 
       pace: session.resolvedPace ?? session.pace ?? null,
       engine: engine ?? session.engine ?? prev.engine ?? null,
       commitRange: session.commitRange ?? null,
+      nestedCommitRanges: session.nestedCommitRanges ?? null,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastSeen: new Date().toISOString(),

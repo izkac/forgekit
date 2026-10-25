@@ -483,6 +483,8 @@ export function appendSessionDigest(opts) {
       brainstorm: readBrainstormSignals(sessionDir),
       // The change's commits, recorded at done — what `forge escapes` reads.
       commitRange: session.commitRange ?? null,
+      // Per nested repository; null = recorded before this existed (`forge escapes` infers).
+      nestedCommitRanges: session.nestedCommitRanges ?? null,
     };
     return appendLines(
       path.join(forgeDirOf(opts, sessionDir), 'sessions.jsonl'),

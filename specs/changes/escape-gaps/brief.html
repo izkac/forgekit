@@ -1,0 +1,75 @@
+<!-- forge-brief-specs-hash:aa3843917a093ea8 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escape gaps brief</title>
+<style>
+  body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1d1d1f; background: #fff; max-width: 48rem; margin: 2rem auto; padding: 0 16px; }
+  h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .2rem; }
+  code { background: #f3f3f3; padding: 0 .25rem; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid #ddd; padding: .4rem .5rem; text-align: left; vertical-align: top; }
+</style>
+</head>
+<body>
+<h1>Making escape tracking work on real projects</h1>
+
+<h2>TL;DR</h2>
+<p>Escape tracking counts how often a finished Forge change needs fixing within two weeks. Today it misses all of Volo's code, because that code lives in separate git repos inside the project, and every possible escape waits for you to confirm it by hand. After this change it searches every repo (including Volo's history), proves escapes automatically when the fix came with a test, and records which Forge release and which models did the work.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li><code>forge escapes</code> finds fixes in Volo's <code>volo_web</code> and <code>volo_mobile</code>, for new sessions and, estimated from timing, for past ones (shown separately as "inferred").</li>
+  <li><code>forge escapes verify</code> runs the fix's own test on the code before the fix and after it. If it fails before and passes after, the escape is confirmed for you. If not, the candidate stays with you, labelled with why.</li>
+  <li>Each finished session records the Forge version and which model coordinated vs which models did the subtasks, and <code>forge escapes report --by version</code> shows the escape rate per release.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>When a session finishes, Forge notes where each repo started and ended. Later, any fix that rewrites lines from that range is a candidate. For verification, Forge makes a throwaway copy of the repo at the old code, drops in the fix's test, runs your configured test command, then does the same at the fix. Your own working files are never touched, and the copies are always removed.</p>
+<pre class="mermaid">
+flowchart LR
+  D[Session done] --> R[Range per repo recorded]
+  R --> C[Later fix rewrites those lines: candidate]
+  C --> V{forge escapes verify}
+  V -- test fails before, passes after --> A[Confirmed automatically]
+  V -- passes before --> N[Not reproduced: you decide]
+  V -- needs code the fix added / fails after --> E[Environment: you decide]
+  V -- no test or no rule --> U[Undecided]
+</pre>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>To use verification in a project, add test commands to <code>.forge/config.json</code> under <code>escapes.replay</code>, for example "files under <code>volo_web/server/</code> run with <code>npx jest {file}</code> in that folder". Forge never guesses the command.</li>
+  <li>Verification runs only when you ask (<code>forge escapes verify</code>), and only with the same permission to run commands that <code>forge evidence</code> needs.</li>
+  <li>The glossary's "Commit range" now means a range per repository.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>A fix's test may need code the fix also added, so it fails on the old code for the wrong reason. Forge recognises "module not found" and syntax errors and labels those "environment" instead of confirming.</li>
+  <li>The throwaway copies borrow today's installed packages; if the old code needs different versions, that shows up as "environment", not as a false confirm.</li>
+  <li>Inferred ranges for past sessions are estimates by time; that is why they are shown separately.</li>
+  <li>Any automatic confirmation can still be overturned with <code>forge escapes dismiss</code>.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Comparing Forge with plain sessions on confirmed escapes (escape replays as evals) — next step once escapes are confirmed.</li>
+  <li>A scheduled weekly fleet report.</li>
+  <li>Changing the two-week window or what counts as a candidate.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What</th><th>Tasks</th></tr>
+  <tr><td>1</td><td>Ranges per repository, including past sessions</td><td>3</td></tr>
+  <tr><td>2</td><td>Running the fix's test to verify escapes</td><td>3</td></tr>
+  <tr><td>3</td><td>Version and models in the ledger, rate per release</td><td>2</td></tr>
+  <tr><td>4</td><td>Docs and an end-to-end run</td><td>2</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

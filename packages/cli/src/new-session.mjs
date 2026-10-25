@@ -7,8 +7,6 @@
  *   forge new <slug> [--chat-id <id>] [--signal <text>]
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   appendPhaseHistory,
@@ -30,6 +28,7 @@ import { liveOverlaps, queueMessage, sessionDirFor } from './lib/fleet.mjs';
 import { matchingOpenBugs } from './findings.mjs';
 import { loadProjectConfig } from './config.mjs';
 import { writeSlotEnvFile } from './lib/slots.mjs';
+import { nestedBaseCommits } from './lib/nested-repos.mjs';
 
 function usage() {
   process.stderr.write(
@@ -85,37 +84,6 @@ if (head.status === 0) {
     encoding: 'utf8',
   });
   if (branch.status === 0) session.branch = branch.stdout.trim();
-}
-
-/**
- * HEAD of every git repo nested at most two directories below `root` (a dir
- * holding a `.git` entry — directory or worktree/submodule file), keyed by
- * posix relative path. `node_modules` and dot-dirs are not scanned; a found
- * repo is not descended into; a repo whose HEAD can't be read is omitted.
- */
-function nestedBaseCommits(root) {
-  const found = {};
-  const scan = (abs, rel, depth) => {
-    let entries;
-    try {
-      entries = fs.readdirSync(abs, { withFileTypes: true });
-    } catch {
-      return; // unreadable directory — never break `forge new`
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-      const childAbs = path.join(abs, entry.name);
-      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (fs.existsSync(path.join(childAbs, '.git'))) {
-        const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: childAbs, encoding: 'utf8' });
-        if (r.status === 0 && r.stdout.trim()) found[childRel] = r.stdout.trim();
-      } else if (depth < 2) {
-        scan(childAbs, childRel, depth + 1);
-      }
-    }
-  };
-  scan(root, '', 1);
-  return found;
 }
 
 const nested = nestedBaseCommits(REPO_ROOT);

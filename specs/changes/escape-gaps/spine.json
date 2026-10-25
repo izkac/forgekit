@@ -1,0 +1,33 @@
+{
+  "change": "escape-gaps",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "escape-tracking: commit ranges per repository (recorded and inferred)",
+      "library": "packages/cli/src/escapes.mjs (per-repo escapeCandidates, time-window inference)",
+      "runtimeOwner": "forge phase done records nestedCommitRanges (packages/cli/src/set-phase.mjs); forge escapes list/report (packages/cli/src/escapes-cli.mjs)",
+      "writes": "nestedCommitRanges on the session and its sessions.jsonl digest; candidate list with repo and inferred markers",
+      "reads": "session nestedBaseCommits, nested repos' git history, sessions.jsonl and fleet registry",
+      "uiConsumer": "operator reading forge escapes list / report",
+      "evidence": "scripts/e2e/harness-portability.mjs escape-replay step; escapes nested-range tests"
+    },
+    {
+      "capability": "escape-tracking: replay verification",
+      "library": "packages/cli/src/escapes-replay.mjs",
+      "runtimeOwner": "forge escapes verify (packages/cli/src/escapes-cli.mjs)",
+      "writes": "escapes ledger entries (auto-confirmed) and candidate tags (environment, not-reproduced)",
+      "reads": ".forge/config.json escapes.replay rules, fix commits and their test files",
+      "uiConsumer": "forge escapes list / report",
+      "evidence": "scripts/e2e/harness-portability.mjs escape-replay step; escapes-replay tests"
+    },
+    {
+      "capability": "session-metrics: forgekit version and models by role; escape rate by version",
+      "library": "packages/cli/src/metrics/collect.mjs, packages/cli/src/ledger.mjs, packages/cli/src/escapes.mjs (report by version)",
+      "runtimeOwner": "digest at forge phase done (set-phase.mjs -> ledger.mjs appendSessionDigest); forge escapes report --by version",
+      "writes": "forgekitVersion and models in .forge/sessions.jsonl",
+      "reads": "packages/cli/package.json version, coordinator and sidecar transcripts",
+      "uiConsumer": "forge escapes report --by version; forge analyze",
+      "evidence": "digest version/models tests; report-by-version tests"
+    }
+  ]
+}

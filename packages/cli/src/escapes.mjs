@@ -17,6 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readLedger, withLedgerLock, writeLedger } from './ledger.mjs';
 import { listFleet, projectNameFor } from './lib/fleet.mjs';
+import { nestedBaseCommits } from './lib/nested-repos.mjs';
 import { normalizePlanDir, resolveProjectPlanEngine } from './plan-engine.mjs';
 import { CONCRETE_PACES } from './preferences.mjs';
 
@@ -49,8 +50,9 @@ const lines = (text) => (text ?? '').split('\n').filter(Boolean);
  * when it has none.
  *
  * @param {{ cwd: string }} opts
- * @returns {Array<{ sessionId: string, slug: string | null, doneAt: string | null,
- *   commitRange: { base: string, head: string } | null, project: string }>}
+ * @returns {Array<{ sessionId: string, slug: string | null, startedAt: string | null, doneAt: string | null,
+ *   commitRange: { base: string, head: string } | null,
+ *   nestedCommitRanges: Record<string, { base: string, head: string }> | null, project: string }>}
  */
 export function doneSessions({ cwd }) {
   const root = path.resolve(cwd);
@@ -61,8 +63,10 @@ export function doneSessions({ cwd }) {
     byId.set(row.sessionId, {
       sessionId: row.sessionId,
       slug: row.slug ?? null,
+      startedAt: row.startedAt ?? null,
       doneAt: row.endedAt ?? null,
       commitRange: row.commitRange ?? null,
+      nestedCommitRanges: row.nestedCommitRanges ?? null,
       project: root,
     });
   }
@@ -73,13 +77,17 @@ export function doneSessions({ cwd }) {
     const known = byId.get(e.sessionId);
     if (known) {
       known.commitRange ??= e.commitRange ?? null;
+      known.nestedCommitRanges ??= e.nestedCommitRanges ?? null;
+      known.startedAt ??= e.createdAt ?? null;
       continue;
     }
     byId.set(e.sessionId, {
       sessionId: e.sessionId,
       slug: e.slug ?? null,
+      startedAt: e.createdAt ?? null,
       doneAt: e.updatedAt ?? null,
       commitRange: e.commitRange ?? null,
+      nestedCommitRanges: e.nestedCommitRanges ?? null,
       project: e.project,
     });
   }
@@ -161,13 +169,18 @@ function oldSideRanges(cwd, c, paths) {
 const isAncestor = (cwd, sha, rev) => spawnSync('git', ['merge-base', '--is-ancestor', sha, rev], { cwd }).status === 0;
 
 /**
- * Escape candidates for one done session.
+ * Escape candidates for one done session: its root Commit range, then each
+ * nested repository's range, every one blamed in its own repository. A
+ * candidate's `repo` is `"."` for the root, else the nested path. A session is
+ * skipped only when no repository could be searched.
  *
  * @param {{ cwd: string, session: { sessionId: string, slug?: string | null, doneAt?: string | null,
- *   commitRange?: { base: string, head: string } | null }, rev?: string }} opts
+ *   commitRange?: { base: string, head: string } | null,
+ *   nestedCommitRanges?: Record<string, { base: string, head: string }> | null,
+ *   inferredCommits?: Record<string, string[]> | null }, rev?: string }} opts
  * @returns {{ sessionId: string, range: { base: string, head: string } | null, inferred: boolean,
  *   skipped: string | null, candidates: Array<{ commit: string, subject: string, at: string,
- *   files: string[], lines: number, outsidePlan: string[] }> }}
+ *   files: string[], lines: number, outsidePlan: string[], repo: string, inferred?: 'time-window' }> }}
  */
 export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
   let range = session.commitRange?.base && session.commitRange?.head ? session.commitRange : null;
@@ -182,31 +195,142 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
     }
   }
   const result = { sessionId: session.sessionId, range, inferred, skipped: null, candidates: [] };
-  if (!range) return { ...result, skipped: 'no commit range (none recorded, no forge(<slug>) commits)' };
-  if (!isAncestor(cwd, range.head, rev)) {
-    return { ...result, skipped: `head ${range.head.slice(0, 7)} not on ${rev} (unmerged or squash-merged)` };
+  /** @type {string[]} */
+  const skips = [];
+  let searched = false;
+  if (!range) skips.push('no commit range (none recorded, no forge(<slug>) commits)');
+  else if (!isAncestor(cwd, range.head, rev)) skips.push(`head ${range.head.slice(0, 7)} not on ${rev} (unmerged or squash-merged)`);
+  else {
+    searched = true;
+    result.candidates.push(...scanRepo({ cwd, repo: '.', session, rev, range, ...rangeCommits(cwd, range) }));
   }
 
-  // First parent only: a `git merge main` mid-session brings other sessions'
-  // commits into base..head, and their lines are not this change's. Blame
-  // credits those lines to their own commits, which this set then excludes.
-  const changeCommits = new Set(lines(git(cwd, ['rev-list', '--first-parent', `${range.base}..${range.head}`])));
+  for (const [repo, nested] of Object.entries(session.nestedCommitRanges ?? {})) {
+    const dir = nestedDir(cwd, repo);
+    if (!dir) {
+      skips.push(`${repo}: repository is gone`);
+      continue;
+    }
+    // ponytail: a nested repo is scanned at `rev` when it has that ref, else at its HEAD.
+    const nestedRev = git(dir, ['rev-parse', '--verify', '--quiet', rev]) ? rev : 'HEAD';
+    if (!isAncestor(dir, nested.head, nestedRev)) {
+      skips.push(`${repo}: head ${nested.head.slice(0, 7)} not on ${nestedRev} (unmerged or squash-merged)`);
+      continue;
+    }
+    searched = true;
+    result.candidates.push(...scanRepo({ cwd: dir, repo, session, rev: nestedRev, range: nested, ...rangeCommits(dir, nested) }));
+  }
+
+  // Sessions recorded before per-repository ranges: the commits `inferNestedWindows`
+  // attributed to this session's time window. Not a contiguous range, so there is no
+  // ancestor check; the newest commit stands in for the head.
+  for (const [repo, shas] of Object.entries(session.inferredCommits ?? {})) {
+    const dir = nestedDir(cwd, repo);
+    if (!dir || shas.length === 0) continue;
+    const nestedRev = git(dir, ['rev-parse', '--verify', '--quiet', rev]) ? rev : 'HEAD';
+    const files = lines(git(dir, ['log', '--no-walk=unsorted', '--format=', '--name-only', '--no-renames', ...shas]));
+    searched = true;
+    result.candidates.push(
+      ...scanRepo({ cwd: dir, repo, session, rev: nestedRev, range: { base: '', head: shas[0] }, changeCommits: new Set(shas), files, inferred: 'time-window' }),
+    );
+  }
+  return { ...result, skipped: searched ? null : skips.join('; ') };
+}
+
+/** @param {string} cwd @param {string} repo @returns {string | null} the nested repo's directory, or null when it is gone */
+function nestedDir(cwd, repo) {
+  const dir = path.join(cwd, repo);
+  return fs.existsSync(path.join(dir, '.git')) ? dir : null;
+}
+
+/**
+ * Time-window inference (CONTEXT.md, Commit range): for each done session with
+ * no recorded `nestedCommitRanges`, the commits of every nested repo that
+ * exists under `cwd` now whose committer time falls in the session's
+ * `[startedAt, endedAt]` (to the second, ends included), across all branches.
+ * A commit in several sessions' windows goes to the one with the shortest.
+ *
+ * ponytail: only sessions that themselves need inferring compete for a commit;
+ * a session with recorded ranges is not weighed, so a parallel session's commit
+ * can be attributed to an older, longer one. The candidate stays marked `inferred`.
+ *
+ * @param {{ cwd: string, sessions: Array<{ sessionId: string, startedAt?: string | null, doneAt?: string | null,
+ *   nestedCommitRanges?: unknown }> }} opts
+ * @returns {Map<string, Record<string, string[]>>} sessionId → repo → shas, newest first; sessions with none are absent
+ */
+export function inferNestedWindows({ cwd, sessions }) {
+  const windows = sessions
+    .filter((s) => !s.nestedCommitRanges)
+    .map((s) => ({ id: s.sessionId, from: Math.floor(Date.parse(s.startedAt ?? '') / 1000), to: Math.floor(Date.parse(s.doneAt ?? '') / 1000) }))
+    .filter((w) => Number.isFinite(w.from) && Number.isFinite(w.to) && w.from <= w.to);
+  /** @type {Map<string, Record<string, string[]>>} */
+  const out = new Map();
+  if (windows.length === 0) return out;
+  for (const repo of Object.keys(nestedBaseCommits(cwd))) {
+    const dir = nestedDir(cwd, repo);
+    if (!dir) continue;
+    for (const l of lines(git(dir, ['log', '--all', '--no-merges', '--format=%H%x09%ct']))) {
+      const [sha, ct] = l.split('\t');
+      const t = Number(ct);
+      let best = null;
+      for (const w of windows) {
+        if (t >= w.from && t <= w.to && (!best || w.to - w.from < best.to - best.from)) best = w;
+      }
+      if (!best) continue;
+      const repos = out.get(best.id) ?? {};
+      (repos[repo] ??= []).push(sha);
+      out.set(best.id, repos);
+    }
+  }
+  return out;
+}
+
+/**
+ * The commits of a recorded range, and the files it touched. First parent
+ * only: a `git merge main` mid-session brings other sessions' commits into
+ * base..head, and their lines are not this change's. Blame credits those lines
+ * to their own commits, which this set then excludes.
+ *
+ * @param {string} cwd
+ * @param {{ base: string, head: string }} range
+ * @returns {{ changeCommits: Set<string>, files: string[] }}
+ */
+function rangeCommits(cwd, range) {
+  return {
+    changeCommits: new Set(lines(git(cwd, ['rev-list', '--first-parent', `${range.base}..${range.head}`]))),
+    files: lines(git(cwd, ['diff', '--name-only', '--no-renames', range.base, range.head])),
+  };
+}
+
+/**
+ * Blame the later commits of one repository against the change's commits.
+ * The plan-dir and `.forge/` rules, and the F16 plan documents, belong to the
+ * root repository (`repo` `"."`) alone.
+ *
+ * @param {{ cwd: string, repo: string, session: { slug?: string | null, doneAt?: string | null },
+ *   rev: string, range: { base: string, head: string }, changeCommits: Set<string>, files: string[],
+ *   inferred?: 'time-window' }} opts
+ */
+function scanRepo({ cwd, repo, session, rev, range, changeCommits, files: changedByChange, inferred }) {
+  const isRoot = repo === '.';
   let planDir = 'openspec';
   try {
-    planDir = normalizePlanDir(resolveProjectPlanEngine(cwd).dir);
+    if (isRoot) planDir = normalizePlanDir(resolveProjectPlanEngine(cwd).dir);
   } catch {
     // unreadable config — keep the default
   }
-  const isCode = (/** @type {string} */ f) => !f.startsWith(`${planDir}/`) && !f.startsWith('.forge/');
+  const isCode = (/** @type {string} */ f) => !isRoot || (!f.startsWith(`${planDir}/`) && !f.startsWith('.forge/'));
   /** Paths that may hold change lines — the change's own files, followed through renames. */
-  const tracked = new Set(lines(git(cwd, ['diff', '--name-only', '--no-renames', range.base, range.head])).filter(isCode));
-  if (tracked.size === 0) return result;
+  const tracked = new Set(changedByChange.filter(isCode));
+  /** @type {Array<{ commit: string, subject: string, at: string, files: string[], lines: number, outsidePlan: string[], repo: string, inferred?: 'time-window' }>} */
+  const found = [];
+  if (tracked.size === 0) return found;
 
   // F16 (a sweep is an unrelated edit that rode along on a checkpoint): the
   // change's own plan documents, read at head, say which files it meant to touch.
   // ponytail: basename substring match, so a common basename (`index.ts`) reads
   // as named and the flag can miss a sweep. It labels a candidate; it never hides one.
-  const planFiles = lines(git(cwd, ['diff', '--name-only', '--diff-filter=d', range.base, range.head, '--', `${planDir}/`]));
+  const planFiles = isRoot ? lines(git(cwd, ['diff', '--name-only', '--diff-filter=d', range.base, range.head, '--', `${planDir}/`])) : [];
   const { head } = range;
   const planText = planFiles.length ? (git(cwd, ['show', ...planFiles.map((f) => `${head}:${f}`)]) ?? '') : '';
 
@@ -240,10 +364,10 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
     }
     if (hit > 0) {
       const outsidePlan = planFiles.length ? files.filter((f) => !planText.includes(path.posix.basename(f))) : [];
-      result.candidates.push({ commit: c.commit, subject: c.subject, at: c.at, files, lines: hit, outsidePlan });
+      found.push({ commit: c.commit, subject: c.subject, at: c.at, files, lines: hit, outsidePlan, repo, ...(inferred && { inferred }) });
     }
   }
-  return result;
+  return found;
 }
 
 /** @param {string} cwd */
@@ -274,16 +398,20 @@ export function replayTestFor({ cwd, commit }) {
  * Record the operator's verdict on one candidate. Confirming requires a replay
  * test (CONTEXT.md): the supplied path, else the fix commit's own test; the
  * path must exist in the fix commit's tree or on disk. A re-decision on the
- * same (session, commit) replaces the earlier line.
+ * same (session, commit) replaces the earlier line. For a candidate in a nested
+ * repository (`repo`), the commit and the replay test are that repository's;
+ * the ledger stays the project's.
  *
  * @param {{ cwd: string, sessionId: string, slug?: string | null, commit: string,
- *   decision: string, replayTest?: string | null, reason?: string | null }} opts
+ *   decision: string, replayTest?: string | null, reason?: string | null,
+ *   repo?: string, inferred?: string | null }} opts
  * @returns {{ ok: true, entry: Record<string, any> } | { ok: false, error: string }}
  */
-export function decide({ cwd, sessionId, slug = null, commit, decision, replayTest = null, reason = null }) {
+export function decide({ cwd: root, sessionId, slug = null, commit, decision, replayTest = null, reason = null, repo = '.', inferred = null }) {
   if (decision !== 'confirmed' && decision !== 'dismissed') {
     return { ok: false, error: `decision must be confirmed or dismissed, got: ${decision}` };
   }
+  const cwd = repo === '.' ? root : path.join(root, repo);
   const sha = git(cwd, ['rev-parse', '--verify', '--quiet', `${commit}^{commit}`])?.trim();
   if (!sha) return { ok: false, error: `not a commit in this repository: ${commit}` };
   let test = null;
@@ -317,9 +445,11 @@ export function decide({ cwd, sessionId, slug = null, commit, decision, replayTe
     decision,
     replayTest: test,
     reason,
+    ...(repo !== '.' && { repo }),
+    ...(inferred && { inferred }),
     decidedAt: new Date().toISOString(),
   };
-  const file = escapesLedgerPath(cwd);
+  const file = escapesLedgerPath(root);
   withLedgerLock(file, () => {
     const kept = readLedger(file).filter((e) => !(e.sessionId === sessionId && e.commit === sha));
     writeLedger(file, [...kept, entry]);
@@ -330,12 +460,15 @@ export function decide({ cwd, sessionId, slug = null, commit, decision, replayTe
 /**
  * Candidates still waiting on the operator, per done session of this repo.
  *
- * @param {{ cwd: string, rev?: string }} opts
+ * @param {{ cwd: string, rev?: string, sessionId?: string }} opts `sessionId` limits the blame to one session
  */
-export function pendingCandidates({ cwd, rev = 'HEAD' }) {
+export function pendingCandidates({ cwd, rev = 'HEAD', sessionId }) {
   const decided = new Set(readDecisions(cwd).map((d) => `${d.sessionId} ${d.commit}`));
-  return doneSessions({ cwd }).map((session) => {
-    const result = escapeCandidates({ cwd, session, rev });
+  const sessions = doneSessions({ cwd });
+  // The windows of all sessions are weighed against each other, so infer before narrowing.
+  const windows = inferNestedWindows({ cwd, sessions });
+  return sessions.filter((s) => !sessionId || s.sessionId === sessionId).map((session) => {
+    const result = escapeCandidates({ cwd, session: { ...session, inferredCommits: windows.get(session.sessionId) }, rev });
     return {
       ...result,
       slug: session.slug,
@@ -343,6 +476,24 @@ export function pendingCandidates({ cwd, rev = 'HEAD' }) {
       candidates: result.candidates.filter((c) => !decided.has(`${session.sessionId} ${c.commit}`)),
     };
   });
+}
+
+/**
+ * Which repository a commit named on the command line belongs to, and whether
+ * its range was inferred: from the earlier decision on it, else from the
+ * session's pending candidates. `{ repo: '.' }` when neither knows it.
+ *
+ * @param {{ cwd: string, sessionId: string, commit: string, rev?: string }} opts `commit` may be abbreviated
+ * @returns {{ repo: string, inferred: string | null }}
+ */
+export function candidateOrigin({ cwd, sessionId, commit, rev = 'HEAD' }) {
+  const prior = readDecisions(cwd).find((d) => d.sessionId === sessionId && d.commit?.startsWith(commit));
+  const found =
+    prior ??
+    pendingCandidates({ cwd, rev, sessionId })
+      .flatMap((s) => s.candidates)
+      .find((c) => c.commit.startsWith(commit));
+  return { repo: found?.repo ?? '.', inferred: found?.inferred ?? null };
 }
 
 /**
@@ -363,11 +514,18 @@ export function escapeReport({ cwd, now = Date.now() }) {
   /** @type {Map<string, { at: string, pace: string | null }>} sessionId → done time and pace */
   const done = new Map();
   const escaped = new Set();
+  /** Sessions whose every confirmed Escape came from an inferred range. */
+  const inferredOnly = new Set();
+  const notInferred = new Set();
   for (const root of roots) {
     for (const row of readLedger(path.join(root, '.forge', 'sessions.jsonl'))) {
       if (row.phase === 'done' && row.sessionId && row.endedAt) done.set(row.sessionId, { at: row.endedAt, pace: row.pace ?? null });
     }
-    for (const d of readDecisions(root)) if (d.decision === 'confirmed') escaped.add(d.sessionId);
+    for (const d of readDecisions(root)) {
+      if (d.decision !== 'confirmed') continue;
+      escaped.add(d.sessionId);
+      (d.inferred ? inferredOnly : notInferred).add(d.sessionId);
+    }
   }
   for (const e of fleet) {
     if (e.phase !== 'done' || !e.sessionId || !e.updatedAt) continue;
@@ -395,6 +553,8 @@ export function escapeReport({ cwd, now = Date.now() }) {
     }
   }
   for (const bucket of [...months.values(), ...paces.values(), total]) bucket.rate = bucket.done ? bucket.escaped / bucket.done : 0;
+  // Of the escaped sessions, those resting only on inferred ranges (time-window guesses).
+  const inferred = { escaped: [...done.keys()].filter((id) => inferredOnly.has(id) && !notInferred.has(id)).length };
   /** @param {string} pace */
   const paceRank = (pace) => (pace === 'unknown' ? 2 : CONCRETE_PACES.includes(pace) ? 0 : 1);
   return {
@@ -406,5 +566,6 @@ export function escapeReport({ cwd, now = Date.now() }) {
         (paceRank(a.pace) === 0 ? CONCRETE_PACES.indexOf(a.pace) - CONCRETE_PACES.indexOf(b.pace) : a.pace.localeCompare(b.pace)),
     ),
     total,
+    inferred,
   };
 }

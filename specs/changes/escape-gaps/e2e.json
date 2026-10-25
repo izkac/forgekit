@@ -1,0 +1,8 @@
+{
+  "change": "escape-gaps",
+  "notApplicable": null,
+  "steps": [
+    { "name": "boot", "cmd": "node scripts/e2e/harness-portability.mjs boot" },
+    { "name": "escape-replay", "cmd": "node scripts/e2e/harness-portability.mjs escape-replay", "expect": "auto-confirmed" }
+  ]
+}
