@@ -404,10 +404,26 @@ export function replayTestFor({ cwd, commit }) {
  *
  * @param {{ cwd: string, sessionId: string, slug?: string | null, commit: string,
  *   decision: string, replayTest?: string | null, reason?: string | null,
- *   repo?: string, inferred?: string | null }} opts
+ *   repo?: string, inferred?: string | null, auto?: boolean, command?: string | null,
+ *   oldExit?: number | null, fixExit?: number | null }} opts
+ *   `auto`, `command`, `oldExit` and `fixExit` are what `forge escapes verify` records for a replay it ran.
  * @returns {{ ok: true, entry: Record<string, any> } | { ok: false, error: string }}
  */
-export function decide({ cwd: root, sessionId, slug = null, commit, decision, replayTest = null, reason = null, repo = '.', inferred = null }) {
+export function decide({
+  cwd: root,
+  sessionId,
+  slug = null,
+  commit,
+  decision,
+  replayTest = null,
+  reason = null,
+  repo = '.',
+  inferred = null,
+  auto = false,
+  command = null,
+  oldExit = null,
+  fixExit = null,
+}) {
   if (decision !== 'confirmed' && decision !== 'dismissed') {
     return { ok: false, error: `decision must be confirmed or dismissed, got: ${decision}` };
   }
@@ -447,6 +463,7 @@ export function decide({ cwd: root, sessionId, slug = null, commit, decision, re
     reason,
     ...(repo !== '.' && { repo }),
     ...(inferred && { inferred }),
+    ...(auto && { auto: true, command, oldExit, fixExit }),
     decidedAt: new Date().toISOString(),
   };
   const file = escapesLedgerPath(root);
@@ -457,13 +474,50 @@ export function decide({ cwd: root, sessionId, slug = null, commit, decision, re
   return { ok: true, entry };
 }
 
+/** @param {string} cwd */
+export function escapeTagsPath(cwd) {
+  return path.join(path.resolve(cwd), '.forge', 'escape-tags.jsonl');
+}
+
 /**
- * Candidates still waiting on the operator, per done session of this repo.
+ * What `forge escapes verify` learned about a candidate it could not confirm —
+ * `environment`, `not-reproduced`, or `undecided` with a reason. Not a
+ * decision: the candidate stays pending. Latest per (session, commit) wins.
+ *
+ * @param {string} cwd
+ * @returns {Array<{ sessionId: string, commit: string, repo: string, tag: string, reason: string | null,
+ *   command: string | null, oldExit: number | null, fixExit: number | null, at: string }>}
+ */
+export function readTags(cwd) {
+  /** @type {Map<string, any>} */
+  const latest = new Map();
+  for (const t of readLedger(escapeTagsPath(cwd))) latest.set(`${t.sessionId} ${t.commit}`, t);
+  return [...latest.values()];
+}
+
+/**
+ * @param {{ cwd: string, sessionId: string, commit: string, repo?: string, tag: string, reason?: string | null,
+ *   command?: string | null, oldExit?: number | null, fixExit?: number | null }} opts
+ */
+export function tagCandidate({ cwd, sessionId, commit, repo = '.', tag, reason = null, command = null, oldExit = null, fixExit = null }) {
+  const entry = { sessionId, commit, repo, tag, reason, command, oldExit, fixExit, at: new Date().toISOString() };
+  const file = escapeTagsPath(cwd);
+  withLedgerLock(file, () => {
+    const kept = readLedger(file).filter((e) => !(e.sessionId === sessionId && e.commit === commit));
+    writeLedger(file, [...kept, entry]);
+  });
+  return entry;
+}
+
+/**
+ * Candidates still waiting on the operator, per done session of this repo. A
+ * candidate `forge escapes verify` tagged carries it as `tag`.
  *
  * @param {{ cwd: string, rev?: string, sessionId?: string }} opts `sessionId` limits the blame to one session
  */
 export function pendingCandidates({ cwd, rev = 'HEAD', sessionId }) {
   const decided = new Set(readDecisions(cwd).map((d) => `${d.sessionId} ${d.commit}`));
+  const tags = new Map(readTags(cwd).map((t) => [`${t.sessionId} ${t.commit}`, t]));
   const sessions = doneSessions({ cwd });
   // The windows of all sessions are weighed against each other, so infer before narrowing.
   const windows = inferNestedWindows({ cwd, sessions });
@@ -473,7 +527,12 @@ export function pendingCandidates({ cwd, rev = 'HEAD', sessionId }) {
       ...result,
       slug: session.slug,
       doneAt: session.doneAt,
-      candidates: result.candidates.filter((c) => !decided.has(`${session.sessionId} ${c.commit}`)),
+      candidates: result.candidates
+        .filter((c) => !decided.has(`${session.sessionId} ${c.commit}`))
+        .map((c) => {
+          const tag = tags.get(`${session.sessionId} ${c.commit}`);
+          return tag ? { ...c, tag } : c;
+        }),
     };
   });
 }
