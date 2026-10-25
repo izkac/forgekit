@@ -89,3 +89,9 @@ codes, and the receipt path — then end with one overall status for the unit:
 If you get part way and stop, say exactly which tasks are finished and which are
 untouched. The coordinator ticks `tasks.md` from your report, and a unit reported
 as one lump is a unit it has to re-open to find out what actually landed.
+
+## Reply length
+
+Your reply is a status line plus at most 10 lines; put the detail (per-task
+report, commands, receipts) in your report text. Write longer only when this
+brief asks for it.

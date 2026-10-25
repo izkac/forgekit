@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Cost levers.** Measured on 62 sessions: cost is requests times context carried,
+  and sessions with 40+ subagents cost about twice as much per task with no better
+  scores. No check, model, tier or pace rule changed.
+  - **Dispatch budget.** `forge phase implement --tasks-total N` projects the plan's
+    subagent dispatches and warns on stderr above `budget.subagents` (default 15 in
+    `.forge/config.json`). `forge status` and the session reminder show
+    `dispatches n/<budget>` from the dispatch log. Never blocks.
+  - **Backed review claims.** Reviewer prompts require an evidence line on every
+    Critical/Important item and a `**Verdict: APPROVED|REJECTED**` line. New
+    `forge review-check <file>` downgrades unbacked blocking items to Minor; a
+    rejection counts, and a fix round starts, only with at least one backed item.
+    An unparseable REJECTED review stays REJECTED. Verdict headings (`## Verdict:
+    REJECTED`, `## Verdict` then `REJECTED`) now read as REJECTED; fenced and
+    quoted lines and `REJECTED or APPROVED` instructions do not.
+  - **Known-false in reviewer briefs.** `forge refute list --md --for-diff <range>`
+    fills a new `{KNOWN_FALSE}` block with this session's refutations plus up to 20
+    project entries that mention the changed files.
+  - **Coordinator context.** `forge group close --group <name>` replaces the
+    checkpoint, range, precheck and label calls with one. `forge status --brief` and
+    `forge phase --brief` print a few lines (JSON stays the default). Metrics split
+    coordinator from subagent requests per group and record mean context per
+    coordinator request. Implementers reply with a short status; reviewers return the
+    full review text.
+
 - **Commit range at done.** `forge phase done` records `commitRange: { base, head }`
   (the session's `baseCommit` .. HEAD) on the session, its `.forge/sessions.jsonl`
   row and its fleet registry entry. A refused done records none.

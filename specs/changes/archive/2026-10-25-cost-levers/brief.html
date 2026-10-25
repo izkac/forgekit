@@ -1,0 +1,80 @@
+<!-- forge-brief-specs-hash:7df11d5c01bc984b -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cost levers brief</title>
+<style>
+  body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1d1d1f; background: #fff; max-width: 48rem; margin: 2rem auto; padding: 0 16px; }
+  h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .2rem; }
+  code { background: #f3f3f3; padding: 0 .25rem; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid #ddd; padding: .4rem .5rem; text-align: left; vertical-align: top; }
+</style>
+</head>
+<body>
+<h1>Cutting Forge's cost without cutting its checks</h1>
+
+<h2>TL;DR</h2>
+<p>Most of a Forge session's cost is the model re-reading its working context on every step, and the main session carries the most. This change trims what the main session has to carry and avoids wasted work: too many helper agents, and reviewers raising complaints they can't back up. Nothing that protects quality is weakened. No cheaper models, no skipped reviews.</p>
+
+<h2>What you'll get</h2>
+<ul>
+  <li>A warning when a plan would launch more than 15 helper agents (configurable), with the parts of the plan that add the most. It's never a block.</li>
+  <li><code>forge status</code> shows how many helper agents the session has used against that budget.</li>
+  <li>Reviewers must back each blocking complaint with proof: a command that fails, the missing requirement and where it's missing, or a concrete scenario at a specific line. Complaints without proof are still reported but no longer force a fix round.</li>
+  <li>Reviewers see the claims already shown to be wrong for this work, so they don't raise them again.</li>
+  <li>One command, <code>forge group close</code>, replaces four separate steps at the end of each task group.</li>
+  <li>A <code>--brief</code> option on <code>forge status</code> and <code>forge phase</code> for short output; the default stays JSON so nothing that reads it breaks.</li>
+  <li>New measurements of how much of the cost is the main session vs its helpers, per task group, so the next round of savings can be aimed with data.</li>
+</ul>
+
+<h2>How it works</h2>
+<p>The plan is checked against the budget once, when implementation starts. During the session the count comes from the dispatch log that already exists. At the end of each task group, one command commits, prepares the review range, checks the evidence and names the reviewer. When a review comes back, a checker splits its complaints into proven and unproven. Only proven ones send work back.</p>
+<pre class="mermaid">
+flowchart LR
+  P[Plan approved] --> B{Projected helpers over budget?}
+  B -- yes --> W[Warning, keep going]
+  B -- no --> I[Implement a task group]
+  W --> I
+  I --> G[forge group close]
+  G --> R[Reviewer with known-wrong claims in brief]
+  R --> C[forge review-check]
+  C -- proven blocking issue --> F[Fix round]
+  C -- nothing proven --> N[Next group]
+  F --> G
+</pre>
+
+<h2>What changes for you</h2>
+<ul>
+  <li>Nothing breaks: <code>forge status</code> and <code>forge phase</code> keep their JSON output; <code>--brief</code> is opt-in.</li>
+  <li>An optional <code>budget.subagents</code> setting in <code>.forge/config.json</code>.</li>
+</ul>
+
+<h2>Risks and open questions</h2>
+<ul>
+  <li>Reviewers might write thin "proof" just to clear the check. The checker requires a specific structure, and refuted claims are still counted, so padding shows up.</li>
+  <li>The running helper count is inflated when two Forge sessions run from the same folder. This was seen today and filed as finding F18. The plan-time warning isn't affected.</li>
+  <li>The "reply in 10 lines" rule for helpers is guidance, not enforced. The new measurements will show whether it holds.</li>
+</ul>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Any model, tier or pace change. Brisk pace waits for escape rates by pace (finding filed).</li>
+  <li>Blocking dispatches over budget.</li>
+  <li>Resetting the main session's context between groups.</li>
+</ul>
+
+<h2>Work overview</h2>
+<table>
+  <tr><th>Group</th><th>What</th><th>Tasks</th></tr>
+  <tr><td>1</td><td>Helper budget: projection, warning, running count</td><td>3</td></tr>
+  <tr><td>2</td><td>Review claims: proof checker, rejection counting, known-wrong claims for reviewers</td><td>4</td></tr>
+  <tr><td>3</td><td>Main-session context: measurements, group close, short output</td><td>3</td></tr>
+  <tr><td>4</td><td>Prompts, docs, a verdict-reading fix and an end-to-end run</td><td>4</td></tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>

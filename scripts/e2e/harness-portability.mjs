@@ -226,6 +226,9 @@ import { NO_TDD_MARKER } from '../../packages/cli/src/record-evidence.mjs';
 // exact paths `scaffoldAdr` itself would have written, not a list of strings
 // retyped from having read that file once.
 import { DEFAULT_ADR_DIR, decisionsDocFor, resolveAdrTemplatesRoot } from '../../packages/cli/src/adr.mjs';
+// `budget` enters implement, which gates on a stamped operator brief; stamp it with
+// the product's own function (the CLI command also opens a browser).
+import { stampBrief } from '../../packages/cli/src/brief.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FORGE_BIN = path.join(REPO, 'packages', 'cli', 'bin', 'forge.mjs');
@@ -1059,6 +1062,8 @@ const ALL_ROSTER = [
   'brainstorm-gate',
   'init-preserves-config',
   'checkpoint-scope',
+  'budget',
+  'group-close',
 ];
 
 if (phase === 'all') {
@@ -3291,6 +3296,102 @@ if (phase === 'boot') {
   }
 
   process.stdout.write('CHECKPOINT SCOPE GREEN\n');
+} else if (phase === 'budget') {
+  // THE DISPATCH-BUDGET WARNING, AGAINST THE SHIPPED BINARY: a plan that projects
+  // more subagent dispatches than the default budget (15) must still enter
+  // implement (exit 0 — it warns, never blocks), say so on stderr, and
+  // `forge status` must then report the running `dispatches` object.
+  const dir = `${SCRATCH}-budget`;
+  makeProject(dir);
+  const groupCount = 8; // 8 groups x 2 tasks: 8 implementers + 8 group reviewers + 1 final = 17 > 15
+  const lines = ['# Tasks', ''];
+  for (let g = 1; g <= groupCount; g += 1) {
+    lines.push(`## ${g}. Group ${g}`, `- [ ] ${g}.1 First task of group ${g}`, `- [ ] ${g}.2 Second task of group ${g}`, '');
+  }
+  const budgetChangeDir = path.join(dir, 'specs', 'changes', 'my-change');
+  fs.writeFileSync(path.join(budgetChangeDir, 'tasks.md'), `${lines.join('\n')}\n`);
+  fs.writeFileSync(path.join(budgetChangeDir, 'brief.html'), '<!doctype html><title>Scratch brief</title><p>Scratch plan.</p>\n');
+  stampBrief(budgetChangeDir);
+
+  const entered = forge(dir, ['phase', 'implement', '--tasks-total', String(groupCount * 2)]);
+  if (entered.code !== 0) {
+    fail('forge phase implement exited non-zero on an over-budget plan — the budget must warn, never block', entered.out);
+  }
+  if (!entered.out.includes('[forge] Dispatch budget:')) {
+    fail('forge phase implement printed no "[forge] Dispatch budget:" warning for a plan projecting 17 dispatches', entered.out);
+  }
+
+  const status = forge(dir, ['status']);
+  if (status.code !== 0) fail('forge status exited non-zero', status.out);
+  let parsed;
+  try {
+    parsed = JSON.parse(status.stdout);
+  } catch {
+    fail('forge status did not print JSON', status.out);
+  }
+  const dispatches = parsed?.dispatches;
+  if (!dispatches || typeof dispatches !== 'object') {
+    fail('forge status did not report a dispatches object', status.stdout);
+  }
+
+  process.stdout.write('DISPATCH BUDGET GREEN — plan is over budget: warned on stderr, entered implement, status reports dispatches\n');
+} else if (phase === 'group-close') {
+  // `forge group close` AGAINST THE SHIPPED BINARY: with checkpoints on and a
+  // finished group, one call must commit the group and print the review target.
+  const dir = `${SCRATCH}-group-close`;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+
+  git(dir, 'init', '-q', '-b', 'work'); // non-default branch: checkpoint refuses on main/master
+  git(dir, 'config', 'user.email', 'e2e@example.com');
+  git(dir, 'config', 'user.name', 'E2E Harness');
+
+  fs.mkdirSync(path.join(dir, '.forge'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.forge', 'config.json'),
+    `${JSON.stringify({ plan: { engine: 'specs', dir: 'specs' }, git: { checkpoint: 'per-group' } }, null, 2)}\n`,
+  );
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'base.txt'), 'baseline\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'base');
+  const baseCommit = git(dir, 'rev-parse', 'HEAD');
+
+  const sessionDir = path.join(dir, '.forge', 'sessions', 's1');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, 'session.json'),
+    `${JSON.stringify({ id: 's1', slug: 'scratch', phase: 'implement', planType: 'specs', openspecChange: 'my-change', baseCommit })}\n`,
+  );
+  fs.writeFileSync(path.join(dir, '.forge', 'active.json'), `${JSON.stringify({ sessionId: 's1' })}\n`);
+  const changeDir = path.join(dir, 'specs', 'changes', 'my-change');
+  fs.mkdirSync(changeDir, { recursive: true });
+  fs.writeFileSync(path.join(changeDir, 'tasks.md'), '# Tasks\n\n## 1. Widgets\n- [x] 1.1 Add the widget\n- [x] 1.2 Test the widget\n');
+
+  // The finished group's work: one tracked edit and one new file (a diff alone hides the new one).
+  fs.writeFileSync(path.join(dir, 'src', 'base.txt'), 'baseline\nwidget wired\n');
+  fs.writeFileSync(path.join(dir, 'src', 'widget.txt'), 'the widget\n');
+
+  const headBefore = git(dir, 'rev-parse', 'HEAD');
+  const closed = forge(dir, ['group', 'close', '--group', '01-widgets', '--tasks', '1.1,1.2']);
+  if (closed.code !== 0) fail('forge group close exited non-zero for a finished group', closed.out);
+  const headAfter = git(dir, 'rev-parse', 'HEAD');
+  if (headAfter === headBefore) fail('forge group close made no checkpoint commit with git.checkpoint enabled', closed.out);
+  const committed = git(dir, 'show', '--name-only', '--pretty=format:', 'HEAD')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!committed.includes('src/widget.txt')) {
+    fail('the group checkpoint commit does not contain the group\'s new file src/widget.txt', committed.join('\n'));
+  }
+  if (!closed.stdout.includes('reviewTarget')) {
+    fail('forge group close printed no reviewTarget', closed.out);
+  }
+  if (!closed.stdout.includes(headAfter.slice(0, 7))) {
+    fail('the printed reviewTarget does not name the new checkpoint commit', closed.out);
+  }
+
+  process.stdout.write(`GROUP CLOSE GREEN — checkpoint ${headAfter.slice(0, 7)} committed; ${closed.stdout.split('\n').find((l) => l.startsWith('reviewTarget')) ?? 'reviewTarget printed'}\n`);
 } else if (phase === 'retire-triage-hook') {
   const dir = `${SCRATCH}-retire-triage-hook`;
   fs.rmSync(dir, { recursive: true, force: true });
@@ -3807,7 +3908,7 @@ if (phase === 'boot') {
       'telemetry-analyze|review-evidence-decides|review-evidence-substance|' +
       'review-evidence-survives|review-evidence-pruned-record|review-evidence-partial-binding|' +
       'review-stamp-decides|session-ambiguity|doctor-wiring|test-guard|tdd-evidence|archive-gate|' +
-      'brainstorm-gate|init-preserves-config|checkpoint-scope|retire-triage-hook|agents-target|tier3-lock|resource-leases\n',
+      'brainstorm-gate|init-preserves-config|checkpoint-scope|budget|group-close|retire-triage-hook|agents-target|tier3-lock|resource-leases\n',
   );
   process.exit(1);
 }

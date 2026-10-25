@@ -3,7 +3,11 @@
  * Update Forge session phase and optional fields.
  *
  * Usage:
- *   forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"]
+ *   forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--brief]
+ *
+ * `--brief` prints a few lines (health, phase, tasks, pace, dispatches) instead
+ * of the JSON object once the transition is recorded; without it the output is
+ * unchanged.
  *
  * `--openspec <change>` names the change for both engines (openspec/changes/<change>
  * or specs/changes/<change>).
@@ -20,6 +24,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
+  FORGE_DIR,
+  REPO_ROOT,
   appendPhaseHistory,
   loadSession,
   readActive,
@@ -29,8 +35,17 @@ import {
 } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
-import { COMBINED_TASKS, collectPlanFacts, suggestCeremonyFromPlan, suggestPaceFromPlan } from './plan-facts.mjs';
-import { CONCRETE_PACES, isHighRiskText } from './preferences.mjs';
+import {
+  COMBINED_TASKS,
+  collectPlanFacts,
+  projectDispatches,
+  suggestCeremonyFromPlan,
+  suggestPaceFromPlan,
+} from './plan-facts.mjs';
+import { CONCRETE_PACES, isHighRiskText, resolveEffectivePreferences } from './preferences.mjs';
+import { dispatchBudgetState, resolveDispatchBudget } from './metrics/dispatches.mjs';
+import { sessionHealth } from './health.mjs';
+import { renderShortSummary } from './short-summary.mjs';
 import { reviewCensus } from './review-census.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { checkIntegritySeal } from './integrity-seal.mjs';
@@ -66,7 +81,7 @@ const args = process.argv.slice(2);
 const wantsHelp = args.includes('--help') || args.includes('-h');
 if (args.length === 0 || wantsHelp) {
   (wantsHelp ? process.stdout : process.stderr).write(
-    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--notes-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>]\n',
+    'Usage: forge phase <phase> [--plan-type openspec|specs|throwaway|direct] [--openspec <change>] [--tasks-total N] [--tasks-complete N] [--subagents N] [--allow-incomplete "<reason>"] [--final-review-waived "<reason>"] [--archive-waived "<reason>"] [--reopen-waived "<reason>"] [--notes-waived "<reason>"] [--exit-reason "<reason>"] [--exit-declined "<reason>"] [--session <id>] [--brief]\n',
   );
   process.exit(wantsHelp ? 0 : 1);
 }
@@ -90,6 +105,7 @@ let reopenWaived = null;
 let notesWaived = null;
 let exitReason = null;
 let exitDeclined = null;
+let brief = false;
 
 for (let i = 1; i < args.length; i += 1) {
   const flag = args[i];
@@ -133,6 +149,8 @@ for (let i = 1; i < args.length; i += 1) {
   } else if (flag === '--allow-incomplete' && next) {
     allowIncomplete = next;
     i += 1;
+  } else if (flag === '--brief') {
+    brief = true;
   }
 }
 
@@ -412,6 +430,49 @@ function maybeResolveCeremonyFromPlan() {
   }
 }
 
+/** How many of the largest groups the budget warning names. */
+const BUDGET_WARNING_GROUPS = 3;
+
+/**
+ * Project the plan's subagent dispatches on the way into implement, keep the
+ * figure on the session, and warn when it exceeds `budget.subagents`.
+ *
+ * Warn, never block: a refused dispatch could be the review quality depends on,
+ * so this only prints (stderr) and never changes the exit code. Runs after pace
+ * is resolved, because group reviewers follow the resolved pace's
+ * `review.perTask`. An unreadable plan projects nothing and says nothing.
+ */
+function announceDispatchBudget() {
+  if (phase !== 'implement') return;
+  try {
+    const facts = collectPlanFacts({ session });
+    if (!facts.readable) return;
+    const { effective } = resolveEffectivePreferences({
+      forgeDir: FORGE_DIR,
+      session,
+      signalText: session.paceSignal || session.slug || '',
+    });
+    const projection = projectDispatches(facts, effective);
+    session.dispatchProjected = projection.total;
+    const budget = resolveDispatchBudget(REPO_ROOT);
+    if (projection.total <= budget) return;
+    const largest = [...projection.groups]
+      .sort((a, b) => b.total - a.total)
+      .slice(0, BUDGET_WARNING_GROUPS)
+      .map((g) => `"${g.title}" (${g.total})`)
+      .join(', ');
+    process.stderr.write(
+      `[forge] Dispatch budget: this plan projects ${projection.total} subagent dispatches ` +
+        `(${projection.implementers} implementers, ${projection.reviewers} group reviewers, 1 final review) against budget ${budget}.\n` +
+        `[forge] Largest: ${largest || 'n/a'}. Warning only — merge or trim groups, or raise budget.subagents in .forge/config.json.\n`,
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[forge] Warning: could not project the dispatch budget: ${err instanceof Error ? err.message : err}\n`,
+    );
+  }
+}
+
 /**
  * Say the combined-close instruction at the moment the tail starts.
  *
@@ -488,6 +549,7 @@ function announceSpecVerify() {
 maybeResolvePaceFromPlan();
 maybeEscalatePaceForTaskCount();
 maybeResolveCeremonyFromPlan();
+announceDispatchBudget();
 announceCombinedClose();
 announceOpenSpecVerify();
 announceSpecVerify();
@@ -1136,5 +1198,15 @@ if (!isTerminalPhase(phase) && readActive()?.sessionId !== sessionId) {
 }
 
 saveSession(dir, session);
-process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));
-process.stdout.write('\n');
+if (brief) {
+  process.stdout.write(
+    renderShortSummary({
+      health: sessionHealth({ cwd: REPO_ROOT, sessionDir: dir, session }),
+      session,
+      dispatches: dispatchBudgetState({ sessionDir: dir, cwd: REPO_ROOT }),
+    }),
+  );
+} else {
+  process.stdout.write(JSON.stringify({ sessionId, phase: session.phase, session }, null, 2));
+  process.stdout.write('\n');
+}

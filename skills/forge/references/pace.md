@@ -90,6 +90,10 @@ task count is known at plan time. A pin here is likewise recorded, not just
 skipped: `paceSuppressed.taskCount` when a pinned session would otherwise have
 escalated.
 
+`budget.subagents` (`.forge/config.json`, default 15) is a dispatch budget, not a
+pace knob: `forge phase implement --tasks-total N` warns when the plan projects
+more subagent dispatches than that, and never blocks one.
+
 ## Plan-time exit ramp
 
 New in this change: right after brainstorm, before any change directory is

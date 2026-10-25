@@ -24,6 +24,7 @@ import { reviewEvidence } from './metrics/review-evidence.mjs';
 import { frozenReviewVerdict } from './review-verdict.mjs';
 import { sessionHealth } from './health.mjs';
 import { readRefutations } from './refute.mjs';
+import { dispatchBudgetState } from './metrics/dispatches.mjs';
 
 /** @param {string} forgeDir */
 export function projectKnownFalsePath(forgeDir) {
@@ -199,6 +200,29 @@ export function compactMetrics(doc) {
 }
 
 /**
+ * Coordinator-versus-subagent facts for the digest, copied from the metrics
+ * document as measured. Kept beside `metrics` rather than inside it: the
+ * compact block is a fixed shape other readers key on, and these three are
+ * independent measurements that are each `null` where the host could not
+ * separate the two sides — never estimated, never defaulted to zero.
+ *
+ * @param {unknown} doc a parsed metrics.json — or anything at all
+ * @returns {{ breakdown: object | null, coordinator: object | null,
+ *   groups: object[] | null } | null} null when no metrics were collected
+ */
+function requestSplitFacts(doc) {
+  if (!doc || typeof doc !== 'object' || doc.available !== true) return null;
+  const obj = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
+  return {
+    // `coordinator: null` is the collector saying the host could not separate
+    // the sides, so its file-level breakdown is not a coordinator/subagent split.
+    breakdown: doc.coordinator === null ? null : obj(doc.breakdown),
+    coordinator: obj(doc.coordinator),
+    groups: Array.isArray(doc.groups) ? doc.groups : null,
+  };
+}
+
+/**
  * What the dispatch ledger contributes to the digest, from a document that may
  * be able to say nothing else.
  *
@@ -348,6 +372,7 @@ export function appendSessionDigest(opts) {
     const metrics = compactMetrics(metricsDoc);
     const dispatch = dispatchFacts(metricsDoc);
     const health = sessionHealth({ cwd: opts.cwd, sessionDir, session });
+    const budget = dispatchBudgetState({ sessionDir, cwd: path.dirname(forgeDirOf(opts, sessionDir)) });
     const started = new Date(session.createdAt ?? NaN).getTime();
     const ended = new Date(session.updatedAt ?? NaN).getTime();
     const durationHours =
@@ -375,6 +400,7 @@ export function appendSessionDigest(opts) {
       dispatchesSkipped: dispatch.skipped,
       dispatches: dispatch.table,
       metrics,
+      requestSplit: requestSplitFacts(metricsDoc),
       reviews: {
         total: census.total,
         independent: census.independent,
@@ -441,6 +467,11 @@ export function appendSessionDigest(opts) {
       // recomputed here.
       paceSuppressed: session.paceSuppressed ?? null,
       exitDeclined: session.exitDeclined ?? null,
+      // What the plan projected at the implement transition (kept on the
+      // session, not recomputed from a plan that may have changed since), what
+      // the dispatch log counted, and the budget in force. `actual` is null
+      // for an unreadable log — an unknown, never a zero.
+      dispatchBudget: { projected: session.dispatchProjected ?? null, actual: budget.n, budget: budget.budget },
       durationHours,
       startedAt: session.createdAt ?? null,
       endedAt: session.updatedAt ?? null,

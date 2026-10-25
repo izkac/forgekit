@@ -51,7 +51,7 @@ test('a session digest survives the deletion of its session dir', () => {
   const { sessionDir, session } = makeSession(root);
   fs.writeFileSync(
     path.join(sessionDir, 'tasks', '01-model', 'group-review.md'),
-    '# Group review\n\n**Verdict: APPROVED** (opus reviewer 9f2)\n\n## Round 1 — REJECTED\n',
+    '# Group review\n\n**Verdict: APPROVED** (opus reviewer 9f2)\n\n## Round 1 — REJECTED\n\n## Important\n\n- Broken.\n  Command: npm test -- a → exit 1\n',
     'utf8',
   );
 

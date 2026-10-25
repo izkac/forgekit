@@ -66,6 +66,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { readStamps } from './review-stamp.mjs';
+import { REJECTION_RE, checkReview } from './review-check.mjs';
 
 /**
  * A review the coordinator wrote about its own work — a weaker signal.
@@ -230,8 +231,15 @@ export function attributionRegion(body) {
  */
 export const CENSUS_RULE = 5;
 
-/** A round that sent work back: proof the review was not a rubber stamp. */
-export const REJECTION_RE = /(?:\bRound\s+\d+[^\n]*\bREJECTED\b|\*\*Verdict:\s*REJECTED\*\*)/i;
+/**
+ * A round that sent work back: proof the review was not a rubber stamp. Defined
+ * beside `checkReview` (which needs it) and re-exported for existing importers.
+ * A verdict match alone is not a rejection — see `countsAsRejection`.
+ */
+export { REJECTION_RE };
+
+/** A rejection counts only when at least one blocking item carries evidence (`review-check.mjs`). */
+const countsAsRejection = (/** @type {string} */ body) => checkReview(body).effectiveVerdict === 'REJECTED';
 
 /**
  * The unit a final-review dispatch carries: `forge-review final`.
@@ -559,7 +567,7 @@ export function reviewCensus(sessionDir, options) {
         census.total += 1;
         if (SELF_REVIEW_RE.test(attributionRegion(body))) census.selfChecks += 1;
         else census.independent += 1;
-        if (REJECTION_RE.test(body)) census.rejections += 1;
+        if (countsAsRejection(body)) census.rejections += 1;
       }
     }
   }
@@ -667,7 +675,7 @@ export function reviewCensus(sessionDir, options) {
       census.finalReview = SELF_REVIEW_RE.test(attributionRegion(body)) ? 'self' : 'independent';
       census.finalReviewEvidence = 'inferred';
     }
-    if (REJECTION_RE.test(body)) census.rejections += 1;
+    if (countsAsRejection(body)) census.rejections += 1;
     break;
   }
   return census;

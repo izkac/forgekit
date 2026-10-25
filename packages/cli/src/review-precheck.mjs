@@ -26,7 +26,8 @@ import {
 } from './integrity.mjs';
 import { loadAllowances } from './guard.mjs';
 import { NO_TDD_REASON_LABEL, RECORDED_BY_EXECUTED } from './record-evidence.mjs';
-import { REJECTION_RE, SELF_REVIEW_RE, attributionRegion } from './review-census.mjs';
+import { SELF_REVIEW_RE, attributionRegion } from './review-census.mjs';
+import { isRejected } from './review-check.mjs';
 import { collectPlanFacts } from './plan-facts.mjs';
 import { isHighRiskText } from './preferences.mjs';
 
@@ -123,7 +124,7 @@ function reviewFacts(sessionDir) {
         // No attribution at all is nobody's review — the census tolerates it
         // for scoring, the tier rail must not cash it in as an outside reader.
         independent: attribution !== null && !SELF_REVIEW_RE.test(attributionRegion(body)),
-        rejected: REJECTION_RE.test(body),
+        rejected: isRejected(body),
         verdictLines: lines.filter((l) => /\b(APPROVED|REJECTED|NOT READY|READY)\b/.test(l)).slice(0, 3).map((l) => l.trim()),
       });
     }
