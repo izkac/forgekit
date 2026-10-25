@@ -30,6 +30,8 @@ export const ENVIRONMENT_SIGNATURES = new RegExp(
   [
     // node
     'Cannot find module|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|does not provide an export|SyntaxError',
+    // a missing file or binary, and a helper the fix added being called
+    'ENOENT|is not a function',
     // python
     'ModuleNotFoundError|ImportError',
     // vitest / vite, esbuild
@@ -37,7 +39,7 @@ export const ENVIRONMENT_SIGNATURES = new RegExp(
     // go — `undefined:` only in Go's own `<file>.go:<line>:<col>:` shape, so JS text like "expected undefined: 5" stays a failure
     '\\.go:\\d+:\\d+: undefined: \\w|cannot find package|no required module provides package',
     // typescript
-    '\\bTS(?:2304|2307)\\b',
+    '\\bTS(?:2304|2307|2339|2554)\\b',
     // rust
     'error\\[E0432\\]',
     // java

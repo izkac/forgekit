@@ -354,6 +354,11 @@ forge escapes verify [--all | <session> <commit>] [--json]
                                   # contain {file}) + the exec opt-in. Several test files in the fix → the
                                   # first one a rule covers. --rev <ref> scans another ref; `forge escapes
                                   # list` shows the result as (verify: <tag>).
+                                  # node_modules at the rule's cwd is LINKED to your copy in the throwaway
+                                  # worktrees: a test that writes into it changes it. `git worktree prune`
+                                  # runs first (it also forgets your other worktrees whose directories are
+                                  # currently missing). A recorded range that could not be searched prints
+                                  # as an `unsearched:` line (list and verify) and in the verify summary.
                                   # old fails + fix passes → auto-confirmed (`auto: true` in the ledger).
                                   # Otherwise tagged, never dismissed: `environment` (fix run fails, or old
                                   # run died on a missing module/syntax error), `not-reproduced` (test passes
@@ -362,7 +367,8 @@ forge escapes verify [--all | <session> <commit>] [--json]
 forge escapes report [--by version] [--json]
                                   # Escape rate per month and per pace (`unknown` if none recorded) of done,
                                   # across the fleet (OPEN = window running); --by version adds a row per
-                                  # forgekit release (`unknown` for sessions without one)
+                                  # forgekit release (`unknown` for sessions without one); a `Partial:` line
+                                  # counts sessions with unsearched ranges (their escape count may be low)
                                   # Replay rules (.forge/config.json), first match wins; `match` globs the
                                   # root-relative test path, `{file}` is relative to `cwd`:
                                   #   "escapes": { "replay": [ { "match": "volo_web/server/**",

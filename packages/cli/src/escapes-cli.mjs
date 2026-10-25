@@ -115,6 +115,9 @@ function printReport() {
       : []),
     '',
     `Inferred (time-window, sessions recorded before per-repository ranges): ${report.inferred.escaped} of the ${report.total.escaped} escaped session(s) rest only on inferred ranges.`,
+    ...(report.unsearched
+      ? [`Partial: ${report.unsearched.sessions} session(s) with unsearched ranges (repository gone, or head not on HEAD) — their escape count may be low. See: forge escapes list`]
+      : []),
     `OPEN = ${WINDOW_DAYS}-day window still running; that month's rate can still rise.`,
   ];
   process.stdout.write(`${lines.join('\n')}\n`);
@@ -125,6 +128,9 @@ const repoTag = (c) => `${c.repo && c.repo !== '.' ? `repo ${c.repo}: ` : ''}${c
 
 /** What `forge escapes verify` found out about a candidate it could not confirm. @param {{ tag?: { tag: string, reason: string | null } }} c */
 const verifyTag = (c) => (c.tag ? `  (verify: ${c.tag.tag}${c.tag.reason ? `: ${c.tag.reason}` : ''})` : '');
+
+/** One line per range of a searched session that could not be searched. @param {{ unsearched?: string[] }} s */
+const unsearchedLines = (s) => (s.unsearched ?? []).map((reason) => `  unsearched: ${reason}`);
 
 /** F16: hit files the change's own plan never names. @param {string[]} files */
 const sweepLine = (files) => `  outside plan: ${files.join(', ')} — possible sweep (F16)`;
@@ -140,6 +146,7 @@ function printList(sessions) {
     }
     const range = s.range ? `${s.range.base.slice(0, 7)}..${s.range.head.slice(0, 7)}${s.inferred ? ' (inferred)' : ''}` : 'nested repos only';
     out.push(`${s.sessionId} (${s.slug ?? '?'}, done ${String(s.doneAt).slice(0, 10)}, ${range}): ${s.candidates.length} candidate(s)`);
+    out.push(...unsearchedLines(s));
     for (const c of s.candidates) {
       count += 1;
       out.push(`  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}  [${repoTag(c)}${c.lines} line(s): ${c.files.join(', ')}]${verifyTag(c)}`);
@@ -178,7 +185,10 @@ function ask(prompt) {
 /** @param {ReturnType<typeof pendingCandidates>} sessions */
 async function interactive(sessions) {
   const queue = sessions.flatMap((s) => s.candidates.map((c) => ({ s, c })));
-  for (const s of sessions) if (s.skipped) process.stdout.write(`${s.sessionId}: skipped — ${s.skipped}\n`);
+  for (const s of sessions) {
+    if (s.skipped) process.stdout.write(`${s.sessionId}: skipped — ${s.skipped}\n`);
+    else for (const line of unsearchedLines(s)) process.stdout.write(`${s.sessionId}:${line}\n`);
+  }
   if (queue.length === 0) {
     process.stdout.write('No undecided Escape candidates.\n');
     return;
@@ -295,6 +305,8 @@ async function verify() {
     environment: count('environment'),
     notReproduced: count('not-reproduced'),
     undecided: count('undecided'),
+    // Ranges that could not be searched, so the candidates above may be a partial set.
+    unsearched: sessions.reduce((n, s) => n + (s.skipped ? 0 : (s.unsearched?.length ?? 0)), 0),
   };
   if (json) {
     process.stdout.write(`${JSON.stringify({ results, summary }, null, 2)}\n`);
@@ -303,8 +315,9 @@ async function verify() {
   const verdict = (/** @type {{ outcome: string, reason: string | null }} */ r) =>
     r.outcome === 'confirmed' ? 'confirmed (auto)' : r.outcome === 'undecided' ? `undecided: ${r.reason}` : r.outcome;
   const out = results.map((r) => `${r.session} ${r.commit.slice(0, 7)} ${r.repo}: ${verdict(r)}`);
+  for (const s of sessions) if (!s.skipped) for (const line of unsearchedLines(s)) out.push(`${s.sessionId}:${line}`);
   out.push(
-    `${summary.total} candidate(s): ${summary.confirmed} confirmed, ${summary.environment} environment, ${summary.notReproduced} not-reproduced, ${summary.undecided} undecided`,
+    `${summary.total} candidate(s): ${summary.confirmed} confirmed, ${summary.environment} environment, ${summary.notReproduced} not-reproduced, ${summary.undecided} undecided${summary.unsearched ? `; ${summary.unsearched} range(s) unsearched` : ''}`,
   );
   process.stdout.write(`${out.join('\n')}\n`);
 }

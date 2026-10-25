@@ -174,17 +174,22 @@ const isAncestor = (cwd, sha, rev) => spawnSync('git', ['merge-base', '--is-ance
  * Escape candidates for one done session: its root Commit range, then each
  * nested repository's range, every one blamed in its own repository. A
  * candidate's `repo` is `"."` for the root, else the nested path. A session is
- * skipped only when no repository could be searched.
+ * skipped only when no repository could be searched. A range that exists but
+ * cannot be searched (repo gone, head off the scanned ref) is always named in
+ * `unsearched`, searched session or not, so a partial result is never silent.
+ * `probe` checks the ranges without blaming anything (the report's cheap pass).
  *
  * @param {{ cwd: string, session: { sessionId: string, slug?: string | null, doneAt?: string | null,
  *   commitRange?: { base: string, head: string } | null,
  *   nestedCommitRanges?: Record<string, { base: string, head: string }> | null,
- *   inferredCommits?: Record<string, string[]> | null }, rev?: string }} opts
+ *   inferredCommits?: Record<string, string[]> | null }, rev?: string, probe?: boolean }} opts
  * @returns {{ sessionId: string, range: { base: string, head: string } | null, inferred: boolean,
- *   skipped: string | null, candidates: Array<{ commit: string, subject: string, at: string,
+ *   skipped: string | null, unsearched: string[], candidates: Array<{ commit: string, subject: string, at: string,
  *   files: string[], lines: number, outsidePlan: string[], repo: string, inferred?: 'time-window' }> }}
  */
-export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
+export function escapeCandidates({ cwd, session, rev = 'HEAD', probe = false }) {
+  const scan = (/** @type {string} */ dir, /** @type {string} */ repo, /** @type {string} */ scanRev, /** @type {{ base: string, head: string }} */ r) =>
+    probe ? [] : scanRepo({ cwd: dir, repo, session, rev: scanRev, range: r, ...rangeCommits(dir, r) });
   let range = session.commitRange?.base && session.commitRange?.head ? session.commitRange : null;
   let inferred = false;
   // A recorded head that is not on `rev` was rebased (or squashed) on its way
@@ -196,31 +201,38 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
       inferred = true;
     }
   }
-  const result = { sessionId: session.sessionId, range, inferred, skipped: null, candidates: [] };
+  /** @type {{ sessionId: string, range: typeof range, inferred: boolean, skipped: string | null, unsearched: string[], candidates: any[] }} */
+  const result = { sessionId: session.sessionId, range, inferred, skipped: null, unsearched: [], candidates: [] };
   /** @type {string[]} */
   const skips = [];
   let searched = false;
+  /** A range that exists but cannot be searched: a skip reason, and never silent. @param {string} reason */
+  const lost = (reason) => {
+    skips.push(reason);
+    result.unsearched.push(reason);
+  };
+  // No range at all is not a lost one: nothing was recorded to search.
   if (!range) skips.push('no commit range (none recorded, no forge(<slug>) commits)');
-  else if (!isAncestor(cwd, range.head, rev)) skips.push(`head ${range.head.slice(0, 7)} not on ${rev} (unmerged or squash-merged)`);
+  else if (!isAncestor(cwd, range.head, rev)) lost(`head ${range.head.slice(0, 7)} not on ${rev} (unmerged or squash-merged)`);
   else {
     searched = true;
-    result.candidates.push(...scanRepo({ cwd, repo: '.', session, rev, range, ...rangeCommits(cwd, range) }));
+    result.candidates.push(...scan(cwd, '.', rev, range));
   }
 
   for (const [repo, nested] of Object.entries(session.nestedCommitRanges ?? {})) {
     const dir = nestedDir(cwd, repo);
     if (!dir) {
-      skips.push(`${repo}: repository is gone`);
+      lost(`${repo}: repository is gone`);
       continue;
     }
     // ponytail: a nested repo is scanned at `rev` when it has that ref, else at its HEAD.
     const nestedRev = git(dir, ['rev-parse', '--verify', '--quiet', rev]) ? rev : 'HEAD';
     if (!isAncestor(dir, nested.head, nestedRev)) {
-      skips.push(`${repo}: head ${nested.head.slice(0, 7)} not on ${nestedRev} (unmerged or squash-merged)`);
+      lost(`${repo}: head ${nested.head.slice(0, 7)} not on ${nestedRev} (unmerged or squash-merged)`);
       continue;
     }
     searched = true;
-    result.candidates.push(...scanRepo({ cwd: dir, repo, session, rev: nestedRev, range: nested, ...rangeCommits(dir, nested) }));
+    result.candidates.push(...scan(dir, repo, nestedRev, nested));
   }
 
   // Sessions recorded before per-repository ranges: the commits `inferNestedWindows`
@@ -228,7 +240,7 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
   // ancestor check; the newest commit stands in for the head.
   for (const [repo, shas] of Object.entries(session.inferredCommits ?? {})) {
     const dir = nestedDir(cwd, repo);
-    if (!dir || shas.length === 0) continue;
+    if (!dir || shas.length === 0 || probe) continue;
     const nestedRev = git(dir, ['rev-parse', '--verify', '--quiet', rev]) ? rev : 'HEAD';
     const files = lines(git(dir, ['log', '--no-walk=unsorted', '--format=', '--name-only', '--no-renames', ...shas]));
     searched = true;
@@ -236,8 +248,7 @@ export function escapeCandidates({ cwd, session, rev = 'HEAD' }) {
       ...scanRepo({ cwd: dir, repo, session, rev: nestedRev, range: { base: '', head: shas[0] }, changeCommits: new Set(shas), files, inferred: 'time-window' }),
     );
   }
-  return { ...result, skipped: searched ? null : skips.join('; ') };
-}
+  return { ...result, skipped: searched ? null : skips.join('; ') };}
 
 /** @param {string} cwd @param {string} repo @returns {string | null} the nested repo's directory, or null when it is gone */
 function nestedDir(cwd, repo) {
@@ -641,6 +652,11 @@ export function escapeReport({ cwd, now = Date.now(), by = null }) {
   }
   // Of the escaped sessions, those resting only on inferred ranges (time-window guesses).
   const inferred = { escaped: [...done.keys()].filter((id) => inferredOnly.has(id) && !notInferred.has(id)).length };
+  // Sessions of this project with a recorded range that cannot be searched, so their
+  // escape count may be partial. Ranges are only probed, never blamed.
+  const unsearched = {
+    sessions: doneSessions({ cwd }).filter((session) => escapeCandidates({ cwd, session, probe: true }).unsearched.length > 0).length,
+  };
   /** @param {string} pace */
   const paceRank = (pace) => (pace === 'unknown' ? 2 : CONCRETE_PACES.includes(pace) ? 0 : 1);
   return {
@@ -662,5 +678,7 @@ export function escapeReport({ cwd, now = Date.now(), by = null }) {
       : {}),
     total,
     inferred,
+    // Present only when a session has an unsearchable range, so a clean report keeps its shape.
+    ...(unsearched.sessions > 0 && { unsearched }),
   };
 }

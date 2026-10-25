@@ -3451,6 +3451,22 @@ if (phase === 'boot') {
   const done = forge(dir, ['phase', 'done', '--allow-incomplete', 'e2e: escape-replay product loop']);
   if (done.code !== 0) fail('forge phase done --allow-incomplete exited non-zero', done.out);
 
+  // Done must have RECORDED the nested range. Time-window inference would find the
+  // same candidate without it, so a broken recording would pass unnoticed otherwise.
+  const recordedRanges = JSON.parse(fs.readFileSync(path.join(dir, '.forge', 'sessions', sessionId, 'session.json'), 'utf8')).nestedCommitRanges;
+  if (!recordedRanges?.app?.base || !recordedRanges.app.head || recordedRanges.app.base === recordedRanges.app.head) {
+    fail('forge phase done did not record nestedCommitRanges.app in session.json', JSON.stringify(recordedRanges));
+  }
+  const digestRow = fs
+    .readFileSync(path.join(dir, '.forge', 'sessions.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l))
+    .find((r) => r.sessionId === sessionId);
+  if (JSON.stringify(digestRow?.nestedCommitRanges?.app) !== JSON.stringify(recordedRanges.app)) {
+    fail('the sessions.jsonl digest does not carry nestedCommitRanges.app', JSON.stringify(digestRow?.nestedCommitRanges));
+  }
+
   // A later fix corrects the line and adds a test that fails on the buggy code.
   const fixTest = [
     "import test from 'node:test';",
