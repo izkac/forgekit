@@ -13,7 +13,6 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { decide, tagCandidate } from './escapes.mjs';
@@ -207,15 +206,51 @@ function removeLink(link) {
 }
 
 /**
+ * Where replay worktrees live: `<project>/.forge/replay/`, self-ignored. Not the OS temp dir —
+ * on another drive than the project, Vite/esbuild walked into an unreadable parent and could not
+ * load its config — and not inside `.git`, which Vite's default `server.fs.deny` refuses to serve.
+ * Returns the directories this call created, so cleanup can remove them again when empty.
+ *
+ * @param {string} projectRoot
+ * @returns {{ base: string, created: string[] }}
+ */
+function replayBase(projectRoot) {
+  const forgeDir = path.join(path.resolve(projectRoot), '.forge');
+  const base = path.join(forgeDir, 'replay');
+  const created = [forgeDir, base].filter((d) => !fs.existsSync(d));
+  fs.mkdirSync(base, { recursive: true });
+  const ignore = path.join(base, '.gitignore');
+  if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, '*\n');
+  return { base, created };
+}
+
+/** Remove what `replayBase` created, deepest first, only when nothing else is left in it. */
+function dropReplayBase({ base, created }) {
+  if (!created.includes(base)) return;
+  try {
+    if (fs.readdirSync(base).every((n) => n === '.gitignore')) fs.rmSync(base, { recursive: true, force: true });
+  } catch {
+    return;
+  }
+  for (const d of created.filter((x) => x !== base)) {
+    try {
+      fs.rmdirSync(d); // non-recursive: only an empty dir we made
+    } catch {
+      // not empty or already gone — leave it
+    }
+  }
+}
+
+/**
  * One throwaway worktree at `rev`: `prepare` may write into it, `node_modules`
  * is linked at `within`, `fn` runs, and the link and the worktree are removed.
  *
  * @template T
- * @param {{ repoDir: string, rev: string, within: string, prepare?: (dir: string) => void, fn: (dir: string) => Promise<T> }} o
+ * @param {{ repoDir: string, rev: string, within: string, baseDir: string, prepare?: (dir: string) => void, fn: (dir: string) => Promise<T> }} o
  * @returns {Promise<T>}
  */
-async function inWorktree({ repoDir, rev, within, prepare, fn }) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-replay-'));
+async function inWorktree({ repoDir, rev, within, baseDir, prepare, fn }) {
+  const dir = fs.mkdtempSync(path.join(baseDir, 'r-'));
   const link = path.join(dir, within, 'node_modules');
   let added = false;
   try {
@@ -264,20 +299,26 @@ export async function runReplay({ projectRoot, repo, fixSha, testPath, rule, tim
     throw new Error(`${fixSha.slice(0, 7)} has no parent to replay against`);
   }
 
-  const old = await inWorktree({
-    repoDir,
-    rev: `${fixSha}^`,
-    within,
-    prepare: (dir) => {
-      const dest = path.join(dir, repoRelTest);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, testBody.stdout);
-    },
-    fn: (cwd) => run(argv, cwd, timeoutSec),
-  });
-  if (old.timedOut) return { old, fix: { exit: null, output: '', timedOut: false, error: null } };
-  const fix = await inWorktree({ repoDir, rev: fixSha, within, fn: (cwd) => run(argv, cwd, timeoutSec) });
-  return { old, fix };
+  const where = replayBase(projectRoot);
+  try {
+    const old = await inWorktree({
+      repoDir,
+      rev: `${fixSha}^`,
+      within,
+      baseDir: where.base,
+      prepare: (dir) => {
+        const dest = path.join(dir, repoRelTest);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, testBody.stdout);
+      },
+      fn: (cwd) => run(argv, cwd, timeoutSec),
+    });
+    if (old.timedOut) return { old, fix: { exit: null, output: '', timedOut: false, error: null } };
+    const fix = await inWorktree({ repoDir, rev: fixSha, within, baseDir: where.base, fn: (cwd) => run(argv, cwd, timeoutSec) });
+    return { old, fix };
+  } finally {
+    dropReplayBase(where);
+  }
 }
 
 /**

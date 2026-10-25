@@ -349,7 +349,8 @@ forge escapes dismiss <session> <commit> [--reason "<why>"]
                                   # decisions → .forge/escapes.jsonl
 forge escapes verify [--all | <session> <commit>] [--json]
                                   # replay the fix commit's test on the fix's parent (fix's test copied in)
-                                  # and on the fix, in throwaway worktrees under the temp dir; your working
+                                  # and on the fix, in throwaway worktrees under .forge/replay/ (self-ignored;
+                                  # not the OS temp dir or .git, where Vite cannot load config); your working
                                   # tree is untouched. Needs an `escapes.replay` rule (its command must
                                   # contain {file}) + the exec opt-in. Several test files in the fix → the
                                   # first one a rule covers. --rev <ref> scans another ref; `forge escapes

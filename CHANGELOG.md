@@ -12,7 +12,8 @@
     the shortest session), marked `inferred` and counted separately in the report.
   - **`forge escapes verify [--all | <session> <commit>]`.** Replays the fix
     commit's test on the fix's parent (with the fix's test copied in) and on the
-    fix, in throwaway worktrees under the temp dir; your working tree is untouched.
+    fix, in throwaway worktrees under `.forge/replay/` (self-ignored; the OS temp dir
+    and `.git` broke Vite/Vitest config loading on Volo); your working tree is untouched.
     Old fails and fix passes: auto-confirmed (`auto: true`, command and exit codes
     in `.forge/escapes.jsonl`). Otherwise tagged `environment` or `not-reproduced`,
     or left undecided with a reason. Never dismisses. Needs the exec opt-in and an
