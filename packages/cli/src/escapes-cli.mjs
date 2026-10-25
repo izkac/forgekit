@@ -17,7 +17,7 @@
 import path from 'node:path';
 import readline from 'node:readline';
 import { loadProjectConfig } from './config.mjs';
-import { candidateOrigin, decide, doneSessions, escapeReport, pendingCandidates, replayTestFor, tagCandidate, WINDOW_DAYS } from './escapes.mjs';
+import { candidateOrigin, decide, doneSessions, escapeReport, pendingCandidates, replayTestsFor, tagCandidate, WINDOW_DAYS } from './escapes.mjs';
 import { DEFAULT_REPLAY_TIMEOUT_SEC, recordReplay, replayArgv, resolveReplayRule, runReplay, splitArgv } from './escapes-replay.mjs';
 import { resolveCallerExecGate } from './exec-gate.mjs';
 
@@ -237,9 +237,10 @@ async function verify() {
   const work = sessions.flatMap((s) =>
     s.candidates.map((c) => {
       const repo = c.repo ?? '.';
-      const testPath = replayTestFor({ cwd: repo === '.' ? cwd : path.join(cwd, repo), commit: c.commit });
-      const rule = testPath ? resolveReplayRule(config, repo === '.' ? testPath : `${repo}/${testPath}`) : null;
-      return { s, c, repo, testPath, rule };
+      const tests = replayTestsFor({ cwd: repo === '.' ? cwd : path.join(cwd, repo), commit: c.commit });
+      // The first of the fix's tests that a rule covers.
+      const ruled = tests.map((t) => ({ t, rule: resolveReplayRule(config, repo === '.' ? t : `${repo}/${t}`) })).find((x) => x.rule);
+      return { s, c, repo, hasTest: tests.length > 0, testPath: ruled?.t ?? null, rule: ruled?.rule ?? null };
     }),
   );
 
@@ -252,14 +253,14 @@ async function verify() {
   }
 
   const results = [];
-  for (const { s, c, repo, testPath, rule } of work) {
+  for (const { s, c, repo, hasTest, testPath, rule } of work) {
     const undecided = (/** @type {string} */ reason) => {
       tagCandidate({ cwd, sessionId: s.sessionId, commit: c.commit, repo, tag: 'undecided', reason });
       return { outcome: 'undecided', reason };
     };
     let res;
-    if (!testPath) res = undecided('no-test');
-    else if (!rule) res = undecided('no-rule');
+    if (!hasTest) res = undecided('no-test');
+    else if (!testPath || !rule) res = undecided('no-rule');
     else {
       try {
         const runs = await runReplay({ projectRoot: cwd, repo, fixSha: c.commit, testPath, rule, timeoutSec });

@@ -26,7 +26,18 @@ export const DEFAULT_REPLAY_TIMEOUT_SEC = 300;
  * An old run that fails like this failed because the test needs code or
  * packages the fix brought, not because of the bug — so it proves nothing.
  */
-export const ENVIRONMENT_SIGNATURES = /Cannot find module|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|does not provide an export|SyntaxError/;
+export const ENVIRONMENT_SIGNATURES = new RegExp(
+  [
+    // node
+    'Cannot find module|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|does not provide an export|SyntaxError',
+    // python
+    'ModuleNotFoundError|ImportError',
+    // vitest / vite, esbuild
+    'Failed to resolve import|Could not resolve',
+    // go
+    'undefined: \\w|cannot find package',
+  ].join('|'),
+);
 
 /** Output kept per run, from the end — a failing test prints its reason last. */
 const OUTPUT_KEEP = 1024 * 1024;
@@ -118,7 +129,8 @@ function killTree(child) {
  * @param {string[]} argv
  * @param {string} cwd
  * @param {number} timeoutSec
- * @returns {Promise<{ exit: number | null, output: string, timedOut: boolean }>}
+ * @returns {Promise<{ exit: number | null, output: string, timedOut: boolean, error: string | null }>}
+ *   `error` is the spawn error when the command could not start
  */
 function run(argv, cwd, timeoutSec) {
   const env = { ...process.env };
@@ -128,6 +140,8 @@ function run(argv, cwd, timeoutSec) {
     let output = '';
     let timedOut = false;
     let done = false;
+    /** @type {string | null} */
+    let error = null;
     /** @type {NodeJS.Timeout | undefined} */
     let hardStop;
     const finish = (/** @type {number | null} */ exit) => {
@@ -135,9 +149,15 @@ function run(argv, cwd, timeoutSec) {
       done = true;
       clearTimeout(timer);
       clearTimeout(hardStop);
-      resolve({ exit, output, timedOut });
+      resolve({ exit, output, timedOut, error });
     };
-    const child = spawn(argv[0], argv.slice(1), { cwd, env, ...CALLER_EXEC_SPAWN, detached: process.platform !== 'win32' });
+    const child = spawn(argv[0], argv.slice(1), {
+      cwd,
+      env,
+      ...CALLER_EXEC_SPAWN,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+    });
     const collect = (/** @type {Buffer} */ d) => {
       output = (output + d.toString('utf8')).slice(-OUTPUT_KEEP);
     };
@@ -145,6 +165,7 @@ function run(argv, cwd, timeoutSec) {
     child.stderr?.on('data', collect);
     child.on('error', (err) => {
       output += `${err.message}\n`;
+      error = err.message;
       finish(null);
     });
     child.on('close', (code) => finish(timedOut ? null : code));
@@ -241,7 +262,7 @@ export async function runReplay({ projectRoot, repo, fixSha, testPath, rule, tim
     },
     fn: (cwd) => run(argv, cwd, timeoutSec),
   });
-  if (old.timedOut) return { old, fix: { exit: null, output: '', timedOut: false } };
+  if (old.timedOut) return { old, fix: { exit: null, output: '', timedOut: false, error: null } };
   const fix = await inWorktree({ repoDir, rev: fixSha, within, fn: (cwd) => run(argv, cwd, timeoutSec) });
   return { old, fix };
 }
@@ -249,13 +270,16 @@ export async function runReplay({ projectRoot, repo, fixSha, testPath, rule, tim
 /**
  * What a replay shows. Never dismisses: only `confirmed` is a verdict.
  *
- * @param {{ old: { exit: number | null, output: string, timedOut: boolean },
- *   fix: { exit: number | null, output: string, timedOut: boolean } }} runs
- * @returns {{ outcome: 'confirmed' | 'environment' | 'not-reproduced' } | { outcome: 'undecided', reason: 'timeout' }}
+ * @param {{ old: { exit: number | null, output: string, timedOut: boolean, error?: string | null },
+ *   fix: { exit: number | null, output: string, timedOut: boolean, error?: string | null } }} runs
+ * @returns {{ outcome: 'confirmed' | 'environment' | 'not-reproduced' } | { outcome: 'undecided', reason: string }}
+ *   an undecided reason is `timeout`, `no-exit` (the old run crashed or was killed) or `cannot-start: <error>`
  */
 export function classifyReplay({ old, fix }) {
   if (old.timedOut || fix.timedOut) return { outcome: 'undecided', reason: 'timeout' };
+  if (old.error && fix.error) return { outcome: 'undecided', reason: `cannot-start: ${old.error}` };
   if (fix.exit !== 0) return { outcome: 'environment' };
+  if (old.exit === null) return { outcome: 'undecided', reason: 'no-exit' };
   if (old.exit === 0) return { outcome: 'not-reproduced' };
   return { outcome: ENVIRONMENT_SIGNATURES.test(old.output) ? 'environment' : 'confirmed' };
 }
@@ -266,8 +290,8 @@ export function classifyReplay({ old, fix }) {
  *
  * @param {{ cwd: string, sessionId: string, slug?: string | null,
  *   candidate: { commit: string, repo?: string, inferred?: string | null }, testPath: string, command: string,
- *   old: { exit: number | null, output: string, timedOut: boolean },
- *   fix: { exit: number | null, output: string, timedOut: boolean } }} opts
+ *   old: { exit: number | null, output: string, timedOut: boolean, error?: string | null },
+ *   fix: { exit: number | null, output: string, timedOut: boolean, error?: string | null } }} opts
  * @returns {{ outcome: string, reason: string | null }}
  */
 export function recordReplay({ cwd, sessionId, slug = null, candidate, testPath, command, old, fix }) {

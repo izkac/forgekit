@@ -92,6 +92,44 @@ test('classifyReplay: every environment signature on the old run -> environment,
   assert.equal(ENVIRONMENT_SIGNATURES.test('AssertionError: expected 5 got -1'), false);
 });
 
+const OTHER_ECOSYSTEMS = {
+  'pytest ModuleNotFoundError': "ModuleNotFoundError: No module named 'helper'",
+  'pytest ImportError': "ImportError: cannot import name 'helper' from 'pkg'",
+  'vitest unresolved import': 'Error: Failed to resolve import "../src/helper" from "test/a.test.ts"',
+  'esbuild unresolved path': 'X [ERROR] Could not resolve "./helper"',
+  'go undefined symbol': './a_test.go:12:9: undefined: helper',
+  'go missing package': 'a_test.go:4:2: cannot find package "example.com/helper" in any of',
+};
+for (const [name, message] of Object.entries(OTHER_ECOSYSTEMS)) {
+  test(`classifyReplay: ${name} on the old run -> environment, never confirmed`, () => {
+    assert.ok(ENVIRONMENT_SIGNATURES.test(message), message);
+    assert.deepEqual(classifyReplay({ old: failing(message), fix: ok }), { outcome: 'environment' });
+  });
+}
+
+test('classifyReplay: an old run with no exit code (crash, signal) is undecided (no-exit), never confirmed', () => {
+  const crashed = { exit: null, output: 'Killed', timedOut: false };
+  assert.deepEqual(classifyReplay({ old: crashed, fix: ok }), { outcome: 'undecided', reason: 'no-exit' });
+});
+
+test('classifyReplay: neither run could start -> undecided with the spawn error', () => {
+  const gone = (error) => ({ exit: null, output: error, timedOut: false, error });
+  assert.deepEqual(classifyReplay({ old: gone('spawn npm ENOENT'), fix: gone('spawn npm ENOENT') }), {
+    outcome: 'undecided',
+    reason: 'cannot-start: spawn npm ENOENT',
+  });
+  // Only one side failing to start is not "cannot start": the fix run failing is an environment problem.
+  assert.deepEqual(classifyReplay({ old: failing(), fix: gone('spawn EPERM') }), { outcome: 'environment' });
+});
+
+test('recordReplay: a run that could not start is tagged undecided with the reason and stays pending', () => {
+  const p = project();
+  const gone = { exit: null, output: 'spawn nope ENOENT', timedOut: false, error: 'spawn nope ENOENT' };
+  assert.deepEqual(record(p, gone, gone), { outcome: 'undecided', reason: 'cannot-start: spawn nope ENOENT' });
+  assert.deepEqual(readDecisions(p.dir), []);
+  assert.equal(pendingCommits(p)[0].tag.reason, 'cannot-start: spawn nope ENOENT');
+});
+
 test('classifyReplay: fix run failing -> environment, whatever the old run said', () => {
   assert.deepEqual(classifyReplay({ old: failing(), fix: failing('boom') }), { outcome: 'environment' });
   assert.deepEqual(classifyReplay({ old: failing(), fix: { exit: null, output: 'spawn ENOENT', timedOut: false } }), { outcome: 'environment' });

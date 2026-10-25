@@ -22,12 +22,22 @@ const RULE = { match: 'test/**', cwd: '.', command: 'node --test {file}' };
  * `testBody(sentinel)` as test/add.test.js (`null` = the fix adds no test). Every run of the test
  * writes `sentinel`, so a run that never happened leaves no file.
  */
-function project({ testBody = defaultTest, extraFixFiles = {}, replay = [RULE], escapes = {} } = {}) {
+function project({ testBody = defaultTest, extraFixFiles = {}, replay = [RULE], escapes = {}, nested = null } = {}) {
   const dir = fs.mkdtempSync(path.join(tmpdir(), 'forge-verify-'));
   const sentinel = path.join(dir, '.forge', 'ran.txt');
+  if (nested) {
+    // The project root is a repository of its own; the change lives in the nested one.
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    for (const [k, v] of [['user.email', 't@t'], ['user.name', 't'], ['core.autocrlf', 'false']]) execFileSync('git', ['config', k, v], { cwd: dir });
+    fs.writeFileSync(path.join(dir, 'README.md'), 'root\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-qm', 'root'], { cwd: dir });
+    fs.mkdirSync(path.join(dir, nested));
+  }
+  const repoDir = nested ? path.join(dir, nested) : dir;
   const git = (args, at = T0) =>
     execFileSync('git', args, {
-      cwd: dir,
+      cwd: repoDir,
       encoding: 'utf8',
       env: { ...process.env, GIT_AUTHOR_DATE: new Date(at).toISOString(), GIT_COMMITTER_DATE: new Date(at).toISOString() },
     }).trim();
@@ -37,8 +47,8 @@ function project({ testBody = defaultTest, extraFixFiles = {}, replay = [RULE], 
   git(['config', 'core.autocrlf', 'false']);
   const commit = (files, subject, at) => {
     for (const [rel, text] of Object.entries(files)) {
-      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-      fs.writeFileSync(path.join(dir, rel), text);
+      fs.mkdirSync(path.dirname(path.join(repoDir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, rel), text);
     }
     git(['add', '-A', '--', '.', ':!.forge'], at);
     git(['commit', '-qm', subject], at);
@@ -58,7 +68,8 @@ function project({ testBody = defaultTest, extraFixFiles = {}, replay = [RULE], 
     'fix: add sums',
     T0 + DAY,
   );
-  const row = { sessionId: 's1', slug: 'c', phase: 'done', endedAt: new Date(T0 + 3600000).toISOString(), commitRange: { base, head } };
+  const ranges = nested ? { nestedCommitRanges: { [nested]: { base, head } } } : { commitRange: { base, head } };
+  const row = { sessionId: 's1', slug: 'c', phase: 'done', endedAt: new Date(T0 + 3600000).toISOString(), ...ranges };
   fs.writeFileSync(path.join(dir, '.forge', 'sessions.jsonl'), `${JSON.stringify(row)}\n`);
   const fleet = fs.mkdtempSync(path.join(tmpdir(), 'forge-verify-fleet-'));
   return { dir, fix, sentinel, git, fleet };
@@ -195,6 +206,43 @@ test('a test that also passes on the old code is tagged not-reproduced', () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(lineFor(p, r.stdout), `s1 ${p.fix.slice(0, 7)} .: not-reproduced`);
   assert.deepEqual(ledger(p, 'escapes.jsonl'), []);
+});
+
+test('verify replays the first of the fix\'s test files that has a rule, not just the first test file', () => {
+  // other/a.test.js sorts before test/add.test.js and matches no rule.
+  const p = project({ extraFixFiles: { 'other/a.test.js': "import test from 'node:test';\ntest('unmatched', () => {});\n" } });
+  const r = forge(p, ['verify', '--all'], { exec: true });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(lineFor(p, r.stdout), `s1 ${p.fix.slice(0, 7)} .: confirmed (auto)`);
+  assert.equal(ledger(p, 'escapes.jsonl')[0].replayTest, 'test/add.test.js');
+  assert.equal(ledger(p, 'escapes.jsonl')[0].command, 'node --test test/add.test.js');
+});
+
+test('verify in a nested repository: root-relative rule, repo named in the output and the ledger', () => {
+  const p = project({ nested: 'volo_web', replay: [{ match: 'volo_web/test/**', cwd: 'volo_web', command: 'node --test {file}' }] });
+  const before = tree(p);
+  const r = forge(p, ['verify', '--all'], { exec: true });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(lineFor(p, r.stdout), `s1 ${p.fix.slice(0, 7)} volo_web: confirmed (auto)`);
+  const [d] = ledger(p, 'escapes.jsonl');
+  assert.equal(d.repo, 'volo_web');
+  assert.equal(d.commit, p.fix);
+  assert.equal(d.auto, true);
+  assert.equal(d.command, 'node --test test/add.test.js');
+  assert.equal(worktreeCount(p), 1);
+  assert.equal(tree(p), before);
+});
+
+test('forge escapes dismiss after an auto-confirm leaves a plain dismissal on the ledger', () => {
+  const p = project();
+  assert.equal(forge(p, ['verify', '--all'], { exec: true }).status, 0);
+  assert.equal(ledger(p, 'escapes.jsonl')[0].auto, true);
+  const r = forge(p, ['dismiss', 's1', p.fix.slice(0, 7), '--reason', 'flaky']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = ledger(p, 'escapes.jsonl');
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].decision, 'dismissed');
+  for (const k of ['auto', 'command', 'oldExit', 'fixExit']) assert.equal(k in lines[0], false, k);
 });
 
 test('escapes.replayTimeoutSec bounds a hung replay: undecided: timeout, nothing left behind', () => {

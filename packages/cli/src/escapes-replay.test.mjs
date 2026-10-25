@@ -133,6 +133,31 @@ test('a command that cannot start still cleans up', async () => {
   assert.equal(status(f.repo.dir), before);
 });
 
+test('a run that cannot start reports the spawn error; one that starts reports none', async () => {
+  const f = fixture();
+  const bad = await runReplay({ projectRoot: f.root, repo: '.', fixSha: f.fixSha, testPath: 'test/add.test.js', rule: { ...RULE, command: 'definitely-not-a-binary-xyz {file}' } });
+  assert.match(bad.old.error, /ENOENT/);
+  assert.match(bad.fix.error, /ENOENT/);
+  const good = await runReplay({ projectRoot: f.root, repo: '.', fixSha: f.fixSha, testPath: 'test/add.test.js', rule: RULE });
+  assert.equal(good.old.error ?? null, null);
+});
+
+test('the replayed command gets no stdin: a test that reads it sees EOF instead of hanging', async () => {
+  const f = fixture();
+  const readsStdin = f.repo.commit({ 'test/stdin.js': "process.stdin.on('data', () => {});\nprocess.stdin.on('end', () => console.log('eof'));\n" }, 'stdin');
+  const res = await runReplay({
+    projectRoot: f.root,
+    repo: '.',
+    fixSha: readsStdin,
+    testPath: 'test/stdin.js',
+    rule: { match: 'test/**', cwd: '.', command: 'node {file}' },
+    timeoutSec: 10,
+  });
+  assert.equal(res.old.timedOut, false);
+  assert.equal(res.old.exit, 0, res.old.output);
+  assert.match(res.old.output, /eof/);
+});
+
 test('node_modules at the rule cwd is linked in, and removing the link first leaves the operator copy intact', async () => {
   const f = fixture();
   const { scratch, restore } = privateTmp();

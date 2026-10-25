@@ -390,8 +390,20 @@ const TEST_FILE = /(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[^/]+$|_test\.[^/]+
  * @returns {string | null}
  */
 export function replayTestFor({ cwd, commit }) {
-  const files = lines(git(cwd, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--diff-filter=AM', '--root', commit]));
-  return files.find((f) => TEST_FILE.test(f)) ?? null;
+  return replayTestsFor({ cwd, commit })[0] ?? null;
+}
+
+/**
+ * Every test a fix commit added or changed, in git's path order — the
+ * candidates for a replay, of which `forge escapes verify` takes the first with a rule.
+ *
+ * @param {{ cwd: string, commit: string }} opts
+ * @returns {string[]}
+ */
+export function replayTestsFor({ cwd, commit }) {
+  return lines(git(cwd, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--diff-filter=AM', '--root', commit])).filter((f) =>
+    TEST_FILE.test(f),
+  );
 }
 
 /**
