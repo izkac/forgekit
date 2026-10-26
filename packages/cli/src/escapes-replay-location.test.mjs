@@ -7,9 +7,11 @@ import { execFileSync } from 'node:child_process';
 import { runReplay } from './escapes-replay.mjs';
 
 /**
- * Where replay worktrees live. Under the OS temp dir, Vite/Vitest projects on another drive
- * failed to load their config (esbuild walked into an unreadable parent), and inside `.git`
- * Vite's `server.fs.deny` (`**\/.git/**`) refused every file. Live check on Volo, 2026-10-25.
+ * Where replay worktrees live: `<project's parent>/forge-replay-<project>/`, on the project's drive,
+ * with no dot segment. Live checks on Volo, 2026-10-25/26: in the OS temp dir on another drive,
+ * Vite/esbuild could not load its config; inside `.git`, Vite's `server.fs.deny` refused every file;
+ * under `.forge/replay`, Jest on Windows read `\.forge` in its testMatch glob as an escaped dot and
+ * found no tests.
  */
 
 const PROBE = "console.log('cwd=' + process.cwd());\n";
@@ -49,7 +51,7 @@ const worktrees = (dir) =>
     .filter((l) => l.startsWith('worktree '));
 
 for (const nestedAs of [null, 'app']) {
-  test(`replay worktrees live under <project>/.forge/replay with no .git segment, and nothing is left (${nestedAs ?? 'root repo'})`, async () => {
+  test(`replay worktrees live in a sibling forge-replay-<project> dir with no dot segment, and nothing is left (${nestedAs ?? 'root repo'})`, async () => {
     const f = fixture(nestedAs);
     const before = status(f.root);
     const res = await runReplay({
@@ -59,16 +61,19 @@ for (const nestedAs of [null, 'app']) {
       testPath: 'test/probe.js',
       rule: { match: '**', cwd: nestedAs ?? '.', command: 'node {file}' },
     });
-    const base = path.join(f.root, '.forge', 'replay');
+    const base = path.join(path.dirname(f.root), `forge-replay-${path.basename(f.root)}`);
     for (const run of [res.old, res.fix]) {
       assert.equal(run.exit, 0, run.output);
       const cwd = /cwd=(.*)/.exec(run.output)?.[1]?.trim();
       assert.ok(cwd, run.output);
       const real = path.resolve(cwd);
       assert.ok(real.toLowerCase().startsWith(base.toLowerCase() + path.sep), `${real} is not under ${base}`);
-      assert.ok(!real.split(/[\\/]/).includes('.git'), `${real} has a .git segment`);
+      // Jest on Windows turns `\.name` in its rootDir-based testMatch into an escaped dot.
+      const below = path.relative(path.dirname(f.root), real).split(/[\\/]/);
+      assert.ok(!below.some((seg) => seg.startsWith('.')), `${real} has a dot segment below the project's parent`);
     }
-    assert.ok(!fs.existsSync(base) || fs.readdirSync(base).every((n) => n === '.gitignore'), 'no worktree left under .forge/replay');
+    assert.equal(fs.existsSync(base), false, 'the sibling replay dir is removed after the run');
+    assert.equal(fs.existsSync(path.join(f.root, '.forge', 'replay')), false, 'nothing created inside the project');
     assert.equal(status(f.root), before, 'git status --ignored unchanged');
     assert.equal(worktrees(f.repo.dir).length, 1);
   });

@@ -349,8 +349,9 @@ forge escapes dismiss <session> <commit> [--reason "<why>"]
                                   # decisions → .forge/escapes.jsonl
 forge escapes verify [--all | <session> <commit>] [--json]
                                   # replay the fix commit's test on the fix's parent (fix's test copied in)
-                                  # and on the fix, in throwaway worktrees under .forge/replay/ (self-ignored;
-                                  # not the OS temp dir or .git, where Vite cannot load config); your working
+                                  # and on the fix, in throwaway worktrees in a sibling folder
+                                  # forge-replay-<project>/ (same drive, no dot folders: the OS temp dir,
+                                  # .git and .forge/ each broke Vite or Jest); your working
                                   # tree is untouched. Needs an `escapes.replay` rule (its command must
                                   # contain {file}) + the exec opt-in. Several test files in the fix → the
                                   # first one a rule covers. --rev <ref> scans another ref; `forge escapes
@@ -375,7 +376,8 @@ forge escapes report [--by version] [--json]
                                   # root-relative test path, `{file}` is relative to `cwd`:
                                   #   "escapes": { "replay": [ { "match": "volo_web/server/**",
                                   #     "cwd": "volo_web/server",
-                                  #     "command": "node node_modules/jest/bin/jest.js {file}" } ],
+                                  #     "command": "node node_modules/jest/bin/jest.js {file}",
+                                  #     "copy": [".env"] } ],              # optional: ignored files to copy in
                                   #     "replayTimeoutSec": 300 }          # default 300 per run
                                   # No shell: on Windows name a real executable (`node …`), not an
                                   # `npm`/`npx` .cmd shim

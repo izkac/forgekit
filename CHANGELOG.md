@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Replay worktrees move next to the project.** They now live in a sibling folder
+  `forge-replay-<project>/` (same drive, no dot folders in the path, removed after the
+  run). Under `.forge/replay/` (0.3.67), Jest on Windows read `\.forge` in its testMatch
+  glob as an escaped dot and found no tests — most of Volo's server replays failed for that.
+- **Replay rules can copy ignored files.** An `escapes.replay` rule may list `copy`
+  (paths relative to its `cwd`, e.g. `[".env"]`): each is copied from the working copy
+  into both throwaway worktrees and removed with them. On Volo, 248 server replays
+  failed on the fix as well because the worktree had no `server/.env`.
+
 ## 0.3.67 — 2026-10-26
 
 - **Escape tracking gaps.** Nested repositories were invisible and confirming was
