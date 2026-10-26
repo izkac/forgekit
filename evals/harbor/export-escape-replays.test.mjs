@@ -282,6 +282,24 @@ test('a base snapshot that holds a symlink drops the session as unsafe-tree, bef
   assert.equal(fs.existsSync(path.join(p.out, 'tasks')), false);
 });
 
+test('a base whose .gitattributes uses export-ignore or export-subst drops the session as unsafe-tree', async (t) => {
+  // git archive would silently leave those files out, or rewrite them: the snapshot would not be the base.
+  for (const [file, text] of [['.gitattributes', 'docs/ export-ignore\n'], ['server/.gitattributes', '*.js text\nVERSION export-subst\n']]) {
+    const p = project(t, { baseFiles: { [file]: text } });
+    const { kept, drops } = await prepare(p);
+    assert.deepEqual(kept, [], file);
+    assert.deepEqual(drops, [{ sessionId: 'sess-1', slug: SLUG, reason: 'unsafe-tree' }], file);
+    assert.equal(fs.existsSync(path.join(p.out, 'tasks')), false, file);
+  }
+});
+
+test('other .gitattributes content, and a comment that mentions export-ignore, are fine', async (t) => {
+  const p = project(t, { baseFiles: { '.gitattributes': '# not export-ignore here\n* text=auto\n*.png binary\n' } });
+  const { kept, drops } = await prepare(p);
+  assert.deepEqual(drops, []);
+  assert.equal(kept.length, 1);
+});
+
 test('dismissed decisions and superseded rows are ignored', async (t) => {
   const p = project(t);
   const ledger = path.join(p.root, '.forge', 'escapes.jsonl');

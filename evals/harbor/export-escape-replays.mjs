@@ -342,10 +342,23 @@ export function collectSessions({ project }) {
   return { kept, drops, skipped };
 }
 
-/** Whether the tree at `rev` holds a symlink, which the harness refuses in a task tree (and Windows tar would turn into a copy). */
-function hasSymlink(repoDir, rev) {
+/**
+ * Whether `git archive` of the tree at `rev` would not be that tree: it holds a symlink, which the
+ * harness refuses in a task tree (and Windows tar would turn into a copy), or a `.gitattributes`
+ * line with `export-ignore` (files left out of the archive) or `export-subst` (contents rewritten).
+ */
+function hasUnsafeTree(repoDir, rev) {
   const listing = git(repoDir, ['ls-tree', '-r', rev]);
-  return listing !== null && listing.split('\n').some((line) => line.startsWith('120000 '));
+  if (listing === null) return false;
+  const lines = listing.split('\n');
+  if (lines.some((line) => line.startsWith('120000 '))) return true;
+  for (const line of lines) {
+    const m = /^\d+ blob ([0-9a-f]+)\t(.*)$/.exec(line);
+    if (!m || path.posix.basename(m[2]) !== '.gitattributes') continue;
+    const text = git(repoDir, ['cat-file', 'blob', m[1]]) ?? '';
+    if (text.split(/\r?\n/).some((l) => !l.trim().startsWith('#') && /(?:^|\s)[-!]?export-(?:ignore|subst)(?:=|\s|$)/.test(l))) return true;
+  }
+  return false;
 }
 
 /**
@@ -416,7 +429,8 @@ export const snapshotDir = (/** @type {string} */ out, /** @type {{ taskId: stri
 /**
  * Write each candidate's base snapshot. An include path found in none of the candidates'
  * checkouts is an error, raised before anything is written. A candidate whose base tree holds a
- * symlink is dropped as `unsafe-tree` without being extracted.
+ * symlink or an `export-ignore`/`export-subst` attribute is dropped as `unsafe-tree` without being
+ * extracted.
  *
  * @param {{ kept: Array<Record<string, any>>, out: string, include?: string[] }} opts
  * @returns {Promise<{ kept: Array<Record<string, any>>, dropped: Array<{ sessionId: string, slug: string | null, reason: string }> }>}
@@ -434,7 +448,7 @@ export async function writeSnapshots({ kept, out, include = [] }) {
   const ok = [];
   const dropped = [];
   for (const task of kept) {
-    if (hasSymlink(task.repoDir, task.base)) {
+    if (hasUnsafeTree(task.repoDir, task.base)) {
       dropped.push({ sessionId: task.sessionId, slug: task.slug, reason: 'unsafe-tree' });
       continue;
     }
@@ -458,17 +472,52 @@ export async function prepareCandidates({ project, include = [], out }) {
 
 /**
  * Remove what an earlier export of this corpus left in `out`, so a re-export never mixes
- * generations. Only a folder whose manifest names this corpus is touched.
+ * generations. Only a folder whose manifest or report names this corpus is touched: an export
+ * that kept nothing writes a report but no manifest.
  *
  * @param {string} out
  */
 function clearPreviousExport(out) {
-  try {
-    if (JSON.parse(fs.readFileSync(path.join(out, 'corpus.json'), 'utf8')).corpus_id !== escapeReplaysCorpusId) return;
-  } catch {
-    return;
-  }
+  const names = (/** @type {string} */ file) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(out, file), 'utf8')).corpus_id === escapeReplaysCorpusId;
+    } catch {
+      return false;
+    }
+  };
+  if (!names('corpus.json') && !names('export-report.json')) return;
   for (const name of ['tasks', 'corpus.json', 'export-report.json']) fs.rmSync(path.join(out, name), { recursive: true, force: true });
+}
+
+/**
+ * Warnings for replay rules that copy ignored files (`copy`, such as `.env`) which exist in the
+ * operator's checkout but which `--include` does not put in the snapshot. Calibration ran with
+ * them; the agent and the verifier have no copy, so those tasks cannot be graded without them.
+ *
+ * @param {{ kept: Array<Record<string, any>>, include: string[] }} o `include` is already validated
+ * @returns {string[]}
+ */
+export function copyWarnings({ kept, include }) {
+  /** @type {Map<string, Set<string>>} rule match -> the uncovered files, relative to the project */
+  const uncovered = new Map();
+  for (const task of kept) {
+    for (const rule of [task.rule, ...task.hiddenTests.map((/** @type {{ rule?: Record<string, any> }} */ h) => h.rule)]) {
+      if (!rule) continue;
+      const within = task.repo === '.' ? path.posix.normalize(posix(rule.cwd ?? '.')) : path.posix.relative(posix(task.repo), path.posix.normalize(posix(rule.cwd ?? '.'))) || '.';
+      for (const file of rule.copy ?? []) {
+        const inRepo = path.posix.normalize(path.posix.join(within, posix(file)));
+        if (inRepo.startsWith('..') || !fs.existsSync(path.join(task.repoDir, inRepo))) continue;
+        if (include.some((inc) => inRepo === inc || inRepo.startsWith(`${inc}/`))) continue;
+        const set = uncovered.get(rule.match) ?? new Set();
+        set.add(path.posix.normalize(path.posix.join(posix(rule.cwd ?? '.'), posix(file))));
+        uncovered.set(rule.match, set);
+      }
+    }
+  }
+  return [...uncovered].map(
+    ([match, files]) =>
+      `replay rule "${match}" copies ${[...files].sort().join(', ')}, which --include does not cover (name it relative to the nested repository): the snapshot and the verifier have no copy, so tasks whose tests need it cannot be graded without it`,
+  );
 }
 
 /**
@@ -502,7 +551,7 @@ export async function exportEscapeReplays({ project, include = [], out = default
       continue;
     }
     task.calibration = calibration;
-    writeTask({ out, task, calibration });
+    writeTask({ out, task, calibration, timeoutSec });
     kept.push(task);
   }
 
@@ -518,6 +567,7 @@ export async function exportEscapeReplays({ project, include = [], out = default
     })),
     drops,
     skippedEscapes: prepared.skipped,
+    warnings: copyWarnings({ kept, include: safe }),
   };
   fs.mkdirSync(out, { recursive: true });
   // The manifest is what registers the corpus with the runner, so only an export that kept a task writes one.
@@ -548,6 +598,7 @@ async function main() {
   try {
     const opts = parseArgs(process.argv.slice(2));
     const { report } = await exportEscapeReplays({ project: /** @type {string} */ (opts.project), include: opts.include, out: opts.out });
+    for (const warning of report.warnings) process.stderr.write(`warning: ${warning}\n`);
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n${/--project|unknown argument|needs a value/.test(error.message) ? USAGE : ''}`);

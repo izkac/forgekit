@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { loadProjectConfig } from '../../packages/cli/src/config.mjs';
 import { calibrateCandidate } from './escape-replays/calibrate.mjs';
 import { exportEscapeReplays, collectSessions } from './export-escape-replays.mjs';
@@ -187,4 +188,115 @@ test('a nested repo that converts line endings (core.autocrlf=true) still yields
   assert.match(r.patch.toString('utf8'), /^\+exports\.total = \(\) => 3;$/m);
   assert.equal(r.patch.includes(0x0d), false, 'no CR in the patch');
   assert.equal(r.regression[0].bytes.includes(0x0d), false, 'regression file bytes are the committed ones');
+});
+
+test('a nested repo with autocrlf=true and a fix that needs a three-way merge still yields an LF patch, cut from objects', async (t) => {
+  const p = build(t, {
+    baseFiles: { 'server/src/x.js': 'a\nb\nc\n' },
+    fixes: [
+      // An ordinary commit between the session and the fix: cherry-picking the fix merges for real.
+      { files: { 'server/src/x.js': 'A\nb\nc\n' } },
+      { files: { 'server/src/x.js': 'A\nb\nZ\n', 'server/src/total.js': 'exports.total = () => 3;\n', [HIDDEN]: totalIs(3) }, test: HIDDEN },
+    ],
+  });
+  p.repo.git(['config', 'core.autocrlf', 'true']);
+  p.repo.git(['config', 'core.eol', 'crlf']);
+  const r = await calibrate(p);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const patch = r.patch.toString('utf8');
+  assert.match(patch, /^-c$/m);
+  assert.match(patch, /^\+Z$/m);
+  assert.equal(patch.includes('\r'), false, 'no CR in the patch');
+});
+
+test('a regression file that differs between the base and the reference is left out of the regression set', async (t) => {
+  const p = build(t, {
+    baseFiles: { 'server/test/old.test.js': totalIs(1) },
+    // The session's head and the fix each update this test to the code of their day.
+    sessionFiles: [{ 'server/src/total.js': 'exports.total = () => 2;\n', 'server/test/old.test.js': totalIs(2) }],
+    fixes: [{ files: { 'server/src/total.js': 'exports.total = () => 3;\n', 'server/test/old.test.js': totalIs(3), [HIDDEN]: totalIs(3) }, test: HIDDEN }],
+  });
+  const r = await calibrate(p);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  // It passes on the base (1) and on the reference worktree (3), but not with the same bytes.
+  assert.deepEqual(r.regression.map((x) => x.path), ['server/test/smoke.test.js']);
+});
+
+test('a reference that changes a manifest, lockfile or runner configuration is dropped as dependency-change', async (t) => {
+  const cases = [
+    { file: 'server/package.json', text: '{"name":"changed"}\n' },
+    { file: 'server/package-lock.json', text: '{"lockfileVersion":3}\n' },
+    { file: 'server/jest.config.js', text: 'module.exports = {};\n' },
+    { file: 'server/tsconfig.build.json', text: '{}\n' },
+  ];
+  for (const { file, text } of cases) {
+    const p = build(t, { fixes: [{ files: { 'server/src/total.js': 'exports.total = () => 3;\n', [HIDDEN]: totalIs(3), [file]: text }, test: HIDDEN }] });
+    const r = await calibrate(p);
+    assert.equal(r.ok, false, file);
+    assert.equal(r.reason, 'dependency-change', file);
+    assert.deepEqual(r.detail.files, [file]);
+  }
+});
+
+test('a session that changes a file of another folder is not a dependency change', async (t) => {
+  const p = build(t, { sessionFiles: [{ 'server/src/total.js': 'exports.total = () => 2;\n', 'client/package.json': '{"name":"client"}\n' }] });
+  const r = await calibrate(p);
+  assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test('a run that exits 0 without a passing test does not count as a pass, so such a hidden test is not passes-on-base', async (t) => {
+  // Under node --test, a file that exits 0 before any test ran is one "passing" file-level entry.
+  const early = "process.exit(0);\ntest('never reached', () => {});";
+  const p = build(t, { fixes: [{ files: { [HIDDEN]: nodeTest(early) }, test: HIDDEN }] });
+  const r = await calibrate(p);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'not-passing-on-reference', 'not passes-on-base: the early exit is not a pass');
+});
+
+test('calibration reports the base protected files for the rule cwd', async (t) => {
+  const p = build(t, { baseFiles: { 'server/package.json': '{"name":"s"}\n', 'server/package-lock.json': '{}\n', 'server/tsconfig.json': '{}\n', 'server/notes.md': 'x\n' } });
+  const r = await calibrate(p);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.protectedFiles.map((f) => [f.path, f.cwd]), [
+    ['server/package-lock.json', 'server'],
+    ['server/package.json', 'server'],
+    ['server/tsconfig.json', 'server'],
+  ]);
+  assert.equal(r.protectedFiles[1].bytes.toString('utf8'), '{"name":"s"}\n');
+  assert.equal(r.protectedFiles[1].sha256, createHash('sha256').update('{"name":"s"}\n').digest('hex'));
+});
+
+/** An ignored file the replay rule copies into every worktree, present in the operator's checkout. */
+const withEnv = (p) => fs.writeFileSync(path.join(p.web, 'server', '.env'), 'SECRET=1\n');
+
+test('the report warns when a rule copies an ignored file that --include does not cover', async (t) => {
+  const p = build(t);
+  withEnv(p);
+  const { kept, report } = await exportEscapeReplays({ project: p.root, out: p.out, env: OPT_IN, timeoutSec: 60 });
+  assert.equal(kept.length, 1);
+  assert.equal(report.warnings.length, 1);
+  assert.match(report.warnings[0], /web\/server\/\.env/);
+  assert.match(report.warnings[0], /--include/);
+  assert.match(report.warnings[0], /cannot be graded without/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(p.out, 'export-report.json'), 'utf8')).warnings, report.warnings);
+});
+
+test('no warning when --include covers the copied file, or the file does not exist', async (t) => {
+  const p = build(t);
+  const bare = await exportEscapeReplays({ project: p.root, out: p.out, env: OPT_IN, timeoutSec: 60 });
+  assert.deepEqual(bare.report.warnings, [], 'nothing to copy, nothing lost');
+  withEnv(p);
+  const covered = await exportEscapeReplays({ project: p.root, out: p.out, include: ['server/.env'], env: OPT_IN, timeoutSec: 60 });
+  assert.deepEqual(covered.report.warnings, []);
+  const folder = await exportEscapeReplays({ project: p.root, out: p.out, include: ['server'], env: OPT_IN, timeoutSec: 60 });
+  assert.deepEqual(folder.report.warnings, [], 'a folder covers the files under it');
+});
+
+test('the command line prints the report warnings on stderr', async (t) => {
+  const p = build(t);
+  withEnv(p);
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'export-escape-replays.mjs');
+  const r = spawnSync(process.execPath, [script, '--project', p.root, '--out', p.out], { encoding: 'utf8', env: { ...process.env, ...OPT_IN } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /warning: .*web\/server\/\.env.*cannot be graded without/);
 });
