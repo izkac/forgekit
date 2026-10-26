@@ -16,9 +16,30 @@ export const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock
  * ponytail: top-level files of the rule's cwd only. A config that extends or imports a file
  * elsewhere (`tsconfig.base.json`, `jest.setup.js`) is only as protected as that file is.
  */
-export const PROTECTED_NAME = String.raw`^(?:package\.json|${LOCKFILES.map((n) => n.replace(/\./g, '\\.')).join('|')}|(?:jest|vitest|vite|babel)\.config\.[A-Za-z0-9]+|\.babelrc(?:\..*)?|tsconfig[^/\\]*\.json)$`;
+export const PROTECTED_NAME = String.raw`^(?:package\.json|${LOCKFILES.map((n) => n.replace(/\./g, '\\.')).join('|')}|(?:jest|vitest|vite|babel)\.config\.[A-Za-z0-9]+|\.babelrc(?:\..*)?|tsconfig[^/\\]*\.json|\.npmrc|\.yarnrc(?:\.yml)?)$`;
 
 export const isProtectedName = (/** @type {string} */ name) => new RegExp(PROTECTED_NAME).test(name);
+
+/**
+ * Package-manager settings (registry, script shell, resolution). The verifier's install and the
+ * runner read them from the rule cwd and from its ancestors, so for those the exporter keeps the
+ * base's copy from the cwd up to the repository root, not just the cwd's own.
+ */
+export const RC_NAME = String.raw`^(?:\.npmrc|\.yarnrc|\.yarnrc\.yml)$`;
+
+export const isRcName = (/** @type {string} */ name) => new RegExp(RC_NAME).test(name);
+
+/**
+ * A folder and every ancestor up to the repository root, nearest first.
+ * @param {string} within repo-relative posix folder, `.` for the root
+ * @returns {string[]}
+ */
+export function folderAndAncestors(within) {
+  const parts = String(within).split('/').filter((p) => p && p !== '.');
+  const out = [];
+  for (let i = parts.length; i >= 0; i -= 1) out.push(parts.slice(0, i).join('/') || '.');
+  return out;
+}
 
 /** The install command for a folder, picked by the lockfile it has. @param {Iterable<string>} names the folder's file names */
 export function installCommand(names) {

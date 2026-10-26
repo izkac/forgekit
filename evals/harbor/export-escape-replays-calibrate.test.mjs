@@ -24,6 +24,7 @@ const totalIs = (n) => nodeTest(`test('total is ${n}', () => assert.equal(requir
 const BASE = {
   '.gitignore': '.env\nnode_modules/\n',
   'server/package.json': '{}\n',
+  'server/package-lock.json': '{}\n',
   'server/src/total.js': 'exports.total = () => 1;\n',
   // Passes on the base and on the reference: part of the regression set.
   'server/test/smoke.test.js': nodeTest("test('total exists', () => assert.equal(typeof require('../src/total').total, 'function'));"),
@@ -299,4 +300,47 @@ test('the command line prints the report warnings on stderr', async (t) => {
   const r = spawnSync(process.execPath, [script, '--project', p.root, '--out', p.out], { encoding: 'utf8', env: { ...process.env, ...OPT_IN } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /warning: .*web\/server\/\.env.*cannot be graded without/);
+});
+
+test('a rule cwd without a lockfile of its own is dropped as unpinned-deps, before any test runs', async (t) => {
+  // Its install would resolve whatever is newest today, so calibration and the verifier could disagree.
+  const p = build(t, { baseFiles: { 'server/package-lock.json': null } });
+  const r = await calibrate(p);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'unpinned-deps');
+  assert.deepEqual(r.detail.cwds, ['server']);
+  assert.equal(fs.existsSync(siblingReplayDir(p)), false, 'no worktree was made');
+
+  // Any of the lockfiles pins.
+  for (const lockfile of ['yarn.lock', 'pnpm-lock.yaml', 'npm-shrinkwrap.json']) {
+    const pinned = build(t, { baseFiles: { 'server/package-lock.json': null, [`server/${lockfile}`]: '\n' } });
+    assert.equal((await calibrate(pinned)).ok, true, lockfile);
+  }
+  // A lockfile in an ancestor folder is not the cwd's own.
+  const ancestor = build(t, { baseFiles: { 'server/package-lock.json': null, 'package-lock.json': '{}\n' } });
+  assert.equal((await calibrate(ancestor)).reason, 'unpinned-deps');
+});
+
+test('tracked .npmrc, .yarnrc and .yarnrc.yml of the rule cwd and its ancestors are base files the verifier is held to', async (t) => {
+  const p = build(t, { baseFiles: { '.npmrc': 'a=1\n', 'server/.npmrc': 'b=2\n', 'server/.yarnrc': 'c 3\n', 'server/.yarnrc.yml': 'd: 4\n', 'other/.npmrc': 'not-an-ancestor\n' } });
+  const r = await calibrate(p);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const rc = r.protectedFiles.filter((f) => /rc(\.yml)?$/.test(f.path)).map((f) => [f.path, f.cwd, f.bytes.toString('utf8')]);
+  assert.deepEqual(rc, [
+    ['.npmrc', '.', 'a=1\n'],
+    ['server/.npmrc', 'server', 'b=2\n'],
+    ['server/.yarnrc', 'server', 'c 3\n'],
+    ['server/.yarnrc.yml', 'server', 'd: 4\n'],
+  ]);
+  assert.equal(r.protectedFiles.some((f) => f.cwd === '.' && !/rc$/.test(f.path)), false, 'an ancestor contributes only its rc files');
+});
+
+test('a reference that changes an ancestor .npmrc is dropped as dependency-change', async (t) => {
+  const p = build(t, {
+    baseFiles: { '.npmrc': 'a=1\n' },
+    fixes: [{ files: { 'server/src/total.js': 'exports.total = () => 3;\n', [HIDDEN]: totalIs(3), '.npmrc': 'a=2\n' }, test: HIDDEN }],
+  });
+  const r = await calibrate(p);
+  assert.equal(r.reason, 'dependency-change');
+  assert.deepEqual(r.detail.files, ['.npmrc']);
 });

@@ -9,13 +9,23 @@
  * test and no failing one. A summary is required when the command names Jest, Vitest or
  * `node --test`.
  *
- * ponytail: the ceiling is the summary text. Agent code that prints a forged summary and exits 0
- * is believed, and a command that is not one of those three runners (`npm test`, pytest, go test)
- * is judged by its exit code alone. Closing it means a runner-owned reporter per runner.
+ * Jest prints `process.exit called with "<code>"` when the code under test exits the process. That
+ * line fails a run whatever the exit code and whatever the command: a rule such as
+ * `npm test -- {file}` names no runner, so a missing summary alone would not catch it.
+ *
+ * ponytail: the ceiling is the summary text, and the threat model is non-adversarial (design.md,
+ * "Threat model"). Agent code runs in the same process as the assertions: it can patch
+ * `node:assert` or `expect`, or plant a nested babel config, and a forged summary it prints
+ * before exiting 0 is believed. A command that is not one of those three runners (`npm test`,
+ * pytest, go test) is judged by its exit code alone. Closing it means a runner-owned reporter per
+ * runner, and results measure honest attempts, not tamper resistance.
  */
 
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+
+/** Jest's wrapper line for a `process.exit` call made while it runs. */
+const JEST_EXIT = /process\.exit called with/;
 
 /** @param {string} word */
 const count = (word, text) => Number(new RegExp(`(\\d+) ${word}`).exec(text)?.[1] ?? 0);
@@ -69,6 +79,7 @@ export function namesKnownRunner(/** @type {string[]} */ argv) {
  * @returns {{ ok: boolean, note: string }}
  */
 export function judge({ argv, exit, output }) {
+  if (JEST_EXIT.test(String(output))) return { ok: false, note: 'the code under test called process.exit under the runner' };
   if (exit !== 0) return { ok: false, note: `exit ${exit}` };
   const s = parseSummary(output);
   if (!s.recognised) {

@@ -113,10 +113,11 @@ test('the agent Dockerfile pins the node image, installs per rule cwd, and keeps
   assert.ok(docker.indexOf('npm ci') < docker.indexOf('FORGEKIT_INSTALL_MARKER'));
 });
 
-test('a project without a lockfile installs with npm install', async (t) => {
-  const { dir } = await exported(t, { lockfile: null });
-  assert.match(read(path.join(dir, 'environment', 'Dockerfile')), /^WORKDIR \/app\/server\nRUN npm install$/m);
-  assert.match(read(path.join(dir, 'tests', 'Dockerfile')), /^WORKDIR \/opt\/verifier-deps\/server\nRUN npm install$/m);
+test('a project without a lockfile is dropped as unpinned-deps and gets no task', async (t) => {
+  const { kept, drops, dir } = await exported(t, { lockfile: null });
+  assert.deepEqual(kept, []);
+  assert.deepEqual(drops.map((d) => d.reason), ['unpinned-deps']);
+  assert.equal(fs.existsSync(dir), false);
 });
 
 test('the lockfile picks the install command in both images', async (t) => {
@@ -474,4 +475,78 @@ test('read-only', () => {
 });`;
   put(path.join(dir, 'tests', 'hidden', HIDDEN), nodeTest(body));
   assert.equal(grade(t, dir, app, { HARBOR_UNTRUSTED_UID: '65534', HARBOR_UNTRUSTED_GID: '65534' }).functional, 1);
+});
+
+test('the verifier\'s deps hold the tracked .npmrc, .yarnrc and .yarnrc.yml of the cwd and its ancestors, and the grader protects them', async (t) => {
+  const { dir } = await exported(t, {
+    baseFiles: { '.npmrc': 'a=1\n', 'server/.npmrc': 'b=2\n', 'server/.yarnrc': 'c 3\n', 'server/.yarnrc.yml': 'd: 4\n', 'other/.npmrc': 'elsewhere\n' },
+  });
+  const deps = (rel) => read(path.join(dir, 'tests', 'deps', rel));
+  assert.equal(deps('.npmrc'), 'a=1\n', 'an ancestor, at its matching relative path');
+  assert.equal(deps('server/.npmrc'), 'b=2\n');
+  assert.equal(deps('server/.yarnrc'), 'c 3\n');
+  assert.equal(deps('server/.yarnrc.yml'), 'd: 4\n');
+  assert.equal(fs.existsSync(path.join(dir, 'tests', 'deps', 'other')), false, 'a folder that is not an ancestor');
+  const spec = JSON.parse(read(path.join(dir, 'tests', 'hidden.json')));
+  const protectedPaths = spec.protected.map((f) => f.path);
+  for (const rel of ['.npmrc', 'server/.npmrc', 'server/.yarnrc', 'server/.yarnrc.yml']) assert.ok(protectedPaths.includes(rel), rel);
+  assert.equal(protectedPaths.includes('other/.npmrc'), false);
+  assert.equal(new RegExp(spec.protected_name).test('.yarnrc.yml'), true);
+
+  // Changing or deleting one of them is a change; leaving them alone is not.
+  const tampering = {
+    'edits the ancestor .npmrc': (app) => fs.appendFileSync(path.join(app, '.npmrc'), ' '),
+    'edits .yarnrc.yml': (app) => fs.appendFileSync(path.join(app, 'server', '.yarnrc.yml'), ' '),
+    'deletes .yarnrc': (app) => fs.rmSync(path.join(app, 'server', '.yarnrc')),
+  };
+  for (const [name, tamper] of Object.entries(tampering)) {
+    const app = referenceApp(t, dir);
+    tamper(app);
+    assert.equal(grade(t, dir, app).tests_unchanged, 0, name);
+  }
+  assert.equal(grade(t, dir, referenceApp(t, dir)).tests_unchanged, 1);
+});
+
+test('a new .npmrc in a folder that had none counts as a change, in the cwd and in an ancestor', async (t) => {
+  const { dir } = await exported(t);
+  for (const rel of ['.npmrc', 'server/.npmrc', 'server/.yarnrc.yml']) {
+    const app = referenceApp(t, dir);
+    put(path.join(app, rel), 'x=1\n');
+    assert.equal(grade(t, dir, app).tests_unchanged, 0, rel);
+  }
+  // A new package.json in an ancestor is not one of the rc files.
+  const app = referenceApp(t, dir);
+  put(path.join(app, 'package.json'), '{}\n');
+  assert.equal(grade(t, dir, app).tests_unchanged, 1);
+});
+
+test('the grader removes every node_modules under the app except the verifier\'s linked ones', async (t) => {
+  const { dir } = await exported(t);
+  put(path.join(dir, 'tests', 'deps', 'server', 'node_modules', 'dep', 'index.js'), 'exports.value = 0;\n');
+  const total = "exports.total = () => require('dep').value;\n";
+  // Node resolves 'dep' from server/src through server/src/node_modules first: it is on no cwd path.
+  const app = referenceApp(t, dir);
+  put(path.join(app, 'server', 'src', 'total.js'), total);
+  put(path.join(app, 'server', 'src', 'node_modules', 'dep', 'index.js'), 'exports.value = 3;\n');
+  put(path.join(app, 'server', 'vendor', 'deep', 'node_modules', 'x', 'index.js'), 'exports.x = 1;\n');
+  assert.equal(grade(t, dir, app).functional, 0, 'the planted nested node_modules is not loaded');
+  assert.equal(fs.existsSync(path.join(app, 'server', 'src', 'node_modules')), false);
+  assert.equal(fs.existsSync(path.join(app, 'server', 'vendor', 'deep', 'node_modules')), false);
+  assert.equal(fs.existsSync(path.join(app, 'server', 'node_modules', 'dep', 'index.js')), true, 'the linked verifier dependencies stay');
+});
+
+test('the grader does not follow a symlinked node_modules when it removes them', async (t) => {
+  const { dir } = await exported(t);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  put(path.join(outside, 'keep.txt'), 'x\n');
+  const app = referenceApp(t, dir);
+  try {
+    fs.symlinkSync(outside, path.join(app, 'server', 'src', 'node_modules'), 'junction');
+  } catch {
+    return t.skip('cannot create a symlink on this host');
+  }
+  grade(t, dir, app);
+  assert.deepEqual(fs.readdirSync(outside), ['keep.txt'], 'the link was removed, not what it points to');
+  assert.equal(fs.existsSync(path.join(app, 'server', 'src', 'node_modules')), false);
 });

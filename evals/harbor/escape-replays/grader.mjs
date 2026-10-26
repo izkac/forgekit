@@ -7,7 +7,8 @@
  * The agent controls /app, including the code the test runner loads, so the grader trusts nothing
  * in it that decides a result:
  * - the runner's dependencies come from the verifier image (`deps/`, installed from the base
- *   manifests); the agent's `node_modules` are removed and the verifier's put in their place;
+ *   manifests); every `node_modules` directory under /app is removed (symlinks are not followed)
+ *   and the verifier's installed ones are linked in at the rule folders;
  * - the manifests, lockfiles and runner configuration must be as at the base (`tests_unchanged`);
  * - /app is read-only to the untrusted user while tests run, which gets a fresh writable
  *   HOME/TMPDIR/cache folder instead;
@@ -159,37 +160,52 @@ function restoreFile(sourceFile, rel, identity) {
 /**
  * The manifests, lockfiles and runner configuration must be exactly the base's: every recorded
  * file has its hash, and no file of those names exists in a rule's folder that the base lacked.
+ * The package-manager rc files (`.npmrc`, `.yarnrc`, `.yarnrc.yml`) are held the same way in each
+ * rule folder and every ancestor of it up to the repository root.
  */
 function protectedUnchanged(spec) {
   const files = spec.protected ?? [];
   if (!files.every((f) => sha256Of(join(APP_DIR, safeRelative(f.path))) === f.sha256)) return false;
-  if (!spec.protected_name) return true;
-  const pattern = new RegExp(spec.protected_name);
   const known = new Set(files.map((f) => f.path));
-  for (const dir of spec.protected_dirs ?? []) {
-    let names = [];
-    try {
-      names = readdirSync(join(APP_DIR, safeRelative(dir)));
-    } catch {
-      /* no folder, no files */
+  const noNewFiles = (dirs, patternText) => {
+    if (!patternText) return true;
+    const pattern = new RegExp(patternText);
+    for (const dir of dirs ?? []) {
+      let names = [];
+      try {
+        names = readdirSync(join(APP_DIR, safeRelative(dir)));
+      } catch {
+        /* no folder, no files */
+      }
+      for (const name of names) if (pattern.test(name) && !known.has(dir === '.' ? name : `${dir}/${name}`)) return false;
     }
-    for (const name of names) if (pattern.test(name) && !known.has(dir === '.' ? name : `${dir}/${name}`)) return false;
-  }
-  return true;
+    return true;
+  };
+  return noNewFiles(spec.protected_dirs, spec.protected_name) && noNewFiles(spec.rc_dirs, spec.rc_name);
 }
 
 /**
- * The runner's dependencies are the verifier's. The agent's `node_modules` at each rule folder
- * (and above it, where Node would look next) are removed; the verifier's installed ones are linked
- * in. Whatever the agent left in them, or planted instead, is never loaded.
+ * Every `node_modules` under APP_DIR is removed: the agent's installs at each rule folder and above
+ * it, and equally any nested one (`src/node_modules`, a vendored `lib/node_modules`) that Node
+ * would find first when a file there requires a package. The walk does not follow symlinks; a
+ * `node_modules` that is a link is unlinked, never entered. Only then are the verifier's installed
+ * `node_modules` linked in at each rule folder, so those links are the only ones left.
  */
 function useVerifierDependencies(spec) {
-  const folders = new Set();
-  for (const entry of [...(spec.hidden ?? []), ...(spec.regression ?? [])]) {
-    const parts = safeRelative(entry.cwd || '.').split(/[\\/]/).filter((p) => p && p !== '.');
-    for (let i = 0; i <= parts.length; i += 1) folders.add(parts.slice(0, i).join('/') || '.');
-  }
-  for (const folder of folders) removeEntry(join(realDirectory(folder), 'node_modules'));
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const child = join(dir, entry.name);
+      if (entry.name === 'node_modules') removeEntry(child);
+      else if (entry.isDirectory() && !entry.isSymbolicLink()) walk(child);
+    }
+  };
+  walk(APP_DIR);
   for (const { cwd } of spec.deps ?? []) {
     const installed = join(DEPS_DIR, safeRelative(cwd || '.'), 'node_modules');
     if (!existsSync(installed)) continue;

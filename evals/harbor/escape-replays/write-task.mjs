@@ -7,7 +7,7 @@
  * artifact, but not its dependencies: the verifier image installs its own, from copies of the base
  * manifests and lockfiles in `tests/deps/<cwd>/`, and the grader runs the tests against those. The
  * artifact is still `/app/` whole (the Forge arm's `.forge/` travels with it), so the agent's
- * `node_modules` come along unused: the grader removes them. The hidden tests and the regression
+ * `node_modules` come along unused: the grader removes every `node_modules` under it, then links the verifier's. The hidden tests and the regression
  * set live only in `tests/`.
  */
 
@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_REPLAY_TIMEOUT_SEC } from '../../../packages/cli/src/escapes-replay.mjs';
 import { escapeReplaysCorpusId } from '../corpus-selection.mjs';
-import { LOCKFILES, PROTECTED_NAME, installCommand, mongoPackage } from './deps.mjs';
+import { LOCKFILES, PROTECTED_NAME, RC_NAME, folderAndAncestors, installCommand, isRcName, mongoPackage } from './deps.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -282,7 +282,10 @@ export function writeTask({ out, task, calibration, timeoutSec = DEFAULT_REPLAY_
         budget_sec: verifierTimeoutSec - 60,
         // The files the agent must leave as they are: hashes of the base's, and the names that may not appear anew.
         protected_name: PROTECTED_NAME,
-        protected_dirs: [...new Set(protectedFiles.map((f) => f.cwd))].sort(),
+        protected_dirs: [...new Set([...hidden, ...regression].map((t) => t.cwd))].sort(),
+        // Package-manager rc files are held to the base from each rule cwd up to the repository root.
+        rc_name: RC_NAME,
+        rc_dirs: [...new Set([...hidden, ...regression].flatMap((t) => folderAndAncestors(t.cwd)))].sort(),
         protected: protectedFiles.map((f) => ({ path: f.path, sha256: f.sha256 })),
         deps: folders.map((f) => ({ cwd: f.cwd })),
         hidden: hidden.map(entry),
@@ -299,6 +302,8 @@ export function writeTask({ out, task, calibration, timeoutSec = DEFAULT_REPLAY_
   for (const t of hidden) put(path.join(dir, 'tests', 'hidden', t.path), t.bytes);
   for (const t of regression) put(path.join(dir, 'tests', 'regression', t.path), t.bytes);
   for (const f of folders) for (const file of f.files) put(path.join(dir, 'tests', 'deps', f.cwd, path.posix.basename(file.path)), file.bytes);
+  // The base's .npmrc/.yarnrc files of the cwd and its ancestors, at their repo-relative paths: the verifier's install reads them.
+  for (const file of protectedFiles) if (isRcName(path.posix.basename(file.path))) put(path.join(dir, 'tests', 'deps', file.path), file.bytes);
 
   put(path.join(dir, 'solution', 'solve.sh'), SOLVE_SH);
   put(path.join(dir, 'solution', 'reference.patch'), patch);

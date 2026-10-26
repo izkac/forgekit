@@ -28,7 +28,7 @@ import {
   resolveReplayRule,
   run,
 } from '../../../packages/cli/src/escapes-replay.mjs';
-import { isProtectedName } from './deps.mjs';
+import { LOCKFILES, folderAndAncestors, isProtectedName, isRcName } from './deps.mjs';
 import { judge } from './outcome.mjs';
 
 /**
@@ -218,21 +218,30 @@ const blob = (repoDir, rev, rel) => {
 
 const sha256 = (/** @type {Buffer} */ bytes) => createHash('sha256').update(bytes).digest('hex');
 
+/** Rule cwds, relative to the repository, that have no lockfile of their own at the base. */
+function cwdsWithoutLockfile({ task, withins }) {
+  return withins.filter((within) => !lsTree(task.repoDir, task.base, within).some((e) => e.type === 'blob' && LOCKFILES.includes(path.posix.basename(e.rel))));
+}
+
 /**
  * The files the verifier holds the agent to, at the base: each rule cwd's manifest, lockfile and
- * runner configuration (see `deps.mjs`).
+ * runner configuration (see `deps.mjs`), plus the package-manager rc files (`.npmrc`, `.yarnrc`,
+ * `.yarnrc.yml`) of the cwd and of every ancestor up to the repository root. Read from git
+ * objects, so only tracked files count.
  */
 function protectedFiles({ task, withins }) {
-  /** @type {Array<{ path: string, cwd: string, sha256: string, bytes: Buffer }>} */
-  const out = [];
-  for (const within of withins) {
+  /** @type {Map<string, { path: string, cwd: string, sha256: string, bytes: Buffer }>} */
+  const out = new Map();
+  const add = (/** @type {string} */ within, /** @type {(name: string) => boolean} */ wanted) => {
     for (const { mode, type, rel } of lsTree(task.repoDir, task.base, within)) {
-      if (type !== 'blob' || mode === '120000' || !isProtectedName(path.posix.basename(rel))) continue;
+      if (type !== 'blob' || mode === '120000' || !wanted(path.posix.basename(rel)) || out.has(rel)) continue;
       const bytes = blob(task.repoDir, task.base, rel);
-      if (bytes) out.push({ path: rel, cwd: within, sha256: sha256(bytes), bytes });
+      if (bytes) out.set(rel, { path: rel, cwd: within, sha256: sha256(bytes), bytes });
     }
-  }
-  return out.sort((a, b) => a.path.localeCompare(b.path));
+  };
+  for (const within of withins) add(within, isProtectedName);
+  for (const within of withins) for (const folder of folderAndAncestors(within)) add(folder, isRcName);
+  return [...out.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
 /**
@@ -262,6 +271,11 @@ export async function calibrateCandidate(task, { projectRoot, config, timeoutSec
   const candidates = regressionCandidates({ task, config, hiddenPaths, cap: regressionCap });
   const all = [...hidden, ...candidates];
 
+  // Without a lockfile of its own the verifier's install would resolve whatever is newest today,
+  // not what calibration ran against. Nothing is run for such a session.
+  const unpinned = cwdsWithoutLockfile({ task, withins: [...new Set(all.map((t) => t.within))].sort() });
+  if (unpinned.length) return { ok: false, reason: 'unpinned-deps', detail: { cwds: unpinned } };
+
   // 1. Base: every hidden test must fail (a timeout or a missing module is a failure here).
   const onBase = await inTree({
     task, projectRoot, rev: task.base, files: hiddenFiles, tests: all,
@@ -289,7 +303,12 @@ export async function calibrateCandidate(task, { projectRoot, config, timeoutSec
       const ref = buildReference({ root, task, hiddenPaths });
       if (!ref.ok) return { conflict: ref };
       const withins = new Set(all.map((t) => t.within));
-      const touched = ref.changed.filter((rel) => withins.has(path.posix.dirname(rel)) && isProtectedName(path.posix.basename(rel)));
+      const rcFolders = new Set([...withins].flatMap(folderAndAncestors));
+      const touched = ref.changed.filter((rel) => {
+        const dir = path.posix.dirname(rel);
+        const name = path.posix.basename(rel);
+        return (withins.has(dir) && isProtectedName(name)) || (rcFolders.has(dir) && isRcName(name));
+      });
       if (touched.length) return { dependencyChange: touched };
       const unchanged = passingOnBase.filter((c) => git(root, ['rev-parse', '--verify', '--quiet', `${ref.tree}:${c.path}`]).stdout.toString('utf8').trim() === c.oid);
       writeFiles(root, hiddenFiles);

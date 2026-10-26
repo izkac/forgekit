@@ -10,6 +10,14 @@
   (paths relative to its `cwd`, e.g. `[".env"]`): each is copied from the working copy
   into both throwaway worktrees and removed with them. On Volo, 248 server replays
   failed on the fix as well because the worktree had no `server/.env`.
+- **Escape-replay eval corpus (local, private).** `evals/harbor/export-escape-replays.mjs
+  --project <path>` (with `FORGEKIT_ALLOW_EXEC=1`) turns a project's confirmed escapes into
+  the Harbor corpus `forgekit-escape-replays-v1`: per escaped session, the base snapshot and the
+  archived proposal and specs go to the agent, and the fix commits' tests grade it in a hidden
+  verifier. Each task is calibrated (fails on base and head, passes on a reference); drops and
+  their reasons go to `export-report.json`. Output lives only in the git-ignored
+  `evals/harbor/local/`. No published CLI change; `npm run smoke:evals:escape-replays` checks the
+  loop without Docker, and trials stay a separate paid step.
 
 ## 0.3.67 — 2026-10-26
 

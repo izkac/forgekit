@@ -293,6 +293,20 @@ test('a base whose .gitattributes uses export-ignore or export-subst drops the s
   }
 });
 
+test('export-ignore or export-subst in the repository\'s own info/attributes drops the session as unsafe-tree', async (t) => {
+  // $GIT_DIR/info/attributes also steers git archive, and it is not part of the tree.
+  for (const text of ['server/src export-ignore\n', '*.js export-subst\n']) {
+    const p = project(t);
+    write(path.join(p.web, '.git', 'info', 'attributes'), text);
+    const { kept, drops } = await prepare(p);
+    assert.deepEqual(kept, [], text);
+    assert.deepEqual(drops, [{ sessionId: 'sess-1', slug: SLUG, reason: 'unsafe-tree' }], text);
+  }
+  const ok = project(t);
+  write(path.join(ok.web, '.git', 'info', 'attributes'), '# export-ignore only in a comment\n*.png binary\n');
+  assert.equal((await prepare(ok)).kept.length, 1);
+});
+
 test('other .gitattributes content, and a comment that mentions export-ignore, are fine', async (t) => {
   const p = project(t, { baseFiles: { '.gitattributes': '# not export-ignore here\n* text=auto\n*.png binary\n' } });
   const { kept, drops } = await prepare(p);

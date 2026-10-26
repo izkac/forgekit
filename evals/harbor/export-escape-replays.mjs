@@ -345,18 +345,29 @@ export function collectSessions({ project }) {
 /**
  * Whether `git archive` of the tree at `rev` would not be that tree: it holds a symlink, which the
  * harness refuses in a task tree (and Windows tar would turn into a copy), or a `.gitattributes`
- * line with `export-ignore` (files left out of the archive) or `export-subst` (contents rewritten).
+ * line with `export-ignore` (files left out of the archive) or `export-subst` (contents rewritten),
+ * in the tree or in the repository's own `$GIT_DIR/info/attributes`.
  */
 function hasUnsafeTree(repoDir, rev) {
   const listing = git(repoDir, ['ls-tree', '-r', rev]);
   if (listing === null) return false;
   const lines = listing.split('\n');
   if (lines.some((line) => line.startsWith('120000 '))) return true;
+  const exportsAttribute = (/** @type {string} */ text) =>
+    text.split(/\r?\n/).some((l) => !l.trim().startsWith('#') && /(?:^|\s)[-!]?export-(?:ignore|subst)(?:=|\s|$)/.test(l));
   for (const line of lines) {
     const m = /^\d+ blob ([0-9a-f]+)\t(.*)$/.exec(line);
     if (!m || path.posix.basename(m[2]) !== '.gitattributes') continue;
-    const text = git(repoDir, ['cat-file', 'blob', m[1]]) ?? '';
-    if (text.split(/\r?\n/).some((l) => !l.trim().startsWith('#') && /(?:^|\s)[-!]?export-(?:ignore|subst)(?:=|\s|$)/.test(l))) return true;
+    if (exportsAttribute(git(repoDir, ['cat-file', 'blob', m[1]]) ?? '')) return true;
+  }
+  // The repository's own $GIT_DIR/info/attributes steers git archive too, and is not in the tree.
+  const info = git(repoDir, ['rev-parse', '--git-path', 'info/attributes'])?.trim();
+  if (info) {
+    try {
+      if (exportsAttribute(fs.readFileSync(path.resolve(repoDir, info), 'utf8'))) return true;
+    } catch {
+      /* no such file: nothing to steer */
+    }
   }
   return false;
 }

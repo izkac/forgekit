@@ -42,8 +42,9 @@ test('judge: a nonzero exit, a failing count or no passing test is a fail', () =
 });
 
 test('judge: Jest, Vitest and node --test must print a summary; an unknown runner is judged by its exit code', () => {
-  // Jest ends a run with no summary when the code under test exits the process.
-  assert.match(judge({ argv: ['npx', 'jest', 'a'], exit: 0, output: 'process.exit called with "0"' }).note, /no test summary/);
+  // Jest ends a run with no summary when the code under test exits the process (and says so, see below).
+  assert.match(judge({ argv: ['npx', 'jest', 'a'], exit: 0, output: 'process.exit called with "0"' }).note, /process\.exit/);
+  assert.match(judge({ argv: ['npx', 'jest', 'a'], exit: 0, output: '' }).note, /no test summary/);
   assert.equal(judge({ argv: ['node', 'node_modules/jest/bin/jest.js', 'a'], exit: 0, output: '' }).ok, false);
   assert.equal(judge({ argv: ['vitest', 'run'], exit: 0, output: '' }).ok, false);
   assert.equal(judge({ argv: NODE_ARGV, exit: 0, output: '' }).ok, false);
@@ -56,4 +57,16 @@ test('namesKnownRunner', () => {
   assert.equal(namesKnownRunner(['node', 'x.js']), false);
   assert.equal(namesKnownRunner(['./node_modules/.bin/jest', 'x']), true);
   assert.equal(namesKnownRunner(['npm', 'test']), false);
+});
+
+test('judge: output that holds the process.exit wrapper line of Jest fails whatever the exit code, even for a wrapper command', () => {
+  // `npm test -- {file}` names no runner, so a missing summary alone would let this through.
+  const exited = 'Tests:       1 passed, 1 total\nprocess.exit called with "0"';
+  for (const exit of [0, 1]) {
+    for (const argv of [['npm', 'test', '--', 'a'], ['npx', 'jest', 'a'], NODE_ARGV]) {
+      const verdict = judge({ argv, exit, output: exited });
+      assert.equal(verdict.ok, false, `${argv.join(' ')} exit ${exit}`);
+    }
+  }
+  assert.match(judge({ argv: ['npm', 'test'], exit: 0, output: 'process.exit called with "0"' }).note, /process\.exit/);
 });
