@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.67 — 2026-10-26
+
 - **Escape tracking gaps.** Nested repositories were invisible and confirming was
   manual; the ledger could not tie a trend to a release or a model.
   - **Commit range per repository.** `forge phase done` records
