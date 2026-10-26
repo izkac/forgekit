@@ -341,12 +341,44 @@ forge escapes [list] [--json] [--rev <ref>]
                                   # c confirm / d dismiss / s skip / q quit
                                   # A candidate whose hit files the change's own plan never names is
                                   # marked `outside plan … possible sweep (F16)` (a label, not a filter)
+                                  # Ranges are per repository: a candidate names its repo (nested repos
+                                  # included); older sessions get an `inferred` time-window range
 forge escapes confirm <session> <commit> [--test <path>]
                                   # confirm needs a replay test: the fix commit's own, or one you name
 forge escapes dismiss <session> <commit> [--reason "<why>"]
                                   # decisions → .forge/escapes.jsonl
-forge escapes report [--json]     # Escape rate per month and per pace (`unknown` if none recorded) of done,
-                                  # across the fleet (OPEN = window running)
+forge escapes verify [--all | <session> <commit>] [--json]
+                                  # replay the fix commit's test on the fix's parent (fix's test copied in)
+                                  # and on the fix, in throwaway worktrees under .forge/replay/ (self-ignored;
+                                  # not the OS temp dir or .git, where Vite cannot load config); your working
+                                  # tree is untouched. Needs an `escapes.replay` rule (its command must
+                                  # contain {file}) + the exec opt-in. Several test files in the fix → the
+                                  # first one a rule covers. --rev <ref> scans another ref; `forge escapes
+                                  # list` shows the result as (verify: <tag>).
+                                  # node_modules at the rule's cwd is LINKED to your copy in the throwaway
+                                  # worktrees: a test that writes into it changes it. `git worktree prune`
+                                  # runs first (it also forgets your other worktrees whose directories are
+                                  # currently missing). A recorded range that could not be searched prints
+                                  # as an `unsearched:` line (list and verify) and in the verify summary.
+                                  # only fix/revert commits are replayed; others are tagged not-a-fix.
+                                  # old fails + fix passes → auto-confirmed (`auto: true` in the ledger).
+                                  # Otherwise tagged, never dismissed: `environment` (fix run fails, or old
+                                  # run died on a missing module/syntax error), `not-reproduced` (test passes
+                                  # on old code), or undecided with a reason (no-test, no-rule, timeout,
+                                  # no-exit, cannot-start, error)
+forge escapes report [--by version] [--json]
+                                  # Escape rate per month and per pace (`unknown` if none recorded) of done,
+                                  # across the fleet (OPEN = window running); --by version adds a row per
+                                  # forgekit release (`unknown` for sessions without one); a `Partial:` line
+                                  # counts sessions with unsearched ranges (their escape count may be low)
+                                  # Replay rules (.forge/config.json), first match wins; `match` globs the
+                                  # root-relative test path, `{file}` is relative to `cwd`:
+                                  #   "escapes": { "replay": [ { "match": "volo_web/server/**",
+                                  #     "cwd": "volo_web/server",
+                                  #     "command": "node node_modules/jest/bin/jest.js {file}" } ],
+                                  #     "replayTimeoutSec": 300 }          # default 300 per run
+                                  # No shell: on Windows name a real executable (`node …`), not an
+                                  # `npm`/`npx` .cmd shim
 forge fires [--json] [--since <iso>]
                                   # Gate fire counts per gate across the fleet, zeros included
                                   # (log: ~/.forgekit/fleet/gate-fires.jsonl, one line per gate refusal)

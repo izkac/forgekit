@@ -27,10 +27,12 @@ function makeProject() {
 }
 
 function forge(dir, args, env = {}, timeout = 90000) {
+  // An outer run (e.g. this suite under `forge evidence --tier3`) holds leases; start from none.
+  const { [HELD]: _outerHeld, ...base } = process.env;
   return spawnSync(process.execPath, [BIN, ...args], {
     cwd: dir,
     encoding: 'utf8',
-    env: { ...process.env, FORGEKIT_ALLOW_EXEC: '1', ...env },
+    env: { ...base, FORGEKIT_ALLOW_EXEC: '1', ...env },
     timeout,
   });
 }

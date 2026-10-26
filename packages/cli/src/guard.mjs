@@ -125,7 +125,7 @@ function escapeRegExpChar(ch) {
  *   folding platform the same way the tracked-path lookup catches it.
  * @returns {RegExp}
  */
-function globToRegExp(glob, caseInsensitive = false) {
+export function globToRegExp(glob, caseInsensitive = false) {
   const g = String(glob);
   let re = '';
   let i = 0;

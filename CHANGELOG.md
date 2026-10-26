@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Escape tracking gaps.** Nested repositories were invisible and confirming was
+  manual; the ledger could not tie a trend to a release or a model.
+  - **Commit range per repository.** `forge phase done` records
+    `nestedCommitRanges` (`{ "<repo>": { base, head } }`) for each nested repo
+    `forge new` saw whose HEAD moved. `forge escapes` searches every recorded range
+    and each candidate names its repository. Sessions recorded before this get a
+    range inferred from their time window (a commit inside several windows goes to
+    the shortest session), marked `inferred` and counted separately in the report.
+  - **`forge escapes verify [--all | <session> <commit>]`.** Replays the fix
+    commit's test on the fix's parent (with the fix's test copied in) and on the
+    fix, in throwaway worktrees under `.forge/replay/` (self-ignored; the OS temp dir
+    and `.git` broke Vite/Vitest config loading on Volo); your working tree is untouched.
+    Only fix/revert commits are replayed; any other candidate is tagged `not-a-fix`
+    (on Volo, 233 of 425 first auto-confirms were feature commits). For a fix,
+    old fails and fix passes: auto-confirmed (`auto: true`, command and exit codes
+    in `.forge/escapes.jsonl`). Otherwise tagged `environment` or `not-reproduced`,
+    or left undecided with a reason. Never dismisses. Needs the exec opt-in and an
+    `escapes.replay` rule (`[{ match, cwd, command }]`, first match wins, `{file}`
+    relative to `cwd`) in `.forge/config.json`; `escapes.replayTimeoutSec` defaults
+    to 300. Commands run without a shell: on Windows name a real executable.
+  - **Version and models.** The digest records `forgekitVersion` and
+    `models: { coordinator, subagents }` (`null` where the host does not separate
+    them). `forge escapes report --by version` adds a row per release.
+
 - **Cost levers.** Measured on 62 sessions: cost is requests times context carried,
   and sessions with 40+ subagents cost about twice as much per task with no better
   scores. No check, model, tier or pace rule changed.

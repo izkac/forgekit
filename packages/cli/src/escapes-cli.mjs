@@ -8,17 +8,26 @@
  *                                                  (bare, on a terminal: decide one keystroke each)
  *   forge escapes confirm <session> <commit> [--test <path>]
  *   forge escapes dismiss <session> <commit> [--reason <text>]
- *   forge escapes report [--json]                  Escape rate per month of done and per pace, fleet-wide
+ *   forge escapes verify [--all | <session> <commit>] [--json]
+ *                                                  replay each candidate's fix test on the fix's parent and on
+ *                                                  the fix (needs an `escapes.replay` rule and the exec opt-in)
+ *   forge escapes report [--by version] [--json]   Escape rate per month of done and per pace, fleet-wide
+ *                                                  (--by version adds one row per forgekit release)
  */
 
+import path from 'node:path';
 import readline from 'node:readline';
-import { decide, doneSessions, escapeReport, pendingCandidates, WINDOW_DAYS } from './escapes.mjs';
+import { loadProjectConfig } from './config.mjs';
+import { candidateOrigin, decide, doneSessions, escapeReport, isFixCommit, pendingCandidates, replayTestsFor, tagCandidate, WINDOW_DAYS } from './escapes.mjs';
+import { DEFAULT_REPLAY_TIMEOUT_SEC, recordReplay, replayArgv, resolveReplayRule, runReplay, splitArgv } from './escapes-replay.mjs';
+import { resolveCallerExecGate } from './exec-gate.mjs';
 
 const USAGE = `Usage:
   forge escapes [list] [--json] [--rev <ref>]
   forge escapes confirm <session> <commit> [--test <path>]
   forge escapes dismiss <session> <commit> [--reason <text>]
-  forge escapes report [--json]
+  forge escapes verify [--all | <session> <commit>] [--json]
+  forge escapes report [--by version] [--json]
 `;
 
 const args = process.argv.slice(2);
@@ -32,7 +41,7 @@ const flag = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? (args[i + 1] ?? null) : null;
 };
-const positional = args.filter((a, i) => !a.startsWith('--') && !['--rev', '--test', '--reason'].includes(args[i - 1]));
+const positional = args.filter((a, i) => !a.startsWith('--') && !['--rev', '--test', '--reason', '--by'].includes(args[i - 1]));
 const [sub = null, ...rest] = positional;
 
 /** @param {string} needle */
@@ -54,9 +63,13 @@ function findSession(needle) {
  * @param {string} commit
  * @param {'confirmed' | 'dismissed'} decision
  * @param {{ replayTest?: string | null, reason?: string | null }} [extra]
+ * @param {{ repo?: string, inferred?: string }} [candidate] the listed candidate, when the caller has it; else looked up
  */
-function record(session, commit, decision, extra = {}) {
-  const res = decide({ cwd, sessionId: session.sessionId, slug: session.slug, commit, decision, ...extra });
+function record(session, commit, decision, extra = {}, candidate = undefined) {
+  const { repo, inferred } = candidate
+    ? { repo: candidate.repo ?? '.', inferred: candidate.inferred ?? null }
+    : candidateOrigin({ cwd, sessionId: session.sessionId, commit });
+  const res = decide({ cwd, sessionId: session.sessionId, slug: session.slug, commit, decision, repo, inferred, ...extra });
   if (!res.ok) {
     process.stderr.write(`${res.error}\n`);
     return false;
@@ -67,7 +80,12 @@ function record(session, commit, decision, extra = {}) {
 }
 
 function printReport() {
-  const report = escapeReport({ cwd });
+  const by = flag('--by');
+  if (by !== null && by !== 'version') {
+    process.stderr.write(`Unknown --by "${by}": only "version" is supported.\n${USAGE}`);
+    process.exit(1);
+  }
+  const report = escapeReport({ cwd, by });
   if (json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     return;
@@ -86,11 +104,33 @@ function printReport() {
     ...report.byPace.map(
       (p) => `${p.pace.padEnd(10)}${String(p.done).padStart(4)}  ${String(p.escaped).padStart(7)}  ${pct(p.rate)}  ${String(p.open).padStart(4)}`,
     ),
+    ...(report.byVersion
+      ? [
+          '',
+          'VERSION   DONE  ESCAPED  RATE  OPEN',
+          ...report.byVersion.map(
+            (v) => `${v.version.padEnd(10)}${String(v.done).padStart(4)}  ${String(v.escaped).padStart(7)}  ${pct(v.rate)}  ${String(v.open).padStart(4)}`,
+          ),
+        ]
+      : []),
     '',
+    `Inferred (time-window, sessions recorded before per-repository ranges): ${report.inferred.escaped} of the ${report.total.escaped} escaped session(s) rest only on inferred ranges.`,
+    ...(report.unsearched
+      ? [`Partial: ${report.unsearched.sessions} session(s) with unsearched ranges (repository gone, or head not on HEAD) — their escape count may be low. See: forge escapes list`]
+      : []),
     `OPEN = ${WINDOW_DAYS}-day window still running; that month's rate can still rise.`,
   ];
   process.stdout.write(`${lines.join('\n')}\n`);
 }
+
+/** Which repository a candidate lives in (empty for the root), and whether its range was inferred. @param {{ repo?: string, inferred?: string }} c */
+const repoTag = (c) => `${c.repo && c.repo !== '.' ? `repo ${c.repo}: ` : ''}${c.inferred ? `inferred ${c.inferred}: ` : ''}`;
+
+/** What `forge escapes verify` found out about a candidate it could not confirm. @param {{ tag?: { tag: string, reason: string | null } }} c */
+const verifyTag = (c) => (c.tag ? `  (verify: ${c.tag.tag}${c.tag.reason ? `: ${c.tag.reason}` : ''})` : '');
+
+/** One line per range of a searched session that could not be searched. @param {{ unsearched?: string[] }} s */
+const unsearchedLines = (s) => (s.unsearched ?? []).map((reason) => `  unsearched: ${reason}`);
 
 /** F16: hit files the change's own plan never names. @param {string[]} files */
 const sweepLine = (files) => `  outside plan: ${files.join(', ')} — possible sweep (F16)`;
@@ -104,11 +144,12 @@ function printList(sessions) {
       out.push(`${s.sessionId}: skipped — ${s.skipped}`);
       continue;
     }
-    const range = `${s.range?.base.slice(0, 7)}..${s.range?.head.slice(0, 7)}${s.inferred ? ' (inferred)' : ''}`;
+    const range = s.range ? `${s.range.base.slice(0, 7)}..${s.range.head.slice(0, 7)}${s.inferred ? ' (inferred)' : ''}` : 'nested repos only';
     out.push(`${s.sessionId} (${s.slug ?? '?'}, done ${String(s.doneAt).slice(0, 10)}, ${range}): ${s.candidates.length} candidate(s)`);
+    out.push(...unsearchedLines(s));
     for (const c of s.candidates) {
       count += 1;
-      out.push(`  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}  [${c.lines} line(s): ${c.files.join(', ')}]`);
+      out.push(`  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}  [${repoTag(c)}${c.lines} line(s): ${c.files.join(', ')}]${verifyTag(c)}`);
       if (c.outsidePlan.length) out.push(sweepLine(c.outsidePlan));
     }
   }
@@ -144,7 +185,10 @@ function ask(prompt) {
 /** @param {ReturnType<typeof pendingCandidates>} sessions */
 async function interactive(sessions) {
   const queue = sessions.flatMap((s) => s.candidates.map((c) => ({ s, c })));
-  for (const s of sessions) if (s.skipped) process.stdout.write(`${s.sessionId}: skipped — ${s.skipped}\n`);
+  for (const s of sessions) {
+    if (s.skipped) process.stdout.write(`${s.sessionId}: skipped — ${s.skipped}\n`);
+    else for (const line of unsearchedLines(s)) process.stdout.write(`${s.sessionId}:${line}\n`);
+  }
   if (queue.length === 0) {
     process.stdout.write('No undecided Escape candidates.\n');
     return;
@@ -155,7 +199,7 @@ async function interactive(sessions) {
     process.stdout.write(
       `\n[${n}/${queue.length}] ${s.sessionId} (${s.slug ?? '?'}, done ${String(s.doneAt).slice(0, 10)})\n` +
         `  ${c.commit.slice(0, 7)} ${c.at.slice(0, 10)} ${c.subject}\n` +
-        `  rewrites ${c.lines} line(s) the change added: ${c.files.join(', ')}\n` +
+        `  rewrites ${c.lines} line(s) the change added: ${repoTag(c)}${c.files.join(', ')}\n` +
         (c.outsidePlan.length ? `${sweepLine(c.outsidePlan)}\n` : '') +
         '  [c]onfirm Escape  [d]ismiss  [s]kip  [q]uit > ',
     );
@@ -171,22 +215,123 @@ async function interactive(sessions) {
       }
       if (k === 'd') {
         process.stdout.write('\n');
-        record(s, c.commit, 'dismissed');
+        record(s, c.commit, 'dismissed', {}, c);
         break;
       }
       if (k === 'c') {
         process.stdout.write('\n');
-        if (record(s, c.commit, 'confirmed')) break;
+        if (record(s, c.commit, 'confirmed', {}, c)) break;
         const test = await ask('  replay test path (blank to skip): ');
-        if (test) record(s, c.commit, 'confirmed', { replayTest: test });
+        if (test) record(s, c.commit, 'confirmed', { replayTest: test }, c);
         break;
       }
     }
   }
 }
 
+/**
+ * Replay every pending candidate (or the named one): its fix commit's test on the
+ * fix's parent and on the fix, classify, record. Executes project commands, so it
+ * passes the same gate as `forge evidence -- <cmd>` before anything is created.
+ */
+async function verify() {
+  const all = args.includes('--all');
+  const [needle, commitArg] = rest;
+  if (!all && !(needle && commitArg)) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+  const rev = flag('--rev') ?? 'HEAD';
+  let sessions;
+  if (all) sessions = pendingCandidates({ cwd, rev });
+  else {
+    const session = findSession(needle);
+    sessions = pendingCandidates({ cwd, rev, sessionId: session.sessionId }).map((s) => ({
+      ...s,
+      candidates: s.candidates.filter((c) => c.commit.startsWith(commitArg)),
+    }));
+    if (!sessions.some((s) => s.candidates.length)) {
+      process.stderr.write(`No undecided candidate ${commitArg} in ${session.sessionId}. Try: forge escapes list\n`);
+      process.exit(1);
+    }
+  }
+
+  const config = /** @type {any} */ (loadProjectConfig(cwd));
+  const configured = config.escapes?.replayTimeoutSec;
+  const timeoutSec = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_REPLAY_TIMEOUT_SEC;
+  const work = sessions.flatMap((s) =>
+    s.candidates.map((c) => {
+      const repo = c.repo ?? '.';
+      // Only a fix or revert can be an Escape; anything else is never replayed.
+      if (!isFixCommit(c.subject)) return { s, c, repo, notFix: true, hasTest: false, testPath: null, rule: null };
+      const tests = replayTestsFor({ cwd: repo === '.' ? cwd : path.join(cwd, repo), commit: c.commit });
+      // The first of the fix's tests that a rule covers.
+      const ruled = tests.map((t) => ({ t, rule: resolveReplayRule(config, repo === '.' ? t : `${repo}/${t}`) })).find((x) => x.rule);
+      return { s, c, repo, hasTest: tests.length > 0, testPath: ruled?.t ?? null, rule: ruled?.rule ?? null };
+    }),
+  );
+
+  for (const command of new Set(work.flatMap((w) => (w.rule ? [w.rule.command] : [])))) {
+    const gate = resolveCallerExecGate({ command: 'forge escapes verify', cmdArgv: splitArgv(command), cwd, forgeDir: path.join(cwd, '.forge') });
+    if (!gate.allowed) {
+      process.stderr.write(gate.message ?? 'forge escapes verify: execution refused\n');
+      process.exit(1);
+    }
+  }
+
+  const results = [];
+  for (const { s, c, repo, notFix, hasTest, testPath, rule } of work) {
+    const undecided = (/** @type {string} */ reason) => {
+      tagCandidate({ cwd, sessionId: s.sessionId, commit: c.commit, repo, tag: 'undecided', reason });
+      return { outcome: 'undecided', reason };
+    };
+    let res;
+    if (notFix) {
+      tagCandidate({ cwd, sessionId: s.sessionId, commit: c.commit, repo, tag: 'not-a-fix', reason: null });
+      res = { outcome: 'not-a-fix', reason: null };
+    } else if (!hasTest) res = undecided('no-test');
+    else if (!testPath || !rule) res = undecided('no-rule');
+    else {
+      try {
+        const runs = await runReplay({ projectRoot: cwd, repo, fixSha: c.commit, testPath, rule, timeoutSec });
+        const command = replayArgv({ repo, testPath, rule }).join(' ');
+        res = recordReplay({ cwd, sessionId: s.sessionId, slug: s.slug, candidate: c, testPath, command, ...runs });
+      } catch (e) {
+        res = undecided(`error: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    results.push({ session: s.sessionId, commit: c.commit, repo, ...res });
+  }
+
+  const count = (/** @type {string} */ outcome) => results.filter((r) => r.outcome === outcome).length;
+  const summary = {
+    total: results.length,
+    confirmed: count('confirmed'),
+    environment: count('environment'),
+    notReproduced: count('not-reproduced'),
+    undecided: count('undecided'),
+    notAFix: count('not-a-fix'),
+    // Ranges that could not be searched, so the candidates above may be a partial set.
+    unsearched: sessions.reduce((n, s) => n + (s.skipped ? 0 : (s.unsearched?.length ?? 0)), 0),
+  };
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ results, summary }, null, 2)}\n`);
+    return;
+  }
+  const verdict = (/** @type {{ outcome: string, reason: string | null }} */ r) =>
+    r.outcome === 'confirmed' ? 'confirmed (auto)' : r.outcome === 'undecided' ? `undecided: ${r.reason}` : r.outcome;
+  const out = results.map((r) => `${r.session} ${r.commit.slice(0, 7)} ${r.repo}: ${verdict(r)}`);
+  for (const s of sessions) if (!s.skipped) for (const line of unsearchedLines(s)) out.push(`${s.sessionId}:${line}`);
+  out.push(
+    `${summary.total} candidate(s): ${summary.confirmed} confirmed, ${summary.environment} environment, ${summary.notReproduced} not-reproduced, ${summary.undecided} undecided${summary.notAFix ? `; ${summary.notAFix} not a fix` : ''}${summary.unsearched ? `; ${summary.unsearched} range(s) unsearched` : ''}`,
+  );
+  process.stdout.write(`${out.join('\n')}\n`);
+}
+
 if (sub === 'report') {
   printReport();
+} else if (sub === 'verify') {
+  await verify();
 } else if (sub === 'confirm' || sub === 'dismiss') {
   const [needle, commit] = rest;
   if (!needle || !commit) {

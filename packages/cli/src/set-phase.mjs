@@ -34,6 +34,7 @@ import {
   writeActive,
 } from './lib.mjs';
 import { isTerminalPhase } from './lib/fleet.mjs';
+import { nestedCommitRanges } from './lib/nested-repos.mjs';
 import { briefProblem, checkBrief } from './brief.mjs';
 import {
   COMBINED_TASKS,
@@ -1093,6 +1094,10 @@ if (phase === 'done' && session.baseCommit) {
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' });
   if (head.status === 0) session.commitRange = { base: session.baseCommit, head: head.stdout.trim() };
 }
+// Per nested repository (`forge new` recorded their bases). Always set at done,
+// `{}` when nothing moved, so a session recorded after this is never mistaken
+// for an older one whose nested ranges `forge escapes` must infer.
+if (phase === 'done') session.nestedCommitRanges = nestedCommitRanges(REPO_ROOT, session.nestedBaseCommits ?? {});
 
 // Host telemetry on finish/done, and it has to happen *here* — before the
 // scorecard, which is what appends the sessions.jsonl digest, and the digest
