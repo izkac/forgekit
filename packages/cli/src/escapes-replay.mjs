@@ -89,7 +89,7 @@ function safeCopyList(list) {
  *
  * @param {{ from: string, to: string, files: string[] }} o
  */
-function copyIgnored({ from, to, files }) {
+export function copyIgnored({ from, to, files }) {
   for (const rel of files) {
     const src = path.join(from, rel);
     let st;
@@ -183,7 +183,7 @@ function killTree(child) {
  * @returns {Promise<{ exit: number | null, output: string, timedOut: boolean, error: string | null }>}
  *   `error` is the spawn error when the command could not start
  */
-function run(argv, cwd, timeoutSec) {
+export function run(argv, cwd, timeoutSec) {
   const env = { ...process.env };
   // A replay run from inside `node --test` must behave as a fresh top-level run.
   delete env.NODE_TEST_CONTEXT;
@@ -229,7 +229,7 @@ function run(argv, cwd, timeoutSec) {
 }
 
 /** Remove a directory link without touching its target. @param {string} link */
-function removeLink(link) {
+export function removeLink(link) {
   let st;
   try {
     st = fs.lstatSync(link);
@@ -257,7 +257,7 @@ function removeLink(link) {
  * @param {string} projectRoot
  * @returns {{ base: string, created: string[] }}
  */
-function replayBase(projectRoot) {
+export function replayBase(projectRoot) {
   const root = path.resolve(projectRoot);
   const base = path.join(path.dirname(root), `forge-replay-${path.basename(root)}`);
   const created = fs.existsSync(base) ? [] : [base];
@@ -268,7 +268,7 @@ function replayBase(projectRoot) {
 }
 
 /** Remove what `replayBase` created, deepest first, only when nothing else is left in it. */
-function dropReplayBase({ base, created }) {
+export function dropReplayBase({ base, created }) {
   if (!created.includes(base)) return;
   try {
     // Only when nothing but our .gitignore is left (another run may still own a worktree here).
@@ -286,7 +286,7 @@ function dropReplayBase({ base, created }) {
  * @param {{ repoDir: string, rev: string, within: string, baseDir: string, prepare?: (dir: string) => void, fn: (dir: string) => Promise<T> }} o
  * @returns {Promise<T>}
  */
-async function inWorktree({ repoDir, rev, within, baseDir, prepare, fn }) {
+export async function inWorktree({ repoDir, rev, within, baseDir, prepare, fn }) {
   const dir = fs.mkdtempSync(path.join(baseDir, 'r-'));
   const link = path.join(dir, within, 'node_modules');
   let added = false;

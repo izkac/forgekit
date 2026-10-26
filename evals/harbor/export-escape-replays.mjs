@@ -5,9 +5,8 @@
  * the session's base, the archived change's proposal and specs as the instruction, and the fix
  * commits whose tests are the hidden checks.
  *
- * This module collects candidates and snapshots the base trees. Calibration, the reference build,
- * the task writer and the grader extend `exportEscapeReplays` between `collectSessions` and
- * `writeSnapshots`.
+ * Collect the candidates, snapshot their base trees, then calibrate each (`escape-replays/calibrate.mjs`)
+ * against its hidden tests: base and escaped head must fail them, the reference must pass them.
  *
  * Usage: FORGEKIT_ALLOW_EXEC=1 node evals/harbor/export-escape-replays.mjs --project <path>
  *          [--include <relpath>]… [--out <dir>]
@@ -15,26 +14,29 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadProjectConfig } from '../../packages/cli/src/config.mjs';
 import { doneSessions, inferNestedWindows, readDecisions } from '../../packages/cli/src/escapes.mjs';
 import { replayArgv, resolveReplayRule } from '../../packages/cli/src/escapes-replay.mjs';
 import { ALLOW_EXEC_ENV, envAllowsCallerExec } from '../../packages/cli/src/exec-gate.mjs';
-import { escapeReplaysCorpusId } from './corpus-selection.mjs';
+import { escapeReplaysCorpusId, localCorpusRoot } from './corpus-selection.mjs';
+import { calibrateCandidate } from './escape-replays/calibrate.mjs';
+import { corpusManifest, writeTask } from './escape-replays/write-task.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-export const defaultOutDir = path.join(here, 'local', escapeReplaysCorpusId);
+/** The forgekit checkout this script lives in. */
+const checkoutRoot = path.resolve(here, '..', '..');
+
+export const defaultOutDir = path.join(localCorpusRoot, escapeReplaysCorpusId);
 
 const USAGE = `Usage: ${ALLOW_EXEC_ENV}=1 node evals/harbor/export-escape-replays.mjs --project <path> [--include <relpath>]... [--out <dir>]
 `;
 
 /** Archived changes live under the planning engine's archive folder, as `YYYY-MM-DD-<slug>`. */
 const ARCHIVE_DIRS = ['openspec/changes/archive', 'specs/changes/archive'];
-
-/** The only runner the verifier knows how to install and run. */
-const JEST_TOKEN = /(^|[\\/])jest([\\/.]|$)/i;
 
 /** @param {string} cwd @param {string[]} args @returns {string | null} stdout, or null when git failed */
 function git(cwd, args) {
@@ -61,6 +63,22 @@ export function assertExecAllowed(env = process.env) {
 }
 
 /**
+ * Why a relative path inside a repository is unusable, or its normalized form: it must not be
+ * empty, absolute, drive-qualified, or contain a `..` segment.
+ *
+ * @param {unknown} rel
+ * @returns {{ message: string, norm?: undefined } | { norm: string, message?: undefined }}
+ */
+function checkRelative(rel) {
+  const p = posix(String(rel ?? ''));
+  if (p === '' || /^[A-Za-z]:/.test(p) || p.startsWith('/')) return { message: 'must be a relative path inside the nested repository' };
+  if (p.split('/').includes('..')) return { message: 'must not contain ".."' };
+  const norm = path.posix.normalize(p);
+  if (norm === '.') return { message: 'must name a file or folder' };
+  return { norm };
+}
+
+/**
  * An `--include` path names an ignored file of the nested checkout to copy into the snapshot.
  * Absolute paths and any `..` segment are refused, before anything is written.
  *
@@ -68,27 +86,40 @@ export function assertExecAllowed(env = process.env) {
  * @returns {string} the normalized posix path
  */
 export function validateInclude(rel) {
-  const p = posix(String(rel));
-  if (p === '' || /^[A-Za-z]:/.test(p) || p.startsWith('/')) {
-    throw new Error(`--include must be a relative path inside the nested repository, got: ${rel}`);
-  }
-  if (p.split('/').includes('..')) {
-    throw new Error(`--include must not contain "..", got: ${rel}`);
-  }
-  const norm = path.posix.normalize(p);
-  if (norm === '.') throw new Error(`--include must name a file or folder, got: ${rel}`);
-  return norm;
+  const checked = checkRelative(rel);
+  if (checked.message) throw new Error(`--include ${checked.message}, got: ${rel}`);
+  return /** @type {string} */ (checked.norm);
 }
 
-/** Whether a replay command runs Jest: some argv token is a jest path or binary. */
-export function isJestArgv(argv) {
-  return argv.some((t) => JEST_TOKEN.test(t));
+/** A ledger `repo` is `.` or a safe relative path; its `replayTest` and `commit` get the same care as `--include`. */
+const safeLedgerRepo = (/** @type {unknown} */ repo) => repo === '.' || checkRelative(repo).norm !== undefined;
+const safeLedgerCommit = (/** @type {unknown} */ commit) => typeof commit === 'string' && /^[0-9a-f]{7,64}$/i.test(commit);
+
+/**
+ * Refuse an output directory inside the forgekit checkout that git does not ignore: exported
+ * tasks hold a private project's source and must never be one `git add` away from the repository.
+ *
+ * @param {string} out
+ */
+export function assertOutDirSafe(out) {
+  const rel = path.relative(checkoutRoot, path.resolve(out));
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return;
+  const child = posix(path.join(rel, '_'));
+  const ignored = spawnSync('git', ['check-ignore', '-q', '--', child], { cwd: checkoutRoot }).status === 0;
+  if (!ignored) {
+    throw new Error(`--out ${out} is inside the forgekit checkout and is not ignored by git.
+Export to a git-ignored folder such as evals/harbor/local/, or outside the checkout.`);
+  }
 }
 
 /** @param {string} slug */
 function taskIdBase(slug) {
-  return String(slug ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return String(slug ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/g, '');
 }
+
+/** The task id for a session: its slug when that leaves something, else a short hash of the session id. */
+const taskIdFor = (/** @type {string | null} */ slug, /** @type {string} */ sessionId) =>
+  taskIdBase(slug) || `escape-${createHash('sha256').update(String(sessionId)).digest('hex').slice(0, 10)}`;
 
 /**
  * The archived change for a slug: the latest `<project>/<archive>/YYYY-MM-DD-<slug>` directory,
@@ -197,7 +228,8 @@ function sessionRange({ session, repo, repoDir, inferred }) {
  * sessions that cannot be tasks with one reason each. Reads the ledger and git only.
  *
  * @param {{ project: string }} opts
- * @returns {{ kept: Array<Record<string, any>>, drops: Array<{ sessionId: string, slug: string | null, reason: string }> }}
+ * @returns {{ kept: Array<Record<string, any>>, drops: Array<{ sessionId: string, slug: string | null, reason: string }>,
+ *   skipped: Array<{ sessionId: string, commit: string, reason: string }> }} `skipped` lists the escapes left out of every session, kept or dropped
  */
 export function collectSessions({ project }) {
   const root = path.resolve(project);
@@ -215,31 +247,55 @@ export function collectSessions({ project }) {
 
   const kept = [];
   const drops = [];
+  /** @type {Array<{ sessionId: string, commit: string, reason: string }>} */
+  const skipped = [];
   const usedIds = new Set();
   for (const [sessionId, rows] of [...grouped].sort(([a], [b]) => a.localeCompare(b))) {
     const slug = rows.find((r) => r.slug)?.slug ?? bySession.get(sessionId)?.slug ?? null;
     const drop = (/** @type {string} */ reason) => drops.push({ sessionId, slug, reason });
 
-    // One repository per session: the one with the most confirmed escapes.
-    const counts = new Map();
-    for (const r of rows) counts.set(r.repo ?? '.', (counts.get(r.repo ?? '.') ?? 0) + 1);
-    const repo = [...counts].sort(([ra, na], [rb, nb]) => nb - na || ra.localeCompare(rb))[0][0];
-    const repoDir = repo === '.' ? root : path.join(root, repo);
+    // Rows the exporter cannot trust: a ledger path or commit that could reach outside the repository.
     /** @type {Array<{ commit: string, reason: string }>} */
-    const skippedEscapes = rows.filter((r) => (r.repo ?? '.') !== repo).map((r) => ({ commit: r.commit, reason: 'unsupported-runner' }));
-
-    // Each fix needs a Jest replay rule; one without is skipped, and a session left with none is dropped.
-    const supported = [];
-    for (const r of rows.filter((x) => (x.repo ?? '.') === repo)) {
-      const rule = r.replayTest ? resolveReplayRule(config, repo === '.' ? r.replayTest : `${repo}/${r.replayTest}`) : null;
-      const argv = rule ? replayArgv({ repo, testPath: r.replayTest, rule }) : [];
-      if (rule && isJestArgv(argv)) supported.push({ row: r, rule, argv });
-      else skippedEscapes.push({ commit: r.commit, reason: 'unsupported-runner' });
+    const skippedEscapes = [];
+    const usable = [];
+    for (const r of rows) {
+      const unsafeCommit = !safeLedgerCommit(r.commit);
+      if (!safeLedgerRepo(r.repo ?? '.') || (r.replayTest != null && checkRelative(r.replayTest).norm === undefined) || unsafeCommit) {
+        skippedEscapes.push({ commit: r.commit, reason: unsafeCommit ? 'bad-commit' : 'unsafe-path' });
+      } else usable.push(r);
     }
-    if (supported.length === 0) {
-      drop('unsupported-runner');
+
+    // Rule-backed escapes per repository; the session lives in the repository with the most.
+    /** @type {Map<string, Array<{ row: Record<string, any>, rule: Record<string, any>, argv: string[] }>>} */
+    const backed = new Map();
+    /** @type {Array<Record<string, any>>} */
+    const unbacked = [];
+    for (const r of usable) {
+      const repoOfRow = r.repo == null || r.repo === '.' ? '.' : path.posix.normalize(posix(r.repo)).replace(/\/+$/, '');
+      const testPath = r.replayTest ? path.posix.normalize(posix(r.replayTest)) : null;
+      const rule = testPath ? resolveReplayRule(config, repoOfRow === '.' ? testPath : `${repoOfRow}/${testPath}`) : null;
+      if (!rule || !testPath) {
+        unbacked.push(r);
+        continue;
+      }
+      const list = backed.get(repoOfRow) ?? [];
+      list.push({ row: { ...r, replayTest: testPath }, rule, argv: replayArgv({ repo: repoOfRow, testPath, rule }) });
+      backed.set(repoOfRow, list);
+    }
+    const ranked = [...backed].sort(([ra, la], [rb, lb]) => lb.length - la.length || ra.localeCompare(rb));
+    if (ranked.length === 0) {
+      for (const r of unbacked) skippedEscapes.push({ commit: r.commit, reason: 'unsupported-runner' });
+      skipped.push(...skippedEscapes.map((x) => ({ sessionId, ...x })));
+      drop(usable.length === 0 ? 'unsafe-path' : 'unsupported-runner');
       continue;
     }
+    const [[repo, supported]] = ranked;
+    for (const r of unbacked) skippedEscapes.push({ commit: r.commit, reason: 'unsupported-runner' });
+    for (const [, list] of ranked.slice(1)) {
+      for (const { row } of list) skippedEscapes.push({ commit: row.commit, reason: 'unsupported-runner' });
+    }
+    skipped.push(...skippedEscapes.map((x) => ({ sessionId, ...x })));
+    const repoDir = repo === '.' ? root : path.join(root, repo);
 
     const changeDir = findArchivedChange(root, slug);
     const instruction = changeDir ? buildInstruction(changeDir) : null;
@@ -259,10 +315,11 @@ export function collectSessions({ project }) {
     const fixes = supported.map(({ row, argv }) => ({ commit: row.commit, replayTest: row.replayTest, command: row.command ?? argv.join(' ') }));
     /** Newest fix wins when two fixes touch one test file. */
     const hidden = new Map();
-    for (const { row, rule, argv } of supported) hidden.set(row.replayTest, { path: row.replayTest, commit: row.commit, argv, cwd: rule.cwd });
+    for (const { row, rule, argv } of supported) hidden.set(row.replayTest, { path: row.replayTest, commit: row.commit, argv, cwd: rule.cwd, rule });
 
-    let taskId = taskIdBase(slug) || taskIdBase(sessionId);
-    for (let n = 2; usedIds.has(taskId); n += 1) taskId = `${taskIdBase(slug) || taskIdBase(sessionId)}-${n}`;
+    const idBase = taskIdFor(slug, sessionId);
+    let taskId = idBase;
+    for (let n = 2; usedIds.has(taskId); n += 1) taskId = `${idBase}-${n}`;
     usedIds.add(taskId);
 
     kept.push({
@@ -282,34 +339,55 @@ export function collectSessions({ project }) {
       instruction,
     });
   }
-  return { kept, drops };
+  return { kept, drops, skipped };
+}
+
+/** Whether the tree at `rev` holds a symlink, which the harness refuses in a task tree (and Windows tar would turn into a copy). */
+function hasSymlink(repoDir, rev) {
+  const listing = git(repoDir, ['ls-tree', '-r', rev]);
+  return listing !== null && listing.split('\n').some((line) => line.startsWith('120000 '));
 }
 
 /**
  * Extract `git archive <base>` of a repository into `dest`: tracked files only, no `.git`, no
- * ignored files. Then copy each `include` path from the operator's checkout.
+ * ignored files, LF bytes whatever the host's autocrlf says. Then copy each `include` path from
+ * the operator's checkout.
  *
- * @param {{ repoDir: string, base: string, dest: string, include?: string[] }} opts
+ * @param {{ repoDir: string, base: string, dest: string, include?: string[], tar?: string[] }} opts
+ *   `tar` is the extractor argv (default `tar -xf -`); tests swap it for a broken one
  * @returns {Promise<string[]>} the include paths that were copied
  */
-export async function snapshotBase({ repoDir, base, dest, include = [] }) {
+export async function snapshotBase({ repoDir, base, dest, include = [], tar: tarArgv = ['tar', '-xf', '-'] }) {
   const safe = include.map(validateInclude);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
   await new Promise((resolve, reject) => {
-    const archive = spawn('git', ['archive', '--format=tar', base], { cwd: repoDir, stdio: ['ignore', 'pipe', 'pipe'] });
-    const tar = spawn('tar', ['-xf', '-'], { cwd: dest, stdio: ['pipe', 'ignore', 'pipe'] });
+    const archive = spawn('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'archive', '--format=tar', base], { cwd: repoDir, stdio: ['ignore', 'pipe', 'pipe'] });
+    const tar = spawn(tarArgv[0], tarArgv.slice(1), { cwd: dest, stdio: ['pipe', 'ignore', 'pipe'] });
     let stderr = '';
+    let settled = false;
+    const finish = (/** @type {Error | null} */ error) => {
+      if (settled) return;
+      settled = true;
+      if (error) {
+        archive.kill();
+        tar.kill();
+        reject(error);
+      } else resolve(undefined);
+    };
     for (const child of [archive, tar]) child.stderr.on('data', (d) => { stderr += d; });
-    archive.on('error', reject);
-    tar.on('error', reject);
+    archive.on('error', (e) => finish(new Error(`could not run git archive: ${e.message}`)));
+    tar.on('error', (e) => finish(new Error(`could not run ${tarArgv[0]}: ${e.message}`)));
+    // The extractor may stop reading early (EPIPE); its exit status and stderr tell why.
+    tar.stdin.on('error', () => {});
+    archive.stdout.on('error', () => {});
     archive.stdout.pipe(tar.stdin);
     let archiveExit = null;
     let tarExit = null;
     const settle = () => {
       if (archiveExit === null || tarExit === null) return;
-      if (archiveExit === 0 && tarExit === 0) resolve(undefined);
-      else reject(new Error(`could not extract ${base} of ${repoDir}: ${stderr.trim() || `exit ${archiveExit}/${tarExit}`}`));
+      if (archiveExit === 0 && tarExit === 0) finish(null);
+      else finish(new Error(`could not extract ${base} of ${repoDir}: ${stderr.trim() || `exit ${archiveExit}/${tarExit}`}`));
     };
     archive.on('close', (code) => { archiveExit = code; settle(); });
     tar.on('close', (code) => { tarExit = code; settle(); });
@@ -318,7 +396,13 @@ export async function snapshotBase({ repoDir, base, dest, include = [] }) {
   const copied = [];
   for (const rel of safe) {
     const src = path.join(repoDir, rel);
-    if (!fs.existsSync(src)) continue;
+    let info;
+    try {
+      info = fs.lstatSync(src);
+    } catch {
+      continue;
+    }
+    if (info.isSymbolicLink()) throw new Error(`--include ${rel} is a symbolic link; name the file it points to`);
     fs.mkdirSync(path.dirname(path.join(dest, rel)), { recursive: true });
     fs.cpSync(src, path.join(dest, rel), { recursive: true });
     copied.push(rel);
@@ -331,38 +415,113 @@ export const snapshotDir = (/** @type {string} */ out, /** @type {{ taskId: stri
 
 /**
  * Write each candidate's base snapshot. An include path found in none of the candidates'
- * checkouts is an error, raised before anything is written.
+ * checkouts is an error, raised before anything is written. A candidate whose base tree holds a
+ * symlink is dropped as `unsafe-tree` without being extracted.
  *
  * @param {{ kept: Array<Record<string, any>>, out: string, include?: string[] }} opts
+ * @returns {Promise<{ kept: Array<Record<string, any>>, dropped: Array<{ sessionId: string, slug: string | null, reason: string }> }>}
  */
 export async function writeSnapshots({ kept, out, include = [] }) {
   const safe = include.map(validateInclude);
-  for (const rel of safe) {
-    if (!kept.some((t) => fs.existsSync(path.join(t.repoDir, rel)))) {
-      throw new Error(`--include ${rel} was not found in any nested checkout`);
+  // With nothing left to snapshot there is nothing to look in; the report still gets written.
+  if (kept.length > 0) {
+    for (const rel of safe) {
+      if (!kept.some((t) => fs.existsSync(path.join(t.repoDir, rel)))) {
+        throw new Error(`--include ${rel} was not found in any nested checkout`);
+      }
     }
   }
+  const ok = [];
+  const dropped = [];
   for (const task of kept) {
+    if (hasSymlink(task.repoDir, task.base)) {
+      dropped.push({ sessionId: task.sessionId, slug: task.slug, reason: 'unsafe-tree' });
+      continue;
+    }
     task.included = await snapshotBase({ repoDir: task.repoDir, base: task.base, dest: snapshotDir(out, task), include: safe });
+    ok.push(task);
   }
-}
-
-/** The shape of one candidate in `export-report.json`: everything but the paths and the instruction text. */
-function candidateSummary(task) {
-  const { repoDir, specDir, instruction, ...rest } = task;
-  return rest;
+  return { kept: ok, dropped };
 }
 
 /**
- * @param {{ project: string, include?: string[], out?: string, env?: NodeJS.ProcessEnv }} opts
+ * Collect the candidates and write their base snapshots. Runs no project command.
+ *
+ * @param {{ project: string, include?: string[], out: string }} opts
  */
-export async function exportEscapeReplays({ project, include = [], out = defaultOutDir, env = process.env }) {
-  assertExecAllowed(env);
+export async function prepareCandidates({ project, include = [], out }) {
   const safe = include.map(validateInclude);
-  const { kept, drops } = collectSessions({ project });
-  await writeSnapshots({ kept, out, include: safe });
-  const report = { corpus_id: escapeReplaysCorpusId, candidates: kept.map(candidateSummary), drops };
+  const collected = collectSessions({ project });
+  const { kept, dropped } = await writeSnapshots({ kept: collected.kept, out, include: safe });
+  return { kept, drops: [...collected.drops, ...dropped], skipped: collected.skipped };
+}
+
+/**
+ * Remove what an earlier export of this corpus left in `out`, so a re-export never mixes
+ * generations. Only a folder whose manifest names this corpus is touched.
+ *
+ * @param {string} out
+ */
+function clearPreviousExport(out) {
+  try {
+    if (JSON.parse(fs.readFileSync(path.join(out, 'corpus.json'), 'utf8')).corpus_id !== escapeReplaysCorpusId) return;
+  } catch {
+    return;
+  }
+  for (const name of ['tasks', 'corpus.json', 'export-report.json']) fs.rmSync(path.join(out, name), { recursive: true, force: true });
+}
+
+/**
+ * Export: collect the candidates, snapshot their bases, calibrate each against its hidden tests
+ * and write the report. A candidate that fails calibration is dropped with its reason and its
+ * partial task folder removed.
+ *
+ * @param {{ project: string, include?: string[], out?: string, env?: NodeJS.ProcessEnv, timeoutSec?: number, regressionCap?: number }} opts
+ */
+export async function exportEscapeReplays({ project, include = [], out = defaultOutDir, env = process.env, timeoutSec, regressionCap }) {
+  assertExecAllowed(env);
+  assertOutDirSafe(out);
+  const safe = include.map(validateInclude);
+  const projectRoot = path.resolve(project);
+  clearPreviousExport(out);
+  const prepared = await prepareCandidates({ project: projectRoot, include: safe, out });
+  const config = loadProjectConfig(projectRoot);
+
+  const drops = [...prepared.drops];
+  const kept = [];
+  for (const task of prepared.kept) {
+    let calibration;
+    try {
+      calibration = await calibrateCandidate(task, { projectRoot, config, timeoutSec, regressionCap });
+    } catch (error) {
+      calibration = { ok: false, reason: 'calibration-error', detail: { message: error.message } };
+    }
+    if (!calibration.ok) {
+      fs.rmSync(path.join(out, 'tasks', task.taskId), { recursive: true, force: true });
+      drops.push({ sessionId: task.sessionId, slug: task.slug, reason: calibration.reason, ...(calibration.detail && { detail: calibration.detail }) });
+      continue;
+    }
+    task.calibration = calibration;
+    writeTask({ out, task, calibration });
+    kept.push(task);
+  }
+
+  const report = {
+    corpus_id: escapeReplaysCorpusId,
+    kept: kept.map((t) => ({
+      taskId: t.taskId,
+      sessionId: t.sessionId,
+      slug: t.slug,
+      repo: t.repo,
+      hidden: t.calibration.hidden.length,
+      regression: t.calibration.regression.length,
+    })),
+    drops,
+    skippedEscapes: prepared.skipped,
+  };
   fs.mkdirSync(out, { recursive: true });
+  // The manifest is what registers the corpus with the runner, so only an export that kept a task writes one.
+  if (kept.length > 0) fs.writeFileSync(path.join(out, 'corpus.json'), `${JSON.stringify(corpusManifest(kept), null, 2)}\n`);
   fs.writeFileSync(path.join(out, 'export-report.json'), `${JSON.stringify(report, null, 2)}\n`);
   return { kept, drops, report };
 }
