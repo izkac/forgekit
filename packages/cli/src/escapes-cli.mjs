@@ -18,7 +18,7 @@
 import path from 'node:path';
 import readline from 'node:readline';
 import { loadProjectConfig } from './config.mjs';
-import { candidateOrigin, decide, doneSessions, escapeReport, pendingCandidates, replayTestsFor, tagCandidate, WINDOW_DAYS } from './escapes.mjs';
+import { candidateOrigin, decide, doneSessions, escapeReport, isFixCommit, pendingCandidates, replayTestsFor, tagCandidate, WINDOW_DAYS } from './escapes.mjs';
 import { DEFAULT_REPLAY_TIMEOUT_SEC, recordReplay, replayArgv, resolveReplayRule, runReplay, splitArgv } from './escapes-replay.mjs';
 import { resolveCallerExecGate } from './exec-gate.mjs';
 
@@ -262,6 +262,8 @@ async function verify() {
   const work = sessions.flatMap((s) =>
     s.candidates.map((c) => {
       const repo = c.repo ?? '.';
+      // Only a fix or revert can be an Escape; anything else is never replayed.
+      if (!isFixCommit(c.subject)) return { s, c, repo, notFix: true, hasTest: false, testPath: null, rule: null };
       const tests = replayTestsFor({ cwd: repo === '.' ? cwd : path.join(cwd, repo), commit: c.commit });
       // The first of the fix's tests that a rule covers.
       const ruled = tests.map((t) => ({ t, rule: resolveReplayRule(config, repo === '.' ? t : `${repo}/${t}`) })).find((x) => x.rule);
@@ -278,13 +280,16 @@ async function verify() {
   }
 
   const results = [];
-  for (const { s, c, repo, hasTest, testPath, rule } of work) {
+  for (const { s, c, repo, notFix, hasTest, testPath, rule } of work) {
     const undecided = (/** @type {string} */ reason) => {
       tagCandidate({ cwd, sessionId: s.sessionId, commit: c.commit, repo, tag: 'undecided', reason });
       return { outcome: 'undecided', reason };
     };
     let res;
-    if (!hasTest) res = undecided('no-test');
+    if (notFix) {
+      tagCandidate({ cwd, sessionId: s.sessionId, commit: c.commit, repo, tag: 'not-a-fix', reason: null });
+      res = { outcome: 'not-a-fix', reason: null };
+    } else if (!hasTest) res = undecided('no-test');
     else if (!testPath || !rule) res = undecided('no-rule');
     else {
       try {
@@ -305,6 +310,7 @@ async function verify() {
     environment: count('environment'),
     notReproduced: count('not-reproduced'),
     undecided: count('undecided'),
+    notAFix: count('not-a-fix'),
     // Ranges that could not be searched, so the candidates above may be a partial set.
     unsearched: sessions.reduce((n, s) => n + (s.skipped ? 0 : (s.unsearched?.length ?? 0)), 0),
   };
@@ -317,7 +323,7 @@ async function verify() {
   const out = results.map((r) => `${r.session} ${r.commit.slice(0, 7)} ${r.repo}: ${verdict(r)}`);
   for (const s of sessions) if (!s.skipped) for (const line of unsearchedLines(s)) out.push(`${s.sessionId}:${line}`);
   out.push(
-    `${summary.total} candidate(s): ${summary.confirmed} confirmed, ${summary.environment} environment, ${summary.notReproduced} not-reproduced, ${summary.undecided} undecided${summary.unsearched ? `; ${summary.unsearched} range(s) unsearched` : ''}`,
+    `${summary.total} candidate(s): ${summary.confirmed} confirmed, ${summary.environment} environment, ${summary.notReproduced} not-reproduced, ${summary.undecided} undecided${summary.notAFix ? `; ${summary.notAFix} not a fix` : ''}${summary.unsearched ? `; ${summary.unsearched} range(s) unsearched` : ''}`,
   );
   process.stdout.write(`${out.join('\n')}\n`);
 }

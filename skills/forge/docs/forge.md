@@ -360,6 +360,7 @@ forge escapes verify [--all | <session> <commit>] [--json]
                                   # runs first (it also forgets your other worktrees whose directories are
                                   # currently missing). A recorded range that could not be searched prints
                                   # as an `unsearched:` line (list and verify) and in the verify summary.
+                                  # only fix/revert commits are replayed; others are tagged not-a-fix.
                                   # old fails + fix passes → auto-confirmed (`auto: true` in the ledger).
                                   # Otherwise tagged, never dismissed: `environment` (fix run fails, or old
                                   # run died on a missing module/syntax error), `not-reproduced` (test passes

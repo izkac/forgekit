@@ -14,7 +14,9 @@
     commit's test on the fix's parent (with the fix's test copied in) and on the
     fix, in throwaway worktrees under `.forge/replay/` (self-ignored; the OS temp dir
     and `.git` broke Vite/Vitest config loading on Volo); your working tree is untouched.
-    Old fails and fix passes: auto-confirmed (`auto: true`, command and exit codes
+    Only fix/revert commits are replayed; any other candidate is tagged `not-a-fix`
+    (on Volo, 233 of 425 first auto-confirms were feature commits). For a fix,
+    old fails and fix passes: auto-confirmed (`auto: true`, command and exit codes
     in `.forge/escapes.jsonl`). Otherwise tagged `environment` or `not-reproduced`,
     or left undecided with a reason. Never dismisses. Needs the exec opt-in and an
     `escapes.replay` rule (`[{ match, cwd, command }]`, first match wins, `{file}`

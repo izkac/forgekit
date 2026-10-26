@@ -71,7 +71,7 @@ function withFleet(p, fn) {
 
 const pendingCommits = (p) => withFleet(p, () => pendingCandidates({ cwd: p.dir }).flatMap((s) => s.candidates));
 const record = (p, old, fix) =>
-  recordReplay({ cwd: p.dir, sessionId: 's1', slug: 'c', candidate: { commit: p.fix, repo: '.' }, testPath: 'test/a.test.js', command: COMMAND, old, fix });
+  recordReplay({ cwd: p.dir, sessionId: 's1', slug: 'c', candidate: { commit: p.fix, repo: '.', subject: 'fix: add1' }, testPath: 'test/a.test.js', command: COMMAND, old, fix });
 
 test('classifyReplay: old fails, fix passes, no environment signature -> confirmed', () => {
   assert.deepEqual(classifyReplay({ old: failing(), fix: ok }), { outcome: 'confirmed' });

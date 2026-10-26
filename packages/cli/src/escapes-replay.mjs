@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { decide, tagCandidate } from './escapes.mjs';
+import { decide, isFixCommit, tagCandidate } from './escapes.mjs';
 import { CALLER_EXEC_SPAWN } from './exec-gate.mjs';
 import { globToRegExp } from './guard.mjs';
 
@@ -354,6 +354,8 @@ export function recordReplay({ cwd, sessionId, slug = null, candidate, testPath,
   const exits = { command, oldExit: old.exit, fixExit: fix.exit };
   let { outcome } = verdict;
   let reason = 'reason' in verdict ? verdict.reason : null;
+  // Only a fix or revert can be an Escape; `verify` filters first, this keeps any other caller honest.
+  if (outcome === 'confirmed' && !isFixCommit(candidate.subject)) outcome = 'not-a-fix';
   if (outcome === 'confirmed') {
     const res = decide({
       cwd,

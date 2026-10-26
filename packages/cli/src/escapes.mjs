@@ -395,6 +395,23 @@ export function readDecisions(cwd) {
 
 const TEST_FILE = /(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[^/]+$|_test\.[^/]+$|(^|\/)test_[^/]+\.py$/;
 
+/** A conventional `fix`/`revert` subject, or git's own `Revert "…"`. */
+const FIX_SUBJECT = /^(fix|revert)(\([^)]*\))?!?:|^Revert "/i;
+
+/**
+ * Whether a commit subject marks a fix or a revert — the only commits an Escape can be
+ * (CONTEXT.md). A later feature that touches a change's lines and adds a test for new behavior
+ * also fails before and passes after, so it must never be auto-confirmed (Volo: 233 of 425).
+ *
+ * ponytail: subject convention only; a fix written as `client: …` is left for the operator.
+ *
+ * @param {unknown} subject
+ * @returns {boolean}
+ */
+export function isFixCommit(subject) {
+  return typeof subject === 'string' && FIX_SUBJECT.test(subject);
+}
+
 /**
  * The test a fix commit added or changed — the default replay test when the
  * operator confirms an Escape. First match in git's path order.
