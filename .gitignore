@@ -16,3 +16,5 @@ Thumbs.db
 # ignores it, and it is no longer tracked.
 .claude/hooks/forge-triage-hook.mjs
 
+# Escape-replay corpus exported from private projects (see evals/README.md)
+evals/harbor/local/

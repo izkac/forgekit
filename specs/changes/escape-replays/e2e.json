@@ -1,0 +1,7 @@
+{
+  "change": "escape-replays",
+  "notApplicable": null,
+  "steps": [
+    { "name": "escape-replays-smoke", "cmd": "node evals/harbor/smoke-escape-replays.mjs", "expect": "reference shippable" }
+  ]
+}
