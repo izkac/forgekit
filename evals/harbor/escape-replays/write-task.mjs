@@ -192,7 +192,7 @@ export function verifierDockerfile({ protectedFiles }) {
   return lines.join('\n');
 }
 
-function taskToml({ task, hiddenCount, verifierTimeoutSec }) {
+function taskToml({ task, hiddenCount, verifierTimeoutSec, theirs }) {
   const first = task.slug ?? task.taskId;
   return `schema_version = "1.4"
 
@@ -220,6 +220,7 @@ inferred = ${task.inferred ? 'true' : 'false'}
 base_commit = ${str(task.base)}
 head_commit = ${str(task.head)}
 fix_commits = ${list(task.fixes.map((f) => f.commit))}
+fix_commits_theirs = ${list(theirs)}
 hidden_tests = ${hiddenCount}
 
 [agent]
@@ -255,7 +256,7 @@ function put(file, content) {
 
 /**
  * @param {{ out: string, task: Record<string, any>, timeoutSec?: number,
- *   calibration: { patch: Buffer, hidden: Array<Record<string, any>>, regression: Array<Record<string, any>>, protectedFiles: ProtectedFile[] } }} o
+ *   calibration: { patch: Buffer, theirs?: string[], hidden: Array<Record<string, any>>, regression: Array<Record<string, any>>, protectedFiles: ProtectedFile[] } }} o
  *   `timeoutSec` is the per-test timeout calibration ran with; the grader runs every test under the same one
  * @returns {string} the task directory
  */
@@ -266,7 +267,7 @@ export function writeTask({ out, task, calibration, timeoutSec = DEFAULT_REPLAY_
   const entry = (/** @type {Record<string, any>} */ t) => ({ path: t.path, sha256: t.sha256, argv: t.argv, cwd: t.cwd });
   const verifierTimeoutSec = Math.min(MAX_VERIFIER_TIMEOUT_SEC, VERIFIER_SLACK_SEC + timeoutSec * (hidden.length + regression.length));
 
-  put(path.join(dir, 'task.toml'), taskToml({ task, hiddenCount: hidden.length, verifierTimeoutSec }));
+  put(path.join(dir, 'task.toml'), taskToml({ task, hiddenCount: hidden.length, verifierTimeoutSec, theirs: calibration.theirs ?? [] }));
   put(path.join(dir, 'instruction.md'), task.instruction);
   put(path.join(dir, 'environment', 'Dockerfile'), agentDockerfile({ protectedFiles }));
 

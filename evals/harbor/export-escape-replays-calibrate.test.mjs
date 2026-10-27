@@ -136,19 +136,45 @@ test('a test that never finishes counts as failing on base and head, and a timeo
   assert.equal(r.detail.tests[0].classification, 'timeout');
 });
 
-test('fixes that do not apply on the escaped head are dropped as reference-conflict', async (t) => {
+test('a fix that conflicts with an intervening commit is retried with the fix side winning, and listed under theirs', async (t) => {
   const p = build(t, {
     baseFiles: { 'server/src/x.js': 'a\nb\nc\n' },
     fixes: [
       // An ordinary later commit rewrites the line the fix then edits.
       { files: { 'server/src/x.js': 'a\nB\nc\n' } },
-      { files: { 'server/src/x.js': 'a\nZ\nc\n', [HIDDEN]: totalIs(3) }, test: HIDDEN },
+      { files: { 'server/src/x.js': 'a\nZ\nc\n', 'server/src/total.js': 'exports.total = () => 3;\n', [HIDDEN]: totalIs(3) }, test: HIDDEN },
+    ],
+  });
+  const r = await calibrate(p);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.theirs, [p.shas.fixes[1]], 'only the fix that needed the retry');
+  const patch = r.patch.toString('utf8');
+  assert.match(patch, /^\+Z$/m, 'the fix side won the conflicting hunk');
+  assert.doesNotMatch(patch, /^\+B$/m);
+  assert.equal(patch.includes('\r'), false, 'the patch is LF');
+  assert.equal(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: p.web, encoding: 'utf8' }).match(/^worktree /gm).length, 1);
+});
+
+test('a fix that conflicts even with the fix side winning is dropped as reference-conflict', async (t) => {
+  const p = build(t, {
+    baseFiles: { 'server/src/x.js': 'a\nb\nc\n' },
+    fixes: [
+      // An ordinary later commit edits a file that the fix then deletes: a modify/delete conflict no strategy option settles.
+      { files: { 'server/src/x.js': 'a\nB\nc\n' } },
+      { files: { 'server/src/x.js': null, 'server/src/total.js': 'exports.total = () => 3;\n', [HIDDEN]: totalIs(3) }, test: HIDDEN },
     ],
   });
   const r = await calibrate(p);
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'reference-conflict');
   assert.equal(r.detail.commit, p.shas.fixes[1]);
+  assert.equal(fs.existsSync(siblingReplayDir(p)), false);
+});
+
+test('fixes that apply cleanly list nothing under theirs', async (t) => {
+  const r = await calibrate(build(t));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.theirs, []);
 });
 
 test('calibration leaves no worktree, replay folder or change in the operator checkout', async (t) => {

@@ -15,8 +15,8 @@
   the Harbor corpus `forgekit-escape-replays-v1`: per escaped session, the base snapshot and the
   archived proposal and specs go to the agent, and the fix commits' tests grade it in a hidden
   verifier. Each task is calibrated (fails on base and head, passes on a reference); drops and
-  their reasons go to `export-report.json`. Output lives only in the git-ignored
-  `evals/harbor/local/`. No published CLI change; `npm run smoke:evals:escape-replays` checks the
+  their reasons go to `export-report.json`. Output goes to the git-ignored
+  `evals/harbor/local/` by default (`--out` elsewhere; never inside the checkout unless ignored). No published CLI change; `npm run smoke:evals:escape-replays` checks the
   loop without Docker, and trials stay a separate paid step.
 
 ## 0.3.67 — 2026-10-26

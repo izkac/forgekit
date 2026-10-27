@@ -600,10 +600,11 @@ The verifier holds the fix commits' own test files, which are hidden, plus a sma
 regression set of passing base tests beside them, and writes the usual
 `functional`/`regression`/`tests_unchanged`/`shippable` reward.
 
-**Privacy.** The tasks contain the project's source, which may be private. They are
-written only under `evals/harbor/local/forgekit-escape-replays-v1/`, a path ignored by
-Git, and are never committed or published (the exporter refuses an `--out` inside this
-checkout unless Git ignores it). Files that Git ignores in the project, such as
+**Privacy.** The tasks contain the project's source, which may be private. By default
+they are written to `evals/harbor/local/forgekit-escape-replays-v1/`, a path ignored by
+Git, and only that path is registered as a corpus. `--out <dir>` writes elsewhere: the
+exporter refuses a path inside this checkout unless Git ignores it, but anywhere outside
+it is the operator's call (keep it off synced or shared folders). Files that Git ignores in the project, such as
 `.env`, are not copied. `--include <path>` (relative to the nested repository; absolute
 paths and `..` are refused) copies one into the snapshot, so it is then readable by the
 agent and sits in the task folder: include only what the tests need and nothing secret

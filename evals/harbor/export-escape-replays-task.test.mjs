@@ -100,6 +100,7 @@ test('task.toml declares a separate no-network verifier and the source metadata'
   assert.match(toml, new RegExp(`^base_commit = "${p.shas.base}"$`, 'm'));
   assert.match(toml, new RegExp(`^head_commit = "${p.shas.session[0]}"$`, 'm'));
   assert.match(toml, new RegExp(`^fix_commits = \\["${p.shas.fixes[0]}"\\]$`, 'm'));
+  assert.match(toml, /^fix_commits_theirs = \[\]$/m);
 });
 
 test('the agent Dockerfile pins the node image, installs per rule cwd, and keeps the install marker', async (t) => {
@@ -187,7 +188,7 @@ test('hidden.json lists the hidden and regression files with their hashes, comma
   assert.equal(new RegExp(spec.protected_name).test('jest.config.mjs'), true);
   assert.equal(new RegExp(spec.protected_name).test('total.js'), false);
   // The counts agree everywhere they are stated.
-  assert.deepEqual(report.kept, [{ taskId: 'order-refunds', sessionId: 'sess-1', slug: 'order-refunds', repo: 'web', hidden: spec.hidden.length, regression: spec.regression.length }]);
+  assert.deepEqual(report.kept, [{ taskId: 'order-refunds', sessionId: 'sess-1', slug: 'order-refunds', repo: 'web', hidden: spec.hidden.length, regression: spec.regression.length, theirs: [] }]);
   assert.deepEqual(JSON.parse(read(path.join(dir, '..', '..', 'export-report.json'))).kept, report.kept);
 });
 

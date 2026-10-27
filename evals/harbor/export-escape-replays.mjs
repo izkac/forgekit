@@ -575,6 +575,7 @@ export async function exportEscapeReplays({ project, include = [], out = default
       repo: t.repo,
       hidden: t.calibration.hidden.length,
       regression: t.calibration.regression.length,
+      theirs: t.calibration.theirs,
     })),
     drops,
     skippedEscapes: prepared.skipped,

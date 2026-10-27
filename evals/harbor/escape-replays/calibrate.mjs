@@ -5,10 +5,13 @@
  * replay (`forge-replay-<project>`): the base and the escaped head, where each hidden test must
  * fail, and the head with the fix commits cherry-picked on top, where each must pass. The last
  * one is also what the reference patch is cut from, from git objects only, never from the
- * worktree's files. Test files in the hidden tests' folders that pass on both base and reference,
- * and are the same blob in both, become the regression set.
+ * worktree's files. A fix that conflicts with the commits between it and the head is retried once
+ * with the fix side winning the conflicting hunks (`-X theirs`), and listed in the result. Test
+ * files in the hidden tests' folders that pass on both base and reference, and are the same blob
+ * in both, become the regression set.
  *
- * The operator's checkout is never touched: only `.git` gains and loses worktree metadata.
+ * The operator's checkout is never touched: only `.git` gains and loses worktree metadata, and
+ * the object store gains the picked commits, which nothing references once the worktree is gone.
  */
 
 import { createHash } from 'node:crypto';
@@ -152,17 +155,47 @@ async function inTree({ task, projectRoot, rev, files, tests, fn }) {
 }
 
 /**
+ * Git settings for the commits a pick makes in the throwaway worktree: a fixed identity, and none of
+ * the operator's signing or hooks, which must not run for a commit nobody will see.
+ */
+const PICK_CONFIG = [
+  '-c', 'user.name=forge-replay',
+  '-c', 'user.email=forge-replay@localhost',
+  '-c', 'commit.gpgsign=false',
+  '-c', `core.hooksPath=${path.join(os.tmpdir(), 'forge-replay-no-hooks')}`,
+];
+
+/**
+ * Cherry-pick one commit onto the worktree's HEAD, as a commit of its own so that a failed pick
+ * can be aborted without losing the earlier ones. `theirs` makes the fix side win conflicting hunks.
+ * A pick that leaves nothing to commit is kept as an empty commit rather than failing.
+ */
+function pickCommit(root, commit, { theirs = false } = {}) {
+  const r = git(root, [...PICK_CONFIG, 'cherry-pick', '--keep-redundant-commits', ...(theirs ? ['-X', 'theirs'] : []), commit]);
+  if (r.status === 0) return { ok: true };
+  // Back to the last good commit, whatever state the failed pick left behind.
+  if (git(root, ['cherry-pick', '--abort']).status !== 0) git(root, ['reset', '--hard', '-q', 'HEAD']);
+  return { ok: false, message: (r.stderr || r.stdout.toString('utf8')).trim().slice(-800) };
+}
+
+/**
  * The reference: the escaped head with every fix cherry-picked on top, oldest first, then the
- * hidden test files put back to what head has (or removed when head lacks them). The patch is cut
- * from the resulting tree object against the base (`git write-tree`, `git diff-tree`), so it is
- * LF whatever the host's autocrlf says and never depends on the worktree's files.
+ * hidden test files put back to what head has (or removed when head lacks them). A fix that does
+ * not apply is retried once with the fix side winning the conflicting hunks; the ones that needed
+ * that are returned in `theirs`. The patch is cut from the resulting tree object against the base
+ * (`git write-tree`, `git diff-tree`), so it is LF whatever the host's autocrlf says and never
+ * depends on the worktree's files.
  *
- * @returns {{ ok: true, patch: Buffer, tree: string, changed: string[] } | { ok: false, commit: string, message: string }}
+ * @returns {{ ok: true, patch: Buffer, tree: string, changed: string[], theirs: string[] } | { ok: false, commit: string, message: string }}
  */
 function buildReference({ root, task, hiddenPaths }) {
+  /** @type {string[]} */
+  const theirs = [];
   for (const fix of task.fixes) {
-    const pick = git(root, ['cherry-pick', '--no-commit', fix.commit]);
-    if (pick.status !== 0) return { ok: false, commit: fix.commit, message: (pick.stderr || pick.stdout.toString('utf8')).trim().slice(-800) };
+    if (pickCommit(root, fix.commit).ok) continue;
+    const retry = pickCommit(root, fix.commit, { theirs: true });
+    if (!retry.ok) return { ok: false, commit: fix.commit, message: retry.message };
+    theirs.push(fix.commit);
   }
   for (const rel of hiddenPaths) {
     if (git(root, ['cat-file', '-e', `${task.head}:${rel}`]).status === 0) git(root, ['checkout', task.head, '--', rel]);
@@ -191,7 +224,7 @@ function buildReference({ root, task, hiddenPaths }) {
   if (diff.status !== 0) throw new Error(`git diff-tree for the reference failed: ${diff.stderr.trim()}`);
   const names = git(root, ['diff-tree', '-r', '-z', '--no-renames', '--name-only', task.base, tree]);
   if (names.status !== 0) throw new Error(`git diff-tree --name-only for the reference failed: ${names.stderr.trim()}`);
-  return { ok: true, patch: diff.stdout, tree, changed: names.stdout.toString('utf8').split('\0').filter(Boolean) };
+  return { ok: true, theirs, patch: diff.stdout, tree, changed: names.stdout.toString('utf8').split('\0').filter(Boolean) };
 }
 
 /** Test files beside the hidden tests, at the base, that have a replay rule. Sorted, capped. */
@@ -250,7 +283,7 @@ function protectedFiles({ task, withins }) {
  * @param {Record<string, any>} task a candidate from `collectSessions`
  * @param {{ projectRoot: string, config: unknown, timeoutSec?: number, regressionCap?: number }} opts
  *   `timeoutSec` is per test, and the verifier uses the same number
- * @returns {Promise<{ ok: true, patch: Buffer, hidden: Array<Record<string, any>>, regression: Array<Record<string, any>>,
+ * @returns {Promise<{ ok: true, patch: Buffer, theirs: string[], hidden: Array<Record<string, any>>, regression: Array<Record<string, any>>,
  *   protectedFiles: Array<{ path: string, cwd: string, sha256: string, bytes: Buffer }> }
  *   | { ok: false, reason: string, detail?: Record<string, any> }>}
  */
@@ -312,7 +345,7 @@ export async function calibrateCandidate(task, { projectRoot, config, timeoutSec
       if (touched.length) return { dependencyChange: touched };
       const unchanged = passingOnBase.filter((c) => git(root, ['rev-parse', '--verify', '--quiet', `${ref.tree}:${c.path}`]).stdout.toString('utf8').trim() === c.oid);
       writeFiles(root, hiddenFiles);
-      return { patch: ref.patch, unchanged, hidden: await runTests(root, hidden, timeoutSec), regression: await runTests(root, unchanged, timeoutSec) };
+      return { patch: ref.patch, theirs: ref.theirs, unchanged, hidden: await runTests(root, hidden, timeoutSec), regression: await runTests(root, unchanged, timeoutSec) };
     },
   });
   if (onReference.conflict) return { ok: false, reason: 'reference-conflict', detail: { commit: onReference.conflict.commit, message: onReference.conflict.message } };
@@ -326,6 +359,8 @@ export async function calibrateCandidate(task, { projectRoot, config, timeoutSec
   return {
     ok: true,
     patch: onReference.patch,
+    // The fixes that only applied with the fix side winning the conflicting hunks.
+    theirs: onReference.theirs,
     hidden: hidden.map((t, i) => ({ ...shape(t, hiddenFiles[i].bytes), commit: t.commit })),
     // The base bytes: the same blob as the reference's, checked above.
     regression: regression.map((t) => shape(t, /** @type {Buffer} */ (blob(task.repoDir, task.base, t.path)))),
