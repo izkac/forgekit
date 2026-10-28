@@ -210,6 +210,12 @@ function useVerifierDependencies(spec) {
     const installed = join(DEPS_DIR, safeRelative(cwd || '.'), 'node_modules');
     if (!existsSync(installed)) continue;
     symlinkSync(installed, join(realDirectory(cwd || '.'), 'node_modules'), 'junction');
+    // Vite bundles its config to `node_modules/.vite-temp`, else next to the config: both are
+    // read-only to the tests, so give it this one sticky shared folder.
+    try {
+      mkdirSync(join(installed, '.vite-temp'), { recursive: true });
+      chmodSync(join(installed, '.vite-temp'), 0o1777);
+    } catch {}
   }
 }
 

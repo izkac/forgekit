@@ -413,6 +413,15 @@ test('the grader runs the verifier\'s own dependencies, never the agent\'s node_
   assert.equal(grade(t, dir, app).functional, 0, 'no agent node_modules at the cwd or above');
 });
 
+test('the verifier\'s node_modules gets a shared .vite-temp, where Vite writes its bundled config', async (t) => {
+  const { dir } = await exported(t);
+  put(path.join(dir, 'tests', 'deps', 'server', 'node_modules', 'dep', 'index.js'), 'exports.value = 3;\n');
+  grade(t, dir, referenceApp(t, dir));
+  const temp = fs.statSync(path.join(dir, 'tests', 'deps', 'server', 'node_modules', '.vite-temp'));
+  assert.ok(temp.isDirectory());
+  if (process.platform !== 'win32') assert.equal(temp.mode & 0o7777, 0o1777, 'writable by the untrusted user, sticky');
+});
+
 test('the grader holds the agent to the manifests, lockfiles and runner configuration', async (t) => {
   const { dir } = await exported(t, { baseFiles: { 'server/tsconfig.json': '{}\n' } });
   const tampering = {
