@@ -615,8 +615,12 @@ file is not covered by `--include`, because such tasks cannot be graded without 
 an explicit opt-in:
 
 ```sh
-FORGEKIT_ALLOW_EXEC=1 node evals/harbor/export-escape-replays.mjs --project <path> [--include <file>]...
+FORGEKIT_ALLOW_EXEC=1 node evals/harbor/export-escape-replays.mjs --project <path> [--include <file>]... [--include-from <dir>]
 ```
+
+`--include-from <dir>` copies the `--include` paths from `<dir>` (laid out like the nested
+repository) instead of the checkout. Use it to give the tasks a placeholder `server/.env`
+built from a sample file, so the real secrets are never read into a task.
 
 `corpus-selection.mjs` registers the corpus only after `corpus.json` exists in that folder;
 before then, selecting it fails as an unknown corpus.
