@@ -1,4 +1,4 @@
-<!-- forge-brief-specs-hash:35d1a9f9d7889dd8 -->
+<!-- forge-brief-specs-hash:09d0ae37b8786b02 -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -20,7 +20,7 @@
 
 <h2>What you'll get</h2>
 <ul>
-  <li>A script, <code>node evals/harbor/export-escape-replays.mjs --project S:/Projects/volo</code>. It writes one task per escaped session, up to about 40 for Volo.</li>
+  <li>A script, <code>node evals/harbor/export-escape-replays.mjs --project S:/Projects/volo</code>. It writes one task per escaped session that passes the check below. Volo has 47 escaped sessions; the latest export kept 9.</li>
   <li>The tasks go to <code>evals/harbor/local/</code>, which git ignores. Volo's private code never enters the public forgekit repo.</li>
   <li>Every task is checked before it is kept. Its test must fail on the code before the session and on the code the session shipped, and it must pass on the shipped code with the fix applied. A task that fails this check is dropped, and <code>export-report.json</code> records the reason.</li>
   <li>Files like <code>.env</code> are never copied unless you name them with <code>--include</code>.</li>
@@ -30,7 +30,7 @@
 <h2>What it won't do</h2>
 <ul>
   <li>It runs no agent trials and builds no Docker images.</li>
-  <li>It makes no client or mobile tasks. All of Volo's confirmed escapes are server tests.</li>
+  <li>It skips escapes whose test has no replay rule, and says so in the report.</li>
   <li>It changes nothing in the published <code>forgekit</code> CLI.</li>
 </ul>
 

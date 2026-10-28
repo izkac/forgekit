@@ -623,7 +623,9 @@ before then, selecting it fails as an unknown corpus.
 
 **Calibration and drops.** Each candidate is calibrated in throwaway replay worktrees: its
 hidden tests must fail on the session's base, fail on its escaped head, and pass on a
-reference (the head plus the fix commits, without the hidden tests). A session that cannot
+reference (the head plus the fix commits, without the hidden tests). A fix that does not
+cherry-pick cleanly is retried once with `-X theirs`; calibration still decides, and the
+report and `task.toml` (`fix_commits_theirs`) list those fixes. A session that cannot
 be a task is dropped with one reason, and every drop is listed in `export-report.json`
 beside the corpus, together with the escapes left out of kept sessions and any warnings.
 Reasons: `no-spec`, `no-base`, `unsupported-runner`, `unsafe-path`, `unsafe-tree`,
@@ -634,7 +636,10 @@ whole loop on a scratch project, run `npm run smoke:evals:escape-replays`.
 
 **Threat model.** The grader is non-adversarial: agent code runs in the same process as
 the assertions, so a determined agent could tamper with them. Results measure honest
-attempts, not tamper resistance (see `specs/changes/escape-replays/design.md`).
+attempts, not tamper resistance (see the escape-replays change's `design.md` under
+`specs/changes/archive/`). Running the tests as the untrusted user with `/app` read-only is
+only exercised on Linux as root (that test skips elsewhere, and the smoke runs without it), so
+the first paid run should confirm it before trusting any score.
 
 **Running trials is a separate, paid step.** The export builds no Docker image and runs no
 agent. When you decide to spend money, start the trials yourself with

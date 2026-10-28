@@ -224,6 +224,13 @@ test('re-exporting replaces the earlier generation instead of mixing with it', a
   assert.equal(fs.existsSync(dir), true);
 });
 
+test('a re-export refused over its inputs keeps the earlier generation', async (t) => {
+  const { p, dir } = await exported(t);
+  await assert.rejects(exportEscapeReplays({ project: p.root, out: p.out, env: OPT_IN, include: ['server/.missing'], timeoutSec: 60 }), /not found/);
+  assert.equal(fs.existsSync(dir), true);
+  assert.equal(fs.existsSync(path.join(p.out, 'corpus.json')), true);
+});
+
 test('the grader scores the reference tree shippable', async (t) => {
   const { dir } = await exported(t);
   const app = appCopy(t, dir);

@@ -174,6 +174,19 @@ test('--include of a file no nested checkout holds is an error, before writing',
   assert.equal(fs.existsSync(p.out), false);
 });
 
+test('--include of a folder that holds a symlink is refused', async (t) => {
+  const p = project(t);
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-include-target-'));
+  t.after(() => fs.rmSync(target, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(p.web, 'server', 'cfg', 'deep'), { recursive: true });
+  try {
+    fs.symlinkSync(target, path.join(p.web, 'server', 'cfg', 'deep', 'link'), 'junction');
+  } catch {
+    return t.skip('cannot create a symlink on this host');
+  }
+  await assert.rejects(prepare(p, { include: ['server/cfg'] }), /server\/cfg holds a symbolic link \(deep[\\/]link\)/);
+});
+
 test('--include while every session is dropped still writes the report', async (t) => {
   const p = project(t, { spec: false });
   const { drops } = await full(p, { include: ['server/.env'] });

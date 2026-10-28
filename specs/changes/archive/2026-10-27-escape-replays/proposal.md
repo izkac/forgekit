@@ -1,6 +1,6 @@
 ## Why
 
-Escape tracking can now tell which Forge sessions shipped a bug that a later fix commit caught, and replay verification confirms it mechanically: the fix's test fails on the old code and passes on the fix (Volo: 96 confirmed escapes across 41 sessions). The eval harness, though, only measures Forge against plain agents on synthetic tasks. A confirmed escape is a real task Forge got wrong, with a real hidden test that tells a correct solution from Forge's. A corpus of them is the honest benchmark of whether a process change catches the bugs Forge actually ships.
+Escape tracking can now tell which Forge sessions shipped a bug that a later fix commit caught, and replay verification confirms it mechanically: the fix's test fails on the old code and passes on the fix (Volo: 134 confirmed escapes across 47 sessions after the latest verify run). The eval harness, though, only measures Forge against plain agents on synthetic tasks. A confirmed escape is a real task Forge got wrong, with a real hidden test that tells a correct solution from Forge's. A corpus of them is the honest benchmark of whether a process change catches the bugs Forge actually ships.
 
 ## What Changes
 

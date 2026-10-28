@@ -168,7 +168,33 @@ test('a fix that conflicts even with the fix side winning is dropped as referenc
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'reference-conflict');
   assert.equal(r.detail.commit, p.shas.fixes[1]);
+  assert.deepEqual(r.detail.theirs, [], 'the failed retry is not listed as applied');
   assert.equal(fs.existsSync(siblingReplayDir(p)), false);
+});
+
+const CONFLICT_BASE = { 'server/src/x.js': 'a\nb\nc\n' };
+// An ordinary later commit rewrites the line the fix then edits.
+const INTERVENING = { files: { 'server/src/x.js': 'a\nB\nc\n' } };
+
+test('a fix applied with the fix side winning reaches export-report.json and task.toml', async (t) => {
+  const p = build(t, {
+    baseFiles: CONFLICT_BASE,
+    fixes: [INTERVENING, { files: { 'server/src/x.js': 'a\nZ\nc\n', 'server/src/total.js': 'exports.total = () => 3;\n', [HIDDEN]: totalIs(3) }, test: HIDDEN }],
+  });
+  const { kept } = await exportEscapeReplays({ project: p.root, out: p.out, env: OPT_IN, timeoutSec: 60 });
+  assert.equal(kept.length, 1);
+  const report = JSON.parse(fs.readFileSync(path.join(p.out, 'export-report.json'), 'utf8'));
+  assert.deepEqual(report.kept[0].theirs, [p.shas.fixes[1]]);
+  const toml = fs.readFileSync(path.join(p.out, 'tasks', kept[0].taskId, 'task.toml'), 'utf8');
+  assert.match(toml, new RegExp(`^fix_commits_theirs = \\["${p.shas.fixes[1]}"\\]$`, 'm'));
+});
+
+test('a drop after the picks lists the fixes that needed the fix side to win', async (t) => {
+  // The fix wins its conflict but never fixes total(), so the hidden test still fails on the reference.
+  const p = build(t, { baseFiles: CONFLICT_BASE, fixes: [INTERVENING, { files: { 'server/src/x.js': 'a\nZ\nc\n', [HIDDEN]: totalIs(3) }, test: HIDDEN }] });
+  const r = await calibrate(p);
+  assert.equal(r.reason, 'not-passing-on-reference');
+  assert.deepEqual(r.detail.theirs, [p.shas.fixes[1]]);
 });
 
 test('fixes that apply cleanly list nothing under theirs', async (t) => {

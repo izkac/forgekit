@@ -156,13 +156,15 @@ async function inTree({ task, projectRoot, rev, files, tests, fn }) {
 
 /**
  * Git settings for the commits a pick makes in the throwaway worktree: a fixed identity, and none of
- * the operator's signing or hooks, which must not run for a commit nobody will see.
+ * the operator's signing, hooks or rerere, which must not run for (or record from) a commit nobody
+ * will see. `noHooks` is a fresh empty folder that the caller removes.
  */
-const PICK_CONFIG = [
+const pickConfig = (/** @type {string} */ noHooks) => [
   '-c', 'user.name=forge-replay',
   '-c', 'user.email=forge-replay@localhost',
   '-c', 'commit.gpgsign=false',
-  '-c', `core.hooksPath=${path.join(os.tmpdir(), 'forge-replay-no-hooks')}`,
+  '-c', 'rerere.enabled=false',
+  '-c', `core.hooksPath=${noHooks}`,
 ];
 
 /**
@@ -170,8 +172,8 @@ const PICK_CONFIG = [
  * can be aborted without losing the earlier ones. `theirs` makes the fix side win conflicting hunks.
  * A pick that leaves nothing to commit is kept as an empty commit rather than failing.
  */
-function pickCommit(root, commit, { theirs = false } = {}) {
-  const r = git(root, [...PICK_CONFIG, 'cherry-pick', '--keep-redundant-commits', ...(theirs ? ['-X', 'theirs'] : []), commit]);
+function pickCommit(root, commit, { theirs = false, noHooks }) {
+  const r = git(root, [...pickConfig(noHooks), 'cherry-pick', '--keep-redundant-commits', ...(theirs ? ['-X', 'theirs'] : []), commit]);
   if (r.status === 0) return { ok: true };
   // Back to the last good commit, whatever state the failed pick left behind.
   if (git(root, ['cherry-pick', '--abort']).status !== 0) git(root, ['reset', '--hard', '-q', 'HEAD']);
@@ -186,16 +188,21 @@ function pickCommit(root, commit, { theirs = false } = {}) {
  * (`git write-tree`, `git diff-tree`), so it is LF whatever the host's autocrlf says and never
  * depends on the worktree's files.
  *
- * @returns {{ ok: true, patch: Buffer, tree: string, changed: string[], theirs: string[] } | { ok: false, commit: string, message: string }}
+ * @returns {{ ok: true, patch: Buffer, tree: string, changed: string[], theirs: string[] } | { ok: false, commit: string, message: string, theirs: string[] }}
  */
 function buildReference({ root, task, hiddenPaths }) {
   /** @type {string[]} */
   const theirs = [];
-  for (const fix of task.fixes) {
-    if (pickCommit(root, fix.commit).ok) continue;
-    const retry = pickCommit(root, fix.commit, { theirs: true });
-    if (!retry.ok) return { ok: false, commit: fix.commit, message: retry.message };
-    theirs.push(fix.commit);
+  const noHooks = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-replay-no-hooks-'));
+  try {
+    for (const fix of task.fixes) {
+      if (pickCommit(root, fix.commit, { noHooks }).ok) continue;
+      const retry = pickCommit(root, fix.commit, { theirs: true, noHooks });
+      if (!retry.ok) return { ok: false, commit: fix.commit, message: retry.message, theirs };
+      theirs.push(fix.commit);
+    }
+  } finally {
+    fs.rmSync(noHooks, { recursive: true, force: true });
   }
   for (const rel of hiddenPaths) {
     if (git(root, ['cat-file', '-e', `${task.head}:${rel}`]).status === 0) git(root, ['checkout', task.head, '--', rel]);
@@ -342,16 +349,17 @@ export async function calibrateCandidate(task, { projectRoot, config, timeoutSec
         const name = path.posix.basename(rel);
         return (withins.has(dir) && isProtectedName(name)) || (rcFolders.has(dir) && isRcName(name));
       });
-      if (touched.length) return { dependencyChange: touched };
+      if (touched.length) return { dependencyChange: touched, theirs: ref.theirs };
       const unchanged = passingOnBase.filter((c) => git(root, ['rev-parse', '--verify', '--quiet', `${ref.tree}:${c.path}`]).stdout.toString('utf8').trim() === c.oid);
       writeFiles(root, hiddenFiles);
       return { patch: ref.patch, theirs: ref.theirs, unchanged, hidden: await runTests(root, hidden, timeoutSec), regression: await runTests(root, unchanged, timeoutSec) };
     },
   });
-  if (onReference.conflict) return { ok: false, reason: 'reference-conflict', detail: { commit: onReference.conflict.commit, message: onReference.conflict.message } };
-  if (onReference.dependencyChange) return { ok: false, reason: 'dependency-change', detail: { files: onReference.dependencyChange } };
+  // `theirs` rides along on every drop after the picks, so the report shows whether the retry was involved.
+  if (onReference.conflict) return { ok: false, reason: 'reference-conflict', detail: { commit: onReference.conflict.commit, message: onReference.conflict.message, theirs: onReference.conflict.theirs } };
+  if (onReference.dependencyChange) return { ok: false, reason: 'dependency-change', detail: { files: onReference.dependencyChange, theirs: onReference.theirs } };
   const refFailing = onReference.hidden.filter((r) => !passed(r));
-  if (refFailing.length) return { ok: false, reason: 'not-passing-on-reference', detail: { tests: refFailing.map(failure) } };
+  if (refFailing.length) return { ok: false, reason: 'not-passing-on-reference', detail: { tests: refFailing.map(failure), theirs: onReference.theirs } };
 
   const regressionPassing = new Set(onReference.regression.filter(passed).map((r) => r.path));
   const regression = onReference.unchanged.filter((c) => regressionPassing.has(c.path));

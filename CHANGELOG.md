@@ -14,7 +14,8 @@
   --project <path>` (with `FORGEKIT_ALLOW_EXEC=1`) turns a project's confirmed escapes into
   the Harbor corpus `forgekit-escape-replays-v1`: per escaped session, the base snapshot and the
   archived proposal and specs go to the agent, and the fix commits' tests grade it in a hidden
-  verifier. Each task is calibrated (fails on base and head, passes on a reference); drops and
+  verifier. Each task is calibrated (fails on base and head, passes on a reference; a fix that
+  conflicts is retried once with `-X theirs`, listed as `fix_commits_theirs`); drops and
   their reasons go to `export-report.json`. Output goes to the git-ignored
   `evals/harbor/local/` by default (`--out` elsewhere; never inside the checkout unless ignored). No published CLI change; `npm run smoke:evals:escape-replays` checks the
   loop without Docker, and trials stay a separate paid step.

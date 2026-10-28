@@ -427,11 +427,29 @@ export async function snapshotBase({ repoDir, base, dest, include = [], tar: tar
       continue;
     }
     if (info.isSymbolicLink()) throw new Error(`--include ${rel} is a symbolic link; name the file it points to`);
+    // cpSync keeps links, and the runner refuses a task tree holding one: refuse it here instead.
+    const link = info.isDirectory() && fs.readdirSync(src, { recursive: true, withFileTypes: true }).find((d) => d.isSymbolicLink());
+    if (link) throw new Error(`--include ${rel} holds a symbolic link (${path.relative(src, path.join(link.parentPath ?? link.path, link.name))}); include the files it points to instead`);
     fs.mkdirSync(path.dirname(path.join(dest, rel)), { recursive: true });
     fs.cpSync(src, path.join(dest, rel), { recursive: true });
     copied.push(rel);
   }
   return copied;
+}
+
+/**
+ * Every include path must exist in at least one candidate's checkout. With nothing left to
+ * snapshot there is nothing to look in; the report still gets written.
+ *
+ * @param {Array<{ repoDir: string }>} kept @param {string[]} safe
+ */
+function assertIncludesFound(kept, safe) {
+  if (kept.length === 0) return;
+  for (const rel of safe) {
+    if (!kept.some((t) => fs.existsSync(path.join(t.repoDir, rel)))) {
+      throw new Error(`--include ${rel} was not found in any nested checkout`);
+    }
+  }
 }
 
 /** Where a candidate's agent-environment snapshot goes. */
@@ -448,14 +466,7 @@ export const snapshotDir = (/** @type {string} */ out, /** @type {{ taskId: stri
  */
 export async function writeSnapshots({ kept, out, include = [] }) {
   const safe = include.map(validateInclude);
-  // With nothing left to snapshot there is nothing to look in; the report still gets written.
-  if (kept.length > 0) {
-    for (const rel of safe) {
-      if (!kept.some((t) => fs.existsSync(path.join(t.repoDir, rel)))) {
-        throw new Error(`--include ${rel} was not found in any nested checkout`);
-      }
-    }
-  }
+  assertIncludesFound(kept, safe);
   const ok = [];
   const dropped = [];
   for (const task of kept) {
@@ -470,13 +481,16 @@ export async function writeSnapshots({ kept, out, include = [] }) {
 }
 
 /**
- * Collect the candidates and write their base snapshots. Runs no project command.
+ * Collect the candidates and write their base snapshots. Runs no project command. `beforeWrite`
+ * runs once every input check has passed and before the first write.
  *
- * @param {{ project: string, include?: string[], out: string }} opts
+ * @param {{ project: string, include?: string[], out: string, beforeWrite?: () => void }} opts
  */
-export async function prepareCandidates({ project, include = [], out }) {
+export async function prepareCandidates({ project, include = [], out, beforeWrite = () => {} }) {
   const safe = include.map(validateInclude);
   const collected = collectSessions({ project });
+  assertIncludesFound(collected.kept, safe);
+  beforeWrite();
   const { kept, dropped } = await writeSnapshots({ kept: collected.kept, out, include: safe });
   return { kept, drops: [...collected.drops, ...dropped], skipped: collected.skipped };
 }
@@ -543,8 +557,8 @@ export async function exportEscapeReplays({ project, include = [], out = default
   assertOutDirSafe(out);
   const safe = include.map(validateInclude);
   const projectRoot = path.resolve(project);
-  clearPreviousExport(out);
-  const prepared = await prepareCandidates({ project: projectRoot, include: safe, out });
+  // Cleared only after the inputs check out, so a refused re-export keeps the previous generation.
+  const prepared = await prepareCandidates({ project: projectRoot, include: safe, out, beforeWrite: () => clearPreviousExport(out) });
   const config = loadProjectConfig(projectRoot);
 
   const drops = [...prepared.drops];
