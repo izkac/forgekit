@@ -10,6 +10,8 @@ export default [
       'evals/.runs/**',
       'evals/.staging/**',
       'evals/staging/**',
+      // Exported escape-replay tasks hold a private project's source.
+      'evals/harbor/local/**',
     ],
   },
   js.configs.recommended,

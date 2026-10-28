@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Replay worktrees move next to the project.** They now live in a sibling folder
+  `forge-replay-<project>/` (same drive, no dot folders in the path, removed after the
+  run). Under `.forge/replay/` (0.3.67), Jest on Windows read `\.forge` in its testMatch
+  glob as an escaped dot and found no tests — most of Volo's server replays failed for that.
+- **Replay rules can copy ignored files.** An `escapes.replay` rule may list `copy`
+  (paths relative to its `cwd`, e.g. `[".env"]`): each is copied from the working copy
+  into both throwaway worktrees and removed with them. On Volo, 248 server replays
+  failed on the fix as well because the worktree had no `server/.env`.
+- **Escape-replay eval corpus (local, private).** `evals/harbor/export-escape-replays.mjs
+  --project <path>` (with `FORGEKIT_ALLOW_EXEC=1`) turns a project's confirmed escapes into
+  the Harbor corpus `forgekit-escape-replays-v1`: per escaped session, the base snapshot and the
+  archived proposal and specs go to the agent, and the fix commits' tests grade it in a hidden
+  verifier. Each task is calibrated (fails on base and head, passes on a reference; a fix that
+  conflicts is retried once with `-X theirs`, listed as `fix_commits_theirs`); drops and
+  their reasons go to `export-report.json`. Output goes to the git-ignored
+  `evals/harbor/local/` by default (`--out` elsewhere; never inside the checkout unless ignored). No published CLI change; `npm run smoke:evals:escape-replays` checks the
+  loop without Docker, and trials stay a separate paid step.
+
 ## 0.3.67 — 2026-10-26
 
 - **Escape tracking gaps.** Nested repositories were invisible and confirming was

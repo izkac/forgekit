@@ -87,19 +87,68 @@ function activeSessionDir(forgeDir) {
   }
 }
 
+/** Host conversation ids a session is bound to (`session.host.sessionIds`), or [] when unbound/unreadable. */
+function boundHostIds(sessionDir) {
+  try {
+    const ids = JSON.parse(fs.readFileSync(path.join(sessionDir, 'session.json'), 'utf8'))?.host?.sessionIds;
+    return Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+const FINISHED = new Set(['done', 'skipped']);
+
+/**
+ * F18: the session a dispatch belongs to. The active pointer is shared by every conversation
+ * working in the checkout, so with the host conversation id: the active session when it is bound
+ * to that conversation or to none (the old behavior), else an unfinished session bound to it,
+ * else nobody — a dispatch credited to another conversation's session would inflate its count.
+ *
+ * @param {string} forgeDir
+ * @param {string | null | undefined} hostSessionId
+ * @returns {string | null}
+ */
+function dispatchSessionDir(forgeDir, hostSessionId) {
+  const active = activeSessionDir(forgeDir);
+  if (!hostSessionId) return active;
+  if (active) {
+    const ids = boundHostIds(active);
+    if (ids.length === 0 || ids.includes(hostSessionId)) return active;
+  }
+  try {
+    for (const e of fs.readdirSync(path.join(forgeDir, 'sessions'), { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const dir = path.join(forgeDir, 'sessions', e.name);
+      let phase = null;
+      try {
+        phase = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8'))?.phase ?? null;
+      } catch {
+        continue;
+      }
+      if (!FINISHED.has(phase) && boundHostIds(dir).includes(hostSessionId)) return dir;
+    }
+  } catch {
+    // no sessions dir — nothing to credit
+  }
+  return null;
+}
+
 /**
  * Record one dispatch decision against the active Forge session.
  *
  * @param {{ tool?: string | null, agentType?: string | null,
  *   modelRequested?: string | null, modelResolved?: string | null,
  *   decision?: string, reason?: string | null, toolUseId?: string | null }} row
- * @param {{ forgeDir?: string, cwd?: string, now?: () => Date }} [opts]
+ * @param {{ forgeDir?: string, cwd?: string, now?: () => Date, hostSessionId?: string | null }} [opts]
+ *   `hostSessionId` — the host conversation that made the dispatch (the hook input's `session_id`);
+ *   it picks the Forge session bound to that conversation (F18).
  * @returns {boolean} whether a line was written — false is a normal outcome
  */
 export function appendDispatch(row, opts = {}) {
   try {
     if (!row || typeof row !== 'object') return false;
-    const dir = activeSessionDir(resolveForgeDir(opts ?? {}));
+    const dir = dispatchSessionDir(resolveForgeDir(opts ?? {}), opts?.hostSessionId);
     if (!dir) return false;
 
     const now = typeof opts.now === 'function' ? opts.now() : new Date();

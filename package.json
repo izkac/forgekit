@@ -18,6 +18,7 @@
     "smoke:evals": "node evals/harbor/smoke.mjs",
     "smoke:evals:hard-v2": "node evals/harbor/smoke-hard-v2.mjs",
     "smoke:evals:campaign": "node evals/harbor/smoke-campaign.mjs",
+    "smoke:evals:escape-replays": "node evals/harbor/smoke-escape-replays.mjs",
     "prepack": "npm run prepack --workspace=@izkac/forgekit",
     "install:link": "npm install && npm link --workspace=@izkac/forgekit"
   },

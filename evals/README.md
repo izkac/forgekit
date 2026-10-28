@@ -590,6 +590,63 @@ establish production safety. Separate verification prevents execution-time
 mounting of grader code into the agent container, but it does not make a public
 benchmark private or demonstrate provider effectiveness.
 
+## Escape-replay corpus (local, private)
+
+`forgekit-escape-replays-v1` turns a project's confirmed escapes (changes Forge shipped
+that a later fix commit corrected; see `forge escapes`) into Harbor tasks, one per
+escaped session. The agent gets the nested repository at the session's base commit and
+the archived change's proposal and specs (never its `design.md`, `tasks.md` or brief).
+The verifier holds the fix commits' own test files, which are hidden, plus a small
+regression set of passing base tests beside them, and writes the usual
+`functional`/`regression`/`tests_unchanged`/`shippable` reward.
+
+**Privacy.** The tasks contain the project's source, which may be private. By default
+they are written to `evals/harbor/local/forgekit-escape-replays-v1/`, a path ignored by
+Git, and only that path is registered as a corpus. `--out <dir>` writes elsewhere: the
+exporter refuses a path inside this checkout unless Git ignores it, but anywhere outside
+it is the operator's call (keep it off synced or shared folders). Files that Git ignores in the project, such as
+`.env`, are not copied. `--include <path>` (relative to the nested repository; absolute
+paths and `..` are refused) copies one into the snapshot, so it is then readable by the
+agent and sits in the task folder: include only what the tests need and nothing secret
+you would not hand to a model provider. The exporter warns when a replay rule's `copy`
+file is not covered by `--include`, because such tasks cannot be graded without it.
+
+**Export.** Exporting runs the project's own test commands on your machine, so it needs
+an explicit opt-in:
+
+```sh
+FORGEKIT_ALLOW_EXEC=1 node evals/harbor/export-escape-replays.mjs --project <path> [--include <file>]...
+```
+
+`corpus-selection.mjs` registers the corpus only after `corpus.json` exists in that folder;
+before then, selecting it fails as an unknown corpus.
+
+**Calibration and drops.** Each candidate is calibrated in throwaway replay worktrees: its
+hidden tests must fail on the session's base, fail on its escaped head, and pass on a
+reference (the head plus the fix commits, without the hidden tests). A fix that does not
+cherry-pick cleanly is retried once with `-X theirs`; calibration still decides, and the
+report and `task.toml` (`fix_commits_theirs`) list those fixes. A session that cannot
+be a task is dropped with one reason, and every drop is listed in `export-report.json`
+beside the corpus, together with the escapes left out of kept sessions and any warnings.
+Reasons: `no-spec`, `no-base`, `unsupported-runner`, `unsafe-path`, `unsafe-tree`,
+`missing-test`, `unpinned-deps` (a replay rule's folder has no lockfile),
+`dependency-change`, `reference-conflict`, `passes-on-base`, `not-failing-on-head`,
+`not-passing-on-reference` and `calibration-error`. For a local, Docker-free check of the
+whole loop on a scratch project, run `npm run smoke:evals:escape-replays`.
+
+**Threat model.** The grader is non-adversarial: agent code runs in the same process as
+the assertions, so a determined agent could tamper with them. Results measure honest
+attempts, not tamper resistance (see the escape-replays change's `design.md` under
+`specs/changes/archive/`). Running the tests as the untrusted user with `/app` read-only is
+only exercised on Linux as root (that test skips elsewhere, and the smoke runs without it), so
+the first paid run should confirm it before trusting any score.
+
+**Running trials is a separate, paid step.** The export builds no Docker image and runs no
+agent. When you decide to spend money, start the trials yourself with
+`--corpus forgekit-escape-replays-v1` like any other corpus (preview with `--dry-run`
+first); the Dockerfiles' dependency installs and MongoDB pre-fetch are first exercised
+by that run.
+
 ## Interpretation Limits
 
 Report the exact selected corpus and its completion status, task-level results,

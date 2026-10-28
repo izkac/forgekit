@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const defaultCorpusId = 'forgekit-held-out-v1';
+export const escapeReplaysCorpusId = 'forgekit-escape-replays-v1';
+
+// Gitignored exports of private projects. FORGEKIT_EVALS_LOCAL_ROOT moves the root for tests.
+export const localCorpusRoot = process.env.FORGEKIT_EVALS_LOCAL_ROOT || path.join(here, 'local');
 
 const registry = new Map([
   [defaultCorpusId, {
@@ -23,6 +28,16 @@ const registry = new Map([
     taskRootLocator: 'tasks/forgekit-campaign-v1',
   }],
 ]);
+
+// Registered only once an export has written its manifest; otherwise the ID stays unknown.
+const escapeReplaysManifest = path.join(localCorpusRoot, escapeReplaysCorpusId, 'corpus.json');
+if (existsSync(escapeReplaysManifest)) {
+  registry.set(escapeReplaysCorpusId, {
+    manifestPath: escapeReplaysManifest,
+    taskRoot: path.join(localCorpusRoot, escapeReplaysCorpusId, 'tasks'),
+    taskRootLocator: `local/${escapeReplaysCorpusId}/tasks`,
+  });
+}
 
 export function selectCorpus(corpusId = defaultCorpusId) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(corpusId)) {

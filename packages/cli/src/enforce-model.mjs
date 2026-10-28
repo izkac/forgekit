@@ -293,6 +293,22 @@ export function enforceModel(raw, opts = {}) {
 const LEDGER_DECISION = { allow: 'allow', pin: 'rewrite', deny: 'deny' };
 
 /**
+ * The host conversation that made this hook call (the hook input's `session_id`), or null.
+ * Used to credit the dispatch to the Forge session bound to that conversation (F18).
+ *
+ * @param {string} raw
+ * @returns {string | null}
+ */
+export function hookSessionId(raw) {
+  try {
+    const id = JSON.parse(raw)?.session_id;
+    return typeof id === 'string' && id ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * One dispatch, as the ledger records it.
  *
  * `modelResolved` is the model the dispatch actually ends up running under:
@@ -439,6 +455,7 @@ export async function runEnforceModel(argv, io = {}) {
       appendDispatch(dispatchRow(result), {
         forgeDir: opts.forgeDir ?? undefined,
         cwd: io.cwd,
+        hostSessionId: hookSessionId(raw),
       });
     } catch {
       // a measurement lost, never a subagent

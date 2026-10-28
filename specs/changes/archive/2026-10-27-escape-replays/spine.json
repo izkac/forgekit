@@ -1,0 +1,15 @@
+{
+  "change": "escape-replays",
+  "notApplicable": null,
+  "rows": [
+    {
+      "capability": "evaluation-corpus: escape-replay corpus exported from confirmed escapes",
+      "library": "evals/harbor/export-escape-replays.mjs, evals/harbor/escape-replays/grader.mjs",
+      "runtimeOwner": "operator runs node evals/harbor/export-escape-replays.mjs --project <path>; corpus-selection.mjs registers the local corpus",
+      "writes": "evals/harbor/local/forgekit-escape-replays-v1/ (corpus.json, tasks/, export-report.json)",
+      "reads": "<project>/.forge/escapes.jsonl, sessions.jsonl, .forge/config.json escapes.replay, archived change specs, nested repo history",
+      "uiConsumer": "Harbor runner --corpus forgekit-escape-replays-v1 (paid trials, run separately); operator reading export-report.json",
+      "evidence": "evals/harbor/smoke-escape-replays.mjs; live Volo export counts"
+    }
+  ]
+}

@@ -129,6 +129,45 @@ export function inferCommitRange({ cwd, slug, rev = 'HEAD' }) {
  * @returns {Array<[string, string, string]>}
  */
 function changedFiles(cwd, c) {
+  return memo('changed', `${cwd}\0${c}`, () => changedFilesUncached(cwd, c));
+}
+
+/**
+ * F29: per-commit git results are the same for every session that looks at the commit (git
+ * objects never change), so one run computes each once. On Volo every later commit was re-diffed
+ * and re-blamed by each of the ~30 sessions whose 14-day window covered it (~66 s per session).
+ *
+ * ponytail: process-lifetime cache, no eviction — a CLI run is short; bound it if a server ever imports this.
+ */
+const CACHE = { changed: new Map(), ranges: new Map(), blame: new Map() };
+const STATS = { changed: { hits: 0, misses: 0 }, ranges: { hits: 0, misses: 0 }, blame: { hits: 0, misses: 0 } };
+
+/**
+ * @template T
+ * @param {'changed' | 'ranges' | 'blame'} kind
+ * @param {string} key
+ * @param {() => T} compute
+ * @returns {T}
+ */
+function memo(kind, key, compute) {
+  const cache = /** @type {Map<string, T>} */ (CACHE[kind]);
+  if (cache.has(key)) {
+    STATS[kind].hits += 1;
+    return /** @type {T} */ (cache.get(key));
+  }
+  STATS[kind].misses += 1;
+  const value = compute();
+  cache.set(key, value);
+  return value;
+}
+
+/** Cache hit/miss counts per kind, for tests and diagnostics. */
+export function escapeCacheStats() {
+  return JSON.parse(JSON.stringify(STATS));
+}
+
+/** @param {string} cwd @param {string} c */
+function changedFilesUncached(cwd, c) {
   const tokens = (git(cwd, ['diff', '--name-status', '-z', '-M', '--no-ext-diff', `${c}^`, c]) ?? '').split('\0');
   /** @type {Array<[string, string, string]>} */
   const out = [];
@@ -156,6 +195,11 @@ function changedFiles(cwd, c) {
  * @returns {Array<[number, number]>}
  */
 function oldSideRanges(cwd, c, paths) {
+  return memo('ranges', `${cwd}\0${c}\0${paths.join('\0')}`, () => oldSideRangesUncached(cwd, c, paths));
+}
+
+/** @param {string} cwd @param {string} c @param {string[]} paths @returns {Array<[number, number]>} */
+function oldSideRangesUncached(cwd, c, paths) {
   /** @type {Array<[number, number]>} */
   const ranges = [];
   const diff = git(cwd, ['diff', '-U0', '-M', '--no-color', '--no-ext-diff', `${c}^`, c, '--', ...paths]) ?? '';
@@ -368,8 +412,12 @@ function scanRepo({ cwd, repo, session, rev, range, changeCommits, files: change
       if (sameSession) continue;
       const ranges = oldSideRanges(cwd, c.commit, status === 'R' ? [from, to] : [from]);
       if (ranges.length === 0) continue;
-      const blame = git(cwd, ['blame', '--porcelain', ...ranges.flatMap(([a, n]) => ['-L', `${a},+${n}`]), `${c.commit}^`, '--', from]);
-      const n = lines(blame).filter((l) => changeCommits.has(SHA_LINE.exec(l)?.[1] ?? '')).length;
+      const origins = memo('blame', `${cwd}\0${c.commit}\0${from}`, () =>
+        lines(git(cwd, ['blame', '--porcelain', ...ranges.flatMap(([a, n]) => ['-L', `${a},+${n}`]), `${c.commit}^`, '--', from]))
+          .map((l) => SHA_LINE.exec(l)?.[1] ?? '')
+          .filter(Boolean),
+      );
+      const n = origins.filter((sha) => changeCommits.has(sha)).length;
       if (n > 0) {
         hit += n;
         files.push(from);

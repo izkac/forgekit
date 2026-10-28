@@ -66,6 +66,45 @@ const posix = (p) => String(p).replace(/\\/g, '/');
  * @param {string} testPath project-root-relative, posix
  * @returns {{ match: string, cwd: string, command: string } | null}
  */
+/**
+ * A rule's `copy` list: gitignored files a test needs (e.g. `.env`) that a fresh worktree lacks.
+ * Only relative paths that stay inside the rule's `cwd` are kept — never absolute, never `..`.
+ *
+ * @param {unknown} list
+ * @returns {string[]}
+ */
+function safeCopyList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((p) => {
+    if (typeof p !== 'string' || p === '') return false;
+    if (/^[A-Za-z]:|^[\\/]/.test(p)) return false;
+    const norm = path.posix.normalize(posix(p));
+    return norm !== '..' && !norm.startsWith('../') && norm !== '.';
+  });
+}
+
+/**
+ * Copy the rule's `copy` files from the operator's working copy into a worktree, at the same
+ * paths under the rule's cwd. A file missing from the working copy is skipped.
+ *
+ * @param {{ from: string, to: string, files: string[] }} o
+ */
+export function copyIgnored({ from, to, files }) {
+  for (const rel of files) {
+    const src = path.join(from, rel);
+    let st;
+    try {
+      st = fs.statSync(src);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    const dest = path.join(to, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+  }
+}
+
 export function resolveReplayRule(config, testPath) {
   const rules = /** @type {any} */ (config)?.escapes?.replay;
   if (!Array.isArray(rules)) return null;
@@ -73,7 +112,7 @@ export function resolveReplayRule(config, testPath) {
   for (const r of rules) {
     if (!r || typeof r.match !== 'string' || typeof r.command !== 'string' || !r.command.includes('{file}')) continue;
     if (r.cwd != null && typeof r.cwd !== 'string') continue;
-    if (globToRegExp(posix(r.match)).test(target)) return { match: r.match, cwd: posix(r.cwd ?? '.'), command: r.command };
+    if (globToRegExp(posix(r.match)).test(target)) return { match: r.match, cwd: posix(r.cwd ?? '.'), command: r.command, copy: safeCopyList(r.copy) };
   }
   return null;
 }
@@ -144,7 +183,7 @@ function killTree(child) {
  * @returns {Promise<{ exit: number | null, output: string, timedOut: boolean, error: string | null }>}
  *   `error` is the spawn error when the command could not start
  */
-function run(argv, cwd, timeoutSec) {
+export function run(argv, cwd, timeoutSec) {
   const env = { ...process.env };
   // A replay run from inside `node --test` must behave as a fresh top-level run.
   delete env.NODE_TEST_CONTEXT;
@@ -190,7 +229,7 @@ function run(argv, cwd, timeoutSec) {
 }
 
 /** Remove a directory link without touching its target. @param {string} link */
-function removeLink(link) {
+export function removeLink(link) {
   let st;
   try {
     st = fs.lstatSync(link);
@@ -206,18 +245,22 @@ function removeLink(link) {
 }
 
 /**
- * Where replay worktrees live: `<project>/.forge/replay/`, self-ignored. Not the OS temp dir —
- * on another drive than the project, Vite/esbuild walked into an unreadable parent and could not
- * load its config — and not inside `.git`, which Vite's default `server.fs.deny` refuses to serve.
+ * Where replay worktrees live: `<project's parent>/forge-replay-<project>/`, self-ignored. Each
+ * other place broke a real runner on Volo: the OS temp dir on another drive (Vite/esbuild walked
+ * into an unreadable parent and could not load its config), inside `.git` (Vite's default
+ * `server.fs.deny`), and any path with a dot segment such as `.forge/replay` (Jest on Windows reads
+ * `\.forge` in its rootDir-based testMatch glob as an escaped dot and finds no tests).
  * Returns the directories this call created, so cleanup can remove them again when empty.
+ *
+ * ponytail: one sibling dir per project; a read-only parent is not handled.
  *
  * @param {string} projectRoot
  * @returns {{ base: string, created: string[] }}
  */
-function replayBase(projectRoot) {
-  const forgeDir = path.join(path.resolve(projectRoot), '.forge');
-  const base = path.join(forgeDir, 'replay');
-  const created = [forgeDir, base].filter((d) => !fs.existsSync(d));
+export function replayBase(projectRoot) {
+  const root = path.resolve(projectRoot);
+  const base = path.join(path.dirname(root), `forge-replay-${path.basename(root)}`);
+  const created = fs.existsSync(base) ? [] : [base];
   fs.mkdirSync(base, { recursive: true });
   const ignore = path.join(base, '.gitignore');
   if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, '*\n');
@@ -225,19 +268,13 @@ function replayBase(projectRoot) {
 }
 
 /** Remove what `replayBase` created, deepest first, only when nothing else is left in it. */
-function dropReplayBase({ base, created }) {
+export function dropReplayBase({ base, created }) {
   if (!created.includes(base)) return;
   try {
+    // Only when nothing but our .gitignore is left (another run may still own a worktree here).
     if (fs.readdirSync(base).every((n) => n === '.gitignore')) fs.rmSync(base, { recursive: true, force: true });
   } catch {
-    return;
-  }
-  for (const d of created.filter((x) => x !== base)) {
-    try {
-      fs.rmdirSync(d); // non-recursive: only an empty dir we made
-    } catch {
-      // not empty or already gone — leave it
-    }
+    // already gone — nothing to do
   }
 }
 
@@ -249,7 +286,7 @@ function dropReplayBase({ base, created }) {
  * @param {{ repoDir: string, rev: string, within: string, baseDir: string, prepare?: (dir: string) => void, fn: (dir: string) => Promise<T> }} o
  * @returns {Promise<T>}
  */
-async function inWorktree({ repoDir, rev, within, baseDir, prepare, fn }) {
+export async function inWorktree({ repoDir, rev, within, baseDir, prepare, fn }) {
   const dir = fs.mkdtempSync(path.join(baseDir, 'r-'));
   const link = path.join(dir, within, 'node_modules');
   let added = false;
@@ -275,7 +312,7 @@ async function inWorktree({ repoDir, rev, within, baseDir, prepare, fn }) {
  * (`exit: null`) — the candidate is undecided either way.
  *
  * @param {{ projectRoot: string, repo: string, fixSha: string, testPath: string,
- *   rule: { cwd?: string, command: string }, timeoutSec?: number }} opts
+ *   rule: { cwd?: string, command: string, copy?: string[] }, timeoutSec?: number }} opts
  *   `repo` is `"."` or the nested repository path; `testPath` is relative to that repository;
  *   `rule.cwd` is relative to the project root.
  * @returns {Promise<{ old: { exit: number | null, output: string, timedOut: boolean },
@@ -310,11 +347,19 @@ export async function runReplay({ projectRoot, repo, fixSha, testPath, rule, tim
         const dest = path.join(dir, repoRelTest);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.writeFileSync(dest, testBody.stdout);
+        copyIgnored({ from: path.join(repoDir, within), to: path.join(dir, within), files: rule.copy ?? [] });
       },
       fn: (cwd) => run(argv, cwd, timeoutSec),
     });
     if (old.timedOut) return { old, fix: { exit: null, output: '', timedOut: false, error: null } };
-    const fix = await inWorktree({ repoDir, rev: fixSha, within, baseDir: where.base, fn: (cwd) => run(argv, cwd, timeoutSec) });
+    const fix = await inWorktree({
+      repoDir,
+      rev: fixSha,
+      within,
+      baseDir: where.base,
+      prepare: (dir) => copyIgnored({ from: path.join(repoDir, within), to: path.join(dir, within), files: rule.copy ?? [] }),
+      fn: (cwd) => run(argv, cwd, timeoutSec),
+    });
     return { old, fix };
   } finally {
     dropReplayBase(where);
