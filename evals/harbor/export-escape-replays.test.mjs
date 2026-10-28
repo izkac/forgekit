@@ -147,6 +147,18 @@ test('--include copies a named ignored file from the nested checkout', async (t)
   assert.deepEqual(kept[0].included, ['server/.env']);
 });
 
+test('--include-from copies the named path from that folder, never the checkout\'s own copy', async (t) => {
+  const p = project(t);
+  const from = fs.mkdtempSync(path.join(os.tmpdir(), 'forgekit-include-from-'));
+  t.after(() => fs.rmSync(from, { recursive: true, force: true }));
+  write(path.join(from, 'server', '.env'), 'SECRET=placeholder\n');
+  const { kept } = await prepare(p, { include: ['server/.env'], includeFrom: from });
+  assert.equal(fs.readFileSync(path.join(appDir(p), 'server', '.env'), 'utf8'), 'SECRET=placeholder\n');
+  assert.deepEqual(kept[0].included, ['server/.env']);
+  await assert.rejects(prepare(p, { include: ['server/.missing'], includeFrom: from }), /not found in --include-from/);
+  assert.equal(parseArgs(['--project', 'x', '--include-from', from]).includeFrom, path.resolve(from));
+});
+
 test('--include refuses absolute paths and ".." segments even when the target exists, and writes nothing', async (t) => {
   const p = project(t);
   // Every one of these resolves to a file that exists, so only the path check can refuse them.

@@ -9,7 +9,7 @@
  * against its hidden tests: base and escaped head must fail them, the reference must pass them.
  *
  * Usage: FORGEKIT_ALLOW_EXEC=1 node evals/harbor/export-escape-replays.mjs --project <path>
- *          [--include <relpath>]… [--out <dir>]
+ *          [--include <relpath>]… [--include-from <dir>] [--out <dir>]
  */
 
 import fs from 'node:fs';
@@ -32,7 +32,7 @@ const checkoutRoot = path.resolve(here, '..', '..');
 
 export const defaultOutDir = path.join(localCorpusRoot, escapeReplaysCorpusId);
 
-const USAGE = `Usage: ${ALLOW_EXEC_ENV}=1 node evals/harbor/export-escape-replays.mjs --project <path> [--include <relpath>]... [--out <dir>]
+const USAGE = `Usage: ${ALLOW_EXEC_ENV}=1 node evals/harbor/export-escape-replays.mjs --project <path> [--include <relpath>]... [--include-from <dir>] [--out <dir>]
 `;
 
 /** Archived changes live under the planning engine's archive folder, as `YYYY-MM-DD-<slug>`. */
@@ -375,13 +375,14 @@ function hasUnsafeTree(repoDir, rev) {
 /**
  * Extract `git archive <base>` of a repository into `dest`: tracked files only, no `.git`, no
  * ignored files, LF bytes whatever the host's autocrlf says. Then copy each `include` path from
- * the operator's checkout.
+ * the operator's checkout, or from `includeFrom` when given (a folder laid out like the nested
+ * repository, e.g. holding a placeholder `server/.env` so the real one is never read).
  *
- * @param {{ repoDir: string, base: string, dest: string, include?: string[], tar?: string[] }} opts
+ * @param {{ repoDir: string, base: string, dest: string, include?: string[], includeFrom?: string, tar?: string[] }} opts
  *   `tar` is the extractor argv (default `tar -xf -`); tests swap it for a broken one
  * @returns {Promise<string[]>} the include paths that were copied
  */
-export async function snapshotBase({ repoDir, base, dest, include = [], tar: tarArgv = ['tar', '-xf', '-'] }) {
+export async function snapshotBase({ repoDir, base, dest, include = [], includeFrom, tar: tarArgv = ['tar', '-xf', '-'] }) {
   const safe = include.map(validateInclude);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
@@ -419,7 +420,7 @@ export async function snapshotBase({ repoDir, base, dest, include = [], tar: tar
   /** @type {string[]} */
   const copied = [];
   for (const rel of safe) {
-    const src = path.join(repoDir, rel);
+    const src = path.join(includeFrom ?? repoDir, rel);
     let info;
     try {
       info = fs.lstatSync(src);
@@ -438,16 +439,17 @@ export async function snapshotBase({ repoDir, base, dest, include = [], tar: tar
 }
 
 /**
- * Every include path must exist in at least one candidate's checkout. With nothing left to
- * snapshot there is nothing to look in; the report still gets written.
+ * Every include path must exist in at least one candidate's checkout, or in `includeFrom` when
+ * given. With nothing left to snapshot there is nothing to look in; the report still gets written.
  *
- * @param {Array<{ repoDir: string }>} kept @param {string[]} safe
+ * @param {Array<{ repoDir: string }>} kept @param {string[]} safe @param {string} [includeFrom]
  */
-function assertIncludesFound(kept, safe) {
+function assertIncludesFound(kept, safe, includeFrom) {
   if (kept.length === 0) return;
   for (const rel of safe) {
-    if (!kept.some((t) => fs.existsSync(path.join(t.repoDir, rel)))) {
-      throw new Error(`--include ${rel} was not found in any nested checkout`);
+    const roots = includeFrom ? [includeFrom] : kept.map((t) => t.repoDir);
+    if (!roots.some((root) => fs.existsSync(path.join(root, rel)))) {
+      throw new Error(`--include ${rel} was not found in ${includeFrom ? `--include-from ${includeFrom}` : 'any nested checkout'}`);
     }
   }
 }
@@ -461,12 +463,12 @@ export const snapshotDir = (/** @type {string} */ out, /** @type {{ taskId: stri
  * symlink or an `export-ignore`/`export-subst` attribute is dropped as `unsafe-tree` without being
  * extracted.
  *
- * @param {{ kept: Array<Record<string, any>>, out: string, include?: string[] }} opts
+ * @param {{ kept: Array<Record<string, any>>, out: string, include?: string[], includeFrom?: string }} opts
  * @returns {Promise<{ kept: Array<Record<string, any>>, dropped: Array<{ sessionId: string, slug: string | null, reason: string }> }>}
  */
-export async function writeSnapshots({ kept, out, include = [] }) {
+export async function writeSnapshots({ kept, out, include = [], includeFrom }) {
   const safe = include.map(validateInclude);
-  assertIncludesFound(kept, safe);
+  assertIncludesFound(kept, safe, includeFrom);
   const ok = [];
   const dropped = [];
   for (const task of kept) {
@@ -474,7 +476,7 @@ export async function writeSnapshots({ kept, out, include = [] }) {
       dropped.push({ sessionId: task.sessionId, slug: task.slug, reason: 'unsafe-tree' });
       continue;
     }
-    task.included = await snapshotBase({ repoDir: task.repoDir, base: task.base, dest: snapshotDir(out, task), include: safe });
+    task.included = await snapshotBase({ repoDir: task.repoDir, base: task.base, dest: snapshotDir(out, task), include: safe, includeFrom });
     ok.push(task);
   }
   return { kept: ok, dropped };
@@ -484,14 +486,14 @@ export async function writeSnapshots({ kept, out, include = [] }) {
  * Collect the candidates and write their base snapshots. Runs no project command. `beforeWrite`
  * runs once every input check has passed and before the first write.
  *
- * @param {{ project: string, include?: string[], out: string, beforeWrite?: () => void }} opts
+ * @param {{ project: string, include?: string[], includeFrom?: string, out: string, beforeWrite?: () => void }} opts
  */
-export async function prepareCandidates({ project, include = [], out, beforeWrite = () => {} }) {
+export async function prepareCandidates({ project, include = [], includeFrom, out, beforeWrite = () => {} }) {
   const safe = include.map(validateInclude);
   const collected = collectSessions({ project });
-  assertIncludesFound(collected.kept, safe);
+  assertIncludesFound(collected.kept, safe, includeFrom);
   beforeWrite();
-  const { kept, dropped } = await writeSnapshots({ kept: collected.kept, out, include: safe });
+  const { kept, dropped } = await writeSnapshots({ kept: collected.kept, out, include: safe, includeFrom });
   return { kept, drops: [...collected.drops, ...dropped], skipped: collected.skipped };
 }
 
@@ -550,15 +552,15 @@ export function copyWarnings({ kept, include }) {
  * and write the report. A candidate that fails calibration is dropped with its reason and its
  * partial task folder removed.
  *
- * @param {{ project: string, include?: string[], out?: string, env?: NodeJS.ProcessEnv, timeoutSec?: number, regressionCap?: number }} opts
+ * @param {{ project: string, include?: string[], includeFrom?: string, out?: string, env?: NodeJS.ProcessEnv, timeoutSec?: number, regressionCap?: number }} opts
  */
-export async function exportEscapeReplays({ project, include = [], out = defaultOutDir, env = process.env, timeoutSec, regressionCap }) {
+export async function exportEscapeReplays({ project, include = [], includeFrom, out = defaultOutDir, env = process.env, timeoutSec, regressionCap }) {
   assertExecAllowed(env);
   assertOutDirSafe(out);
   const safe = include.map(validateInclude);
   const projectRoot = path.resolve(project);
   // Cleared only after the inputs check out, so a refused re-export keeps the previous generation.
-  const prepared = await prepareCandidates({ project: projectRoot, include: safe, out, beforeWrite: () => clearPreviousExport(out) });
+  const prepared = await prepareCandidates({ project: projectRoot, include: safe, includeFrom: includeFrom && path.resolve(includeFrom), out, beforeWrite: () => clearPreviousExport(out) });
   const config = loadProjectConfig(projectRoot);
 
   const drops = [...prepared.drops];
@@ -604,15 +606,16 @@ export async function exportEscapeReplays({ project, include = [], out = default
 
 /** @param {string[]} argv */
 export function parseArgs(argv) {
-  /** @type {{ project: string | null, include: string[], out: string | undefined }} */
-  const opts = { project: null, include: [], out: undefined };
+  /** @type {{ project: string | null, include: string[], includeFrom: string | undefined, out: string | undefined }} */
+  const opts = { project: null, include: [], includeFrom: undefined, out: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     const value = argv[i + 1];
-    if (!['--project', '--include', '--out'].includes(flag)) throw new Error(`unknown argument: ${flag}`);
+    if (!['--project', '--include', '--include-from', '--out'].includes(flag)) throw new Error(`unknown argument: ${flag}`);
     if (value === undefined) throw new Error(`${flag} needs a value`);
     i += 1;
     if (flag === '--include') opts.include.push(value);
+    else if (flag === '--include-from') opts.includeFrom = path.resolve(value);
     else if (flag === '--project') opts.project = value;
     else opts.out = path.resolve(value);
   }
@@ -623,7 +626,7 @@ export function parseArgs(argv) {
 async function main() {
   try {
     const opts = parseArgs(process.argv.slice(2));
-    const { report } = await exportEscapeReplays({ project: /** @type {string} */ (opts.project), include: opts.include, out: opts.out });
+    const { report } = await exportEscapeReplays({ project: /** @type {string} */ (opts.project), include: opts.include, includeFrom: opts.includeFrom, out: opts.out });
     for (const warning of report.warnings) process.stderr.write(`warning: ${warning}\n`);
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } catch (error) {
