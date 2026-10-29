@@ -238,7 +238,7 @@ test('the grader scores the reference tree shippable', async (t) => {
   assert.equal(applied.status, 0, applied.stderr);
   assert.deepEqual(grade(t, dir, app), {
     functional: 1, regression: 1, tests_unchanged: 1, shippable: 1,
-    requirements_met: 1, requirements_total: 1, regression_met: 1, regression_total: 1,
+    requirements_met: 1, requirements_total: 1, regression_met: 1, regression_total: 1, false_completion: 0,
   });
 });
 
@@ -257,8 +257,11 @@ test('the grader scores the untouched base not functional', async (t) => {
   const { dir } = await exported(t);
   assert.deepEqual(grade(t, dir, appCopy(t, dir)), {
     functional: 0, regression: 1, tests_unchanged: 1, shippable: 0,
-    requirements_met: 0, requirements_total: 1, regression_met: 1, regression_total: 1,
+    requirements_met: 0, requirements_total: 1, regression_met: 1, regression_total: 1, false_completion: 1,
   });
+  const blocked = appCopy(t, dir);
+  put(path.join(blocked, 'BLOCKED.md'), 'needs a decision\n');
+  assert.equal(grade(t, dir, blocked).false_completion, 0, 'a BLOCKED.md is not a false completion');
 });
 
 test('the grader detects an edited regression file, and still runs the original', async (t) => {
@@ -310,7 +313,7 @@ test('the grader reports an infrastructure error with an all-zero reward and a n
   assert.notEqual(r.status, 0);
   assert.deepEqual(JSON.parse(read(path.join(rewardDir, 'reward.json'))), {
     functional: 0, regression: 0, tests_unchanged: 0, shippable: 0,
-    requirements_met: 0, requirements_total: 0, regression_met: 0, regression_total: 0,
+    requirements_met: 0, requirements_total: 0, regression_met: 0, regression_total: 0, false_completion: 0,
   });
 });
 
@@ -411,6 +414,15 @@ test('the grader runs the verifier\'s own dependencies, never the agent\'s node_
   put(path.join(app, 'server', 'node_modules', 'dep', 'index.js'), 'exports.value = 3;\n');
   put(path.join(app, 'node_modules', 'dep', 'index.js'), 'exports.value = 3;\n');
   assert.equal(grade(t, dir, app).functional, 0, 'no agent node_modules at the cwd or above');
+});
+
+test('the verifier\'s node_modules gets a shared .vite-temp, where Vite writes its bundled config', async (t) => {
+  const { dir } = await exported(t);
+  put(path.join(dir, 'tests', 'deps', 'server', 'node_modules', 'dep', 'index.js'), 'exports.value = 3;\n');
+  grade(t, dir, referenceApp(t, dir));
+  const temp = fs.statSync(path.join(dir, 'tests', 'deps', 'server', 'node_modules', '.vite-temp'));
+  assert.ok(temp.isDirectory());
+  if (process.platform !== 'win32') assert.equal(temp.mode & 0o7777, 0o1777, 'writable by the untrusted user, sticky');
 });
 
 test('the grader holds the agent to the manifests, lockfiles and runner configuration', async (t) => {

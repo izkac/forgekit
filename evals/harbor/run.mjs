@@ -510,7 +510,8 @@ async function findEntries(directory, predicate, found = []) {
   for (const entry of entries) {
     const child = path.join(directory, entry.name);
     if (predicate(entry, child)) found.push(child);
-    if (entry.isDirectory()) await findEntries(child, predicate, found);
+    // The agent's copied-out session folders can be root-only; nothing searched for lives there.
+    if (entry.isDirectory()) await findEntries(child, predicate, found).catch((error) => { if (error.code !== 'EACCES') throw error; });
   }
   return found;
 }
