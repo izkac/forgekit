@@ -238,7 +238,7 @@ test('the grader scores the reference tree shippable', async (t) => {
   assert.equal(applied.status, 0, applied.stderr);
   assert.deepEqual(grade(t, dir, app), {
     functional: 1, regression: 1, tests_unchanged: 1, shippable: 1,
-    requirements_met: 1, requirements_total: 1, regression_met: 1, regression_total: 1,
+    requirements_met: 1, requirements_total: 1, regression_met: 1, regression_total: 1, false_completion: 0,
   });
 });
 
@@ -257,8 +257,11 @@ test('the grader scores the untouched base not functional', async (t) => {
   const { dir } = await exported(t);
   assert.deepEqual(grade(t, dir, appCopy(t, dir)), {
     functional: 0, regression: 1, tests_unchanged: 1, shippable: 0,
-    requirements_met: 0, requirements_total: 1, regression_met: 1, regression_total: 1,
+    requirements_met: 0, requirements_total: 1, regression_met: 1, regression_total: 1, false_completion: 1,
   });
+  const blocked = appCopy(t, dir);
+  put(path.join(blocked, 'BLOCKED.md'), 'needs a decision\n');
+  assert.equal(grade(t, dir, blocked).false_completion, 0, 'a BLOCKED.md is not a false completion');
 });
 
 test('the grader detects an edited regression file, and still runs the original', async (t) => {
@@ -310,7 +313,7 @@ test('the grader reports an infrastructure error with an all-zero reward and a n
   assert.notEqual(r.status, 0);
   assert.deepEqual(JSON.parse(read(path.join(rewardDir, 'reward.json'))), {
     functional: 0, regression: 0, tests_unchanged: 0, shippable: 0,
-    requirements_met: 0, requirements_total: 0, regression_met: 0, regression_total: 0,
+    requirements_met: 0, requirements_total: 0, regression_met: 0, regression_total: 0, false_completion: 0,
   });
 });
 
