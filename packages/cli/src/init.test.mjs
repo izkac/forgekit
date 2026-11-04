@@ -78,6 +78,21 @@ test('thin-rule templates are engine-neutral (no hardcoded OpenSpec-only flow)',
   }
 });
 
+test('thin-rule templates point at the shared ~/.agents/skills/forge install', () => {
+  const root = resolveTemplatesRoot();
+  for (const rel of ['claude/rules/forge.md', 'cursor/rules/forge.mdc', 'codex/rules/forge.md']) {
+    const body = fs.readFileSync(path.join(root, ...rel.split('/')), 'utf8');
+    assert.ok(
+      body.includes('~/.agents/skills/forge/docs/forge.md'),
+      `${rel} missing pointer to the shared Forge skill doc`,
+    );
+    assert.ok(
+      !/\.(codex|cursor|claude)\/skills\/forge/.test(body),
+      `${rel} points at a per-harness Forge copy that install never creates`,
+    );
+  }
+});
+
 test('thin-rule templates are opt-in (no auto-triage default)', () => {
   const root = resolveTemplatesRoot();
   for (const rel of ['claude/rules/forge.md', 'cursor/rules/forge.mdc', 'codex/rules/forge.md']) {

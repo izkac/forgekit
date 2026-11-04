@@ -92,7 +92,7 @@ Paces: ${PACES.join(', ')}  (default: auto)
 
 Defaults: preferences.defaults.json
 Local overlay: .forge/preferences.local.json (appears only after a set)
-Matrix: .cursor/skills/forge/references/pace.md
+Matrix: ~/.agents/skills/forge/references/pace.md
 
 Options:
   --set path=value   Nested override (repeatable; exec.allowCallerCommands=true opts in to caller-argv exec)

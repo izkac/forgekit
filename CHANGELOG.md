@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Forge paths point at the shared install.** The Codex thin rule said
+  `~/.codex/skills/forge/`, and the OpenSpec overlays wrote `.cursor/skills/forge/`,
+  `.claude/skills/forge/` or `.codex/skills/forge/` into vendor skills. Install never
+  creates any of those, so agents were sent to files that don't exist. All now point at
+  `~/.agents/skills/forge/`. Run `forge init` (rules) and `forge overlay` (OpenSpec skills)
+  in a project to pick up the fix.
 - **Replay worktrees move next to the project.** They now live in a sibling folder
   `forge-replay-<project>/` (same drive, no dot folders in the path, removed after the
   run). Under `.forge/replay/` (0.3.67), Jest on Windows read `\.forge` in its testMatch

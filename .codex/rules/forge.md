@@ -1,6 +1,6 @@
 # Forge (thin rule)
 
-Full workflow: `~/.codex/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.codex/skills/forge/SKILL.md` after `forge install`).
+Full workflow: `~/.agents/skills/forge/docs/forge.md` · Skill: user-installed **Forge** (`~/.agents/skills/forge/SKILL.md` after `forge install`).
 
 **Default:** execute the request directly. Start Forge only when the user asks for **Forge by name** in any phrasing ("use Forge", "with Forge", "do forge work", "forge workflow"). Codex has no slash commands — the phrase is the invoke.
 

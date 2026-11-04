@@ -4,8 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  FORGE_SKILL_ROOT,
   applySkillFooter,
   patchOpsxApplyContent,
+  renderOverlay,
   stripOverlayBlock,
 } from './vendor-openspec-overlays.mjs';
 
@@ -39,7 +41,7 @@ test('patchOpsxApplyContent injects Forge implement step', () => {
   const { content, status } = patchOpsxApplyContent(VANILLA, 'cursor');
   assert.equal(status, 'patched');
   assert.match(content, /REQUIRED \(Forge\):/);
-  assert.match(content, /\.cursor\/skills\/forge\/phases\/implement\.md/);
+  assert.match(content, /~\/\.agents\/skills\/forge\/phases\/implement\.md/);
   assert.match(content, /Dispatch one \*\*implementer\*\* for the group/);
   assert.match(content, /Per pending `##` group/);
   assert.doesNotMatch(content, /Make the code changes required/);
@@ -51,7 +53,21 @@ test('patchOpsxApplyContent is idempotent on re-run', () => {
   const first = patchOpsxApplyContent(VANILLA, 'claude');
   const second = patchOpsxApplyContent(first.content, 'claude');
   assert.equal(second.status, 're-patched');
-  assert.match(second.content, /\.claude\/skills\/forge\/phases\/verify\.md/);
+  assert.match(second.content, /~\/\.agents\/skills\/forge\/phases\/verify\.md/);
+});
+
+test('overlays point every harness at the shared Forge skill root', () => {
+  assert.equal(FORGE_SKILL_ROOT, '~/.agents/skills/forge');
+  const template = '{{SKILL_ROOT}} {{PHASES_IMPLEMENT}} {{PHASES_VERIFY}} {{PHASES_REVIEW}}';
+  for (const agent of ['cursor', 'claude', 'codex']) {
+    const out = renderOverlay(template, agent);
+    assert.equal(
+      out,
+      '~/.agents/skills/forge ~/.agents/skills/forge/phases/implement.md ' +
+        '~/.agents/skills/forge/phases/verify.md ~/.agents/skills/forge/phases/review.md',
+      `${agent} overlay renders a non-shared Forge path`,
+    );
+  }
 });
 
 test('applySkillFooter adds overlay block once', () => {

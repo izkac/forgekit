@@ -29,21 +29,26 @@ const LEGACY_END = '<!-- janus-forge:openspec-overlay:end -->';
 const STEP_MARKER = 'REQUIRED (Forge):';
 const LEGACY_STEP_MARKER = 'REQUIRED (Janus Forge):';
 
+// The Forge skill is installed once at the user level (`~/.agents/skills/forge`);
+// Claude reaches it through a symlink. No harness gets a per-agent copy, so every
+// overlay points at the shared root.
+export const FORGE_SKILL_ROOT = '~/.agents/skills/forge';
+
 const AGENT_PATHS = {
   cursor: {
-    skillRoot: '.cursor/skills/forge',
+    skillRoot: FORGE_SKILL_ROOT,
     opsxApply: '.cursor/commands/opsx-apply.md',
     applySkill: '.cursor/skills/openspec-apply-change/SKILL.md',
     verifySkill: '.cursor/skills/openspec-verify-change/SKILL.md',
   },
   claude: {
-    skillRoot: '.claude/skills/forge',
+    skillRoot: FORGE_SKILL_ROOT,
     opsxApply: '.claude/commands/opsx/apply.md',
     applySkill: '.claude/skills/openspec-apply-change/SKILL.md',
     verifySkill: '.claude/skills/openspec-verify-change/SKILL.md',
   },
   codex: {
-    skillRoot: '.codex/skills/forge',
+    skillRoot: FORGE_SKILL_ROOT,
     opsxApply: null,
     applySkill: '.codex/skills/openspec-apply-change/SKILL.md',
     verifySkill: '.codex/skills/openspec-verify-change/SKILL.md',
